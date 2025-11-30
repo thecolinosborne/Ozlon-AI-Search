@@ -26,8 +26,8 @@ const NameIntake = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8">
-        <h1 className="text-3xl font-medium text-foreground text-center">
-          What's your name?
+        <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
+          What should I call you?
         </h1>
         
         <div className="flex flex-col items-center space-y-6">

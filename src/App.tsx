@@ -8,9 +8,8 @@ import NameIntake from "./pages/onboarding/NameIntake";
 import LocationConfirm from "./pages/onboarding/LocationConfirm";
 import MainNeed from "./pages/onboarding/MainNeed";
 import Connections from "./pages/onboarding/Connections";
-import ConnectService from "./pages/onboarding/ConnectService";
 import Insight from "./pages/onboarding/Insight";
-import Categories from "./pages/onboarding/Categories";
+import FocusArea from "./pages/onboarding/FocusArea";
 import Final from "./pages/onboarding/Final";
 import Chat from "./pages/Chat";
 import NotFound from "./pages/NotFound";
@@ -28,10 +27,9 @@ const App = () => (
           <Route path="/onboarding/name" element={<NameIntake />} />
           <Route path="/onboarding/location" element={<LocationConfirm />} />
           <Route path="/onboarding/main-need" element={<MainNeed />} />
+          <Route path="/onboarding/focus" element={<FocusArea />} />
           <Route path="/onboarding/connections" element={<Connections />} />
-          <Route path="/onboarding/connect-service" element={<ConnectService />} />
           <Route path="/onboarding/insight" element={<Insight />} />
-          <Route path="/onboarding/categories" element={<Categories />} />
           <Route path="/onboarding/final" element={<Final />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="*" element={<NotFound />} />

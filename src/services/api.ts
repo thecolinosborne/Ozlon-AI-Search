@@ -26,37 +26,36 @@ export const api = {
       return { success: true };
     },
     
-    setMainNeed: async (need: string) => {
+    setPrimaryNeed: async (need: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/mainneed', { need });
+      console.log('API: POST /onboarding/primary-need', { need });
       return { success: true };
     },
     
-    selectConnection: async (connection: string) => {
+    setFocus: async (focus: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/connection-selected', { connection });
+      console.log('API: POST /onboarding/focus', { focus });
       return { success: true };
     },
     
-    connect: async (service: string) => {
-      await delay(1000);
-      console.log('API: POST /onboarding/connect', { service });
+    connectChoice: async (connection: string) => {
+      await delay(500);
+      console.log('API: POST /onboarding/connect-choice', { connection });
       return { success: true };
     },
     
     getInsight: async () => {
       await delay(700);
       console.log('API: GET /onboarding/insight');
+      const insights = [
+        "Your city has free meals available nearby today.",
+        "A local job fair is coming up soon.",
+        "Voting day is next week in your area."
+      ];
       return {
-        insight: "Local voting deadline is in 12 days. Want a reminder?",
+        insight: insights[Math.floor(Math.random() * insights.length)],
         success: true
       };
-    },
-    
-    setCategory: async (category: string) => {
-      await delay(500);
-      console.log('API: POST /onboarding/category', { category });
-      return { success: true };
     },
     
     complete: async () => {
