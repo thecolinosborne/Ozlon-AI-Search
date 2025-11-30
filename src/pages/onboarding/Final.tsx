@@ -7,6 +7,7 @@ const Final = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const userName = localStorage.getItem("userName") || "there";
+  const assistantName = localStorage.getItem("assistantName") || "Assistant";
 
   const handleStart = async () => {
     setLoading(true);
@@ -23,7 +24,7 @@ const Final = () => {
             Alright, I'm here whenever you need me.
           </h1>
           <p className="text-lg text-muted-foreground leading-relaxed">
-            You can talk to me about anything: money, food, work, stress, or whatever is going on.
+            You can talk to me about anything: money, food, work, stress, or whatever is going on. Just say "Hey {assistantName}..."
           </p>
         </div>
         

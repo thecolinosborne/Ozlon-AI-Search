@@ -10,10 +10,13 @@ interface Message {
 }
 
 const Chat = () => {
+  const userName = localStorage.getItem("userName") || "there";
+  const assistantName = localStorage.getItem("assistantName") || "Assistant";
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: "How can I help you today?",
+      text: `Hi ${userName}! Whenever you need anything, just say "Hey ${assistantName}..."`,
       sender: "assistant",
     },
   ]);
@@ -52,7 +55,7 @@ const Chat = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border px-6 py-4">
-        <h1 className="text-2xl font-medium text-foreground">Ozlon</h1>
+        <h1 className="text-2xl font-medium text-foreground">{assistantName}</h1>
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-8 space-y-4">

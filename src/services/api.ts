@@ -14,9 +14,21 @@ export const api = {
       return { success: true };
     },
     
-    setName: async (name: string) => {
+    setUserName: async (name: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/name', { name });
+      console.log('API: POST /onboarding/user-name', { user_name: name });
+      return { success: true };
+    },
+    
+    setAIName: async (name: string) => {
+      await delay(500);
+      console.log('API: POST /onboarding/ai-name', { assistant_name: name });
+      return { success: true };
+    },
+    
+    nameConfirmed: async () => {
+      await delay(500);
+      console.log('API: POST /onboarding/name-confirmed');
       return { success: true };
     },
     
