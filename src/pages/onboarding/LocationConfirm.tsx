@@ -20,8 +20,8 @@ const LocationConfirm = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8">
-        <h1 className="text-3xl font-medium text-foreground text-center">
-          Got it, {userName}. Where are you living right now?
+        <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
+          Where are you living these days?
         </h1>
         
         <div className="bg-secondary rounded-3xl p-8 flex flex-col items-center space-y-4">
@@ -37,17 +37,15 @@ const LocationConfirm = () => {
             className="w-full h-14 text-lg rounded-2xl"
             size="lg"
           >
-            Confirm location
+            Yes, that's it
           </Button>
           
-          <Button
+          <button
             onClick={() => {}}
-            variant="ghost"
-            className="w-full h-14 text-lg rounded-2xl"
-            size="lg"
+            className="w-full text-primary text-base underline-offset-4 hover:underline"
           >
             Change location
-          </Button>
+          </button>
         </div>
       </div>
     </div>

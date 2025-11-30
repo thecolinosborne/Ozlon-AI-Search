@@ -18,9 +18,14 @@ const Final = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8 text-center">
-        <h1 className="text-3xl font-medium text-foreground leading-relaxed">
-          You're all set, {userName}. Whenever you need anything — just talk to me.
-        </h1>
+        <div className="space-y-4">
+          <h1 className="text-3xl font-medium text-foreground leading-relaxed">
+            Alright, I'm here whenever you need me.
+          </h1>
+          <p className="text-lg text-muted-foreground leading-relaxed">
+            You can talk to me about anything: money, food, work, stress, or whatever is going on.
+          </p>
+        </div>
         
         <Button
           onClick={handleStart}
@@ -28,7 +33,7 @@ const Final = () => {
           className="w-full h-14 text-lg rounded-2xl"
           size="lg"
         >
-          Start using Ozlon
+          Let's start
         </Button>
       </div>
     </div>

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
 import { api } from "@/services/api";
 
 const Insight = () => {
@@ -18,32 +17,50 @@ const Insight = () => {
     loadInsight();
   }, []);
 
+  const handleContinue = () => {
+    navigate("/onboarding/final");
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8">
-        <h1 className="text-3xl font-medium text-foreground text-center">
-          Here's something helpful I found for you:
+        <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
+          Here's something useful I found for you.
         </h1>
-        
-        <div className="bg-secondary rounded-3xl p-8 space-y-4 animate-scale-in">
-          <Sparkles className="w-8 h-8 text-primary" />
-          {loading ? (
-            <div className="h-20 flex items-center justify-center">
-              <div className="animate-pulse text-muted-foreground">Loading...</div>
+
+        {loading ? (
+          <div className="bg-secondary p-8 rounded-3xl flex items-center justify-center min-h-[120px]">
+            <div className="flex space-x-2">
+              <div className="w-2 h-2 bg-primary rounded-full animate-pulse-soft" />
+              <div className="w-2 h-2 bg-primary rounded-full animate-pulse-soft" style={{ animationDelay: "0.2s" }} />
+              <div className="w-2 h-2 bg-primary rounded-full animate-pulse-soft" style={{ animationDelay: "0.4s" }} />
             </div>
-          ) : (
-            <p className="text-xl text-foreground leading-relaxed">{insight}</p>
-          )}
+          </div>
+        ) : (
+          <div className="bg-secondary p-8 rounded-3xl animate-scale-in">
+            <p className="text-lg text-foreground text-center leading-relaxed">
+              {insight}
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <Button
+            onClick={handleContinue}
+            className="w-full h-14 text-lg rounded-2xl"
+            size="lg"
+          >
+            Tell me more
+          </Button>
+          <Button
+            onClick={handleContinue}
+            variant="ghost"
+            className="w-full h-14 text-lg rounded-2xl text-muted-foreground"
+            size="lg"
+          >
+            Not right now
+          </Button>
         </div>
-        
-        <Button
-          onClick={() => navigate("/onboarding/categories")}
-          disabled={loading}
-          className="w-full h-14 text-lg rounded-2xl"
-          size="lg"
-        >
-          Continue
-        </Button>
       </div>
     </div>
   );
