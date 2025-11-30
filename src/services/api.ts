@@ -38,21 +38,15 @@ export const api = {
       return { success: true };
     },
     
-    setPrimaryNeed: async (need: string) => {
+    connect: async (type: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/primary-need', { need });
+      console.log('API: POST /onboarding/connect', { type });
       return { success: true };
     },
     
-    setFocus: async (focus: string) => {
+    setMainConcern: async (concern: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/focus', { focus });
-      return { success: true };
-    },
-    
-    connectChoice: async (connection: string) => {
-      await delay(500);
-      console.log('API: POST /onboarding/connect-choice', { connection });
+      console.log('API: POST /onboarding/main-concern', { concern });
       return { success: true };
     },
     
