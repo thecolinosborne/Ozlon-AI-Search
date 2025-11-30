@@ -14,7 +14,7 @@ const LocationConfirm = () => {
     setLoading(true);
     await api.onboarding.setLocation(location);
     setLoading(false);
-    navigate("/onboarding/main-need");
+    navigate("/onboarding/connections");
   };
 
   return (

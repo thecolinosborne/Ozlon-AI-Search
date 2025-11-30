@@ -20,7 +20,7 @@ const AINameIntake = () => {
       await api.onboarding.setAIName(name);
       localStorage.setItem("assistantName", name);
       setLoading(false);
-      navigate("/onboarding/name-confirmation");
+      navigate("/onboarding/location");
     }, 2000);
   };
 
@@ -36,10 +36,10 @@ const AINameIntake = () => {
             <div className="space-y-4">
               <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
                 Now it's your turn.<br />
-                What do you want to call me?
+                What would you like to call me?
               </h1>
               <p className="text-base text-muted-foreground text-center">
-                This will be my name and your wake word.
+                This will be my name when you talk to me.
               </p>
             </div>
             
@@ -68,9 +68,9 @@ const AINameIntake = () => {
           </>
         ) : (
           <div className="text-center space-y-8 animate-fade-in">
-            <div className="bg-secondary p-8 rounded-3xl">
+            <div className="bg-secondary/50 backdrop-blur-sm p-8 rounded-3xl border border-border/50">
               <p className="text-xl text-foreground leading-relaxed">
-                Got it. I'll answer to "Hey {name}."
+                Great. I'll answer to "Hey {name}."
               </p>
             </div>
           </div>

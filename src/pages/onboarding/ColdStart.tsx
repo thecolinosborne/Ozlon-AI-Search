@@ -24,19 +24,26 @@ const ColdStart = () => {
       
       <div className="max-w-md w-full space-y-8 text-center relative z-10">
         <h1 className="text-3xl font-medium text-foreground leading-relaxed">
-          Hi, I'm your personal assistant.<br />
-          Before we begin, I want to get to know you.
+          Hi, I'm here to help take some weight off your shoulders.<br />
+          Before I can do that, I want to get to know you a bit.<br />
+          Is that okay?
         </h1>
         
-        <div className="pt-8">
+        <div className="pt-8 space-y-3">
           <Button
             onClick={handleStart}
             disabled={loading}
             className="w-full h-14 text-lg rounded-2xl"
             size="lg"
           >
-            Okay
+            Yes, that's okay
           </Button>
+          <button
+            onClick={() => {}}
+            className="w-full text-muted-foreground text-base hover:text-foreground transition-colors"
+          >
+            Maybe later
+          </button>
         </div>
       </div>
     </div>
