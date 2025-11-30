@@ -3,7 +3,16 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
+import ColdStart from "./pages/onboarding/ColdStart";
+import NameIntake from "./pages/onboarding/NameIntake";
+import LocationConfirm from "./pages/onboarding/LocationConfirm";
+import MainNeed from "./pages/onboarding/MainNeed";
+import Connections from "./pages/onboarding/Connections";
+import ConnectService from "./pages/onboarding/ConnectService";
+import Insight from "./pages/onboarding/Insight";
+import Categories from "./pages/onboarding/Categories";
+import Final from "./pages/onboarding/Final";
+import Chat from "./pages/Chat";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -15,8 +24,16 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="/" element={<ColdStart />} />
+          <Route path="/onboarding/name" element={<NameIntake />} />
+          <Route path="/onboarding/location" element={<LocationConfirm />} />
+          <Route path="/onboarding/main-need" element={<MainNeed />} />
+          <Route path="/onboarding/connections" element={<Connections />} />
+          <Route path="/onboarding/connect-service" element={<ConnectService />} />
+          <Route path="/onboarding/insight" element={<Insight />} />
+          <Route path="/onboarding/categories" element={<Categories />} />
+          <Route path="/onboarding/final" element={<Final />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
