@@ -30,13 +30,15 @@ const Connections = () => {
 
   const handleConnection = async (type: string) => {
     if (type === "skip") {
-      navigate("/onboarding/main-need");
+      localStorage.setItem("connectedApps", "none");
+      navigate("/onboarding/insight");
       return;
     }
     setLoading(true);
     await api.onboarding.connect(type);
+    localStorage.setItem("connectedApps", type);
     setLoading(false);
-    navigate("/onboarding/main-need");
+    navigate("/onboarding/insight");
   };
 
   return (

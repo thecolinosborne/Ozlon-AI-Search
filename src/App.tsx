@@ -8,7 +8,6 @@ import NameIntake from "./pages/onboarding/NameIntake";
 import AINameIntake from "./pages/onboarding/AINameIntake";
 import LocationConfirm from "./pages/onboarding/LocationConfirm";
 import Connections from "./pages/onboarding/Connections";
-import MainNeed from "./pages/onboarding/MainNeed";
 import Insight from "./pages/onboarding/Insight";
 import Final from "./pages/onboarding/Final";
 import Chat from "./pages/Chat";
@@ -28,7 +27,6 @@ const App = () => (
           <Route path="/onboarding/ai-name" element={<AINameIntake />} />
           <Route path="/onboarding/location" element={<LocationConfirm />} />
           <Route path="/onboarding/connections" element={<Connections />} />
-          <Route path="/onboarding/main-need" element={<MainNeed />} />
           <Route path="/onboarding/insight" element={<Insight />} />
           <Route path="/onboarding/final" element={<Final />} />
           <Route path="/chat" element={<Chat />} />

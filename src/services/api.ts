@@ -50,16 +50,36 @@ export const api = {
       return { success: true };
     },
     
-    getInsight: async () => {
+    getWowMoment: async (connectedApp: string) => {
       await delay(700);
-      console.log('API: GET /onboarding/insight');
-      const insights = [
-        "Your city has free meals available nearby today.",
-        "A local job fair is coming up soon.",
-        "Voting day is next week in your area."
-      ];
+      console.log('API: GET /onboarding/wow', { connectedApp });
+      
+      const insights: Record<string, string[]> = {
+        bank: [
+          "You spent a bit more than usual on food this week. Want me to help you keep an eye on that?",
+          "You have a bill due in 3 days. Want a reminder?",
+          "Your rent payment is coming up. Want me to make sure you don't miss it?"
+        ],
+        email: [
+          "You have an important email you haven't opened yet. Want me to bring it to the top?",
+          "There's a message about your benefits that needs attention. Want to see it?",
+          "Someone sent you something time-sensitive. Want me to show you?"
+        ],
+        calendar: [
+          "You have something coming up soon. Want a reminder 24 hours before?",
+          "Your schedule looks busy tomorrow. Want me to help you prepare?",
+          "You have an appointment next week. Want me to keep you on track?"
+        ],
+        none: [
+          "Your city has free meals available today. Want directions?",
+          "A local job fair is coming up soon. Want the details?",
+          "Voting day is next week in your area. Want a reminder?"
+        ]
+      };
+      
+      const appInsights = insights[connectedApp] || insights.none;
       return {
-        insight: insights[Math.floor(Math.random() * insights.length)],
+        insight: appInsights[Math.floor(Math.random() * appInsights.length)],
         success: true
       };
     },
