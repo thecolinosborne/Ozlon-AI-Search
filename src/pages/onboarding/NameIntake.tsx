@@ -13,10 +13,10 @@ const NameIntake = () => {
   const handleSubmit = async () => {
     if (!name.trim()) return;
     setLoading(true);
-    await api.onboarding.setName(name);
+    await api.onboarding.setUserName(name);
     localStorage.setItem("userName", name);
     setLoading(false);
-    navigate("/onboarding/location");
+    navigate("/onboarding/ai-name");
   };
 
   const handleVoiceInput = (text: string) => {
