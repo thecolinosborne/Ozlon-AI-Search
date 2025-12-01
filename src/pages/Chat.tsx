@@ -21,7 +21,7 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: `Hi ${userName}, I'm here whenever you need me. What can I help you with today?`,
+      text: `Hi ${userName}, I'm right here whenever you need me. What can I help you with today?`,
       sender: "assistant",
       actions: ["Tell me more", "Help with money", "Show my day"],
     },
@@ -73,44 +73,50 @@ const Chat = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "var(--chat-bg)" }}>
+    <div className="min-h-screen flex flex-col animate-gradient" style={{ 
+      background: "linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(210 100% 98%) 30%, hsl(0 0% 98%) 70%, hsl(0 0% 96%) 100%)"
+    }}>
       {/* Header */}
-      <header className="backdrop-blur-sm bg-background/60 border-b border-border/30 px-6 py-6">
-        <h1 className="text-3xl font-light text-foreground tracking-wide">{assistantName}</h1>
-        <p className="text-sm text-muted-foreground/60 mt-1">
+      <header className="backdrop-blur-sm bg-background/40 border-b border-border/20 px-6 py-8 animate-fade-in">
+        <h1 className="text-4xl font-semibold text-foreground tracking-tight">{assistantName}</h1>
+        <p className="text-sm text-muted-foreground/70 mt-2">
           Say "Hey {assistantName}..." anytime to talk to me.
         </p>
       </header>
 
       {/* Quick Actions Bar */}
-      <div className="py-4 border-b border-border/20">
+      <div className="py-6 border-b border-border/20">
         <QuickActionsBar onAction={handleQuickAction} />
       </div>
 
       {/* Chat Feed */}
-      <div className="flex-1 overflow-y-auto py-8 space-y-8">
+      <div className="flex-1 overflow-y-auto py-10 space-y-10">
         {messages.map((message) => (
           <div
             key={message.id}
             className={`flex ${message.sender === "user" ? "justify-end px-6" : "justify-start px-6"} ${
-              message.sender === "user" ? "animate-slide-in-right" : "animate-fade-in"
+              message.sender === "user" ? "animate-slide-in-right" : "animate-slide-up-fade"
             }`}
           >
             {message.sender === "assistant" && (
-              <div className="mr-4 mt-2">
+              <div className="mr-5 mt-3">
                 <AIOrb />
               </div>
             )}
-            <div className="flex-1 max-w-2xl">
+            <div className="flex-1 max-w-3xl">
               <div
-                className={`px-8 py-6 rounded-3xl ${
+                className={`px-10 py-7 rounded-3xl ${
                   message.sender === "user"
-                    ? "bg-background/60 backdrop-blur-md border border-border/40 shadow-md ml-auto max-w-[85%]"
-                    : "bg-background/40 backdrop-blur-md border border-border/20"
+                    ? "backdrop-blur-md border border-border/40 shadow-lg ml-auto max-w-[85%]"
+                    : "bg-background/60 backdrop-blur-md border border-border/30 shadow-lg"
                 }`}
-                style={message.sender === "assistant" ? { boxShadow: "var(--ai-message-glow)" } : {}}
+                style={
+                  message.sender === "assistant" 
+                    ? { boxShadow: "var(--ai-message-glow)" } 
+                    : { background: "var(--user-message-bg)", boxShadow: "0 8px 24px -8px hsl(0 0% 0% / 0.1)" }
+                }
               >
-                <p className="text-base leading-relaxed text-foreground/90">{message.text}</p>
+                <p className="text-base leading-relaxed text-foreground/95">{message.text}</p>
               </div>
               {message.sender === "assistant" && message.actions && (
                 <ActionButtons actions={message.actions} onAction={handleAction} />
@@ -122,15 +128,15 @@ const Chat = () => {
       </div>
 
       {/* Input Area - Voice First */}
-      <div className="backdrop-blur-sm bg-background/60 border-t border-border/30 px-6 py-6">
-        <div className="max-w-4xl mx-auto flex items-center gap-4">
+      <div className="backdrop-blur-md bg-background/50 border-t border-border/30 px-6 py-8">
+        <div className="max-w-4xl mx-auto flex items-center gap-5">
           <Input
             type="text"
             placeholder="Or type a message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            className="flex-1 h-12 rounded-2xl bg-background/60 backdrop-blur-sm border-border/40 text-base"
+            className="flex-1 h-14 rounded-3xl bg-background/70 backdrop-blur-sm border-border/40 text-base px-6"
             disabled={loading}
           />
           <VoiceButton onVoiceInput={handleVoiceInput} className="flex-shrink-0" />
