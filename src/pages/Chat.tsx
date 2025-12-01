@@ -43,7 +43,7 @@ const Chat = () => {
     setInput("");
     setLoading(true);
 
-    const response = await api.chat.send(input);
+    const response = await api.chat.send(input, userName, assistantName);
 
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
@@ -58,13 +58,13 @@ const Chat = () => {
 
   const handleAction = async (action: string) => {
     console.log("Action clicked:", action);
-    // POST https://dummy.ozlon.ai/action
+    await api.chat.action(action);
     setInput(action);
   };
 
   const handleQuickAction = async (intent: string) => {
     console.log("Quick action:", intent);
-    // POST https://dummy.ozlon.ai/quick
+    await api.chat.quick(intent);
     const actionText = intent.replace(/_/g, " ");
     setInput(actionText);
   };
