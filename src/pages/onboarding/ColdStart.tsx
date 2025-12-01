@@ -21,9 +21,8 @@ const ColdStart = () => {
       </div>
       
       <div className="max-w-md w-full space-y-8 text-center relative z-10">
-        <h1 className="text-3xl font-medium text-foreground leading-relaxed">Welcome to Ozlon
-Your Life, In Sync​<br />
-          Let's get your life synced up!        <br />
+        <h1 className="text-3xl font-medium text-foreground leading-relaxed">Welcome to Ozlon <br />
+          Your Life, In Sync​        <br />
           ​
         </h1>
         
