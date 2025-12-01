@@ -6,6 +6,7 @@ import { ActionButtons } from "@/components/ActionButtons";
 import { QuickActionsBar } from "@/components/QuickActionsBar";
 import { AIThinkingIndicator } from "@/components/AIThinkingIndicator";
 import { AIOrb } from "@/components/AIOrb";
+import { Send } from "lucide-react";
 
 interface Message {
   id: string;
@@ -130,16 +131,28 @@ const Chat = () => {
       {/* Input Area - Voice First */}
       <div className="backdrop-blur-md bg-background/50 border-t border-border/30 px-6 py-8">
         <div className="max-w-4xl mx-auto flex items-center gap-5">
-          <Input
-            type="text"
-            placeholder="Or type a message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            className="flex-1 h-14 rounded-3xl bg-background/70 backdrop-blur-sm border-border/40 text-base px-6"
-            disabled={loading}
-          />
-          <VoiceButton onVoiceInput={handleVoiceInput} className="flex-shrink-0" />
+          <div className="flex-1 relative">
+            <Input
+              type="text"
+              placeholder="Type a message..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              className="w-full h-14 rounded-3xl bg-background/70 backdrop-blur-sm border-border/40 text-base px-6 pr-14"
+              disabled={loading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-primary/10 hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center group"
+            >
+              <Send className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+            </button>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <VoiceButton onVoiceInput={handleVoiceInput} className="flex-shrink-0" />
+            <span className="text-xs text-muted-foreground/60">Speak</span>
+          </div>
         </div>
       </div>
     </div>
