@@ -20,9 +20,11 @@ const LocationConfirm = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8">
-        <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
-          Where are you living these days?
-        </h1>
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-medium text-foreground leading-relaxed">
+            Where are you living these days?
+          </h1>
+        </div>
         
         <div className="bg-secondary rounded-3xl p-8 flex flex-col items-center space-y-4">
           <MapPin className="w-12 h-12 text-primary" />

@@ -24,7 +24,7 @@ const Final = () => {
             Alright, I'm here whenever you need me.
           </h1>
           <p className="text-lg text-muted-foreground leading-relaxed">
-            You can talk to me about anything: money, food, work, stress, or whatever is going on. Just say "Hey {assistantName}..."
+            You can talk to me about money, food, work, stress, or anything else.
           </p>
         </div>
         

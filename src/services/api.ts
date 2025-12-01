@@ -1,7 +1,7 @@
 // Dummy API service layer
 // Backend developers: Replace these endpoints with real API calls
 
-const DUMMY_API_BASE = 'https://dummy.ozlon.ai';
+const PINEAPPLE_API_BASE = 'https://dummy.pineapple.ai';
 
 // Simulate network delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -10,37 +10,37 @@ export const api = {
   onboarding: {
     start: async () => {
       await delay(500);
-      console.log('API: POST /onboarding/start');
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/start`);
       return { success: true };
     },
     
     setUserName: async (name: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/user-name', { user_name: name });
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/user-name`, { user_name: name });
       return { success: true };
     },
     
     setAIName: async (name: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/ai-name', { assistant_name: name });
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/ai-name`, { assistant_name: name });
       return { success: true };
     },
     
     nameConfirmed: async () => {
       await delay(500);
-      console.log('API: POST /onboarding/name-confirmed');
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/name-confirmed`);
       return { success: true };
     },
     
     setLocation: async (location: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/location', { location });
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/location`, { location });
       return { success: true };
     },
     
     connect: async (type: string) => {
       await delay(500);
-      console.log('API: POST /onboarding/connect', { type });
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/connect`, { type });
       return { success: true };
     },
     
@@ -52,7 +52,7 @@ export const api = {
     
     getWowMoment: async (connectedApp: string) => {
       await delay(700);
-      console.log('API: GET /onboarding/wow', { connectedApp });
+      console.log(`API: GET ${PINEAPPLE_API_BASE}/onboarding/wow`, { connectedApp });
       
       const insights: Record<string, string[]> = {
         bank: [
@@ -86,17 +86,39 @@ export const api = {
     
     complete: async () => {
       await delay(500);
-      console.log('API: POST /onboarding/complete');
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/onboarding/complete`);
       return { success: true };
     },
   },
   
   chat: {
-    send: async (message: string) => {
+    send: async (message: string, userName?: string, assistantName?: string) => {
       await delay(800);
-      console.log('API: POST /chat', { message });
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/chat`, { 
+        user_name: userName, 
+        assistant_name: assistantName, 
+        message 
+      });
       return {
         response: "I'm here to help! This is a placeholder response.",
+        success: true
+      };
+    },
+    
+    quick: async (intent: string) => {
+      await delay(800);
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/quick`, { intent });
+      return {
+        response: `Quick action response for: ${intent}`,
+        success: true
+      };
+    },
+    
+    action: async (action: string, context?: string) => {
+      await delay(800);
+      console.log(`API: POST ${PINEAPPLE_API_BASE}/action`, { action, context });
+      return {
+        response: `Action response for: ${action}`,
         success: true
       };
     },
