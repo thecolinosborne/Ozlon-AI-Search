@@ -1,6 +1,10 @@
-export const AIOrb = () => {
+interface AIOrbProps {
+  breatheIn?: boolean;
+}
+
+export const AIOrb = ({ breatheIn = false }: AIOrbProps) => {
   return (
-    <div className="relative w-12 h-12 flex-shrink-0">
+    <div className={`relative w-12 h-12 flex-shrink-0 ${breatheIn ? 'animate-breath-in' : ''}`}>
       {/* Ripple effect */}
       <div className="absolute inset-0 rounded-full bg-primary/20 animate-ripple" />
       {/* Breathing layers */}
