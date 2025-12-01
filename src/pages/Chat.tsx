@@ -2,11 +2,16 @@ import { useState } from "react";
 import { VoiceButton } from "@/components/VoiceButton";
 import { Input } from "@/components/ui/input";
 import { api } from "@/services/api";
+import { ActionButtons } from "@/components/ActionButtons";
+import { QuickActionsBar } from "@/components/QuickActionsBar";
+import { AIThinkingIndicator } from "@/components/AIThinkingIndicator";
+import { AIOrb } from "@/components/AIOrb";
 
 interface Message {
   id: string;
   text: string;
   sender: "user" | "assistant";
+  actions?: string[];
 }
 
 const Chat = () => {
@@ -16,8 +21,9 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: `Hi ${userName}! Whenever you need anything, just say "Hey ${assistantName}..." or message me here.`,
+      text: `Hi ${userName}, I'm here whenever you need me. What can I help you with today?`,
       sender: "assistant",
+      actions: ["Tell me more", "Help with money", "Show my day"],
     },
   ]);
   const [input, setInput] = useState("");
@@ -42,10 +48,24 @@ const Chat = () => {
       id: (Date.now() + 1).toString(),
       text: response.response,
       sender: "assistant",
+      actions: ["Tell me more", "Do this", "Show options"],
     };
 
     setMessages((prev) => [...prev, assistantMessage]);
     setLoading(false);
+  };
+
+  const handleAction = async (action: string) => {
+    console.log("Action clicked:", action);
+    // POST https://dummy.ozlon.ai/action
+    setInput(action);
+  };
+
+  const handleQuickAction = async (intent: string) => {
+    console.log("Quick action:", intent);
+    // POST https://dummy.ozlon.ai/quick
+    const actionText = intent.replace(/_/g, " ");
+    setInput(actionText);
   };
 
   const handleVoiceInput = (text: string) => {
@@ -53,50 +73,64 @@ const Chat = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b border-border px-6 py-4">
-        <h1 className="text-2xl font-medium text-foreground">{assistantName}</h1>
+    <div className="min-h-screen flex flex-col" style={{ background: "var(--chat-bg)" }}>
+      {/* Header */}
+      <header className="backdrop-blur-sm bg-background/60 border-b border-border/30 px-6 py-6">
+        <h1 className="text-3xl font-light text-foreground tracking-wide">{assistantName}</h1>
+        <p className="text-sm text-muted-foreground/60 mt-1">
+          Say "Hey {assistantName}..." anytime to talk to me.
+        </p>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-4">
+      {/* Quick Actions Bar */}
+      <div className="py-4 border-b border-border/20">
+        <QuickActionsBar onAction={handleQuickAction} />
+      </div>
+
+      {/* Chat Feed */}
+      <div className="flex-1 overflow-y-auto py-8 space-y-8">
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"} animate-slide-up`}
+            className={`flex ${message.sender === "user" ? "justify-end px-6" : "justify-start px-6"} ${
+              message.sender === "user" ? "animate-slide-in-right" : "animate-fade-in"
+            }`}
           >
-            <div
-              className={`max-w-[80%] px-6 py-4 rounded-3xl ${
-                message.sender === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-foreground"
-              }`}
-            >
-              <p className="text-base leading-relaxed">{message.text}</p>
+            {message.sender === "assistant" && (
+              <div className="mr-4 mt-2">
+                <AIOrb />
+              </div>
+            )}
+            <div className="flex-1 max-w-2xl">
+              <div
+                className={`px-8 py-6 rounded-3xl ${
+                  message.sender === "user"
+                    ? "bg-background/60 backdrop-blur-md border border-border/40 shadow-md ml-auto max-w-[85%]"
+                    : "bg-background/40 backdrop-blur-md border border-border/20"
+                }`}
+                style={message.sender === "assistant" ? { boxShadow: "var(--ai-message-glow)" } : {}}
+              >
+                <p className="text-base leading-relaxed text-foreground/90">{message.text}</p>
+              </div>
+              {message.sender === "assistant" && message.actions && (
+                <ActionButtons actions={message.actions} onAction={handleAction} />
+              )}
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="flex justify-start animate-slide-up">
-            <div className="bg-secondary px-6 py-4 rounded-3xl">
-              <div className="flex space-x-2">
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse-soft" />
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse-soft" style={{ animationDelay: "0.2s" }} />
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse-soft" style={{ animationDelay: "0.4s" }} />
-              </div>
-            </div>
-          </div>
-        )}
+        {loading && <AIThinkingIndicator />}
       </div>
 
-      <div className="border-t border-border px-6 py-4 space-y-4">
-        <div className="flex items-center gap-3">
+      {/* Input Area - Voice First */}
+      <div className="backdrop-blur-sm bg-background/60 border-t border-border/30 px-6 py-6">
+        <div className="max-w-4xl mx-auto flex items-center gap-4">
           <Input
             type="text"
-            placeholder="Type a message..."
+            placeholder="Or type a message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            className="flex-1 h-12 rounded-2xl"
+            className="flex-1 h-12 rounded-2xl bg-background/60 backdrop-blur-sm border-border/40 text-base"
             disabled={loading}
           />
           <VoiceButton onVoiceInput={handleVoiceInput} className="flex-shrink-0" />
