@@ -16,7 +16,7 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: `Hi ${userName}! Whenever you need anything, just say "Hey ${assistantName}..."`,
+      text: `Hi ${userName}! Whenever you need anything, just say "Hey ${assistantName}..." or message me here.`,
       sender: "assistant",
     },
   ]);
