@@ -100,7 +100,7 @@ const Chat = () => {
           >
             {message.sender === "assistant" && (
               <div className="mr-5 mt-3">
-                <AIOrb />
+                <AIOrb key={message.id} breatheIn={true} />
               </div>
             )}
             <div className="flex-1 max-w-3xl">

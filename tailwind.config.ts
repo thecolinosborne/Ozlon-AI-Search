@@ -108,6 +108,11 @@ export default {
           "0%, 100%": { boxShadow: "0 0 20px hsl(var(--primary) / 0.3)" },
           "50%": { boxShadow: "0 0 30px hsl(var(--primary) / 0.5)" }
         },
+        "breath-in": {
+          "0%": { transform: "scale(0.8)", opacity: "0.5" },
+          "50%": { transform: "scale(1.15)", opacity: "1" },
+          "100%": { transform: "scale(1)", opacity: "1" }
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -121,6 +126,7 @@ export default {
         "breathe": "breathe 6s ease-in-out infinite",
         "ripple": "ripple 6s ease-out infinite",
         "glow-pulse": "glow-pulse 3s ease-in-out infinite",
+        "breath-in": "breath-in 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
       },
     },
   },
