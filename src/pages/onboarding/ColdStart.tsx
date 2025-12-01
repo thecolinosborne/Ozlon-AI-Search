@@ -22,8 +22,8 @@ const ColdStart = () => {
       
       <div className="max-w-md w-full space-y-8 text-center relative z-10">
         <h1 className="text-3xl font-medium text-foreground leading-relaxed">Hey there!</h1>
-        <p className="text-lg text-muted-foreground leading-relaxed">Let's get you set up. My system is designed to get to know you, then slowly integrate into your life.<br />
-          Is that okay?
+        <p className="text-lg text-muted-foreground leading-relaxed">
+          My system is designed to get to know you, then slowly integrate into the parts of your life you would like me to be a part of. How does that sound?
         </p>
         
         <div className="pt-8 space-y-3">
