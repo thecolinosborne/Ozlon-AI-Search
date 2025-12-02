@@ -15,12 +15,14 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 export async function streamChat({
   messages,
   intent,
+  systemName = 'Ozlon',
   onDelta,
   onDone,
   onError,
 }: {
   messages: Message[];
   intent?: string;
+  systemName?: string;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -32,7 +34,7 @@ export async function streamChat({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages, intent }),
+      body: JSON.stringify({ messages, intent, systemName }),
     });
 
     if (!resp.ok) {
