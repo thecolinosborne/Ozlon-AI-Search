@@ -12,11 +12,11 @@ import {
 
 interface SystemNamingModalProps {
   isOpen: boolean;
-  onClose: (systemName: string) => void;
+  onComplete: (systemName: string) => void;
   userId: string;
 }
 
-export const SystemNamingModal = ({ isOpen, onClose, userId }: SystemNamingModalProps) => {
+export const SystemNamingModal = ({ isOpen, onComplete, userId }: SystemNamingModalProps) => {
   const [name, setName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -32,29 +32,40 @@ export const SystemNamingModal = ({ isOpen, onClose, userId }: SystemNamingModal
         .eq("user_id", userId);
 
       if (error) throw error;
-      toast.success(`Your system is now called ${systemName}`);
-      onClose(systemName);
+      toast.success(`Welcome to ${systemName}!`);
+      onComplete(systemName);
     } catch (error: any) {
       toast.error("Failed to save name");
-      onClose("Ozlon");
+      onComplete("Ozlon");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSkip = () => {
-    onClose("Ozlon");
+  const handleSkip = async () => {
+    setIsLoading(true);
+    try {
+      await supabase
+        .from("profiles")
+        .update({ system_name: "Ozlon" })
+        .eq("user_id", userId);
+    } catch {
+      // Ignore errors for skip
+    }
+    toast.success("Welcome to Ozlon!");
+    onComplete("Ozlon");
+    setIsLoading(false);
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="text-xl font-light text-center">
-            Name Your System
+          <DialogTitle className="text-2xl font-light text-center">
+            Welcome to Your Personal OS
           </DialogTitle>
-          <DialogDescription className="text-center">
-            Give your personal operating system a name. This is how it will introduce itself to you.
+          <DialogDescription className="text-center text-base">
+            Give your system a name. This is how it will introduce itself to you.
           </DialogDescription>
         </DialogHeader>
 
@@ -67,14 +78,14 @@ export const SystemNamingModal = ({ isOpen, onClose, userId }: SystemNamingModal
               placeholder="Ozlon"
               maxLength={30}
               className={cn(
-                "w-full px-4 py-3 text-center text-lg rounded-lg border border-neutral-200",
+                "w-full px-4 py-4 text-center text-xl rounded-xl border border-neutral-200",
                 "focus:outline-none focus:border-neutral-400",
                 "placeholder:text-neutral-300"
               )}
               autoFocus
             />
-            <p className="text-xs text-neutral-400 text-center mt-2">
-              Leave blank to keep "Ozlon"
+            <p className="text-sm text-neutral-400 text-center mt-3">
+              Leave blank to keep the default name "Ozlon"
             </p>
           </div>
 
@@ -90,7 +101,7 @@ export const SystemNamingModal = ({ isOpen, onClose, userId }: SystemNamingModal
                 "disabled:opacity-50"
               )}
             >
-              Skip
+              Keep Ozlon
             </button>
             <button
               type="submit"
@@ -102,7 +113,7 @@ export const SystemNamingModal = ({ isOpen, onClose, userId }: SystemNamingModal
                 "disabled:opacity-50"
               )}
             >
-              {isLoading ? "Saving..." : "Confirm"}
+              {isLoading ? "Setting up..." : "Name it"}
             </button>
           </div>
         </form>
