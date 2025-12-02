@@ -56,7 +56,7 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
         )}
 
         <span className="text-[10px] text-muted-foreground/60 mt-1 px-2">
-          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </span>
       </div>
     </div>
