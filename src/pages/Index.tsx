@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat } from "@/services/chatService";
+import { UserMenu } from "@/components/UserMenu";
 
 type Message = {
   id: string;
@@ -89,6 +90,13 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
+      {/* Header */}
+      <header className="absolute top-0 left-0 right-0 px-4 py-4 z-10">
+        <div className="max-w-6xl mx-auto flex justify-end">
+          <UserMenu />
+        </div>
+      </header>
+
       {/* Hero Section - Always visible but shrinks after interaction */}
       <div
         className={cn(

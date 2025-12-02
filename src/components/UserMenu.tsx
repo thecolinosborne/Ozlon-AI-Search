@@ -1,0 +1,134 @@
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { User, Session } from "@supabase/supabase-js";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
+
+export const UserMenu = () => {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+    });
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      toast.success("Signed out successfully");
+      navigate("/");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to sign out");
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="w-8 h-8 rounded-full bg-neutral-100 animate-pulse" />
+    );
+  }
+
+  if (!user) {
+    return (
+      <Link
+        to="/auth"
+        className={cn(
+          "px-4 py-2 text-sm font-medium rounded-full",
+          "bg-neutral-900 text-white",
+          "hover:bg-neutral-800 transition-colors"
+        )}
+      >
+        Sign in
+      </Link>
+    );
+  }
+
+  const initials = user.user_metadata?.full_name
+    ?.split(" ")
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || user.email?.slice(0, 2).toUpperCase() || "U";
+
+  const avatarUrl = user.user_metadata?.avatar_url;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={cn(
+            "w-9 h-9 rounded-full flex items-center justify-center",
+            "bg-neutral-100 hover:bg-neutral-200 transition-colors",
+            "focus:outline-none focus:ring-2 focus:ring-neutral-300",
+            "overflow-hidden"
+          )}
+        >
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Avatar"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-sm font-medium text-neutral-600">{initials}</span>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <div className="px-3 py-2">
+          <p className="text-sm font-medium text-neutral-900 truncate">
+            {user.user_metadata?.full_name || "User"}
+          </p>
+          <p className="text-xs text-neutral-500 truncate">{user.email}</p>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/profile" className="cursor-pointer">
+            <UserIcon className="w-4 h-4 mr-2" />
+            Profile
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/settings" className="cursor-pointer">
+            <Settings className="w-4 h-4 mr-2" />
+            Settings
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/billing" className="cursor-pointer">
+            <CreditCard className="w-4 h-4 mr-2" />
+            Billing
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600">
+          <LogOut className="w-4 h-4 mr-2" />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
