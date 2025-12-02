@@ -5,6 +5,8 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { QuickActions } from "@/components/chat/QuickActions";
 import { AIOrb } from "@/components/AIOrb";
+import { streamChat } from "@/services/chatService";
+import { toast } from "sonner";
 import type { Message } from "@/types";
 
 const Chat = () => {
@@ -53,7 +55,6 @@ const Chat = () => {
   }, []);
 
   const handleSendMessage = async (text: string) => {
-    // Add user message
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       text,
@@ -62,16 +63,15 @@ const Chat = () => {
     };
     addMessage(userMessage);
 
-    // Handle offline mode
     if (isOffline) {
       addPendingMessage(userMessage);
+      toast.error("You are offline. Message queued.");
       return;
     }
 
-    // Add loading message
-    const loadingId = `loading-${Date.now()}`;
+    const assistantId = `assistant-${Date.now()}`;
     addMessage({
-      id: loadingId,
+      id: assistantId,
       text: "",
       sender: "assistant",
       timestamp: new Date(),
@@ -80,17 +80,38 @@ const Chat = () => {
 
     setLoading(true);
 
-    // TODO: Wire to API - onSendMessage callback
-    // Simulated response for now
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Build conversation history for Claude
+    const chatHistory = messages
+      .filter((m) => !m.isLoading && m.id !== "welcome")
+      .map((m) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        content: m.text,
+      }))
+      .concat([{ role: "user", content: text }]);
 
-    // Update loading message with response
-    updateMessage(loadingId, {
-      text: "Analysis complete. Data has been processed and indexed.",
-      isLoading: false,
+    let responseText = "";
+
+    await streamChat({
+      messages: chatHistory as { role: "user" | "assistant"; content: string }[],
+      onDelta: (delta) => {
+        responseText += delta;
+        updateMessage(assistantId, {
+          text: responseText,
+          isLoading: false,
+        });
+      },
+      onDone: () => {
+        setLoading(false);
+      },
+      onError: (error) => {
+        updateMessage(assistantId, {
+          text: "Connection error. Please try again.",
+          isLoading: false,
+        });
+        toast.error(error);
+        setLoading(false);
+      },
     });
-
-    setLoading(false);
   };
 
   const handleQuickAction = (intent: string) => {
