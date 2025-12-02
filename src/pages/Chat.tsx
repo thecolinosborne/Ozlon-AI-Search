@@ -17,14 +17,13 @@ interface Message {
 
 const Chat = () => {
   const userName = localStorage.getItem("userName") || "there";
-  const assistantName = localStorage.getItem("assistantName") || "Assistant";
   
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: `Hi ${userName}, I'm right here whenever you need me. What can I help you with today?`,
+      text: `The Orb is active. What would you like to analyze?`,
       sender: "assistant",
-      actions: ["Tell me more", "Help with money", "Show my day"],
+      actions: ["Analyze today", "Request summary", "Check opportunities"],
     },
   ]);
   const [input, setInput] = useState("");
@@ -43,7 +42,7 @@ const Chat = () => {
     setInput("");
     setLoading(true);
 
-    const response = await api.chat.send(input, userName, assistantName);
+    const response = await api.chat.send(input, userName);
 
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
@@ -79,9 +78,9 @@ const Chat = () => {
     }}>
       {/* Header */}
       <header className="backdrop-blur-sm bg-background/40 border-b border-border/20 px-6 py-8 animate-fade-in">
-        <h1 className="text-4xl font-semibold text-foreground tracking-tight">{assistantName}</h1>
+        <h1 className="text-4xl font-semibold text-foreground tracking-tight">Orb</h1>
         <p className="text-sm text-muted-foreground/70 mt-2">
-          Say "Hey {assistantName}..." anytime to talk to me.
+          Active and observing
         </p>
       </header>
 
@@ -134,7 +133,7 @@ const Chat = () => {
           <div className="flex-1 relative">
             <Input
               type="text"
-              placeholder="Type a message..."
+              placeholder="Enter query..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}

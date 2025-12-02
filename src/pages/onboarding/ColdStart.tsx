@@ -21,18 +21,15 @@ const ColdStart = () => {
       </div>
       
       <div className="max-w-md w-full space-y-8 text-center relative z-10">
-        <h1 className="text-3xl font-medium text-foreground leading-relaxed">Hey there!</h1>
+        <h1 className="text-3xl font-medium text-foreground leading-relaxed">Welcome to the Orb</h1>
         <p className="text-lg text-muted-foreground leading-relaxed">
-          My system is designed to get to know you, then slowly integrate into the parts of your life you would like me to be a part of. How does that sound?
+          This system observes, adapts, and aligns itself with how you operate. Your Orb learns from your inputs to generate structure, insights, and efficiencies.
         </p>
         
-        <div className="pt-8 space-y-3">
+        <div className="pt-8">
           <Button onClick={handleStart} disabled={loading} className="w-full h-14 text-lg rounded-2xl" size="lg">
-            Yes, that's okay
+            Begin Setup
           </Button>
-          <button onClick={() => {}} className="w-full text-muted-foreground text-base hover:text-foreground transition-colors">
-            Maybe later
-          </button>
         </div>
       </div>
     </div>;
