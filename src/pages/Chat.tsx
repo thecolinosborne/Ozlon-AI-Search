@@ -1,160 +1,161 @@
-import { useState } from "react";
-import { VoiceButton } from "@/components/VoiceButton";
-import { Input } from "@/components/ui/input";
-import { api } from "@/services/api";
-import { ActionButtons } from "@/components/ActionButtons";
-import { QuickActionsBar } from "@/components/QuickActionsBar";
-import { AIThinkingIndicator } from "@/components/AIThinkingIndicator";
+import { useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
+import { useAppStore } from "@/stores/useAppStore";
+import { MessageBubble } from "@/components/chat/MessageBubble";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { QuickActions } from "@/components/chat/QuickActions";
 import { AIOrb } from "@/components/AIOrb";
-import { Send } from "lucide-react";
-
-interface Message {
-  id: string;
-  text: string;
-  sender: "user" | "assistant";
-  actions?: string[];
-}
+import type { Message } from "@/types";
 
 const Chat = () => {
-  const userName = localStorage.getItem("userName") || "there";
-  const orbName = localStorage.getItem("orbName") || "Orb";
-  
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: `${orbName} is active. What would you like to analyze?`,
-      sender: "assistant",
-      actions: ["Analyze today", "Request summary", "Check opportunities"],
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const location = useLocation();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const {
+    user,
+    messages,
+    addMessage,
+    updateMessage,
+    setLoading,
+    isLoading,
+    isOffline,
+    addPendingMessage,
+  } = useAppStore();
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const orbName = user?.orbName || "Orb";
 
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Handle initial intent from navigation
+  useEffect(() => {
+    const intent = location.state?.intent;
+    if (intent) {
+      handleQuickAction(intent);
+      // Clear the state to prevent re-triggering
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  // Initialize with welcome message if empty
+  useEffect(() => {
+    if (messages.length === 0) {
+      const welcomeMessage: Message = {
+        id: "welcome",
+        text: `${orbName} is active. What would you like to analyze?`,
+        sender: "assistant",
+        timestamp: new Date(),
+        actions: ["Analyze today", "Request summary", "Check opportunities"],
+      };
+      addMessage(welcomeMessage);
+    }
+  }, []);
+
+  const handleSendMessage = async (text: string) => {
+    // Add user message
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: input,
+      id: `user-${Date.now()}`,
+      text,
       sender: "user",
+      timestamp: new Date(),
     };
+    addMessage(userMessage);
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
+    // Handle offline mode
+    if (isOffline) {
+      addPendingMessage(userMessage);
+      return;
+    }
+
+    // Add loading message
+    const loadingId = `loading-${Date.now()}`;
+    addMessage({
+      id: loadingId,
+      text: "",
+      sender: "assistant",
+      timestamp: new Date(),
+      isLoading: true,
+    });
+
     setLoading(true);
 
-    const response = await api.chat.send(input, userName, orbName);
+    // TODO: Wire to API - onSendMessage callback
+    // Simulated response for now
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      text: response.response,
-      sender: "assistant",
-      actions: ["Tell me more", "Do this", "Show options"],
-    };
+    // Update loading message with response
+    updateMessage(loadingId, {
+      text: "Analysis complete. Data has been processed and indexed.",
+      isLoading: false,
+      actions: ["Tell me more", "Show details", "Next action"],
+    });
 
-    setMessages((prev) => [...prev, assistantMessage]);
     setLoading(false);
   };
 
-  const handleAction = async (action: string) => {
-    console.log("Action clicked:", action);
-    await api.chat.action(action);
-    setInput(action);
-  };
-
-  const handleQuickAction = async (intent: string) => {
-    console.log("Quick action:", intent);
-    await api.chat.quick(intent);
+  const handleQuickAction = (intent: string) => {
     const actionText = intent.replace(/_/g, " ");
-    setInput(actionText);
+    handleSendMessage(actionText);
   };
 
-  const handleVoiceInput = (text: string) => {
-    setInput(text);
+  const handleRecordStart = () => {
+    // TODO: Wire to Whisper/Deepgram - onRecordStart callback
+    console.log("Recording started");
+  };
+
+  const handleRecordStop = () => {
+    // TODO: Wire to Whisper/Deepgram - onRecordStop callback
+    console.log("Recording stopped");
   };
 
   return (
-    <div className="min-h-screen flex flex-col animate-gradient" style={{ 
-      background: "linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(210 100% 98%) 30%, hsl(0 0% 98%) 70%, hsl(0 0% 96%) 100%)"
-    }}>
+    <div className="flex flex-col h-screen bg-gradient-to-b from-background to-muted/10">
       {/* Header */}
-      <header className="backdrop-blur-sm bg-background/40 border-b border-border/20 px-6 py-8 animate-fade-in">
-        <h1 className="text-4xl font-semibold text-foreground tracking-tight">{orbName}</h1>
-        <p className="text-sm text-muted-foreground/70 mt-2">
-          Active and observing
-        </p>
+      <header className="flex items-center gap-3 px-4 py-4 backdrop-blur-xl bg-background/80 border-b border-border/30 safe-area-top">
+        <AIOrb breatheIn={!isLoading} />
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">{orbName}</h1>
+          <p className="text-xs text-muted-foreground">
+            {isOffline ? "Offline mode" : "Active and observing"}
+          </p>
+        </div>
       </header>
 
-      {/* Quick Actions Bar */}
-      <div className="py-6 border-b border-border/20">
-        <QuickActionsBar onAction={handleQuickAction} />
-      </div>
+      {/* Quick Actions - shown when no messages */}
+      {messages.length <= 1 && <QuickActions onAction={handleQuickAction} />}
 
-      {/* Chat Feed */}
-      <div className="flex-1 overflow-y-auto py-10 space-y-10">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto py-4 space-y-4">
         {messages.map((message) => (
-          <div
+          <MessageBubble
             key={message.id}
-            className={`flex ${message.sender === "user" ? "justify-end px-6" : "justify-start px-6"} ${
-              message.sender === "user" ? "animate-slide-in-right" : "animate-slide-up-fade"
-            }`}
-          >
-            {message.sender === "assistant" && (
-              <div className="mr-5 mt-3">
-                <AIOrb key={message.id} breatheIn={true} />
-              </div>
-            )}
-            <div className="flex-1 max-w-3xl">
-              <div
-                className={`px-10 py-7 rounded-3xl ${
-                  message.sender === "user"
-                    ? "backdrop-blur-md border border-border/40 shadow-lg ml-auto max-w-[85%]"
-                    : "bg-background/60 backdrop-blur-md border border-border/30 shadow-lg"
-                }`}
-                style={
-                  message.sender === "assistant" 
-                    ? { boxShadow: "var(--ai-message-glow)" } 
-                    : { background: "var(--user-message-bg)", boxShadow: "0 8px 24px -8px hsl(0 0% 0% / 0.1)" }
-                }
-              >
-                <p className="text-base leading-relaxed text-foreground/95">{message.text}</p>
-              </div>
-              {message.sender === "assistant" && message.actions && (
-                <ActionButtons actions={message.actions} onAction={handleAction} />
-              )}
-            </div>
-          </div>
+            message={message}
+            onAction={handleQuickAction}
+          />
         ))}
-        {loading && <AIThinkingIndicator />}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - Voice First */}
-      <div className="backdrop-blur-md bg-background/50 border-t border-border/30 px-6 py-8">
-        <div className="max-w-4xl mx-auto flex items-center gap-5">
-          <div className="flex-1 relative">
-            <Input
-              type="text"
-              placeholder="Enter query..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              className="w-full h-14 rounded-3xl bg-background/70 backdrop-blur-sm border-border/40 text-base px-6 pr-14"
-              disabled={loading}
-            />
-            <button
-              onClick={handleSend}
-              disabled={loading || !input.trim()}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-primary/10 hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center group"
-            >
-              <Send className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
-            </button>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <VoiceButton onVoiceInput={handleVoiceInput} className="flex-shrink-0" />
-            <span className="text-xs text-muted-foreground/60">Speak</span>
-          </div>
+      {/* Offline Banner */}
+      {isOffline && (
+        <div className="px-4 py-2 bg-warning/10 border-t border-warning/30">
+          <p className="text-xs text-warning text-center">
+            You are offline. Messages will be sent when connection is restored.
+          </p>
         </div>
-      </div>
+      )}
+
+      {/* Input */}
+      <ChatInput
+        onSendMessage={handleSendMessage}
+        onRecordStart={handleRecordStart}
+        onRecordStop={handleRecordStop}
+        disabled={isLoading}
+      />
+
+      {/* Bottom nav spacer */}
+      <div className="h-16" />
     </div>
   );
 };
