@@ -20,13 +20,28 @@ const QUICK_ACTIONS = [
 ];
 
 const Index = () => {
-  const { systemName, user, needsNaming, setNeedsNaming, updateSystemName } = useSystemName();
+  const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding } = useSystemName();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
+  const [welcomeShown, setWelcomeShown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Show welcome back message for returning users
+  useEffect(() => {
+    if (isReturningUser && !welcomeShown && messages.length === 0) {
+      setWelcomeShown(true);
+      const welcomeMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`,
+      };
+      setMessages([welcomeMessage]);
+      setHasInteracted(true);
+    }
+  }, [isReturningUser, welcomeShown, systemName, messages.length]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,11 +105,6 @@ const Index = () => {
 
   const handleQuickAction = (action: (typeof QUICK_ACTIONS)[0]) => {
     sendMessage(action.message, action.intent);
-  };
-
-  const handleNamingComplete = (name: string) => {
-    updateSystemName(name);
-    setNeedsNaming(false);
   };
 
   return (
@@ -286,11 +296,11 @@ const Index = () => {
         </div>
       )}
 
-      {/* System Naming Modal */}
-      {user && needsNaming && (
+      {/* System Naming Modal - Onboarding */}
+      {user && needsOnboarding && (
         <SystemNamingModal
-          isOpen={needsNaming}
-          onClose={handleNamingComplete}
+          isOpen={needsOnboarding}
+          onComplete={completeOnboarding}
           userId={user.id}
         />
       )}
