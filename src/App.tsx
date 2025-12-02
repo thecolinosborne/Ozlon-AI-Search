@@ -17,6 +17,9 @@ import Settings from "@/pages/Settings";
 import Developer from "@/pages/Developer";
 import MemorySettings from "@/pages/MemorySettings";
 import Auth from "@/pages/Auth";
+import AuthPage from "@/pages/AuthPage";
+import Profile from "@/pages/Profile";
+import Billing from "@/pages/Billing";
 import Onboarding from "@/pages/onboarding";
 import NotFound from "@/pages/NotFound";
 
@@ -83,7 +86,9 @@ const App = () => (
         <OfflineDetector />
         <AppLayout>
           <Routes>
-            <Route path="/auth" element={<Auth />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/billing" element={<Billing />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
