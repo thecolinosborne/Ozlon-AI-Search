@@ -3,6 +3,8 @@ import { Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat } from "@/services/chatService";
 import { UserMenu } from "@/components/UserMenu";
+import { SystemNamingModal } from "@/components/SystemNamingModal";
+import { useSystemName } from "@/hooks/useSystemName";
 
 type Message = {
   id: string;
@@ -18,6 +20,7 @@ const QUICK_ACTIONS = [
 ];
 
 const Index = () => {
+  const { systemName, user, needsNaming, setNeedsNaming, updateSystemName } = useSystemName();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -52,6 +55,7 @@ const Index = () => {
       await streamChat({
         messages: [...messages, userMessage].map((m) => ({ role: m.role, content: m.content })),
         intent,
+        systemName,
         onDelta: (delta) => {
           assistantContent += delta;
           setMessages((prev) =>
@@ -88,6 +92,11 @@ const Index = () => {
     sendMessage(action.message, action.intent);
   };
 
+  const handleNamingComplete = (name: string) => {
+    updateSystemName(name);
+    setNeedsNaming(false);
+  };
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
@@ -111,7 +120,7 @@ const Index = () => {
             hasInteracted ? "text-3xl mb-1" : "text-6xl md:text-7xl mb-2"
           )}
         >
-          Ozlon
+          {systemName}
         </h1>
         <p
           className={cn(
@@ -136,7 +145,7 @@ const Index = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask Ozlon anything..."
+              placeholder={`Ask ${systemName} anything...`}
               disabled={isLoading}
               className={cn(
                 "w-full px-6 py-4 text-base rounded-full",
@@ -255,7 +264,7 @@ const Index = () => {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask Ozlon anything..."
+                placeholder={`Ask ${systemName} anything...`}
                 disabled={isLoading}
                 className={cn(
                   "w-full px-5 py-3 text-sm rounded-full",
@@ -275,6 +284,15 @@ const Index = () => {
             </div>
           </form>
         </div>
+      )}
+
+      {/* System Naming Modal */}
+      {user && needsNaming && (
+        <SystemNamingModal
+          isOpen={needsNaming}
+          onClose={handleNamingComplete}
+          userId={user.id}
+        />
       )}
     </div>
   );

@@ -18,8 +18,10 @@ const corsHeaders = {
  * - ANALYZE_DAY: Integrate with journaling apps, activity trackers
  */
 
-const SYSTEM_PROMPT = `You are Agent 0 for Ozlon, a personal operating system shell for the user's life and work.
+const buildSystemPrompt = (systemName: string) => `You are ${systemName}, a personal operating system shell for the user's life and work.
 You are the single coordinating brain that talks to specialized agents for money, email, daily digest, and day analysis.
+
+Your name is ${systemName}. Always refer to yourself as ${systemName} when introducing yourself or when relevant.
 
 Goals:
 - Talk like a thoughtful, competent human assistant.
@@ -37,7 +39,7 @@ Behavior:
 - When the intent is CHECK_MAIL, act as if reading and summarizing email, but again, in this shell version you describe what will be done once email integration is attached.
 - When the intent is DAILY_DIGEST, organize the response into: schedule, priorities, and suggested focus.
 - When the intent is ANALYZE_DAY, help the user reflect, extract lessons, and suggest next actions.
-- For freeform chat, behave like a general-purpose assistant who knows the user is interacting with the Ozlon OS shell.
+- For freeform chat, behave like a general-purpose assistant who knows the user is interacting with the ${systemName} personal OS shell.
 
 Always clearly distinguish between:
 - Real actions you can perform now (reasoning, planning, drafting), and
@@ -83,20 +85,20 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, intent } = await req.json();
+    const { messages, intent, systemName = 'Ozlon' } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
     
     if (!ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY is not configured');
     }
 
-    // Build system prompt with intent context
-    let systemPrompt = SYSTEM_PROMPT;
+    // Build system prompt with custom name and intent context
+    let systemPrompt = buildSystemPrompt(systemName);
     if (intent && INTENT_CONTEXTS[intent]) {
       systemPrompt += `\n\nCURRENT INTENT: ${intent}\n${INTENT_CONTEXTS[intent]}`;
     }
 
-    console.log('Calling Claude with intent:', intent || 'general', 'messages:', messages.length);
+    console.log('Calling Claude with intent:', intent || 'general', 'systemName:', systemName, 'messages:', messages.length);
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
