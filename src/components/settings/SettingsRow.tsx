@@ -1,0 +1,82 @@
+import { ChevronRight, LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+
+interface SettingsRowProps {
+  icon: LucideIcon;
+  label: string;
+  description?: string;
+  type?: "navigate" | "toggle" | "action";
+  value?: boolean;
+  onChange?: (value: boolean) => void;
+  onClick?: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}
+
+export const SettingsRow = ({
+  icon: Icon,
+  label,
+  description,
+  type = "navigate",
+  value,
+  onChange,
+  onClick,
+  disabled = false,
+  destructive = false,
+}: SettingsRowProps) => {
+  const handleClick = () => {
+    if (type === "toggle" && onChange) {
+      onChange(!value);
+    } else if (onClick) {
+      onClick();
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={disabled}
+      className={cn(
+        "w-full flex items-center gap-4 p-4 rounded-2xl transition-all duration-200",
+        "bg-card/60 hover:bg-card/80 border border-border/30",
+        disabled && "opacity-50 cursor-not-allowed",
+        destructive && "hover:bg-destructive/10"
+      )}
+    >
+      <div className={cn(
+        "p-2.5 rounded-xl",
+        destructive ? "bg-destructive/10" : "bg-muted/60"
+      )}>
+        <Icon className={cn(
+          "w-5 h-5",
+          destructive ? "text-destructive" : "text-foreground/70"
+        )} strokeWidth={1.5} />
+      </div>
+      
+      <div className="flex-1 text-left">
+        <p className={cn(
+          "font-medium",
+          destructive ? "text-destructive" : "text-foreground"
+        )}>
+          {label}
+        </p>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        )}
+      </div>
+
+      {type === "toggle" && (
+        <Switch
+          checked={value}
+          onCheckedChange={onChange}
+          disabled={disabled}
+        />
+      )}
+      
+      {type === "navigate" && (
+        <ChevronRight className="w-5 h-5 text-muted-foreground" />
+      )}
+    </button>
+  );
+};
