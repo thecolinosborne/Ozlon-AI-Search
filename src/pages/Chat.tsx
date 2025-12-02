@@ -88,7 +88,6 @@ const Chat = () => {
     updateMessage(loadingId, {
       text: "Analysis complete. Data has been processed and indexed.",
       isLoading: false,
-      actions: ["Tell me more", "Show details", "Next action"],
     });
 
     setLoading(false);
