@@ -53,16 +53,28 @@ export const UserMenu = () => {
 
   if (!user) {
     return (
-      <Link
-        to="/auth"
-        className={cn(
-          "px-4 py-2 text-sm font-medium rounded-full",
-          "bg-neutral-900 text-white",
-          "hover:bg-neutral-800 transition-colors"
-        )}
-      >
-        Sign in
-      </Link>
+      <div className="flex items-center gap-2">
+        <Link
+          to="/auth?mode=signup"
+          className={cn(
+            "px-4 py-2 text-sm font-medium rounded-full",
+            "border border-neutral-200 text-neutral-700",
+            "hover:bg-neutral-50 transition-colors"
+          )}
+        >
+          Sign up
+        </Link>
+        <Link
+          to="/auth"
+          className={cn(
+            "px-4 py-2 text-sm font-medium rounded-full",
+            "bg-neutral-900 text-white",
+            "hover:bg-neutral-800 transition-colors"
+          )}
+        >
+          Sign in
+        </Link>
+      </div>
     );
   }
 
