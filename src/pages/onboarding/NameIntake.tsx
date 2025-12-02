@@ -16,7 +16,7 @@ const NameIntake = () => {
     await api.onboarding.setUserName(name);
     localStorage.setItem("userName", name);
     setLoading(false);
-    navigate("/onboarding/communication-mode");
+    navigate("/onboarding/orb-naming");
   };
 
   const handleVoiceInput = (text: string) => {

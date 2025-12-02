@@ -17,11 +17,12 @@ interface Message {
 
 const Chat = () => {
   const userName = localStorage.getItem("userName") || "there";
+  const orbName = localStorage.getItem("orbName") || "Orb";
   
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: `The Orb is active. What would you like to analyze?`,
+      text: `${orbName} is active. What would you like to analyze?`,
       sender: "assistant",
       actions: ["Analyze today", "Request summary", "Check opportunities"],
     },
@@ -42,7 +43,7 @@ const Chat = () => {
     setInput("");
     setLoading(true);
 
-    const response = await api.chat.send(input, userName);
+    const response = await api.chat.send(input, userName, orbName);
 
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
@@ -78,7 +79,7 @@ const Chat = () => {
     }}>
       {/* Header */}
       <header className="backdrop-blur-sm bg-background/40 border-b border-border/20 px-6 py-8 animate-fade-in">
-        <h1 className="text-4xl font-semibold text-foreground tracking-tight">Orb</h1>
+        <h1 className="text-4xl font-semibold text-foreground tracking-tight">{orbName}</h1>
         <p className="text-sm text-muted-foreground/70 mt-2">
           Active and observing
         </p>
