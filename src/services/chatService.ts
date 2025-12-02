@@ -1,14 +1,26 @@
+/**
+ * Chat Service for Ozlon
+ * 
+ * DEVELOPER NOTE: This is a shell implementation. Real integrations would:
+ * - CHECK_MONEY: Connect to banking APIs (Plaid, etc.) for real financial data
+ * - CHECK_MAIL: Connect to email APIs (Gmail, Outlook) for real email summaries
+ * - DAILY_DIGEST: Connect to calendar APIs (Google Calendar, Outlook) for schedule
+ * - ANALYZE_DAY: Connect to journaling/task apps for day analysis
+ */
+
 type Message = { role: 'user' | 'assistant'; content: string };
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 export async function streamChat({
   messages,
+  intent,
   onDelta,
   onDone,
   onError,
 }: {
   messages: Message[];
+  intent?: string;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -20,7 +32,7 @@ export async function streamChat({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, intent }),
     });
 
     if (!resp.ok) {

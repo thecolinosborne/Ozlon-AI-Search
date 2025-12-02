@@ -10,6 +10,7 @@ import { useAppStore } from "@/stores/useAppStore";
 import { initializeOrbOS } from "@/core/init";
 
 // Pages
+import Index from "@/pages/Index";
 import Home from "@/pages/Home";
 import Chat from "@/pages/Chat";
 import Settings from "@/pages/Settings";
@@ -89,7 +90,7 @@ const App = () => (
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/developer" element={<ProtectedRoute><Developer /></ProtectedRoute>} />
             <Route path="/memory-settings" element={<ProtectedRoute><MemorySettings /></ProtectedRoute>} />
-            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/" element={<Index />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>
