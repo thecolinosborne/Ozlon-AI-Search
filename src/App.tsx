@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ColdStart from "./pages/onboarding/ColdStart";
 import NameIntake from "./pages/onboarding/NameIntake";
+import OrbNaming from "./pages/onboarding/OrbNaming";
 import CommunicationMode from "./pages/onboarding/CommunicationMode";
 import OrbOrientation from "./pages/onboarding/OrbOrientation";
 import DailyStructure from "./pages/onboarding/DailyStructure";
@@ -27,6 +28,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<ColdStart />} />
           <Route path="/onboarding/name" element={<NameIntake />} />
+          <Route path="/onboarding/orb-naming" element={<OrbNaming />} />
           <Route path="/onboarding/communication-mode" element={<CommunicationMode />} />
           <Route path="/onboarding/orb-orientation" element={<OrbOrientation />} />
           <Route path="/onboarding/daily-structure" element={<DailyStructure />} />

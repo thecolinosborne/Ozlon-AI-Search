@@ -70,10 +70,11 @@ export const api = {
   },
   
   chat: {
-    send: async (message: string, userName?: string) => {
+    send: async (message: string, userName?: string, orbName?: string) => {
       await delay(800);
       console.log(`API: POST ${PINEAPPLE_API_BASE}/chat`, { 
-        user_name: userName, 
+        user_name: userName,
+        orb_name: orbName,
         message 
       });
       return {
