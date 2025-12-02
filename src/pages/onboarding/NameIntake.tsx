@@ -16,7 +16,7 @@ const NameIntake = () => {
     await api.onboarding.setUserName(name);
     localStorage.setItem("userName", name);
     setLoading(false);
-    navigate("/onboarding/ai-name");
+    navigate("/onboarding/communication-mode");
   };
 
   const handleVoiceInput = (text: string) => {
@@ -27,8 +27,11 @@ const NameIntake = () => {
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 animate-fade-in">
       <div className="max-w-md w-full space-y-8">
         <h1 className="text-3xl font-medium text-foreground text-center leading-relaxed">
-          What should I call you?
+          Identification Required
         </h1>
+        <p className="text-base text-muted-foreground text-center">
+          What should the Orb call you?
+        </p>
         
         <div className="flex flex-col items-center space-y-6">
           <VoiceButton onVoiceInput={handleVoiceInput} />
@@ -36,7 +39,7 @@ const NameIntake = () => {
           
           <Input
             type="text"
-            placeholder="Your name"
+            placeholder="Enter name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full h-14 text-lg rounded-2xl border-border"

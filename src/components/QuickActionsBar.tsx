@@ -5,9 +5,9 @@ interface QuickActionsBarProps {
 }
 
 const quickActions = [
-  { icon: DollarSign, label: "Help me with money", intent: "money_help" },
-  { icon: Calendar, label: "What's due soon?", intent: "due_soon" },
-  { icon: Utensils, label: "Find food nearby", intent: "food_nearby" },
+  { icon: DollarSign, label: "Money analysis", intent: "money_help" },
+  { icon: Calendar, label: "Due items", intent: "due_soon" },
+  { icon: Utensils, label: "Location resources", intent: "food_nearby" },
   { icon: Sparkles, label: "Daily summary", intent: "daily_summary" },
 ];
 
