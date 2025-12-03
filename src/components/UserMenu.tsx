@@ -115,10 +115,10 @@ export const UserMenu = () => {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56 bg-popover border border-border shadow-lg z-[100]">
         <div className="px-3 py-2">
-          <p className="text-sm font-medium text-neutral-900 truncate">
+          <p className="text-sm font-medium text-foreground truncate">
             {user.user_metadata?.full_name || "User"}
           </p>
-          <p className="text-xs text-neutral-500 truncate">{user.email}</p>
+          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
@@ -140,7 +140,7 @@ export const UserMenu = () => {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600">
+        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive focus:text-destructive">
           <LogOut className="w-4 h-4 mr-2" />
           Sign out
         </DropdownMenuItem>
