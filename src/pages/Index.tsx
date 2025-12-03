@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send } from "lucide-react";
+import { Mic, Square, Send, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -7,6 +7,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useSystemName } from "@/hooks/useSystemName";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
 
 type Message = {
   id: string;
@@ -259,6 +260,19 @@ const Index = () => {
     sendMessage(action.message, action.intent);
   };
 
+  const clearChat = async () => {
+    try {
+      await localDb.clearMessages();
+      setMessages([]);
+      setHasInteracted(false);
+      setWelcomeShown(false);
+      toast.success("Chat cleared");
+    } catch (error) {
+      console.error('Failed to clear chat:', error);
+      toast.error("Failed to clear chat");
+    }
+  };
+
   // Mic button component for consistency
   const MicButton = ({ size = "normal" }: { size?: "normal" | "small" }) => {
     const isSmall = size === "small";
@@ -302,7 +316,17 @@ const Index = () => {
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
       <header className="absolute top-0 left-0 right-0 px-4 py-4 z-10">
-        <div className="max-w-6xl mx-auto flex justify-end">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
+          {hasInteracted && (
+            <button
+              onClick={clearChat}
+              className="p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-colors"
+              title="Clear chat"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+          {!hasInteracted && <div />}
           <UserMenu />
         </div>
       </header>
@@ -415,8 +439,10 @@ const Index = () => {
                   )}
                 >
                   {message.role === "assistant" ? (
-                    <div className="prose prose-sm prose-neutral max-w-none">
-                      {message.content || (
+                    <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5">
+                      {message.content ? (
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      ) : (
                         <span className="inline-flex items-center gap-1">
                           <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse" />
                           <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-75" />
