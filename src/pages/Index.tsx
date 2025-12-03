@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Trash2 } from "lucide-react";
+import { Mic, Square, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -282,19 +282,6 @@ const Index = () => {
     sendMessage(action.message, action.intent);
   };
 
-  const clearChat = async () => {
-    try {
-      await localDb.clearMessages();
-      setMessages([]);
-      setHasInteracted(false);
-      setWelcomeShown(false);
-      toast.success("Chat cleared");
-    } catch (error) {
-      console.error('Failed to clear chat:', error);
-      toast.error("Failed to clear chat");
-    }
-  };
-
   // Mic button component for consistency
   const MicButton = ({ size = "normal" }: { size?: "normal" | "small" }) => {
     const isSmall = size === "small";
@@ -338,17 +325,7 @@ const Index = () => {
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
       <header className="absolute top-0 left-0 right-0 px-4 py-4 z-10">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          {hasInteracted && (
-            <button
-              onClick={clearChat}
-              className="p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-colors"
-              title="Clear chat"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-          {!hasInteracted && <div />}
+        <div className="max-w-6xl mx-auto flex justify-end">
           <UserMenu />
         </div>
       </header>
