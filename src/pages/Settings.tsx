@@ -17,35 +17,64 @@ import {
   FileText,
   ArrowLeft,
   Edit3,
+  Trash2,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
 import { useAppStore } from "@/stores/useAppStore";
 import { supabase } from "@/integrations/supabase/client";
+import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const STORAGE_KEY = "ozlon_system_name";
 
 const Settings = () => {
   const navigate = useNavigate();
-  const { user, updateUser, connections, updateConnection, agents, toggleAgent, reset } = useAppStore();
+  const { user, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
   
   // OS Name state
   const [osName, setOsName] = useState(() => localStorage.getItem(STORAGE_KEY) || "Ozlon");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(osName);
+  const [showSignOutDialog, setShowSignOutDialog] = useState(false);
+  const [showClearChatDialog, setShowClearChatDialog] = useState(false);
 
   const communicationMode = user?.communicationMode || "both";
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
       reset();
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("ozlon_onboarded");
       toast.success("Signed out successfully");
       navigate("/");
+    } catch (error: any) {
+      console.error("Sign out error:", error);
+      toast.error(error.message || "Failed to sign out");
+    }
+  };
+
+  const handleClearChat = async () => {
+    try {
+      await localDb.clearMessages();
+      clearStoreMessages();
+      toast.success("Chat history cleared");
+      setShowClearChatDialog(false);
     } catch (error) {
-      toast.error("Failed to sign out");
+      toast.error("Failed to clear chat history");
     }
   };
 
@@ -245,17 +274,66 @@ const Settings = () => {
           </div>
         </SettingsSection>
 
-        {/* Danger Zone */}
+        {/* Data Management */}
+        <SettingsSection title="Data">
+          <SettingsRow
+            icon={Trash2}
+            label="Clear chat history"
+            description="Delete all conversation history"
+            type="action"
+            onClick={() => setShowClearChatDialog(true)}
+            destructive
+          />
+        </SettingsSection>
+
+        {/* Account Actions */}
         <SettingsSection title="Account Actions">
           <SettingsRow
             icon={LogOut}
             label="Sign out"
+            description="Sign out of your account"
             type="action"
-            onClick={handleLogout}
+            onClick={() => setShowSignOutDialog(true)}
             destructive
           />
         </SettingsSection>
       </div>
+
+      {/* Sign Out Confirmation Dialog */}
+      <AlertDialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to sign out? You'll need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleLogout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Sign out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clear Chat Confirmation Dialog */}
+      <AlertDialog open={showClearChatDialog} onOpenChange={setShowClearChatDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear chat history?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all your conversation history. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClearChat} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Clear history
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

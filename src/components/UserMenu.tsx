@@ -37,10 +37,14 @@ export const UserMenu = () => {
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      localStorage.removeItem("ozlon_system_name");
+      localStorage.removeItem("ozlon_onboarded");
       toast.success("Signed out successfully");
       navigate("/");
     } catch (error: any) {
+      console.error("Sign out error:", error);
       toast.error(error.message || "Failed to sign out");
     }
   };
