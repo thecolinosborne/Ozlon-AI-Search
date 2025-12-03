@@ -68,6 +68,24 @@ export const AVAILABLE_AGENTS = {
 
 export type AgentId = keyof typeof AVAILABLE_AGENTS;
 
+export interface UserSettings {
+  communicationMode?: 'text' | 'voice' | 'both';
+  integrations?: {
+    calendar?: boolean;
+    email?: boolean;
+    banking?: boolean;
+  };
+  agents?: {
+    memory?: boolean;
+    orchestration?: boolean;
+    communication?: boolean;
+    personality?: boolean;
+    banking?: boolean;
+    summary?: boolean;
+  };
+  osName?: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -76,6 +94,7 @@ export interface StreamChatOptions {
   agentId?: AgentId;
   agentMetadata?: AgentMetadata;
   enableTools?: boolean;
+  userSettings?: UserSettings;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
   onDone: () => void;
@@ -94,6 +113,7 @@ export async function streamChat({
   agentId,
   agentMetadata,
   enableTools = false,
+  userSettings,
   onDelta,
   onToolCall,
   onDone,
@@ -114,6 +134,7 @@ export async function streamChat({
         agentId,
         agentMetadata,
         enableTools,
+        userSettings,
       }),
     });
 
