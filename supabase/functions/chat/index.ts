@@ -1,3 +1,4 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
@@ -6,10 +7,15 @@ const corsHeaders = {
 };
 
 /**
- * Ozlon Chat Edge Function
+ * Ozlon Chat Edge Function - Agent-Expandable Architecture
  * 
  * This is Agent 0 - the main coordinating brain that handles all user requests.
- * It routes to specialized agents based on intent.
+ * It routes to specialized agents based on intent and supports tool calling.
+ * 
+ * ARCHITECTURE:
+ * - Model Router: Supports multiple models (default: GPT-4.1)
+ * - Tool Registry: Extensible tool/function definitions
+ * - Agent Context: Metadata for multi-agent routing
  * 
  * DEVELOPER NOTES for future integrations:
  * - CHECK_MONEY: Integrate with Plaid, banking APIs for real financial data
@@ -18,7 +24,169 @@ const corsHeaders = {
  * - ANALYZE_DAY: Integrate with journaling apps, activity trackers
  */
 
-const buildSystemPrompt = (systemName: string) => `You are ${systemName}, a personal operating system shell for the user's life and work.
+// ============================================================================
+// MODEL ROUTER - Supports multiple models, extensible for future agents
+// ============================================================================
+
+interface ModelConfig {
+  name: string;
+  apiEndpoint: string;
+  apiKeyEnvVar: string;
+  maxTokens: number;
+  supportsStreaming: boolean;
+  supportsTools: boolean;
+}
+
+const MODEL_REGISTRY: Record<string, ModelConfig> = {
+  'gpt-4.1': {
+    name: 'gpt-4.1-2025-04-14',
+    apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    maxTokens: 4096,
+    supportsStreaming: true,
+    supportsTools: true,
+  },
+  'gpt-5': {
+    name: 'gpt-5-2025-08-07',
+    apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    maxTokens: 4096,
+    supportsStreaming: true,
+    supportsTools: true,
+  },
+  'gpt-5-mini': {
+    name: 'gpt-5-mini-2025-08-07',
+    apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    maxTokens: 4096,
+    supportsStreaming: true,
+    supportsTools: true,
+  },
+};
+
+const DEFAULT_MODEL = 'gpt-4.1';
+
+// ============================================================================
+// TOOL REGISTRY - Extensible tool definitions for agents
+// ============================================================================
+
+interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+// Tool registry - agents can register their tools here
+const TOOL_REGISTRY: Record<string, ToolDefinition[]> = {
+  // Base tools available to all agents
+  base: [],
+  // Money agent tools
+  money: [
+    {
+      type: 'function',
+      function: {
+        name: 'get_account_balance',
+        description: 'Get the current balance of connected bank accounts',
+        parameters: {
+          type: 'object',
+          properties: {
+            account_type: {
+              type: 'string',
+              enum: ['checking', 'savings', 'credit', 'all'],
+              description: 'Type of account to query',
+            },
+          },
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_recent_transactions',
+        description: 'Get recent transactions from connected accounts',
+        parameters: {
+          type: 'object',
+          properties: {
+            days: { type: 'number', description: 'Number of days to look back' },
+            category: { type: 'string', description: 'Filter by category' },
+          },
+        },
+      },
+    },
+  ],
+  // Mail agent tools
+  mail: [
+    {
+      type: 'function',
+      function: {
+        name: 'get_unread_emails',
+        description: 'Get unread emails from connected email accounts',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum number of emails' },
+            priority: { type: 'string', enum: ['high', 'normal', 'all'] },
+          },
+        },
+      },
+    },
+  ],
+  // Calendar agent tools
+  calendar: [
+    {
+      type: 'function',
+      function: {
+        name: 'get_upcoming_events',
+        description: 'Get upcoming calendar events',
+        parameters: {
+          type: 'object',
+          properties: {
+            days: { type: 'number', description: 'Number of days to look ahead' },
+          },
+        },
+      },
+    },
+  ],
+};
+
+// Get tools for a specific agent or intent
+function getToolsForAgent(agentId: string): ToolDefinition[] {
+  const tools = [...(TOOL_REGISTRY.base || [])];
+  if (TOOL_REGISTRY[agentId]) {
+    tools.push(...TOOL_REGISTRY[agentId]);
+  }
+  return tools;
+}
+
+// ============================================================================
+// AGENT CONTEXT - Metadata for multi-agent routing
+// ============================================================================
+
+interface AgentContext {
+  agentId: string;
+  intent?: string;
+  memory?: Record<string, unknown>;
+  activeTools?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+// Map intents to agent IDs
+const INTENT_TO_AGENT: Record<string, string> = {
+  CHECK_MONEY: 'money',
+  CHECK_MAIL: 'mail',
+  DAILY_DIGEST: 'calendar',
+  ANALYZE_DAY: 'analysis',
+};
+
+// ============================================================================
+// SYSTEM PROMPT BUILDER
+// ============================================================================
+
+const buildSystemPrompt = (systemName: string, agentContext?: AgentContext) => {
+  let basePrompt = `You are ${systemName}, a personal operating system shell for the user's life and work.
 You are the single coordinating brain that talks to specialized agents for money, email, daily digest, and day analysis.
 
 Your name is ${systemName}. Always refer to yourself as ${systemName} when introducing yourself or when relevant.
@@ -47,37 +215,96 @@ Always clearly distinguish between:
 
 When describing shell/placeholder functionality, be helpful and demonstrate what the experience WILL be like, using realistic example data to illustrate the value.`;
 
-// Intent-specific context additions
-const INTENT_CONTEXTS: Record<string, string> = {
-  CHECK_MONEY: `
+  // Add agent-specific context
+  if (agentContext?.intent) {
+    const intentContexts: Record<string, string> = {
+      CHECK_MONEY: `
 The user wants to check their financial situation. In this shell version, demonstrate what the money agent will provide:
 - Show example account balances and recent transactions
 - Highlight spending patterns and insights
 - Note that real banking integration (via Plaid or similar) will enable live data
 Be helpful and show the VALUE of having this integration, using realistic placeholder data.`,
-  
-  CHECK_MAIL: `
+      
+      CHECK_MAIL: `
 The user wants to check their email. In this shell version, demonstrate what the mail agent will provide:
 - Show example important/urgent emails that would be surfaced
 - Summarize what's in the inbox
 - Note that real email integration (Gmail, Outlook) will enable live access
 Show the value of intelligent email summarization using realistic examples.`,
-  
-  DAILY_DIGEST: `
+      
+      DAILY_DIGEST: `
 The user wants their daily digest. In this shell version, demonstrate what the digest agent will provide:
 Structure your response as:
 1. Today's Schedule - example calendar events
 2. Top Priorities - what needs attention
 3. Suggested Focus - what to tackle first
 Note that calendar/task integrations will enable real data. Use realistic examples.`,
-  
-  ANALYZE_DAY: `
+      
+      ANALYZE_DAY: `
 The user wants to analyze their day. In this shell version, help them reflect:
 - Ask about wins and challenges
 - Help identify patterns and lessons
 - Suggest actionable next steps
 This is something you CAN do now through conversation, even without integrations.`,
+    };
+
+    if (intentContexts[agentContext.intent]) {
+      basePrompt += `\n\nCURRENT INTENT: ${agentContext.intent}\n${intentContexts[agentContext.intent]}`;
+    }
+  }
+
+  return basePrompt;
 };
+
+// ============================================================================
+// TOOL CALL HANDLER - Process tool calls from the model
+// ============================================================================
+
+async function handleToolCall(
+  toolName: string, 
+  toolArgs: Record<string, unknown>,
+  _agentContext: AgentContext
+): Promise<string> {
+  // This is a stub - in production, this would dispatch to actual integrations
+  console.log(`Tool call: ${toolName}`, toolArgs);
+  
+  // Placeholder responses for shell functionality
+  const toolResponses: Record<string, string> = {
+    get_account_balance: JSON.stringify({
+      checking: { balance: 2450.32, currency: 'USD' },
+      savings: { balance: 8900.00, currency: 'USD' },
+      note: 'This is example data. Connect your bank to see real balances.'
+    }),
+    get_recent_transactions: JSON.stringify({
+      transactions: [
+        { date: '2024-01-15', merchant: 'Grocery Store', amount: -85.42 },
+        { date: '2024-01-14', merchant: 'Gas Station', amount: -45.00 },
+        { date: '2024-01-13', merchant: 'Direct Deposit', amount: 2500.00 },
+      ],
+      note: 'This is example data. Connect your bank to see real transactions.'
+    }),
+    get_unread_emails: JSON.stringify({
+      emails: [
+        { from: 'boss@company.com', subject: 'Q1 Planning Meeting', priority: 'high' },
+        { from: 'team@company.com', subject: 'Weekly Update', priority: 'normal' },
+      ],
+      note: 'This is example data. Connect your email to see real messages.'
+    }),
+    get_upcoming_events: JSON.stringify({
+      events: [
+        { time: '09:00', title: 'Team Standup', duration: '30min' },
+        { time: '14:00', title: 'Client Call', duration: '1hr' },
+      ],
+      note: 'This is example data. Connect your calendar to see real events.'
+    }),
+  };
+
+  return toolResponses[toolName] || JSON.stringify({ error: 'Tool not implemented' });
+}
+
+// ============================================================================
+// MAIN REQUEST HANDLER
+// ============================================================================
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -85,43 +312,81 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, intent, systemName = 'Ozlon' } = await req.json();
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+    const { 
+      messages, 
+      intent, 
+      systemName = 'Ozlon',
+      model = DEFAULT_MODEL,
+      agentId,
+      agentMetadata,
+      enableTools = false,
+    } = await req.json();
+
+    // Get model configuration
+    const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
+    const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
     
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY is not configured');
+    if (!apiKey) {
+      throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
     }
 
-    // Build system prompt with custom name and intent context
-    let systemPrompt = buildSystemPrompt(systemName);
-    if (intent && INTENT_CONTEXTS[intent]) {
-      systemPrompt += `\n\nCURRENT INTENT: ${intent}\n${INTENT_CONTEXTS[intent]}`;
+    // Build agent context
+    const agentContext: AgentContext = {
+      agentId: agentId || INTENT_TO_AGENT[intent] || 'base',
+      intent,
+      metadata: agentMetadata,
+    };
+
+    // Build system prompt
+    const systemPrompt = buildSystemPrompt(systemName, agentContext);
+
+    // Build messages array in OpenAI format
+    const openAIMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.map((m: { role: string; content: string }) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      })),
+    ];
+
+    // Get tools for this agent
+    const tools = enableTools ? getToolsForAgent(agentContext.agentId) : [];
+
+    console.log('Calling OpenAI with:', {
+      model: modelConfig.name,
+      intent: intent || 'general',
+      systemName,
+      agentId: agentContext.agentId,
+      messagesCount: messages.length,
+      toolsCount: tools.length,
+    });
+
+    // Build request payload
+    const requestPayload: Record<string, unknown> = {
+      model: modelConfig.name,
+      messages: openAIMessages,
+      max_completion_tokens: modelConfig.maxTokens,
+      stream: true,
+    };
+
+    // Add tools if available
+    if (tools.length > 0) {
+      requestPayload.tools = tools;
+      requestPayload.tool_choice = 'auto';
     }
 
-    console.log('Calling Claude with intent:', intent || 'general', 'systemName:', systemName, 'messages:', messages.length);
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(modelConfig.apiEndpoint, {
       method: 'POST',
       headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: messages.map((m: { role: string; content: string }) => ({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content,
-        })),
-        stream: true,
-      }),
+      body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Claude API error:', response.status, errorText);
+      console.error('OpenAI API error:', response.status, errorText);
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }), {
@@ -130,48 +395,14 @@ serve(async (req) => {
         });
       }
       
-      return new Response(JSON.stringify({ error: 'AI service error' }), {
+      return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Transform Claude's SSE format to OpenAI-compatible format
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        const text = new TextDecoder().decode(chunk);
-        const lines = text.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
-              continue;
-            }
-            
-            try {
-              const parsed = JSON.parse(data);
-              
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                const openAIFormat = {
-                  choices: [{
-                    delta: { content: parsed.delta.text }
-                  }]
-                };
-                controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(openAIFormat)}\n\n`));
-              } else if (parsed.type === 'message_stop') {
-                controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
-              }
-            } catch {
-              // Skip unparseable lines
-            }
-          }
-        }
-      }
-    });
-
-    return new Response(response.body?.pipeThrough(transformStream), {
+    // Stream the response directly - OpenAI format is already compatible
+    return new Response(response.body, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
     });
 

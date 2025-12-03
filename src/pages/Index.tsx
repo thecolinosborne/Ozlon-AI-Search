@@ -80,8 +80,8 @@ const Index = () => {
         onDone: () => {
           setIsLoading(false);
         },
-        onError: (error) => {
-          console.error("Chat error:", error);
+        onError: (errorMsg: string) => {
+          console.error("Chat error:", errorMsg);
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
