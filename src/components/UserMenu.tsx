@@ -109,7 +109,7 @@ export const UserMenu = () => {
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-56 bg-white border shadow-lg z-[100]">
         <div className="px-3 py-2">
           <p className="text-sm font-medium text-neutral-900 truncate">
             {user.user_metadata?.full_name || "User"}

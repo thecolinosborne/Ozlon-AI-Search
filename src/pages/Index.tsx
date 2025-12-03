@@ -324,7 +324,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
-      <header className="absolute top-0 left-0 right-0 px-4 py-4 z-10">
+      <header className="absolute top-0 left-0 right-0 px-4 py-4 z-50">
         <div className="max-w-6xl mx-auto flex justify-end">
           <UserMenu />
         </div>
