@@ -26,22 +26,32 @@ export const SettingsRow = ({
   destructive = false,
 }: SettingsRowProps) => {
   const handleClick = () => {
-    if (type === "toggle" && onChange) {
-      onChange(!value);
-    } else if (onClick) {
+    if (disabled) return;
+    if (type !== "toggle" && onClick) {
       onClick();
     }
   };
 
+  const handleToggle = (checked: boolean) => {
+    if (disabled) return;
+    if (onChange) {
+      onChange(checked);
+    }
+  };
+
+  // Use div for toggle type to avoid button-in-button issue
+  const Wrapper = type === "toggle" ? "div" : "button";
+
   return (
-    <button
-      onClick={handleClick}
-      disabled={disabled}
+    <Wrapper
+      onClick={type !== "toggle" ? handleClick : undefined}
+      disabled={type !== "toggle" ? disabled : undefined}
       className={cn(
         "w-full flex items-center gap-4 p-4 rounded-2xl transition-all duration-200",
         "bg-card/60 hover:bg-card/80 border border-border/30",
         disabled && "opacity-50 cursor-not-allowed",
-        destructive && "hover:bg-destructive/10"
+        destructive && "hover:bg-destructive/10",
+        type !== "toggle" && "cursor-pointer"
       )}
     >
       <div className={cn(
@@ -69,7 +79,7 @@ export const SettingsRow = ({
       {type === "toggle" && (
         <Switch
           checked={value}
-          onCheckedChange={onChange}
+          onCheckedChange={handleToggle}
           disabled={disabled}
         />
       )}
@@ -77,6 +87,6 @@ export const SettingsRow = ({
       {type === "navigate" && (
         <ChevronRight className="w-5 h-5 text-muted-foreground" />
       )}
-    </button>
+    </Wrapper>
   );
 };
