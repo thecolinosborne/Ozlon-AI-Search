@@ -17,11 +17,13 @@ type Message = {
 };
 
 const QUICK_ACTIONS = [
-  { label: "Check Money", intent: "CHECK_MONEY", message: "Check my financial situation and balances." },
-  { label: "Check Mail", intent: "CHECK_MAIL", message: "Check my email and summarize anything important." },
-  { label: "Daily Digest", intent: "DAILY_DIGEST", message: "Give me a daily digest of my schedule, tasks, and priorities." },
-  { label: "Analyze My Day", intent: "ANALYZE_DAY", message: "Analyze my day and suggest what I should focus on next." },
+  { label: "Check Money", intent: "CHECK_MONEY", message: "Check my financial situation and balances.", integration: "banking" as const },
+  { label: "Check Mail", intent: "CHECK_MAIL", message: "Check my email and summarize anything important.", integration: "email" as const },
+  { label: "Daily Digest", intent: "DAILY_DIGEST", message: "Give me a daily digest of my schedule, tasks, and priorities.", integration: "calendar" as const },
+  { label: "Analyze My Day", intent: "ANALYZE_DAY", message: "Analyze my day and suggest what I should focus on next.", integration: null },
 ];
+
+type QuickAction = typeof QUICK_ACTIONS[number];
 
 const Index = () => {
   const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding } = useSystemName();
@@ -278,7 +280,7 @@ const Index = () => {
     sendMessage(input);
   };
 
-  const handleQuickAction = (action: (typeof QUICK_ACTIONS)[0]) => {
+  const handleQuickAction = (action: QuickAction) => {
     sendMessage(action.message, action.intent);
   };
 
@@ -394,10 +396,14 @@ const Index = () => {
           </form>
         )}
 
-        {/* Quick Actions - Only show before interaction */}
+        {/* Quick Actions - Only show before interaction, filtered by integrations */}
         {!hasInteracted && (
           <div className="flex flex-wrap justify-center gap-2 mt-6 px-4">
-            {QUICK_ACTIONS.map((action) => (
+            {QUICK_ACTIONS.filter((action) => {
+              // Show action if no integration required, or if integration is enabled
+              if (!action.integration) return true;
+              return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
+            }).map((action) => (
               <button
                 key={action.intent}
                 onClick={() => handleQuickAction(action)}
@@ -460,12 +466,15 @@ const Index = () => {
         </div>
       )}
 
-      {/* Floating Quick Actions - Show after interaction */}
+      {/* Floating Quick Actions - Show after interaction, filtered by integrations */}
       {hasInteracted && (
         <div className="fixed bottom-24 left-0 right-0 px-4">
           <div className="max-w-2xl mx-auto">
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              {QUICK_ACTIONS.map((action) => (
+              {QUICK_ACTIONS.filter((action) => {
+                if (!action.integration) return true;
+                return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
+              }).map((action) => (
                 <button
                   key={action.intent}
                   onClick={() => handleQuickAction(action)}
