@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Mic, Square, Send, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { streamChat } from "@/services/chatService";
+import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useSystemName } from "@/hooks/useSystemName";
+import { useAppStore } from "@/stores/useAppStore";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
@@ -24,11 +25,31 @@ const QUICK_ACTIONS = [
 
 const Index = () => {
   const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding } = useSystemName();
+  const { user: storeUser, connections, agents } = useAppStore();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [welcomeShown, setWelcomeShown] = useState(false);
+  
+  // Build user settings for AI context
+  const userSettings: UserSettings = {
+    communicationMode: storeUser?.communicationMode || 'both',
+    integrations: {
+      calendar: connections.find(c => c.id === 'calendar')?.connected || false,
+      email: connections.find(c => c.id === 'email')?.connected || false,
+      banking: connections.find(c => c.id === 'banking')?.connected || false,
+    },
+    agents: {
+      memory: agents.find(a => a.id === 'memory')?.enabled || false,
+      orchestration: agents.find(a => a.id === 'orchestration')?.enabled || false,
+      communication: agents.find(a => a.id === 'communication')?.enabled || false,
+      personality: agents.find(a => a.id === 'personality')?.enabled || false,
+      banking: agents.find(a => a.id === 'banking')?.enabled || false,
+      summary: agents.find(a => a.id === 'summary')?.enabled || false,
+    },
+    osName: systemName,
+  };
   
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -121,6 +142,7 @@ const Index = () => {
         messages: [...messages, userMessage].map((m) => ({ role: m.role, content: m.content })),
         intent,
         systemName,
+        userSettings,
         onDelta: (delta) => {
           assistantContent += delta;
           setMessages((prev) =>
