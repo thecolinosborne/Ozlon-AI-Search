@@ -4,10 +4,24 @@ import { supabase } from "@/integrations/supabase/client";
 import { User, Session } from "@supabase/supabase-js";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, LogOut } from "lucide-react";
+import { useAppStore } from "@/stores/useAppStore";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+const STORAGE_KEY = "ozlon_system_name";
 
 const Profile = () => {
   const navigate = useNavigate();
+  const { reset } = useAppStore();
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [fullName, setFullName] = useState("");
@@ -15,6 +29,7 @@ const Profile = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [showSignOutDialog, setShowSignOutDialog] = useState(false);
 
   // Auth state listener - same pattern as UserMenu
   useEffect(() => {
@@ -95,6 +110,21 @@ const Profile = () => {
       toast.error(error.message || "Failed to update profile");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      reset();
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("ozlon_onboarded");
+      toast.success("Signed out successfully");
+      navigate("/");
+    } catch (error: any) {
+      console.error("Sign out error:", error);
+      toast.error(error.message || "Failed to sign out");
     }
   };
 
@@ -224,22 +254,54 @@ const Profile = () => {
             </div>
           </div>
 
-          {/* Save Button */}
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className={cn(
-              "flex items-center gap-2 px-6 py-3 rounded-full font-medium",
-              "bg-primary text-primary-foreground",
-              "hover:bg-primary/90 transition-colors",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
-            )}
-          >
-            <Save className="w-4 h-4" />
-            {isSaving ? "Saving..." : "Save changes"}
-          </button>
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-3 pt-4">
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className={cn(
+                "flex items-center justify-center gap-2 px-6 py-3 rounded-full font-medium",
+                "bg-primary text-primary-foreground",
+                "hover:bg-primary/90 transition-colors",
+                "disabled:opacity-50 disabled:cursor-not-allowed"
+              )}
+            >
+              <Save className="w-4 h-4" />
+              {isSaving ? "Saving..." : "Save changes"}
+            </button>
+
+            <button
+              onClick={() => setShowSignOutDialog(true)}
+              className={cn(
+                "flex items-center justify-center gap-2 px-6 py-3 rounded-full font-medium",
+                "bg-destructive/10 text-destructive",
+                "hover:bg-destructive/20 transition-colors"
+              )}
+            >
+              <LogOut className="w-4 h-4" />
+              Sign out
+            </button>
+          </div>
         </div>
       </main>
+
+      {/* Sign Out Confirmation Dialog */}
+      <AlertDialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to sign out? You'll need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSignOut} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Sign out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
