@@ -25,12 +25,16 @@ const Profile = () => {
       setUser(session.user);
       setFullName(session.user.user_metadata?.full_name || "");
 
-      // Fetch profile from database
-      const { data: profile } = await supabase
+      // Fetch profile from database - use maybeSingle to avoid error if no row exists
+      const { data: profile, error } = await supabase
         .from("profiles")
         .select("*")
         .eq("user_id", session.user.id)
-        .single();
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error loading profile:", error);
+      }
 
       if (profile) {
         setFullName(profile.full_name || session.user.user_metadata?.full_name || "");
