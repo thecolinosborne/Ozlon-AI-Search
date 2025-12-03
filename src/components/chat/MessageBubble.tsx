@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
 import { AIOrb } from "@/components/AIOrb";
+import ReactMarkdown from "react-markdown";
 
 interface MessageBubbleProps {
   message: Message;
@@ -36,8 +37,12 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
             <div className="flex items-center gap-2">
               <div className="w-16 h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent rounded-full animate-pulse" />
             </div>
-          ) : (
+          ) : isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
+          ) : (
+            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0">
+              <ReactMarkdown>{message.text}</ReactMarkdown>
+            </div>
           )}
         </div>
 
