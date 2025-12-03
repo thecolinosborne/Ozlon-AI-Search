@@ -141,39 +141,38 @@ const Index = () => {
           Your Personal Operating System
         </p>
 
-        {/* Search Input */}
-        <form
-          onSubmit={handleSubmit}
-          className={cn(
-            "w-full max-w-2xl px-4 transition-all duration-500",
-            hasInteracted ? "max-w-xl" : ""
-          )}
-        >
-          <div className="relative group">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={`Ask ${systemName} anything...`}
-              disabled={isLoading}
-              className={cn(
-                "w-full px-6 py-4 text-base rounded-full",
-                "border border-neutral-200 shadow-sm",
-                "focus:outline-none focus:border-neutral-300 focus:shadow-md",
-                "transition-all duration-200",
-                "placeholder:text-neutral-400",
-                "disabled:opacity-50"
-              )}
-            />
-            <button
-              type="button"
-              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 transition-colors"
-            >
-              <Mic className="w-5 h-5" />
-            </button>
-          </div>
-        </form>
+        {/* Search Input - Only show before interaction */}
+        {!hasInteracted && (
+          <form
+            onSubmit={handleSubmit}
+            className="w-full max-w-2xl px-4"
+          >
+            <div className="relative group">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={`Ask ${systemName} anything...`}
+                disabled={isLoading}
+                className={cn(
+                  "w-full px-6 py-4 text-base rounded-full",
+                  "border border-neutral-200 shadow-sm",
+                  "focus:outline-none focus:border-neutral-300 focus:shadow-md",
+                  "transition-all duration-200",
+                  "placeholder:text-neutral-400",
+                  "disabled:opacity-50"
+                )}
+              />
+              <button
+                type="button"
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 transition-colors"
+              >
+                <Mic className="w-5 h-5" />
+              </button>
+            </div>
+          </form>
+        )}
 
         {/* Quick Actions - Only show before interaction */}
         {!hasInteracted && (
