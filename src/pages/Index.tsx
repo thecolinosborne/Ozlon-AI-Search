@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Mic, Square, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat } from "@/services/chatService";
+import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useSystemName } from "@/hooks/useSystemName";
@@ -37,7 +38,29 @@ const Index = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Show welcome back message for returning users
+  // Load cached messages on mount
+  useEffect(() => {
+    const loadCachedMessages = async () => {
+      try {
+        const cached = await localDb.getMessages(100);
+        if (cached.length > 0) {
+          const msgs: Message[] = cached.map(m => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          }));
+          setMessages(msgs);
+          setHasInteracted(true);
+          console.log(`Loaded ${cached.length} cached messages`);
+        }
+      } catch (error) {
+        console.error('Failed to load cached messages:', error);
+      }
+    };
+    loadCachedMessages();
+  }, []);
+
+  // Show welcome back message for returning users (only if no cached messages)
   useEffect(() => {
     if (isReturningUser && !welcomeShown && messages.length === 0) {
       setWelcomeShown(true);
@@ -55,6 +78,21 @@ const Index = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Helper to save message to local DB
+  const saveMessageToCache = async (msg: Message) => {
+    try {
+      await localDb.saveMessage({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: Date.now(),
+        synced: true,
+      });
+    } catch (error) {
+      console.error('Failed to cache message:', error);
+    }
+  };
+
   const sendMessage = async (text: string, intent?: string) => {
     if (!text.trim() || isLoading) return;
 
@@ -67,6 +105,9 @@ const Index = () => {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
+
+    // Cache user message
+    saveMessageToCache(userMessage);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
@@ -87,6 +128,10 @@ const Index = () => {
         },
         onDone: () => {
           setIsLoading(false);
+          // Cache assistant response when complete
+          if (assistantContent) {
+            saveMessageToCache({ id: assistantId, role: "assistant", content: assistantContent });
+          }
         },
         onError: (errorMsg: string) => {
           console.error("Chat error:", errorMsg);
