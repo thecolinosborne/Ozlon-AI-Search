@@ -64,7 +64,7 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
   },
 };
 
-const DEFAULT_MODEL = 'gpt-4.1';
+const DEFAULT_MODEL = 'gpt-5';
 
 // ============================================================================
 // TOOL REGISTRY - Extensible tool definitions for agents
