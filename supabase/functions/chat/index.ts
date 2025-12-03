@@ -388,8 +388,9 @@ serve(async (req) => {
       intent: intent || 'general',
       systemName,
       agentId: agentContext.agentId,
-      messagesCount: messages.length,
+      messagesCount: openAIMessages.length,
       toolsCount: tools.length,
+      systemPromptPreview: systemPrompt.substring(0, 200) + '...',
     });
 
     // Build request payload
