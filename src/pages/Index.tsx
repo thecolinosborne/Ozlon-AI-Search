@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -9,6 +9,8 @@ import { useSystemName } from "@/hooks/useSystemName";
 import { useAppStore } from "@/stores/useAppStore";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
+import { voiceService } from "@/services/voiceService";
+import { supabase } from "@/integrations/supabase/client";
 
 type Message = {
   id: string;
@@ -33,6 +35,9 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [welcomeShown, setWelcomeShown] = useState(false);
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   
   // Build user settings for AI context
   const userSettings: UserSettings = {
@@ -82,6 +87,22 @@ const Index = () => {
       }
     };
     loadCachedMessages();
+  }, []);
+
+  // Load auto-play setting
+  useEffect(() => {
+    const loadAutoPlaySetting = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { settings } = await voiceService.getSettings();
+          setAutoPlayEnabled(settings?.auto_play_responses ?? false);
+        }
+      } catch (error) {
+        console.error('Failed to load auto-play setting:', error);
+      }
+    };
+    loadAutoPlaySetting();
   }, []);
 
   // Show welcome back message for returning users (only if no cached messages)
@@ -156,6 +177,11 @@ const Index = () => {
           // Cache assistant response when complete
           if (assistantContent) {
             saveMessageToCache({ id: assistantId, role: "assistant", content: assistantContent });
+            
+            // Auto-play if enabled
+            if (autoPlayEnabled && assistantContent) {
+              playMessage(assistantId, assistantContent);
+            }
           }
         },
         onError: (errorMsg: string) => {
@@ -173,6 +199,27 @@ const Index = () => {
     } catch (error) {
       console.error("Chat error:", error);
       setIsLoading(false);
+    }
+  };
+
+  // Play message audio
+  const playMessage = async (messageId: string, text: string) => {
+    if (playingMessageId === messageId) {
+      voiceService.stop();
+      setPlayingMessageId(null);
+      return;
+    }
+
+    setLoadingAudioId(messageId);
+    try {
+      setPlayingMessageId(messageId);
+      await voiceService.speak(text);
+    } catch (error) {
+      console.error('Playback error:', error);
+      toast.error("Could not play voice");
+    } finally {
+      setPlayingMessageId(null);
+      setLoadingAudioId(null);
     }
   };
 
@@ -459,6 +506,28 @@ const Index = () => {
                     message.content
                   )}
                 </div>
+                {/* Play button for assistant messages */}
+                {message.role === "assistant" && message.content && (
+                  <button
+                    onClick={() => playMessage(message.id, message.content)}
+                    disabled={loadingAudioId === message.id}
+                    className={cn(
+                      "mt-1 p-1.5 rounded-full transition-all",
+                      "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
+                      playingMessageId === message.id && "text-blue-500",
+                      loadingAudioId === message.id && "opacity-50"
+                    )}
+                    title={playingMessageId === message.id ? "Stop" : "Play"}
+                  >
+                    {loadingAudioId === message.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : playingMessageId === message.id ? (
+                      <VolumeX className="w-4 h-4" />
+                    ) : (
+                      <Volume2 className="w-4 h-4" />
+                    )}
+                  </button>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />

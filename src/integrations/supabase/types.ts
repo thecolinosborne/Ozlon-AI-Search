@@ -16,34 +16,55 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          auto_play_responses: boolean | null
           avatar_url: string | null
           created_at: string
+          elevenlabs_voice_id: string | null
           full_name: string | null
           id: string
+          is_premium: boolean | null
+          playht_voice_id: string | null
           system_name: string | null
+          tts_provider: string | null
           updated_at: string
           user_id: string
           username: string | null
+          voice_cloning_status: string | null
+          voice_id: string | null
         }
         Insert: {
+          auto_play_responses?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          elevenlabs_voice_id?: string | null
           full_name?: string | null
           id?: string
+          is_premium?: boolean | null
+          playht_voice_id?: string | null
           system_name?: string | null
+          tts_provider?: string | null
           updated_at?: string
           user_id: string
           username?: string | null
+          voice_cloning_status?: string | null
+          voice_id?: string | null
         }
         Update: {
+          auto_play_responses?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          elevenlabs_voice_id?: string | null
           full_name?: string | null
           id?: string
+          is_premium?: boolean | null
+          playht_voice_id?: string | null
           system_name?: string | null
+          tts_provider?: string | null
           updated_at?: string
           user_id?: string
           username?: string | null
+          voice_cloning_status?: string | null
+          voice_id?: string | null
         }
         Relationships: []
       }

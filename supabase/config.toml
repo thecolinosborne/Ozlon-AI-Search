@@ -5,3 +5,12 @@ verify_jwt = false
 
 [functions.transcribe]
 verify_jwt = false
+
+[functions.text-to-speech]
+verify_jwt = false
+
+[functions.voice-settings]
+verify_jwt = true
+
+[functions.voice-clone]
+verify_jwt = true

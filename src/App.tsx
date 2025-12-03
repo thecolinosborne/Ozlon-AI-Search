@@ -13,6 +13,7 @@ import Developer from "@/pages/Developer";
 import AuthPage from "@/pages/AuthPage";
 import Profile from "@/pages/Profile";
 import Billing from "@/pages/Billing";
+import VoiceSetup from "@/pages/onboarding/VoiceSetup";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/developer" element={<Developer />} />
+          <Route path="/voice-setup" element={<VoiceSetup />} />
           <Route path="/" element={<Index />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

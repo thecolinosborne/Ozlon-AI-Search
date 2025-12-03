@@ -18,6 +18,8 @@ import {
   ArrowLeft,
   Edit3,
   Trash2,
+  Volume2,
+  PlayCircle,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -26,6 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { voiceService, VoiceSettings } from "@/services/voiceService";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,8 +52,26 @@ const Settings = () => {
   const [tempName, setTempName] = useState(osName);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [showClearChatDialog, setShowClearChatDialog] = useState(false);
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings | null>(null);
+  const [isLoadingVoice, setIsLoadingVoice] = useState(false);
 
   const communicationMode = user?.communicationMode || "both";
+
+  // Load voice settings
+  useEffect(() => {
+    const loadVoiceSettings = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { settings } = await voiceService.getSettings();
+          setVoiceSettings(settings);
+        }
+      } catch (error) {
+        console.error('Failed to load voice settings:', error);
+      }
+    };
+    loadVoiceSettings();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -80,6 +101,20 @@ const Settings = () => {
 
   const handleCommunicationChange = (mode: "text" | "voice" | "both") => {
     updateUser({ communicationMode: mode });
+  };
+
+  const handleAutoPlayToggle = async (enabled: boolean) => {
+    if (!voiceSettings) return;
+    setIsLoadingVoice(true);
+    try {
+      const updated = await voiceService.updateSettings({ auto_play_responses: enabled });
+      setVoiceSettings(prev => prev ? { ...prev, ...updated } : null);
+      toast.success(enabled ? "Auto-play enabled" : "Auto-play disabled");
+    } catch (error) {
+      toast.error("Failed to update voice settings");
+    } finally {
+      setIsLoadingVoice(false);
+    }
   };
 
   const handleSaveOsName = async () => {
@@ -165,6 +200,26 @@ const Settings = () => {
             type="toggle"
             value={communicationMode === "both"}
             onChange={() => handleCommunicationChange("both")}
+          />
+        </SettingsSection>
+
+        {/* Voice Output */}
+        <SettingsSection title="Voice Output">
+          <SettingsRow
+            icon={Volume2}
+            label="Voice Settings"
+            description={voiceSettings?.elevenlabs_voice_id ? "Custom voice configured" : "Default voice"}
+            type="action"
+            onClick={() => navigate("/voice-setup")}
+          />
+          <SettingsRow
+            icon={PlayCircle}
+            label="Auto-play responses"
+            description="Automatically play voice for AI responses"
+            type="toggle"
+            value={voiceSettings?.auto_play_responses ?? false}
+            onChange={handleAutoPlayToggle}
+            disabled={isLoadingVoice}
           />
         </SettingsSection>
 

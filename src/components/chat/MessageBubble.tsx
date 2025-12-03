@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
 import { AIOrb } from "@/components/AIOrb";
 import ReactMarkdown from "react-markdown";
+import { MessagePlayButton } from "./MessagePlayButton";
 
 interface MessageBubbleProps {
   message: Message;
@@ -60,9 +61,14 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
           </div>
         )}
 
-        <span className="text-[10px] text-muted-foreground/60 mt-1 px-2">
-          {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        <div className="flex items-center gap-2 mt-1 px-2">
+          <span className="text-[10px] text-muted-foreground/60">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+          {!isUser && !message.isLoading && message.text && (
+            <MessagePlayButton text={message.text} />
+          )}
+        </div>
       </div>
     </div>
   );
