@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { User as SupabaseUser, Session } from "@supabase/supabase-js";
 import {
   User,
   Mic,
@@ -46,6 +47,10 @@ const Settings = () => {
   const navigate = useNavigate();
   const { user, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
   
+  // Auth state from Supabase
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  
   // OS Name state
   const [osName, setOsName] = useState(() => localStorage.getItem(STORAGE_KEY) || "Ozlon");
   const [isEditingName, setIsEditingName] = useState(false);
@@ -57,21 +62,57 @@ const Settings = () => {
 
   const communicationMode = user?.communicationMode || "both";
 
-  // Load voice settings
+  // Auth state listener
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        // Defer profile fetch to avoid deadlock
+        setTimeout(() => fetchProfileName(session.user.id), 0);
+      } else {
+        setProfileName(null);
+      }
+    });
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfileName(session.user.id);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchProfileName = async (userId: string) => {
+    const { data } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    setProfileName(data?.full_name || null);
+  };
+
+  // Load voice settings when auth changes
   useEffect(() => {
     const loadVoiceSettings = async () => {
+      if (!authUser) return;
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          const { settings } = await voiceService.getSettings();
-          setVoiceSettings(settings);
-        }
+        const { settings } = await voiceService.getSettings();
+        setVoiceSettings(settings);
       } catch (error) {
         console.error('Failed to load voice settings:', error);
       }
     };
     loadVoiceSettings();
-  }, []);
+  }, [authUser]);
+
+  // Computed account display values
+  const isSignedIn = !!authUser;
+  const accountLabel = isSignedIn 
+    ? (profileName || authUser?.user_metadata?.full_name || authUser?.email || "User")
+    : "Guest";
+  const accountDescription = isSignedIn ? "Signed in" : "Not signed in";
 
   const handleLogout = async () => {
     try {
@@ -172,9 +213,9 @@ const Settings = () => {
         <SettingsSection title="Account">
           <SettingsRow
             icon={User}
-            label={user?.name || "Guest"}
-            description={user?.email || "Not signed in"}
-            onClick={() => navigate("/auth")}
+            label={accountLabel}
+            description={accountDescription}
+            onClick={() => navigate(isSignedIn ? "/profile" : "/auth")}
           />
         </SettingsSection>
 
