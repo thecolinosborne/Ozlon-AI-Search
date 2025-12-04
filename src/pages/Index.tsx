@@ -693,6 +693,15 @@ const Index = () => {
                 ))}
               </div>
             )}
+            {/* File Input Hidden */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
             <div className="relative">
               <input
                 type="text"
