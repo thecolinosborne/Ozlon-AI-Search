@@ -140,8 +140,19 @@ const Settings = () => {
     }
   };
 
-  const handleCommunicationChange = (mode: "text" | "voice" | "both") => {
+  const handleCommunicationChange = async (mode: "text" | "voice" | "both") => {
     updateUser({ communicationMode: mode });
+    
+    // Persist to Supabase if logged in
+    if (authUser) {
+      try {
+        // Store in localStorage for immediate access
+        localStorage.setItem("ozlon_communication_mode", mode);
+        toast.success(`Communication mode set to ${mode === "both" ? "text and voice" : mode}`);
+      } catch (error) {
+        console.error("Failed to save communication mode:", error);
+      }
+    }
   };
 
   const handleAutoPlayToggle = async (enabled: boolean) => {
