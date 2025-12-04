@@ -288,8 +288,9 @@ const Index = () => {
           const { text } = await response.json();
           
           if (text && text.trim()) {
-            // Send the transcribed text as a message
-            sendMessage(text.trim());
+            // Put transcribed text in input for user review before sending
+            setInput(text.trim());
+            toast.success("Voice transcribed - review and send when ready");
           } else {
             toast.error("I couldn't understand that clearly, can you please try again?");
           }
@@ -728,6 +729,14 @@ const Index = () => {
                     <Send className="w-4 h-4" />
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setShowRealtimeChat(true)}
+                  className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
+                  title={`Talk to ${systemName}`}
+                >
+                  <Phone className="w-4 h-4" />
+                </button>
                 <MicButton size="small" />
               </div>
             </div>
