@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, CreditCard, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
@@ -53,22 +53,17 @@ const PLANS = [
 
 const Billing = () => {
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(true);
+  const { authLoading, session, user } = useAuth();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
+  // Redirect to auth if not signed in
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        navigate("/auth");
-        return;
-      }
-      setIsLoading(false);
-    };
-    checkAuth();
-  }, [navigate]);
+    if (!authLoading && (!session || !user)) {
+      navigate("/auth");
+    }
+  }, [authLoading, session, user, navigate]);
 
   const handleUpgrade = (planId: string) => {
     setSelectedPlan(planId);
@@ -83,12 +78,16 @@ const Billing = () => {
     toast.info("Payment method setup coming soon. Please contact support.");
   };
 
-  if (isLoading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin" />
       </div>
     );
+  }
+
+  if (!session || !user) {
+    return null; // Will redirect
   }
 
   return (

@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { User, Session } from "@supabase/supabase-js";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ArrowLeft, Save, LogOut } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,62 +17,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const STORAGE_KEY = "ozlon_system_name";
-
 const Profile = () => {
   const navigate = useNavigate();
   const { reset } = useAppStore();
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const { authLoading, session, user, signOut } = useAuth();
+  
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-
-  // Auth state listener
-  useEffect(() => {
-    let mounted = true;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!mounted) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setAuthChecked(true);
-      
-      if (!session?.user) {
-        setIsLoading(false);
-      }
-    });
-
-    // Initial session check with timeout to prevent infinite loading
-    const timeout = setTimeout(() => {
-      if (mounted && !authChecked) {
-        console.log("Auth check timeout - setting loading to false");
-        setIsLoading(false);
-        setAuthChecked(true);
-      }
-    }, 5000);
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!mounted) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setAuthChecked(true);
-      
-      if (!session?.user) {
-        setIsLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      clearTimeout(timeout);
-      subscription.unsubscribe();
-    };
-  }, []);
 
   // Load profile data when user is available
   useEffect(() => {
@@ -104,26 +58,15 @@ const Profile = () => {
         console.error("Profile load error:", error);
       } finally {
         if (mounted) {
-          setIsLoading(false);
           setProfileLoaded(true);
         }
       }
     };
 
-    // Timeout to prevent indefinite loading
-    const timeout = setTimeout(() => {
-      if (mounted && !profileLoaded) {
-        console.log("Profile load timeout - forcing completion");
-        setIsLoading(false);
-        setProfileLoaded(true);
-      }
-    }, 10000);
-
     loadProfileData();
 
     return () => {
       mounted = false;
-      clearTimeout(timeout);
     };
   }, [user, profileLoaded]);
 
@@ -153,22 +96,13 @@ const Profile = () => {
   };
 
   const handleSignOut = async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      reset();
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("ozlon_onboarded");
-      toast.success("Signed out successfully");
-      navigate("/");
-    } catch (error: any) {
-      console.error("Sign out error:", error);
-      toast.error(error.message || "Failed to sign out");
-    }
+    reset();
+    await signOut();
+    navigate("/");
   };
 
   // Show loading state
-  if (isLoading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -180,7 +114,7 @@ const Profile = () => {
   }
 
   // If no user, show sign in prompt
-  if (!user) {
+  if (!session || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center px-4">

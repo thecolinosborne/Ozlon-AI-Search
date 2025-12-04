@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { User as SupabaseUser, Session } from "@supabase/supabase-js";
 import {
   User,
   Mic,
@@ -30,6 +29,7 @@ import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { voiceService, VoiceSettings } from "@/services/voiceService";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,57 +41,49 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const STORAGE_KEY = "ozlon_system_name";
-
 const Settings = () => {
   const navigate = useNavigate();
-  const { user, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
+  const { user: storeUser, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
+  const { authLoading, session, user: authUser, systemName, signOut } = useAuth();
   
-  // Auth state from Supabase
-  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
+  // Profile name state
   const [profileName, setProfileName] = useState<string | null>(null);
   
   // OS Name state
-  const [osName, setOsName] = useState(() => localStorage.getItem(STORAGE_KEY) || "Ozlon");
+  const [osName, setOsName] = useState(systemName);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(osName);
+  const [tempName, setTempName] = useState(systemName);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [showClearChatDialog, setShowClearChatDialog] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings | null>(null);
   const [isLoadingVoice, setIsLoadingVoice] = useState(false);
 
-  const communicationMode = user?.communicationMode || "both";
+  const communicationMode = storeUser?.communicationMode || "both";
 
-  // Auth state listener
+  // Sync osName with systemName from auth context
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setAuthUser(session?.user ?? null);
-      if (session?.user) {
-        // Defer profile fetch to avoid deadlock
-        setTimeout(() => fetchProfileName(session.user.id), 0);
-      } else {
-        setProfileName(null);
-      }
-    });
+    setOsName(systemName);
+    setTempName(systemName);
+  }, [systemName]);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfileName(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const fetchProfileName = async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("user_id", userId)
-      .maybeSingle();
-    setProfileName(data?.full_name || null);
-  };
+  // Fetch profile name when user is available
+  useEffect(() => {
+    if (!authUser) {
+      setProfileName(null);
+      return;
+    }
+    
+    const fetchProfileName = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      setProfileName(data?.full_name || null);
+    };
+    
+    fetchProfileName();
+  }, [authUser]);
 
   // Load voice settings when auth changes
   useEffect(() => {
@@ -108,25 +100,16 @@ const Settings = () => {
   }, [authUser]);
 
   // Computed account display values
-  const isSignedIn = !!authUser;
+  const isSignedIn = !!session && !!authUser;
   const accountLabel = isSignedIn 
     ? (profileName || authUser?.user_metadata?.full_name || authUser?.email || "User")
     : "Guest";
   const accountDescription = isSignedIn ? "Signed in" : "Not signed in";
 
   const handleLogout = async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      reset();
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("ozlon_onboarded");
-      toast.success("Signed out successfully");
-      navigate("/");
-    } catch (error: any) {
-      console.error("Sign out error:", error);
-      toast.error(error.message || "Failed to sign out");
-    }
+    reset();
+    await signOut();
+    navigate("/");
   };
 
   const handleClearChat = async () => {
@@ -143,16 +126,9 @@ const Settings = () => {
   const handleCommunicationChange = async (mode: "text" | "voice" | "both") => {
     updateUser({ communicationMode: mode });
     
-    // Persist to Supabase if logged in
-    if (authUser) {
-      try {
-        // Store in localStorage for immediate access
-        localStorage.setItem("ozlon_communication_mode", mode);
-        toast.success(`Communication mode set to ${mode === "both" ? "text and voice" : mode}`);
-      } catch (error) {
-        console.error("Failed to save communication mode:", error);
-      }
-    }
+    // Persist to localStorage
+    localStorage.setItem("ozlon_communication_mode", mode);
+    toast.success(`Communication mode set to ${mode === "both" ? "text and voice" : mode}`);
   };
 
   const handleAutoPlayToggle = async (enabled: boolean) => {
@@ -177,15 +153,14 @@ const Settings = () => {
     }
     
     setOsName(trimmedName);
-    localStorage.setItem(STORAGE_KEY, trimmedName);
+    localStorage.setItem("ozlon_system_name", trimmedName);
     
     // Also update in database if user is logged in
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
+    if (authUser) {
       await supabase
         .from("profiles")
         .update({ system_name: trimmedName })
-        .eq("user_id", session.user.id);
+        .eq("user_id", authUser.id);
     }
     
     setIsEditingName(false);
@@ -200,6 +175,18 @@ const Settings = () => {
     banking: Wallet,
     summary: FileText,
   };
+
+  // Show loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm text-muted-foreground">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">
@@ -394,16 +381,18 @@ const Settings = () => {
         </SettingsSection>
 
         {/* Account Actions */}
-        <SettingsSection title="Account Actions">
-          <SettingsRow
-            icon={LogOut}
-            label="Sign out"
-            description="Sign out of your account"
-            type="action"
-            onClick={() => setShowSignOutDialog(true)}
-            destructive
-          />
-        </SettingsSection>
+        {isSignedIn && (
+          <SettingsSection title="Account Actions">
+            <SettingsRow
+              icon={LogOut}
+              label="Sign out"
+              description="Sign out of your account"
+              type="action"
+              onClick={() => setShowSignOutDialog(true)}
+              destructive
+            />
+          </SettingsSection>
+        )}
       </div>
 
       {/* Sign Out Confirmation Dialog */}

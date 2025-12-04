@@ -1,9 +1,6 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { User, Session } from "@supabase/supabase-js";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,68 +10,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
 
-interface UserMenuProps {
-  user?: User | null;
-  isLoading?: boolean;
-}
+export const UserMenu = () => {
+  const { authLoading, session, user, signOut } = useAuth();
 
-export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuProps) => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(propUser ?? null);
-  const [isLoading, setIsLoading] = useState(propIsLoading ?? !propUser);
-
-  // Sync with prop user when provided
-  useEffect(() => {
-    if (propUser !== undefined) {
-      setUser(propUser);
-    }
-    if (propIsLoading !== undefined) {
-      setIsLoading(propIsLoading);
-    } else if (propUser !== undefined) {
-      setIsLoading(false);
-    }
-  }, [propUser, propIsLoading]);
-
-  // Fallback to own auth listener if no user prop
-  useEffect(() => {
-    if (propUser !== undefined) return; // Skip if user is provided via props
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [propUser]);
-
-  const handleSignOut = async () => {
-    console.log("Sign out clicked");
-    try {
-      const { error } = await supabase.auth.signOut();
-      console.log("Sign out result:", { error });
-      if (error) throw error;
-      localStorage.removeItem("ozlon_system_name");
-      localStorage.removeItem("ozlon_onboarded");
-      toast.success("Signed out successfully");
-      navigate("/");
-    } catch (error: any) {
-      console.error("Sign out error:", error);
-      toast.error(error.message || "Failed to sign out");
-    }
-  };
-
-  if (isLoading) {
+  // State 1: Loading - show skeleton
+  if (authLoading) {
     return (
-      <div className="w-8 h-8 rounded-full bg-neutral-100 animate-pulse" />
+      <div className="w-9 h-9 rounded-full bg-neutral-100 animate-pulse" />
     );
   }
 
-  if (!user) {
+  // State 2: Not authenticated - show sign in/up buttons
+  if (!session || !user) {
     return (
       <div className="flex items-center gap-2">
         <Link
@@ -101,6 +48,7 @@ export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuP
     );
   }
 
+  // State 3: Authenticated - show user menu
   const initials = user.user_metadata?.full_name
     ?.split(" ")
     .map((n: string) => n[0])
@@ -141,6 +89,12 @@ export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuP
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
+          <Link to="/" className="cursor-pointer">
+            <UserIcon className="w-4 h-4 mr-2" />
+            Chat
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link to="/profile" className="cursor-pointer">
             <UserIcon className="w-4 h-4 mr-2" />
             Profile
@@ -162,7 +116,7 @@ export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuP
         <DropdownMenuItem asChild>
           <button 
             type="button"
-            onClick={handleSignOut} 
+            onClick={signOut} 
             className="w-full cursor-pointer text-destructive focus:text-destructive flex items-center"
           >
             <LogOut className="w-4 h-4 mr-2" />
