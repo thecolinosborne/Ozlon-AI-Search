@@ -14,3 +14,6 @@ verify_jwt = true
 
 [functions.voice-clone]
 verify_jwt = true
+
+[functions.realtime-session]
+verify_jwt = false

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2 } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
+import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
 
 type Message = {
   id: string;
@@ -38,6 +39,7 @@ const Index = () => {
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const [showRealtimeChat, setShowRealtimeChat] = useState(false);
   
   // Build user settings for AI context
   const userSettings: UserSettings = {
@@ -468,6 +470,22 @@ const Index = () => {
             ))}
           </div>
         )}
+
+        {/* Real-time Voice Call Button - Show before interaction */}
+        {!hasInteracted && (
+          <button
+            onClick={() => setShowRealtimeChat(true)}
+            className={cn(
+              "mt-6 flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-full",
+              "bg-blue-500 text-white",
+              "hover:bg-blue-600 hover:shadow-md",
+              "transition-all duration-200"
+            )}
+          >
+            <Phone className="w-4 h-4" />
+            Talk to {systemName}
+          </button>
+        )}
       </div>
 
       {/* Chat Messages - Show after interaction */}
@@ -608,6 +626,13 @@ const Index = () => {
           isOpen={needsOnboarding}
           onComplete={completeOnboarding}
           userId={user.id}
+        />
+      )}
+      {/* Realtime Voice Chat Modal */}
+      {showRealtimeChat && (
+        <RealtimeVoiceChat
+          systemName={systemName}
+          onClose={() => setShowRealtimeChat(false)}
         />
       )}
     </div>
