@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Volume2, Mic, Sparkles, ArrowRight, Loader2, Check } from "lucide-react";
+import { Volume2, Mic, Sparkles, ArrowRight, Loader2, Check, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { voiceService, AvailableVoice } from "@/services/voiceService";
 import { toast } from "sonner";
@@ -38,6 +38,10 @@ export default function VoiceSetup() {
 
   const handleVoiceSelect = async (voiceId: string) => {
     setSelectedVoice(voiceId);
+    const voice = standardVoices.find(v => v.id === voiceId);
+    if (voice) {
+      toast.success(`Voice set to ${voice.name}`);
+    }
     // Preview the voice
     try {
       await voiceService.speak("Hello, I am your Ozlon assistant.", voiceId);
@@ -97,6 +101,22 @@ export default function VoiceSetup() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* Header with Back Button */}
+      <header className="border-b border-border/50 px-4 py-4 safe-area-top">
+        <div className="max-w-md mx-auto flex items-center gap-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 hover:bg-muted rounded-full transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5 text-foreground" />
+          </button>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Voice Setup</h1>
+            <p className="text-xs text-muted-foreground">Configure voice output</p>
+          </div>
+        </div>
+      </header>
+
       <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-medium text-foreground mb-2">

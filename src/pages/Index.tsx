@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -39,6 +39,10 @@ const Index = () => {
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   const [showRealtimeChat, setShowRealtimeChat] = useState(false);
+  
+  // File upload state
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Build user settings for AI context
   const userSettings: UserSettings = {
@@ -332,6 +336,40 @@ const Index = () => {
     sendMessage(action.message, action.intent);
   };
 
+  // File upload handlers
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const validFiles = files.filter(file => {
+      const maxSize = 20 * 1024 * 1024; // 20MB
+      if (file.size > maxSize) {
+        toast.error(`${file.name} is too large (max 20MB)`);
+        return false;
+      }
+      return true;
+    });
+    
+    if (attachedFiles.length + validFiles.length > 10) {
+      toast.error("Maximum 10 files per message");
+      return;
+    }
+    
+    setAttachedFiles(prev => [...prev, ...validFiles]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const getFileIcon = (file: File) => {
+    if (file.type.startsWith('image/')) {
+      return <ImageIcon className="w-4 h-4" />;
+    }
+    return <FileText className="w-4 h-4" />;
+  };
+
   // Mic button component for consistency
   const MicButton = ({ size = "normal" }: { size?: "normal" | "small" }) => {
     const isSmall = size === "small";
@@ -411,6 +449,28 @@ const Index = () => {
             onSubmit={handleSubmit}
             className="w-full max-w-2xl px-4"
           >
+            {/* Attached Files Preview */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3 px-2">
+                {attachedFiles.map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-full text-sm"
+                  >
+                    {getFileIcon(file)}
+                    <span className="max-w-[150px] truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(index)}
+                      className="text-neutral-400 hover:text-neutral-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
             <div className="relative group">
               <input
                 ref={inputRef}
@@ -420,7 +480,7 @@ const Index = () => {
                 placeholder={`Ask ${systemName} anything...`}
                 disabled={isLoading || isRecording}
                 className={cn(
-                  "w-full px-6 py-4 text-base rounded-full",
+                  "w-full px-6 py-4 pl-14 text-base rounded-full",
                   "border border-neutral-200 shadow-sm",
                   "focus:outline-none focus:border-neutral-300 focus:shadow-md",
                   "transition-all duration-200",
@@ -428,8 +488,26 @@ const Index = () => {
                   "disabled:opacity-50"
                 )}
               />
+              {/* File Input Hidden */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              {/* Attach Button - Left side */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                title="Attach files"
+              >
+                <Paperclip className="w-5 h-5" />
+              </button>
               <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                {input.trim() && (
+                {(input.trim() || attachedFiles.length > 0) && (
                   <button
                     type="submit"
                     disabled={isLoading}
@@ -593,6 +671,27 @@ const Index = () => {
       {hasInteracted && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-100 p-4">
           <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
+            {/* Attached Files Preview */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachedFiles.map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 px-2 py-1 bg-neutral-100 rounded-full text-xs"
+                  >
+                    {getFileIcon(file)}
+                    <span className="max-w-[100px] truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(index)}
+                      className="text-neutral-400 hover:text-neutral-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <input
                 type="text"
@@ -601,7 +700,7 @@ const Index = () => {
                 placeholder={isRecording ? "Recording..." : `Ask ${systemName} anything...`}
                 disabled={isLoading || isRecording}
                 className={cn(
-                  "w-full px-5 py-3 pr-20 text-sm rounded-full",
+                  "w-full px-5 py-3 pl-12 pr-20 text-sm rounded-full",
                   "border border-neutral-200 shadow-sm",
                   "focus:outline-none focus:border-neutral-300 focus:shadow-md",
                   "transition-all duration-200",
@@ -610,8 +709,17 @@ const Index = () => {
                   isRecording && "border-red-300 bg-red-50/30"
                 )}
               />
+              {/* Attach Button - Left side */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                title="Attach files"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {input.trim() && !isRecording && (
+                {(input.trim() || attachedFiles.length > 0) && !isRecording && (
                   <button
                     type="submit"
                     disabled={isLoading}
