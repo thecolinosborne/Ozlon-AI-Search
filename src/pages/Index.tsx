@@ -428,8 +428,8 @@ const Index = () => {
         aria-hidden="true"
       />
 
-      {/* Header */}
-      <header className="absolute top-0 left-0 right-0 px-4 py-4 z-50">
+      {/* Header - Fixed position with high z-index */}
+      <header className="fixed top-0 left-0 right-0 px-4 py-4 z-[60] bg-white/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           {/* Chat/Voice Toggle */}
           <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-full">
