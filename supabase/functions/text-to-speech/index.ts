@@ -9,11 +9,12 @@ const corsHeaders = {
 /**
  * Text-to-Speech Edge Function
  * 
- * Supports ElevenLabs as primary provider with Play.ht fallback (future)
+ * Supports ElevenLabs as primary provider with OpenAI TTS fallback
  * Returns audio as base64 for client playback
  */
 
 const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
@@ -64,6 +65,37 @@ async function synthesizeWithElevenLabs(
     const errorText = await response.text();
     console.error('ElevenLabs API error:', response.status, errorText);
     throw new Error(`ElevenLabs API error: ${response.status}`);
+  }
+
+  return await response.arrayBuffer();
+}
+
+async function synthesizeWithOpenAI(
+  text: string,
+  voice: string = 'alloy'
+): Promise<ArrayBuffer> {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'tts-1',
+      input: text,
+      voice: voice,
+      response_format: 'mp3',
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('OpenAI TTS API error:', response.status, errorText);
+    throw new Error(`OpenAI TTS API error: ${response.status}`);
   }
 
   return await response.arrayBuffer();
@@ -139,12 +171,26 @@ serve(async (req) => {
     });
 
     let audioBuffer: ArrayBuffer;
+    let usedProvider = selectedProvider;
 
-    if (selectedProvider === 'elevenlabs') {
-      audioBuffer = await synthesizeWithElevenLabs(text, selectedVoiceId, model);
-    } else {
-      // Fallback to ElevenLabs for now (Play.ht can be added later)
-      audioBuffer = await synthesizeWithElevenLabs(text, selectedVoiceId, model);
+    // Try primary provider, fall back to OpenAI if it fails
+    try {
+      if (selectedProvider === 'elevenlabs') {
+        audioBuffer = await synthesizeWithElevenLabs(text, selectedVoiceId, model);
+      } else {
+        audioBuffer = await synthesizeWithOpenAI(text);
+      }
+    } catch (primaryError) {
+      console.warn(`Primary provider (${selectedProvider}) failed:`, primaryError);
+      console.log('Falling back to OpenAI TTS...');
+      
+      try {
+        audioBuffer = await synthesizeWithOpenAI(text);
+        usedProvider = 'openai-fallback';
+      } catch (fallbackError) {
+        console.error('Fallback provider (OpenAI) also failed:', fallbackError);
+        throw primaryError; // Throw the original error
+      }
     }
 
     // Convert to base64 using chunked approach to avoid stack overflow
@@ -161,7 +207,7 @@ serve(async (req) => {
       JSON.stringify({ 
         audioContent: base64Audio,
         format: 'mp3',
-        provider: selectedProvider,
+        provider: usedProvider,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
