@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -23,7 +23,6 @@ const QUICK_ACTIONS = [
   { label: "Check Money", intent: "CHECK_MONEY", message: "Check my financial situation and balances.", integration: "banking" as const },
   { label: "Check Mail", intent: "CHECK_MAIL", message: "Check my email and summarize anything important.", integration: "email" as const },
   { label: "Daily Digest", intent: "DAILY_DIGEST", message: "Give me a daily digest of my schedule, tasks, and priorities.", integration: "calendar" as const },
-  { label: "Analyze My Day", intent: "ANALYZE_DAY", message: "Analyze my day and suggest what I should focus on next.", integration: null },
 ];
 
 type QuickAction = typeof QUICK_ACTIONS[number];
@@ -429,7 +428,7 @@ const Index = () => {
                   "disabled:opacity-50"
                 )}
               />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 {input.trim() && (
                   <button
                     type="submit"
@@ -440,6 +439,14 @@ const Index = () => {
                   </button>
                 )}
                 <MicButton />
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.focus()}
+                  className="p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                  title="Type a message"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                </button>
               </div>
             </div>
           </form>
