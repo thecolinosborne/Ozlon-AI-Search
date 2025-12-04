@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -38,11 +38,13 @@ const Index = () => {
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
-  const [showRealtimeChat, setShowRealtimeChat] = useState(false);
   
   // File upload state
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Mode toggle state: 'chat' or 'voice'
+  const [activeMode, setActiveMode] = useState<'chat' | 'voice'>('chat');
   
   // Build user settings for AI context
   const userSettings: UserSettings = {
@@ -338,7 +340,7 @@ const Index = () => {
   };
 
   // File upload handlers
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const validFiles = files.filter(file => {
       const maxSize = 20 * 1024 * 1024; // 20MB
@@ -355,14 +357,17 @@ const Index = () => {
     }
     
     setAttachedFiles(prev => [...prev, ...validFiles]);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+    // Reset the input value so same file can be selected again
+    e.target.value = '';
+  }, [attachedFiles.length]);
 
-  const removeFile = (index: number) => {
+  const removeFile = useCallback((index: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
-  };
+  }, []);
+
+  const triggerFileUpload = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
   const getFileIcon = (file: File) => {
     if (file.type.startsWith('image/')) {
@@ -412,29 +417,80 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
+      {/* Global File Input - Always mounted */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
+        onChange={handleFileSelect}
+        className="hidden"
+        aria-hidden="true"
+      />
+
       {/* Header */}
       <header className="absolute top-0 left-0 right-0 px-4 py-4 z-50">
-        <div className="max-w-6xl mx-auto flex justify-end">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
+          {/* Chat/Voice Toggle */}
+          <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-full">
+            <button
+              type="button"
+              onClick={() => setActiveMode('chat')}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
+                activeMode === 'chat'
+                  ? "bg-white text-neutral-900 shadow-sm"
+                  : "text-neutral-500 hover:text-neutral-700"
+              )}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveMode('voice')}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
+                activeMode === 'voice'
+                  ? "bg-white text-neutral-900 shadow-sm"
+                  : "text-neutral-500 hover:text-neutral-700"
+              )}
+            >
+              <Phone className="w-4 h-4" />
+              Voice
+            </button>
+          </div>
           <UserMenu />
         </div>
       </header>
 
-      {/* Hero Section - Always visible but shrinks after interaction */}
-      <div
-        className={cn(
-          "flex flex-col items-center justify-center transition-all duration-500",
-          hasInteracted ? "pt-8 pb-4" : "flex-1 min-h-[60vh]"
-        )}
-      >
-        {/* Logo */}
-        <h1
-          className={cn(
-            "font-light tracking-tight text-neutral-800 transition-all duration-500",
-            hasInteracted ? "text-3xl mb-1" : "text-6xl md:text-7xl mb-2"
-          )}
-        >
-          {systemName}
-        </h1>
+      {/* Voice Mode - Full Screen Realtime Chat */}
+      {activeMode === 'voice' && (
+        <RealtimeVoiceChat
+          systemName={systemName}
+          onClose={() => setActiveMode('chat')}
+        />
+      )}
+
+      {/* Chat Mode Content */}
+      {activeMode === 'chat' && (
+        <>
+          {/* Hero Section - Always visible but shrinks after interaction */}
+          <div
+            className={cn(
+              "flex flex-col items-center justify-center transition-all duration-500",
+              hasInteracted ? "pt-16 pb-4" : "flex-1 min-h-[60vh]"
+            )}
+          >
+            {/* Logo */}
+            <h1
+              className={cn(
+                "font-light tracking-tight text-neutral-800 transition-all duration-500",
+                hasInteracted ? "text-3xl mb-1" : "text-6xl md:text-7xl mb-2"
+              )}
+            >
+              {systemName}
+            </h1>
         <p
           className={cn(
             "text-neutral-500 transition-all duration-500",
@@ -489,19 +545,10 @@ const Index = () => {
                   "disabled:opacity-50"
                 )}
               />
-              {/* File Input Hidden */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
               {/* Attach Button - Left side */}
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={triggerFileUpload}
                 className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
                 title="Attach files"
               >
@@ -519,7 +566,7 @@ const Index = () => {
                 )}
                 <button
                   type="button"
-                  onClick={() => setShowRealtimeChat(true)}
+                  onClick={() => setActiveMode('voice')}
                   className="p-2.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
                   title={`Talk to ${systemName}`}
                 >
@@ -560,7 +607,7 @@ const Index = () => {
         {/* Real-time Voice Call Button - Show before interaction */}
         {!hasInteracted && (
           <button
-            onClick={() => setShowRealtimeChat(true)}
+            onClick={() => setActiveMode('voice')}
             className={cn(
               "mt-6 flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-full",
               "bg-blue-500 text-white",
@@ -693,15 +740,6 @@ const Index = () => {
                 ))}
               </div>
             )}
-            {/* File Input Hidden */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
             <div className="relative">
               <input
                 type="text"
@@ -722,7 +760,7 @@ const Index = () => {
               {/* Attach Button - Left side */}
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={triggerFileUpload}
                 className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
                 title="Attach files"
               >
@@ -740,7 +778,7 @@ const Index = () => {
                 )}
                 <button
                   type="button"
-                  onClick={() => setShowRealtimeChat(true)}
+                  onClick={() => setActiveMode('voice')}
                   className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
                   title={`Talk to ${systemName}`}
                 >
@@ -752,6 +790,8 @@ const Index = () => {
           </form>
         </div>
       )}
+      </>
+      )}
 
       {/* System Naming Modal - Onboarding */}
       {user && needsOnboarding && (
@@ -759,13 +799,6 @@ const Index = () => {
           isOpen={needsOnboarding}
           onComplete={completeOnboarding}
           userId={user.id}
-        />
-      )}
-      {/* Realtime Voice Chat Modal */}
-      {showRealtimeChat && (
-        <RealtimeVoiceChat
-          systemName={systemName}
-          onClose={() => setShowRealtimeChat(false)}
         />
       )}
     </div>
