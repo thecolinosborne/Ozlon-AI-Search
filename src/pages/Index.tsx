@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, MessageCircle } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
@@ -428,7 +428,7 @@ const Index = () => {
                   "disabled:opacity-50"
                 )}
               />
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
                 {input.trim() && (
                   <button
                     type="submit"
@@ -438,15 +438,15 @@ const Index = () => {
                     <Send className="w-4 h-4" />
                   </button>
                 )}
-                <MicButton />
                 <button
                   type="button"
-                  onClick={() => inputRef.current?.focus()}
-                  className="p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
-                  title="Type a message"
+                  onClick={() => setShowRealtimeChat(true)}
+                  className="p-2.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
+                  title={`Talk to ${systemName}`}
                 >
-                  <MessageCircle className="w-5 h-5" />
+                  <Phone className="w-5 h-5" />
                 </button>
+                <MicButton />
               </div>
             </div>
           </form>
