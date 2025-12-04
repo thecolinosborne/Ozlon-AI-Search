@@ -5,7 +5,7 @@ import { streamChat, UserSettings } from "@/services/chatService";
 import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
-import { useSystemName } from "@/hooks/useSystemName";
+import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -28,7 +28,7 @@ const QUICK_ACTIONS = [
 type QuickAction = typeof QUICK_ACTIONS[number];
 
 const Index = () => {
-  const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding, isAuthenticated, authState, isLoading: authLoading } = useSystemName();
+  const { authLoading, session, user, systemName, needsOnboarding, isReturningUser, completeOnboarding } = useAuth();
   const { user: storeUser, connections, agents } = useAppStore();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -460,7 +460,7 @@ const Index = () => {
               Voice
             </button>
           </div>
-          <UserMenu user={user} isLoading={authLoading} />
+          <UserMenu />
         </div>
       </header>
 
