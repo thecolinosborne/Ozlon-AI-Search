@@ -28,7 +28,7 @@ const QUICK_ACTIONS = [
 type QuickAction = typeof QUICK_ACTIONS[number];
 
 const Index = () => {
-  const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding } = useSystemName();
+  const { systemName, user, needsOnboarding, isReturningUser, completeOnboarding, isAuthenticated, authState, isLoading: authLoading } = useSystemName();
   const { user: storeUser, connections, agents } = useAppStore();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -460,7 +460,7 @@ const Index = () => {
               Voice
             </button>
           </div>
-          <UserMenu user={user} />
+          <UserMenu user={user} isLoading={authLoading} />
         </div>
       </header>
 

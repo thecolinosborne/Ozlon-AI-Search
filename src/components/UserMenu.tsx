@@ -15,20 +15,25 @@ import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
 
 interface UserMenuProps {
   user?: User | null;
+  isLoading?: boolean;
 }
 
-export const UserMenu = ({ user: propUser }: UserMenuProps) => {
+export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuProps) => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(propUser ?? null);
-  const [isLoading, setIsLoading] = useState(!propUser);
+  const [isLoading, setIsLoading] = useState(propIsLoading ?? !propUser);
 
   // Sync with prop user when provided
   useEffect(() => {
     if (propUser !== undefined) {
       setUser(propUser);
+    }
+    if (propIsLoading !== undefined) {
+      setIsLoading(propIsLoading);
+    } else if (propUser !== undefined) {
       setIsLoading(false);
     }
-  }, [propUser]);
+  }, [propUser, propIsLoading]);
 
   // Fallback to own auth listener if no user prop
   useEffect(() => {
