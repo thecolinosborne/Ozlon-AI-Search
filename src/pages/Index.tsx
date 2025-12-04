@@ -460,7 +460,7 @@ const Index = () => {
               Voice
             </button>
           </div>
-          <UserMenu />
+          <UserMenu user={user} />
         </div>
       </header>
 

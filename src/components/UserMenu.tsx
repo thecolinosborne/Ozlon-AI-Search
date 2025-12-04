@@ -13,27 +13,39 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
 
-export const UserMenu = () => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+interface UserMenuProps {
+  user?: User | null;
+}
 
+export const UserMenu = ({ user: propUser }: UserMenuProps) => {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(propUser ?? null);
+  const [isLoading, setIsLoading] = useState(!propUser);
+
+  // Sync with prop user when provided
   useEffect(() => {
+    if (propUser !== undefined) {
+      setUser(propUser);
+      setIsLoading(false);
+    }
+  }, [propUser]);
+
+  // Fallback to own auth listener if no user prop
+  useEffect(() => {
+    if (propUser !== undefined) return; // Skip if user is provided via props
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [propUser]);
 
   const handleSignOut = async () => {
     try {
