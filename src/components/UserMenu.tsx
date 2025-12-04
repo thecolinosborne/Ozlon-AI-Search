@@ -53,8 +53,10 @@ export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuP
   }, [propUser]);
 
   const handleSignOut = async () => {
+    console.log("Sign out clicked");
     try {
       const { error } = await supabase.auth.signOut();
+      console.log("Sign out result:", { error });
       if (error) throw error;
       localStorage.removeItem("ozlon_system_name");
       localStorage.removeItem("ozlon_onboarded");
@@ -157,9 +159,15 @@ export const UserMenu = ({ user: propUser, isLoading: propIsLoading }: UserMenuP
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive focus:text-destructive">
-          <LogOut className="w-4 h-4 mr-2" />
-          Sign out
+        <DropdownMenuItem asChild>
+          <button 
+            type="button"
+            onClick={handleSignOut} 
+            className="w-full cursor-pointer text-destructive focus:text-destructive flex items-center"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign out
+          </button>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
