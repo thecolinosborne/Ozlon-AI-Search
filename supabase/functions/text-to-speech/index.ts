@@ -147,10 +147,15 @@ serve(async (req) => {
       audioBuffer = await synthesizeWithElevenLabs(text, selectedVoiceId, model);
     }
 
-    // Convert to base64
-    const base64Audio = btoa(
-      String.fromCharCode(...new Uint8Array(audioBuffer))
-    );
+    // Convert to base64 using chunked approach to avoid stack overflow
+    const uint8Array = new Uint8Array(audioBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    const base64Audio = btoa(binary);
 
     return new Response(
       JSON.stringify({ 
