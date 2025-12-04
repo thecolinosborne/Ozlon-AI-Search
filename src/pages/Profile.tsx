@@ -30,34 +30,55 @@ const Profile = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // Auth state listener - same pattern as UserMenu
+  // Auth state listener
   useEffect(() => {
+    let mounted = true;
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
+      setAuthChecked(true);
       
       if (!session?.user) {
         setIsLoading(false);
       }
     });
 
-    // Initial session check
+    // Initial session check with timeout to prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (mounted && !authChecked) {
+        console.log("Auth check timeout - setting loading to false");
+        setIsLoading(false);
+        setAuthChecked(true);
+      }
+    }, 5000);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
+      setAuthChecked(true);
       
       if (!session?.user) {
         setIsLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Load profile data when user is available
   useEffect(() => {
     if (!user || profileLoaded) return;
+
+    let mounted = true;
 
     const loadProfileData = async () => {
       try {
@@ -68,6 +89,8 @@ const Profile = () => {
           .select("*")
           .eq("user_id", user.id)
           .maybeSingle();
+
+        if (!mounted) return;
 
         if (error) {
           console.error("Error loading profile:", error);
@@ -80,12 +103,28 @@ const Profile = () => {
       } catch (error) {
         console.error("Profile load error:", error);
       } finally {
-        setIsLoading(false);
-        setProfileLoaded(true);
+        if (mounted) {
+          setIsLoading(false);
+          setProfileLoaded(true);
+        }
       }
     };
 
+    // Timeout to prevent indefinite loading
+    const timeout = setTimeout(() => {
+      if (mounted && !profileLoaded) {
+        console.log("Profile load timeout - forcing completion");
+        setIsLoading(false);
+        setProfileLoaded(true);
+      }
+    }, 10000);
+
     loadProfileData();
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeout);
+    };
   }, [user, profileLoaded]);
 
   const handleSave = async () => {
