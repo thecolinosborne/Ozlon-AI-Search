@@ -18,9 +18,14 @@ interface AuthContextType {
   needsOnboarding: boolean;
   isReturningUser: boolean;
   
+  // Voice settings
+  voiceEnabled: boolean;
+  
   // Actions
   signOut: () => Promise<void>;
   completeOnboarding: (name: string) => Promise<void>;
+  setVoiceEnabled: (enabled: boolean) => Promise<void>;
+  refreshVoiceSettings: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isReturningUser, setIsReturningUser] = useState(false);
+  
+  // Voice settings
+  const [voiceEnabled, setVoiceEnabledState] = useState(false);
 
   // Clear all auth state - used on sign out
   const clearAuthState = useCallback(() => {
@@ -46,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoaded(false);
     setNeedsOnboarding(false);
     setIsReturningUser(false);
+    setVoiceEnabledState(false);
     setAuthLoading(false);
     
     // Clear localStorage
@@ -59,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("system_name")
+        .select("system_name, voice_enabled, elevenlabs_voice_id")
         .eq("user_id", userId)
         .single();
 
@@ -77,12 +86,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setNeedsOnboarding(false);
       }
       
+      // Set voice enabled state from profile
+      setVoiceEnabledState(profile?.voice_enabled ?? false);
+      
       setProfileLoaded(true);
     } catch (error) {
       console.error("Error loading user profile:", error);
       setProfileLoaded(true);
     }
   }, []);
+
+  // Refresh voice settings from database
+  const refreshVoiceSettings = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("voice_enabled")
+        .eq("user_id", user.id)
+        .single();
+      
+      setVoiceEnabledState(profile?.voice_enabled ?? false);
+    } catch (error) {
+      console.error("Error refreshing voice settings:", error);
+    }
+  }, [user]);
+
+  // Set voice enabled - saves to database
+  const setVoiceEnabled = useCallback(async (enabled: boolean) => {
+    if (!user) {
+      toast.error("Sign in to enable voice conversation");
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ voice_enabled: enabled })
+        .eq("user_id", user.id);
+      
+      if (error) throw error;
+      
+      setVoiceEnabledState(enabled);
+      toast.success(enabled ? "Voice conversation enabled" : "Voice conversation disabled");
+    } catch (error) {
+      console.error("Error updating voice setting:", error);
+      toast.error("Failed to update voice setting");
+    }
+  }, [user]);
 
   // Sign out handler
   const signOut = useCallback(async () => {
@@ -189,8 +241,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileLoaded,
         needsOnboarding,
         isReturningUser,
+        voiceEnabled,
         signOut,
         completeOnboarding,
+        setVoiceEnabled,
+        refreshVoiceSettings,
       }}
     >
       {children}
