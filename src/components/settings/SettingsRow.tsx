@@ -2,7 +2,7 @@ import { ChevronRight, LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 
-interface SettingsRowProps {
+export interface SettingsRowProps {
   icon: LucideIcon;
   label: string;
   description?: string;
@@ -12,6 +12,7 @@ interface SettingsRowProps {
   onClick?: () => void;
   disabled?: boolean;
   destructive?: boolean;
+  actionLabel?: string;
 }
 
 export const SettingsRow = ({
@@ -24,6 +25,7 @@ export const SettingsRow = ({
   onClick,
   disabled = false,
   destructive = false,
+  actionLabel,
 }: SettingsRowProps) => {
   const handleClick = () => {
     if (disabled) return;
@@ -86,6 +88,10 @@ export const SettingsRow = ({
       
       {type === "navigate" && (
         <ChevronRight className="w-5 h-5 text-muted-foreground" />
+      )}
+
+      {type === "action" && actionLabel && (
+        <span className="text-sm text-primary font-medium">{actionLabel}</span>
       )}
     </Wrapper>
   );

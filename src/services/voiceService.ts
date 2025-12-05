@@ -1,5 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 
+// Custom OZLON ElevenLabs voice ID - used as default for all TTS
+export const OZLON_CUSTOM_VOICE_ID = 'tmE7FLz96JX0kHVdP6qw';
+
 export interface VoiceSettings {
   tts_provider: 'elevenlabs' | 'playht' | 'auto';
   voice_id: string | null;
@@ -91,8 +94,16 @@ export const voiceService = {
    * Synthesize and play text
    */
   async speak(text: string, voiceId?: string): Promise<void> {
-    const audioUrl = await this.synthesize(text, voiceId);
+    const audioUrl = await this.synthesize(text, voiceId || OZLON_CUSTOM_VOICE_ID);
     await this.play(audioUrl);
+  },
+
+  /**
+   * Preview the custom OZLON voice with a demo phrase
+   */
+  async previewVoice(): Promise<void> {
+    const demoPhrase = "This is OZLON speaking with your custom voice.";
+    await this.speak(demoPhrase, OZLON_CUSTOM_VOICE_ID);
   },
 
   /**

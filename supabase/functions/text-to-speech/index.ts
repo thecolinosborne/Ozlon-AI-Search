@@ -18,9 +18,12 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
+// Custom OZLON ElevenLabs voice ID - this is the primary voice for all TTS
+const OZLON_CUSTOM_VOICE_ID = 'tmE7FLz96JX0kHVdP6qw';
+
 // Default ElevenLabs voices
 const DEFAULT_VOICES = {
-  elevenlabs: 'EXAVITQu4vr4xnSDxMaL', // Sarah - natural female voice
+  elevenlabs: OZLON_CUSTOM_VOICE_ID, // Custom OZLON voice
 };
 
 interface TTSRequest {
