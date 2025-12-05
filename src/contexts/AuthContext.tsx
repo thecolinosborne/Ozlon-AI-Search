@@ -115,24 +115,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Set voice enabled - saves to database
   const setVoiceEnabled = useCallback(async (enabled: boolean) => {
+    console.log("setVoiceEnabled called with:", enabled, "user:", user?.id);
+    
     if (!user) {
+      console.error("No user found - cannot update voice setting");
       toast.error("Sign in to enable voice conversation");
       return;
     }
     
+    // Optimistically update UI first
+    setVoiceEnabledState(enabled);
+    
     try {
-      const { error } = await supabase
+      console.log("Updating voice_enabled to:", enabled, "for user:", user.id);
+      const { error, data } = await supabase
         .from("profiles")
         .update({ voice_enabled: enabled })
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .select();
       
-      if (error) throw error;
+      console.log("Update result:", { error, data });
       
-      setVoiceEnabledState(enabled);
-      toast.success(enabled ? "Voice conversation enabled" : "Voice conversation disabled");
-    } catch (error) {
+      if (error) {
+        // Revert on error
+        setVoiceEnabledState(!enabled);
+        throw error;
+      }
+      
+      toast.success(enabled ? "Custom voice enabled" : "Custom voice disabled");
+    } catch (error: any) {
       console.error("Error updating voice setting:", error);
-      toast.error("Failed to update voice setting");
+      toast.error(error?.message || "Failed to update voice setting");
     }
   }, [user]);
 
