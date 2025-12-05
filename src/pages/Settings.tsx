@@ -28,7 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { voiceService, VoiceSettings } from "@/services/voiceService";
+import { voiceService, VoiceSettings, OZLON_CUSTOM_VOICE_ID } from "@/services/voiceService";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog,
@@ -57,6 +57,7 @@ const Settings = () => {
   const [showClearChatDialog, setShowClearChatDialog] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings | null>(null);
   const [isLoadingVoice, setIsLoadingVoice] = useState(false);
+  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
 
   const communicationMode = storeUser?.communicationMode || "both";
 
@@ -142,6 +143,18 @@ const Settings = () => {
       toast.error("Failed to update voice settings");
     } finally {
       setIsLoadingVoice(false);
+    }
+  };
+
+  const handlePreviewVoice = async () => {
+    setIsPreviewingVoice(true);
+    try {
+      await voiceService.previewVoice();
+    } catch (error) {
+      console.error('Voice preview failed:', error);
+      toast.error("Failed to preview voice. Please try again.");
+    } finally {
+      setIsPreviewingVoice(false);
     }
   };
 
@@ -246,10 +259,11 @@ const Settings = () => {
         <SettingsSection title="Voice Output">
           <SettingsRow
             icon={Volume2}
-            label="Voice Settings"
-            description={voiceSettings?.elevenlabs_voice_id ? "Custom voice configured" : "Default voice"}
+            label="Current Voice"
+            description="Custom ElevenLabs Voice"
             type="action"
-            onClick={() => navigate("/voice-setup")}
+            onClick={handlePreviewVoice}
+            actionLabel={isPreviewingVoice ? "Playing..." : "Preview"}
           />
           <SettingsRow
             icon={PlayCircle}
