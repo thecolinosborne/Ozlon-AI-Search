@@ -99,10 +99,10 @@ export const voiceService = {
   },
 
   /**
-   * Preview the custom OZLON voice with a demo phrase
+   * Preview the custom voice with a demo phrase
    */
   async previewVoice(): Promise<void> {
-    const demoPhrase = "This is OZLON speaking with your custom voice.";
+    const demoPhrase = "This is your custom voice, Colin Osborne, speaking through OZLON.";
     await this.speak(demoPhrase, OZLON_CUSTOM_VOICE_ID);
   },
 
