@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { voiceService, OZLON_CUSTOM_VOICE_ID } from '@/services/voiceService';
 
 type RealtimeStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'error';
 
@@ -24,9 +25,36 @@ export function useRealtimeVoice({
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isSpeakingRef = useRef(false);
+
+  // Play AI response with custom ElevenLabs voice
+  const playWithCustomVoice = useCallback(async (text: string) => {
+    if (!text.trim() || isSpeakingRef.current) return;
+    
+    try {
+      isSpeakingRef.current = true;
+      setIsAISpeaking(true);
+      setStatus('speaking');
+      
+      console.log('Playing AI response with custom ElevenLabs voice:', text.substring(0, 50) + '...');
+      await voiceService.speak(text, OZLON_CUSTOM_VOICE_ID);
+      
+    } catch (error) {
+      console.error('Error playing custom voice:', error);
+      onError?.('Failed to play voice response');
+    } finally {
+      isSpeakingRef.current = false;
+      setIsAISpeaking(false);
+      setStatus('connected');
+    }
+  }, [onError]);
 
   const disconnect = useCallback(() => {
     console.log('Disconnecting realtime voice...');
+    
+    // Stop any ongoing speech
+    voiceService.stop();
+    isSpeakingRef.current = false;
     
     if (dcRef.current) {
       dcRef.current.close();
@@ -55,11 +83,11 @@ export function useRealtimeVoice({
   const connect = useCallback(async () => {
     try {
       setStatus('connecting');
-      console.log('Starting realtime voice connection...');
+      console.log('Starting realtime voice connection with custom ElevenLabs voice...');
 
       // Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('realtime-session', {
-        body: { systemName },
+        body: { systemName, useCustomVoice: true },
       });
 
       if (error || !data?.client_secret?.value) {
@@ -73,14 +101,15 @@ export function useRealtimeVoice({
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
 
-      // Set up audio element for AI voice output
+      // Set up audio element - we won't use OpenAI's voice, just for the connection
       const audioEl = document.createElement('audio');
-      audioEl.autoplay = true;
+      audioEl.autoplay = false; // Disable OpenAI audio playback
+      audioEl.muted = true; // Mute OpenAI's voice
       audioElRef.current = audioEl;
 
-      // Handle remote audio stream (AI voice)
+      // Handle remote audio stream (muted - we use ElevenLabs instead)
       pc.ontrack = (e) => {
-        console.log('Received audio track from AI');
+        console.log('Received audio track from OpenAI (muted - using ElevenLabs instead)');
         audioEl.srcObject = e.streams[0];
       };
 
@@ -104,6 +133,7 @@ export function useRealtimeVoice({
       dcRef.current = dc;
 
       let currentResponseText = '';
+      let isResponseInProgress = false;
 
       dc.onmessage = (e) => {
         try {
@@ -119,6 +149,9 @@ export function useRealtimeVoice({
             case 'input_audio_buffer.speech_started':
               setStatus('listening');
               setIsAISpeaking(false);
+              // Stop any ongoing TTS when user starts speaking
+              voiceService.stop();
+              isSpeakingRef.current = false;
               break;
 
             case 'input_audio_buffer.speech_stopped':
@@ -133,27 +166,26 @@ export function useRealtimeVoice({
               }
               break;
 
+            case 'response.created':
+              isResponseInProgress = true;
+              currentResponseText = '';
+              break;
+
             case 'response.audio_transcript.delta':
+              // Collect the text transcript from the AI
               currentResponseText += event.delta || '';
               onAIResponse?.(currentResponseText);
               break;
 
-            case 'response.audio.delta':
-              setIsAISpeaking(true);
-              setStatus('speaking');
-              break;
-
-            case 'response.audio.done':
-              setIsAISpeaking(false);
-              setStatus('connected');
-              break;
-
             case 'response.done':
-              if (currentResponseText) {
+              // When response is complete, play with custom ElevenLabs voice
+              if (currentResponseText && isResponseInProgress) {
+                console.log('AI response complete, playing with ElevenLabs voice');
                 onAIResponse?.(currentResponseText);
+                playWithCustomVoice(currentResponseText);
               }
               currentResponseText = '';
-              setStatus('connected');
+              isResponseInProgress = false;
               break;
 
             case 'error':
@@ -217,7 +249,7 @@ export function useRealtimeVoice({
       };
 
       await pc.setRemoteDescription(answer);
-      console.log('WebRTC connection established');
+      console.log('WebRTC connection established with custom ElevenLabs voice output');
       setStatus('connected');
 
     } catch (error) {
@@ -226,7 +258,7 @@ export function useRealtimeVoice({
       onError?.(error instanceof Error ? error.message : 'Connection failed');
       disconnect();
     }
-  }, [systemName, onTranscript, onAIResponse, onError, disconnect]);
+  }, [systemName, onTranscript, onAIResponse, onError, disconnect, playWithCustomVoice]);
 
   const sendTextMessage = useCallback((text: string) => {
     if (!dcRef.current || dcRef.current.readyState !== 'open') {
