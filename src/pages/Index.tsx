@@ -28,7 +28,8 @@ const QUICK_ACTIONS = [
 type QuickAction = typeof QUICK_ACTIONS[number];
 
 const Index = () => {
-  const { authLoading, session, user, systemName, needsOnboarding, isReturningUser, completeOnboarding } = useAuth();
+  const { authLoading, session, user, systemName, needsOnboarding, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
+  const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -448,13 +449,26 @@ const Index = () => {
             </button>
             <button
               type="button"
-              onClick={() => setActiveMode('voice')}
+              onClick={() => {
+                if (!isAuthenticated) {
+                  toast.error("Sign in to use voice conversation");
+                  return;
+                }
+                if (!voiceEnabled) {
+                  toast.error("Enable voice conversation in Settings first");
+                  return;
+                }
+                setActiveMode('voice');
+              }}
+              disabled={!isAuthenticated}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
                 activeMode === 'voice'
                   ? "bg-white text-neutral-900 shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-700"
+                  : "text-neutral-500 hover:text-neutral-700",
+                !isAuthenticated && "opacity-50 cursor-not-allowed"
               )}
+              title={!isAuthenticated ? "Sign in to enable voice" : !voiceEnabled ? "Enable in Settings" : "Voice conversation"}
             >
               <Phone className="w-4 h-4" />
               Voice
@@ -464,12 +478,56 @@ const Index = () => {
         </div>
       </header>
 
-      {/* Voice Mode - Full Screen Realtime Chat */}
-      {activeMode === 'voice' && (
+      {/* Voice Mode - Full Screen Realtime Chat (only if authenticated and voice enabled) */}
+      {activeMode === 'voice' && isAuthenticated && voiceEnabled && (
         <RealtimeVoiceChat
           systemName={systemName}
           onClose={() => setActiveMode('chat')}
         />
+      )}
+
+      {/* Voice Mode Blocked Message - show when voice selected but not enabled */}
+      {activeMode === 'voice' && (!isAuthenticated || !voiceEnabled) && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
+          <button
+            onClick={() => setActiveMode('chat')}
+            className="absolute top-4 right-4 text-white/60 hover:text-white transition-colors text-sm"
+          >
+            Close
+          </button>
+          
+          <div className="w-24 h-24 rounded-full bg-neutral-700 flex items-center justify-center mb-8">
+            <Phone className="w-10 h-10 text-neutral-400" />
+          </div>
+          
+          <h2 className="text-white text-2xl font-light mb-4">Voice Conversation</h2>
+          
+          {!isAuthenticated ? (
+            <>
+              <p className="text-neutral-400 text-center mb-6 max-w-sm">
+                Sign in to enable voice conversation with {systemName}.
+              </p>
+              <a
+                href="/auth"
+                className="px-6 py-3 bg-blue-500 text-white rounded-full font-medium hover:bg-blue-600 transition-colors"
+              >
+                Sign in
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="text-neutral-400 text-center mb-6 max-w-sm">
+                Turn on Voice Mode in Settings to use voice conversation.
+              </p>
+              <a
+                href="/settings"
+                className="px-6 py-3 bg-blue-500 text-white rounded-full font-medium hover:bg-blue-600 transition-colors"
+              >
+                Go to Settings
+              </a>
+            </>
+          )}
+        </div>
       )}
 
       {/* Chat Mode Content */}

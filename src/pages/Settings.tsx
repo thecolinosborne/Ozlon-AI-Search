@@ -20,6 +20,7 @@ import {
   Trash2,
   Volume2,
   PlayCircle,
+  Phone,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -44,7 +45,8 @@ import {
 const Settings = () => {
   const navigate = useNavigate();
   const { user: storeUser, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
-  const { authLoading, session, user: authUser, systemName, signOut } = useAuth();
+  const { authLoading, session, user: authUser, systemName, signOut, voiceEnabled, setVoiceEnabled } = useAuth();
+  const isAuthenticated = !!session && !!authUser;
   
   // Profile name state
   const [profileName, setProfileName] = useState<string | null>(null);
@@ -255,12 +257,21 @@ const Settings = () => {
           />
         </SettingsSection>
 
-        {/* Voice Output */}
-        <SettingsSection title="Voice Output">
+        {/* Voice Conversation */}
+        <SettingsSection title="Voice Conversation">
+          <SettingsRow
+            icon={Phone}
+            label="Enable Voice Conversation"
+            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Voice mode available" : "Turn on to use voice mode"}
+            type="toggle"
+            value={voiceEnabled}
+            onChange={setVoiceEnabled}
+            disabled={!isAuthenticated}
+          />
           <SettingsRow
             icon={Volume2}
             label="Current Voice"
-            description="Custom ElevenLabs Voice"
+            description="ElevenLabs custom voice"
             type="action"
             onClick={handlePreviewVoice}
             actionLabel={isPreviewingVoice ? "Playing..." : "Preview"}
