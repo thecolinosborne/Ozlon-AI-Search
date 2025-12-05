@@ -261,8 +261,8 @@ const Settings = () => {
         <SettingsSection title="Voice Conversation">
           <SettingsRow
             icon={Phone}
-            label="Enable Voice Conversation"
-            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Voice mode available" : "Turn on to use voice mode"}
+            label="Enable Custom Voice (Colin Osborne)"
+            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Custom ElevenLabs voice active" : "Turn on to use your custom voice"}
             type="toggle"
             value={voiceEnabled}
             onChange={setVoiceEnabled}
@@ -270,8 +270,8 @@ const Settings = () => {
           />
           <SettingsRow
             icon={Volume2}
-            label="Current Voice"
-            description="ElevenLabs custom voice"
+            label="Voice Preview"
+            description="Colin Osborne - ElevenLabs custom voice"
             type="action"
             onClick={handlePreviewVoice}
             actionLabel={isPreviewingVoice ? "Playing..." : "Preview"}
