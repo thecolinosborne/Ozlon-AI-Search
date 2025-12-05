@@ -75,7 +75,8 @@ export function RealtimeVoiceChat({ systemName, onClose }: RealtimeVoiceChatProp
 
       {/* System name */}
       <h1 className="text-white text-3xl font-light mb-2">{systemName}</h1>
-      <p className="text-white/60 text-sm mb-12">Real-time voice conversation</p>
+      <p className="text-white/60 text-sm mb-2">Real-time voice conversation</p>
+      <p className="text-blue-400/60 text-xs mb-10">Using custom ElevenLabs voice</p>
 
       {/* Animated orb */}
       <div className="relative mb-12">
