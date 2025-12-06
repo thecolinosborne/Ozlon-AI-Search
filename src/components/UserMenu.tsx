@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppStore } from "@/stores/useAppStore";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +14,7 @@ import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
 export const UserMenu = () => {
   const navigate = useNavigate();
   const { authLoading, session, user, signOut } = useAuth();
+  const resetStore = useAppStore((state) => state.reset);
 
   // State 1: Loading - show skeleton
   if (authLoading) {
@@ -61,6 +63,7 @@ export const UserMenu = () => {
 
   const handleSignOut = async () => {
     console.log("Sign out clicked");
+    resetStore(); // Clear all app state
     await signOut();
     navigate("/");
   };
