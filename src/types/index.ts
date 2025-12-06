@@ -8,6 +8,19 @@ export interface Message {
   isLoading?: boolean;
 }
 
+// User Profile for onboarding
+export interface UserProfile {
+  name: string;
+  personalNotes: string | null;
+  wakeTime: string | null;
+  morningEnergy: "calm" | "busy" | "mixed" | null;
+  responseLengthPreference: "short" | "medium" | "detailed";
+  tonePreference: "casual" | "neutral" | "polished";
+  primaryNeed: string | null;
+  proactivityPreference: "immediate" | "wait" | "judgment";
+  interactionPreference: "typing" | "talking" | "both";
+}
+
 // User types
 export interface User {
   id: string;
@@ -20,6 +33,14 @@ export interface User {
   existingSystems: string[];
   insightStyle: "direct" | "detailed" | "visual" | "adaptive";
   onboardingComplete: boolean;
+  // New profile fields
+  personalNotes?: string;
+  wakeTime?: string;
+  morningEnergy?: "calm" | "busy" | "mixed";
+  responseLengthPreference?: "short" | "medium" | "detailed";
+  tonePreference?: "casual" | "neutral" | "polished";
+  primaryNeed?: string;
+  proactivityPreference?: "immediate" | "wait" | "judgment";
 }
 
 // Agent types for future extensibility
