@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingOption } from "../OnboardingOption";
 import { OnboardingVoiceButton } from "../OnboardingVoiceButton";
+import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface DailyRhythmScreenProps {
   wakeTime: string;
@@ -8,6 +10,9 @@ interface DailyRhythmScreenProps {
   onWakeTimeChange: (time: string) => void;
   onMorningEnergyChange: (energy: "calm" | "busy" | "mixed") => void;
   onContinue: () => void;
+  isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
 export const DailyRhythmScreen = ({
@@ -16,6 +21,9 @@ export const DailyRhythmScreen = ({
   onWakeTimeChange,
   onMorningEnergyChange,
   onContinue,
+  isSpeaking = false,
+  onReplay,
+  onSkipAudio,
 }: DailyRhythmScreenProps) => {
   const handleVoiceInput = (text: string) => {
     // Try to extract time from voice input
@@ -36,14 +44,28 @@ export const DailyRhythmScreen = ({
 
   return (
     <div>
-      <h1 className="text-3xl font-semibold text-foreground mb-3 tracking-tight">
-        Let's match your natural flow.
-      </h1>
-      <p className="text-muted-foreground mb-8 text-lg">
+      <div className="flex items-center gap-4 mb-6">
+        <AIOrb isSpeaking={isSpeaking} size="md" />
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            Let's match your natural flow.
+          </h1>
+        </div>
+      </div>
+      
+      <p className="text-muted-foreground mb-4 text-lg">
         What time do your days usually begin?
       </p>
       
-      <div className="flex items-center gap-3 mb-10">
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
+      
+      <div className="flex items-center gap-3 mb-10 mt-6">
         <input
           type="time"
           value={wakeTime}
@@ -54,7 +76,7 @@ export const DailyRhythmScreen = ({
       </div>
       
       <p className="text-muted-foreground mb-4 text-lg">
-        Do your mornings feel...
+        Do your mornings feel calm, busy, or somewhere in the middle?
       </p>
       
       <div className="space-y-3 mb-8">

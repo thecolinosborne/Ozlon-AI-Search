@@ -1,27 +1,49 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingVoiceButton } from "../OnboardingVoiceButton";
+import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface PrimaryNeedScreenProps {
   primaryNeed: string;
   onNeedChange: (need: string) => void;
   onContinue: () => void;
+  isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
 export const PrimaryNeedScreen = ({
   primaryNeed,
   onNeedChange,
   onContinue,
+  isSpeaking = false,
+  onReplay,
+  onSkipAudio,
 }: PrimaryNeedScreenProps) => {
   return (
     <div>
-      <h1 className="text-3xl font-semibold text-foreground mb-3 tracking-tight">
-        What should I make easier for you right now?
-      </h1>
-      <p className="text-muted-foreground mb-8 text-lg">
-        Tell me what's on your mind.
+      <div className="flex items-center gap-4 mb-6">
+        <AIOrb isSpeaking={isSpeaking} size="md" />
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            If I could make one thing easier...
+          </h1>
+        </div>
+      </div>
+      
+      <p className="text-muted-foreground mb-4 text-lg">
+        What would it be?
       </p>
       
-      <div className="relative mb-8">
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
+      
+      <div className="relative mb-8 mt-6">
         <textarea
           value={primaryNeed}
           onChange={(e) => onNeedChange(e.target.value)}

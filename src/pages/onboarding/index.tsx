@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -39,7 +39,7 @@ const Onboarding = () => {
   const navigate = useNavigate();
   const { updateUser } = useAppStore();
   const { completeOnboarding } = useAuth();
-  const { isSpeaking, speakForStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
+  const { isSpeaking, speakForStep, replayCurrentStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
   
   // Profile state
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
@@ -60,8 +60,17 @@ const Onboarding = () => {
 
   // Trigger voice narration when step changes
   useEffect(() => {
-    speakForStep(currentStep);
-  }, [currentStep, speakForStep]);
+    // Pass the user's name for personalized prompts
+    speakForStep(currentStep, profile.name);
+  }, [currentStep, speakForStep, profile.name]);
+
+  const handleReplay = useCallback(() => {
+    replayCurrentStep(currentStep, profile.name);
+  }, [replayCurrentStep, currentStep, profile.name]);
+
+  const handleSkipAudio = useCallback(() => {
+    stopSpeaking();
+  }, [stopSpeaking]);
 
   const nextStep = () => {
     stopSpeaking(); // Stop current narration when moving to next step
@@ -76,6 +85,8 @@ const Onboarding = () => {
   };
 
   const handleComplete = async () => {
+    stopSpeaking();
+    
     // Map new profile to existing user structure
     const communicationMode = profile.interactionPreference === "typing" 
       ? "text" as const
@@ -126,6 +137,8 @@ const Onboarding = () => {
             onNameChange={(name) => updateProfile({ name })}
             onContinue={nextStep}
             isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -138,6 +151,8 @@ const Onboarding = () => {
             onContinue={nextStep}
             onSkip={nextStep}
             isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -149,6 +164,9 @@ const Onboarding = () => {
             onWakeTimeChange={(wakeTime) => updateProfile({ wakeTime })}
             onMorningEnergyChange={(morningEnergy) => updateProfile({ morningEnergy })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -160,6 +178,9 @@ const Onboarding = () => {
             onResponseLengthChange={(responseLengthPreference) => updateProfile({ responseLengthPreference })}
             onToneChange={(tonePreference) => updateProfile({ tonePreference })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -169,6 +190,9 @@ const Onboarding = () => {
             primaryNeed={profile.primaryNeed || ""}
             onNeedChange={(primaryNeed) => updateProfile({ primaryNeed })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -178,6 +202,9 @@ const Onboarding = () => {
             proactivityPreference={profile.proactivityPreference}
             onProactivityChange={(proactivityPreference) => updateProfile({ proactivityPreference })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -187,6 +214,9 @@ const Onboarding = () => {
             interactionPreference={profile.interactionPreference}
             onInteractionChange={(interactionPreference) => updateProfile({ interactionPreference })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 
@@ -197,6 +227,8 @@ const Onboarding = () => {
             interactionPreference={profile.interactionPreference}
             onComplete={handleComplete}
             isSpeaking={isSpeaking}
+            onReplay={handleReplay}
+            onSkipAudio={handleSkipAudio}
           />
         );
 

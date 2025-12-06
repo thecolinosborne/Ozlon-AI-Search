@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingVoiceButton } from "../OnboardingVoiceButton";
 import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface PersonalSnapshotScreenProps {
   name: string;
@@ -9,6 +10,8 @@ interface PersonalSnapshotScreenProps {
   onContinue: () => void;
   onSkip: () => void;
   isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
 export const PersonalSnapshotScreen = ({
@@ -18,6 +21,8 @@ export const PersonalSnapshotScreen = ({
   onContinue,
   onSkip,
   isSpeaking = false,
+  onReplay,
+  onSkipAudio,
 }: PersonalSnapshotScreenProps) => {
   return (
     <div>
@@ -25,16 +30,24 @@ export const PersonalSnapshotScreen = ({
         <AIOrb isSpeaking={isSpeaking} size="md" />
         <div>
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">
-            Good to meet you, {name}.
+            Thanks, {name}.
           </h1>
         </div>
       </div>
       
-      <p className="text-muted-foreground mb-8 text-lg leading-relaxed">
+      <p className="text-muted-foreground mb-4 text-lg leading-relaxed">
         Is there anything important about you or your life that I should keep in mind?
       </p>
       
-      <div className="relative mb-8">
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
+      
+      <div className="relative mb-8 mt-6">
         <textarea
           value={personalNotes}
           onChange={(e) => onNotesChange(e.target.value)}
