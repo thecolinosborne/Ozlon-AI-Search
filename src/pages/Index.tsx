@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings } from "@/services/chatService";
@@ -28,9 +29,18 @@ const QUICK_ACTIONS = [
 type QuickAction = typeof QUICK_ACTIONS[number];
 
 const Index = () => {
-  const { authLoading, session, user, systemName, needsOnboarding, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
+  const navigate = useNavigate();
+  const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
+  
+  // Redirect to onboarding if needed
+  useEffect(() => {
+    if (!authLoading && profileLoaded && isAuthenticated && needsOnboarding) {
+      console.log("Redirecting to onboarding...");
+      navigate("/onboarding");
+    }
+  }, [authLoading, profileLoaded, isAuthenticated, needsOnboarding, navigate]);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);

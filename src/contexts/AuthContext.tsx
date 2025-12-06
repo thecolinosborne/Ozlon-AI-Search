@@ -64,26 +64,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Load user profile from Supabase
   const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
-    console.log("Loading user profile for:", userId);
+    console.log("Loading user profile for:", userId, "isNewSignup:", isNewSignup);
     try {
-      const { data: profile } = await supabase
+      const { data: profile, error } = await supabase
         .from("profiles")
         .select("system_name, voice_enabled, elevenlabs_voice_id")
         .eq("user_id", userId)
         .single();
 
-      if (profile?.system_name && profile.system_name !== "Ozlon") {
+      console.log("Profile loaded:", profile, "error:", error);
+
+      // Check if user has completed onboarding
+      const hasCustomName = profile?.system_name && profile.system_name !== "Ozlon";
+      const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
+      
+      console.log("Onboarding check:", { hasCustomName, wasOnboarded, isNewSignup });
+
+      if (hasCustomName) {
+        // User has a custom name, they've completed onboarding
         setSystemName(profile.system_name);
         localStorage.setItem(STORAGE_KEY, profile.system_name);
         localStorage.setItem(ONBOARDED_KEY, "true");
         setIsReturningUser(true);
         setNeedsOnboarding(false);
-      } else if (isNewSignup || !localStorage.getItem(ONBOARDED_KEY)) {
+        console.log("User has completed onboarding previously");
+      } else if (isNewSignup) {
+        // New signup - definitely needs onboarding
         setNeedsOnboarding(true);
         setIsReturningUser(false);
+        console.log("New signup - needs onboarding");
+      } else if (!wasOnboarded) {
+        // Not onboarded yet according to localStorage
+        setNeedsOnboarding(true);
+        setIsReturningUser(false);
+        console.log("Not onboarded according to localStorage - needs onboarding");
       } else {
+        // Was onboarded but has default name
         setIsReturningUser(true);
         setNeedsOnboarding(false);
+        console.log("Returning user with default name");
       }
       
       // Set voice enabled state from profile
