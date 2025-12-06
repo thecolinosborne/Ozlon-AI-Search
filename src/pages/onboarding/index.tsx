@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOnboardingVoice } from "@/hooks/useOnboardingVoice";
 import { OnboardingLayout } from "@/components/onboarding/OnboardingLayout";
 import { WelcomeScreen } from "@/components/onboarding/screens/WelcomeScreen";
 import { PersonalSnapshotScreen } from "@/components/onboarding/screens/PersonalSnapshotScreen";
@@ -38,6 +39,7 @@ const Onboarding = () => {
   const navigate = useNavigate();
   const { updateUser } = useAppStore();
   const { completeOnboarding } = useAuth();
+  const { isSpeaking, speakForStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
   
   // Profile state
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
@@ -56,7 +58,13 @@ const Onboarding = () => {
   const stepIndex = steps.indexOf(currentStep);
   const progress = ((stepIndex) / (steps.length - 1)) * 100;
 
+  // Trigger voice narration when step changes
+  useEffect(() => {
+    speakForStep(currentStep);
+  }, [currentStep, speakForStep]);
+
   const nextStep = () => {
+    stopSpeaking(); // Stop current narration when moving to next step
     const nextIndex = stepIndex + 1;
     if (nextIndex < steps.length) {
       setCurrentStep(steps[nextIndex]);
@@ -117,6 +125,7 @@ const Onboarding = () => {
             name={profile.name}
             onNameChange={(name) => updateProfile({ name })}
             onContinue={nextStep}
+            isSpeaking={isSpeaking}
           />
         );
 
@@ -128,6 +137,7 @@ const Onboarding = () => {
             onNotesChange={(personalNotes) => updateProfile({ personalNotes })}
             onContinue={nextStep}
             onSkip={nextStep}
+            isSpeaking={isSpeaking}
           />
         );
 
@@ -186,6 +196,7 @@ const Onboarding = () => {
             name={profile.name}
             interactionPreference={profile.interactionPreference}
             onComplete={handleComplete}
+            isSpeaking={isSpeaking}
           />
         );
 

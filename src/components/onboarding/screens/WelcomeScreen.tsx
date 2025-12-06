@@ -6,14 +6,15 @@ interface WelcomeScreenProps {
   name: string;
   onNameChange: (name: string) => void;
   onContinue: () => void;
+  isSpeaking?: boolean;
 }
 
-export const WelcomeScreen = ({ name, onNameChange, onContinue }: WelcomeScreenProps) => {
+export const WelcomeScreen = ({ name, onNameChange, onContinue, isSpeaking = false }: WelcomeScreenProps) => {
   return (
     <div className="text-center">
       <div className="flex justify-center mb-10">
-        <div className="scale-125">
-          <AIOrb breatheIn={true} />
+        <div className="scale-150">
+          <AIOrb breatheIn={true} isSpeaking={isSpeaking} size="lg" />
         </div>
       </div>
       

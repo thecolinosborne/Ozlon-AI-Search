@@ -261,8 +261,8 @@ const Settings = () => {
         <SettingsSection title="Voice Conversation">
           <SettingsRow
             icon={Phone}
-            label="Enable Custom Voice (Colin Osborne)"
-            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Custom ElevenLabs voice active" : "Turn on to use your custom voice"}
+            label="Enable Voice Features"
+            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Voice output active" : "Turn on to hear AI responses"}
             type="toggle"
             value={voiceEnabled}
             onChange={setVoiceEnabled}
@@ -271,10 +271,11 @@ const Settings = () => {
           <SettingsRow
             icon={Volume2}
             label="Voice Preview"
-            description="Colin Osborne - ElevenLabs custom voice"
+            description="Aria - ElevenLabs voice"
             type="action"
             onClick={handlePreviewVoice}
             actionLabel={isPreviewingVoice ? "Playing..." : "Preview"}
+            disabled={isPreviewingVoice}
           />
           <SettingsRow
             icon={PlayCircle}
