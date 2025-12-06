@@ -41,8 +41,13 @@ export const CompletionScreen = ({
       </div>
       
       <Button
-        onClick={onComplete}
-        className="w-full h-14 rounded-2xl text-lg font-medium transition-all duration-300 hover:scale-[1.02]"
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onComplete();
+        }}
+        className="w-full h-14 rounded-2xl text-lg font-medium transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
       >
         {interactionPreference === "talking" ? "Start Talking" : "Start Chatting"}
       </Button>

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { voiceService, OZLON_CUSTOM_VOICE_ID } from '@/services/voiceService';
+import { voiceService, OZLON_DEFAULT_VOICE_ID } from '@/services/voiceService';
 
 type RealtimeStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'error';
 
@@ -36,8 +36,8 @@ export function useRealtimeVoice({
       setIsAISpeaking(true);
       setStatus('speaking');
       
-      console.log('Playing AI response with custom ElevenLabs voice:', text.substring(0, 50) + '...');
-      await voiceService.speak(text, OZLON_CUSTOM_VOICE_ID);
+      console.log('Playing AI response with default voice:', text.substring(0, 50) + '...');
+      await voiceService.speak(text, OZLON_DEFAULT_VOICE_ID);
       
     } catch (error) {
       console.error('Error playing custom voice:', error);
