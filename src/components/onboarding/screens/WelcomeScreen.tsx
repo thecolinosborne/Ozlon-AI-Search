@@ -1,15 +1,25 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingInput } from "../OnboardingInput";
 import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface WelcomeScreenProps {
   name: string;
   onNameChange: (name: string) => void;
   onContinue: () => void;
   isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
-export const WelcomeScreen = ({ name, onNameChange, onContinue, isSpeaking = false }: WelcomeScreenProps) => {
+export const WelcomeScreen = ({ 
+  name, 
+  onNameChange, 
+  onContinue, 
+  isSpeaking = false,
+  onReplay,
+  onSkipAudio,
+}: WelcomeScreenProps) => {
   return (
     <div className="text-center">
       <div className="flex justify-center mb-10">
@@ -24,16 +34,24 @@ export const WelcomeScreen = ({ name, onNameChange, onContinue, isSpeaking = fal
       <p className="text-xl text-foreground/80 mb-2">
         I'm here for you.
       </p>
-      <p className="text-muted-foreground mb-10 text-lg">
-        Before we get started, what should I call you?
+      <p className="text-muted-foreground mb-6 text-lg">
+        What should I call you?
       </p>
+      
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
       
       <OnboardingInput
         value={name}
         onChange={onNameChange}
         onVoiceInput={onNameChange}
         placeholder="Your name"
-        className="mb-8"
+        className="mb-8 mt-6"
       />
       
       <Button

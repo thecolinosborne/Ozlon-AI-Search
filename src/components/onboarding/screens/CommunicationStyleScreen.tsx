@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingOption } from "../OnboardingOption";
+import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface CommunicationStyleScreenProps {
   responseLengthPreference: "short" | "medium" | "detailed";
@@ -7,6 +9,9 @@ interface CommunicationStyleScreenProps {
   onResponseLengthChange: (length: "short" | "medium" | "detailed") => void;
   onToneChange: (tone: "casual" | "neutral" | "polished") => void;
   onContinue: () => void;
+  isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
 export const CommunicationStyleScreen = ({
@@ -15,18 +20,34 @@ export const CommunicationStyleScreen = ({
   onResponseLengthChange,
   onToneChange,
   onContinue,
+  isSpeaking = false,
+  onReplay,
+  onSkipAudio,
 }: CommunicationStyleScreenProps) => {
   return (
     <div>
-      <h1 className="text-3xl font-semibold text-foreground mb-8 tracking-tight">
-        How should I talk with you?
-      </h1>
+      <div className="flex items-center gap-4 mb-6">
+        <AIOrb isSpeaking={isSpeaking} size="md" />
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            How should I talk with you?
+          </h1>
+        </div>
+      </div>
       
       <p className="text-muted-foreground mb-4 text-lg">
-        Do you prefer short answers or more detailed explanations?
+        Do you prefer short answers, medium, or detailed?
       </p>
       
-      <div className="space-y-3 mb-10">
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
+      
+      <div className="space-y-3 mb-10 mt-6">
         <OnboardingOption
           label="Short"
           description="Quick and to the point"
@@ -48,7 +69,7 @@ export const CommunicationStyleScreen = ({
       </div>
       
       <p className="text-muted-foreground mb-4 text-lg">
-        Is your usual tone more casual or more polished?
+        Is your usual tone casual, neutral, or polished?
       </p>
       
       <div className="space-y-3 mb-8">

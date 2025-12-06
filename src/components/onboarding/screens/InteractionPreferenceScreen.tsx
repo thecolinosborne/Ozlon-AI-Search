@@ -1,28 +1,49 @@
 import { Button } from "@/components/ui/button";
-import { OnboardingOption } from "../OnboardingOption";
 import { Keyboard, Mic, MessageCircle } from "lucide-react";
+import { AIOrb } from "@/components/AIOrb";
+import { VoiceControls } from "../VoiceControls";
 
 interface InteractionPreferenceScreenProps {
   interactionPreference: "typing" | "talking" | "both" | null;
   onInteractionChange: (preference: "typing" | "talking" | "both") => void;
   onContinue: () => void;
+  isSpeaking?: boolean;
+  onReplay?: () => void;
+  onSkipAudio?: () => void;
 }
 
 export const InteractionPreferenceScreen = ({
   interactionPreference,
   onInteractionChange,
   onContinue,
+  isSpeaking = false,
+  onReplay,
+  onSkipAudio,
 }: InteractionPreferenceScreenProps) => {
   return (
     <div>
-      <h1 className="text-3xl font-semibold text-foreground mb-3 tracking-tight">
-        How do you prefer to talk with me?
-      </h1>
-      <p className="text-muted-foreground mb-8 text-lg">
-        You can always change this later.
+      <div className="flex items-center gap-4 mb-6">
+        <AIOrb isSpeaking={isSpeaking} size="md" />
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            How do you prefer to talk with me?
+          </h1>
+        </div>
+      </div>
+      
+      <p className="text-muted-foreground mb-4 text-lg">
+        Typing, talking, or both? You can always change this later.
       </p>
       
-      <div className="space-y-3 mb-8">
+      {onReplay && onSkipAudio && (
+        <VoiceControls 
+          isSpeaking={isSpeaking} 
+          onReplay={onReplay} 
+          onSkip={onSkipAudio} 
+        />
+      )}
+      
+      <div className="space-y-3 mb-8 mt-6">
         <button
           onClick={() => onInteractionChange("typing")}
           className={`w-full p-6 rounded-2xl text-left transition-all duration-300 border flex items-center gap-4 ${
