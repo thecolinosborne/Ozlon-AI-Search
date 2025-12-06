@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -11,6 +11,7 @@ import {
 import { User as UserIcon, Settings, CreditCard, LogOut } from "lucide-react";
 
 export const UserMenu = () => {
+  const navigate = useNavigate();
   const { authLoading, session, user, signOut } = useAuth();
 
   // State 1: Loading - show skeleton
@@ -58,6 +59,12 @@ export const UserMenu = () => {
 
   const avatarUrl = user.user_metadata?.avatar_url;
 
+  const handleSignOut = async () => {
+    console.log("Sign out clicked");
+    await signOut();
+    navigate("/");
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -89,12 +96,6 @@ export const UserMenu = () => {
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link to="/" className="cursor-pointer">
-            <UserIcon className="w-4 h-4 mr-2" />
-            Chat
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
           <Link to="/profile" className="cursor-pointer">
             <UserIcon className="w-4 h-4 mr-2" />
             Profile
@@ -113,15 +114,12 @@ export const UserMenu = () => {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <button 
-            type="button"
-            onClick={signOut} 
-            className="w-full cursor-pointer text-destructive focus:text-destructive flex items-center"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign out
-          </button>
+        <DropdownMenuItem 
+          onClick={handleSignOut}
+          className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
