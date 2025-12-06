@@ -29,7 +29,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { voiceService, VoiceSettings, OZLON_CUSTOM_VOICE_ID } from "@/services/voiceService";
+import { voiceService, VoiceSettings, OZLON_DEFAULT_VOICE_ID } from "@/services/voiceService";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AlertDialog,
