@@ -5,18 +5,20 @@ interface CompletionScreenProps {
   name: string;
   interactionPreference: "typing" | "talking" | "both" | null;
   onComplete: () => void;
+  isSpeaking?: boolean;
 }
 
 export const CompletionScreen = ({
   name,
   interactionPreference,
   onComplete,
+  isSpeaking = false,
 }: CompletionScreenProps) => {
   return (
     <div className="text-center">
       <div className="flex justify-center mb-10">
-        <div className="scale-125">
-          <AIOrb breatheIn={true} />
+        <div className="scale-150">
+          <AIOrb breatheIn={true} isSpeaking={isSpeaking} size="lg" />
         </div>
       </div>
       

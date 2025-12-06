@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { OnboardingVoiceButton } from "../OnboardingVoiceButton";
+import { AIOrb } from "@/components/AIOrb";
 
 interface PersonalSnapshotScreenProps {
   name: string;
@@ -7,6 +8,7 @@ interface PersonalSnapshotScreenProps {
   onNotesChange: (notes: string) => void;
   onContinue: () => void;
   onSkip: () => void;
+  isSpeaking?: boolean;
 }
 
 export const PersonalSnapshotScreen = ({
@@ -15,12 +17,19 @@ export const PersonalSnapshotScreen = ({
   onNotesChange,
   onContinue,
   onSkip,
+  isSpeaking = false,
 }: PersonalSnapshotScreenProps) => {
   return (
     <div>
-      <h1 className="text-3xl font-semibold text-foreground mb-3 tracking-tight">
-        Good to meet you, {name}.
-      </h1>
+      <div className="flex items-center gap-4 mb-6">
+        <AIOrb isSpeaking={isSpeaking} size="md" />
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            Good to meet you, {name}.
+          </h1>
+        </div>
+      </div>
+      
       <p className="text-muted-foreground mb-8 text-lg leading-relaxed">
         Is there anything important about you or your life that I should keep in mind?
       </p>
