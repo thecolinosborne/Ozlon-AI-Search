@@ -128,13 +128,13 @@ export const MatonIntegrations = () => {
 
       {/* Link to Maton dashboard */}
       <a
-        href="https://www.maton.ai/dashboard"
+        href="https://www.maton.ai/connections"
         target="_blank"
         rel="noopener noreferrer"
         className="flex items-center justify-center gap-2 p-3 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors text-sm text-muted-foreground hover:text-foreground"
       >
         <ExternalLink className="w-4 h-4" />
-        Manage in Maton Dashboard
+        Manage Connections
       </a>
     </SettingsSection>
   );
