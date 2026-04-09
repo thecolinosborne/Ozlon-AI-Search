@@ -317,6 +317,9 @@ const Settings = () => {
           />
         </SettingsSection>
 
+        {/* Maton AI Integrations */}
+        <MatonIntegrations />
+
         {/* Agents */}
         <SettingsSection title="Agents">
           {agents.map((agent) => {
