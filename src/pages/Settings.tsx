@@ -23,6 +23,7 @@ import {
   Phone,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
+import { MatonIntegrations } from "@/components/settings/MatonIntegrations";
 import { SettingsRow } from "@/components/settings/SettingsRow";
 import { useAppStore } from "@/stores/useAppStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -315,6 +316,9 @@ const Settings = () => {
             onChange={(val) => updateConnection("banking", val)}
           />
         </SettingsSection>
+
+        {/* Maton AI Integrations */}
+        <MatonIntegrations />
 
         {/* Agents */}
         <SettingsSection title="Agents">
