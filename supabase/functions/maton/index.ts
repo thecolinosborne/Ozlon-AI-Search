@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MATON_BASE_URL = 'https://api.maton.ai';
+const MATON_BASE_URL = 'https://ctrl.maton.ai';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -18,28 +18,26 @@ serve(async (req) => {
       throw new Error('MATON_API_KEY is not configured');
     }
 
-    const { action, path, body: reqBody } = await req.json();
+    const { action, path, body: reqBody, method: reqMethod } = await req.json();
 
-    // Route based on action
     let endpoint: string;
-    let method = 'GET';
+    let method = reqMethod || 'GET';
     let fetchBody: string | undefined;
 
     switch (action) {
-      case 'status':
-        // Check connection status / list available connectors
-        endpoint = `${MATON_BASE_URL}/v1/connectors`;
-        break;
       case 'connections':
-        // List active connections
-        endpoint = `${MATON_BASE_URL}/v1/connections`;
+        endpoint = `${MATON_BASE_URL}/connections`;
+        break;
+      case 'connectors':
+        endpoint = `${MATON_BASE_URL}/connectors`;
         break;
       case 'proxy':
-        // Proxy a request to any Maton endpoint
         if (!path) throw new Error('Path is required for proxy action');
         endpoint = `${MATON_BASE_URL}${path}`;
-        method = reqBody ? 'POST' : 'GET';
-        fetchBody = reqBody ? JSON.stringify(reqBody) : undefined;
+        if (reqBody) {
+          fetchBody = JSON.stringify(reqBody);
+          if (!reqMethod) method = 'POST';
+        }
         break;
       default:
         throw new Error(`Unknown action: ${action}`);
