@@ -11,11 +11,17 @@ export interface MatonConnection {
 }
 
 export async function fetchMatonConnections(): Promise<MatonConnection[]> {
+  console.log("Fetching Maton connections...");
   const { data, error } = await supabase.functions.invoke("maton", {
     body: { action: "connections" },
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("Maton service error:", error);
+    throw new Error(error.message || "Failed to fetch Maton connections");
+  }
+  
+  console.log("Maton connections loaded:", data?.connections?.length ?? 0);
   return data?.connections || [];
 }
 
