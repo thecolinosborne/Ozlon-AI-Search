@@ -483,30 +483,39 @@ function detectServiceIntents(messages: { role: string; content: string }[]): st
 // SERVICE DATA FETCHERS - One per Maton app
 // ============================================================================
 
-function getYesterdayAndDayBefore(): [string, string] {
-  const y = new Date(); y.setDate(y.getDate() - 1);
-  const db = new Date(); db.setDate(db.getDate() - 2);
-  return [y.toISOString().split('T')[0], db.toISOString().split('T')[0]];
-}
-
 async function fetchGSCData(key: string, connId: string): Promise<string> {
   const sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string }[] };
   const sites = sitesData.siteEntry || [];
   if (!sites.length) return 'No sites found in GSC.';
-  const [dateStr, dayBeforeStr] = getYesterdayAndDayBefore();
+
+  // GSC data is delayed 2-3 days, so use a 7-day window ending 2 days ago
+  const recentEnd = new Date(); recentEnd.setDate(recentEnd.getDate() - 2);
+  const recentStart = new Date(); recentStart.setDate(recentStart.getDate() - 8);
+  const priorEnd = new Date(); priorEnd.setDate(priorEnd.getDate() - 9);
+  const priorStart = new Date(); priorStart.setDate(priorStart.getDate() - 15);
+  const recentEndStr = recentEnd.toISOString().split('T')[0];
+  const recentStartStr = recentStart.toISOString().split('T')[0];
+  const priorEndStr = priorEnd.toISOString().split('T')[0];
+  const priorStartStr = priorStart.toISOString().split('T')[0];
+
   const reports: string[] = [];
   for (const site of sites) {
     try {
-      const [yd, dbd] = await Promise.all([
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: dateStr, endDate: dateStr, dimensions: ['query'], rowLimit: 20 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: dayBeforeStr, endDate: dayBeforeStr, dimensions: ['query'], rowLimit: 20 }),
+      const [recentData, priorData] = await Promise.all([
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: recentStartStr, endDate: recentEndStr, dimensions: ['query'], rowLimit: 25 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: priorStartStr, endDate: priorEndStr, dimensions: ['query'], rowLimit: 25 }),
       ]) as [{ rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }, { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }];
-      const yRows = yd.rows || []; const dbRows = dbd.rows || [];
-      const yT = yRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
-      const dbT = dbRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
-      let r = `### ${site.siteUrl}\nYesterday (${dateStr}): ${yT.c} clicks, ${yT.i} impressions | Day before: ${dbT.c} clicks, ${dbT.i} impressions\n`;
-      if (yRows.length) { r += 'Top queries:\n'; for (const row of yRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
-      else r += 'No query data for yesterday (GSC data may be delayed 2-3 days).\n';
+      const rRows = recentData.rows || []; const pRows = priorData.rows || [];
+      const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      const pT = pRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      let r = `### ${site.siteUrl}\n`;
+      r += `**Last 7 days (${recentStartStr} to ${recentEndStr}):** ${rT.c} clicks, ${rT.i} impressions\n`;
+      r += `**Prior 7 days (${priorStartStr} to ${priorEndStr}):** ${pT.c} clicks, ${pT.i} impressions\n`;
+      const clickChange = pT.c > 0 ? ((rT.c - pT.c) / pT.c * 100).toFixed(1) : 'N/A';
+      const impChange = pT.i > 0 ? ((rT.i - pT.i) / pT.i * 100).toFixed(1) : 'N/A';
+      r += `**Change:** Clicks ${clickChange}% | Impressions ${impChange}%\n`;
+      if (rRows.length) { r += '\nTop queries (last 7 days):\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      else r += 'No query data available yet for this site.\n';
       reports.push(r);
     } catch (e) { reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}\n`); }
   }
