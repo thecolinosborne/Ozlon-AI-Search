@@ -1,71 +1,104 @@
 
 
-# Fix Maton Integration Gaps — Full Service Coverage
+# Deep Dive: GoHighLevel Integration — Gap Analysis and Fix Plan
 
-## The Problem
+## Current State
 
-You have **12 active Maton connections** but only about half of them have read fetchers and write tools wired up. The AI can see Gmail, Calendar, Drive, and GSC data, but it's completely blind to YouTube, Google Meet, Google Docs, Sheets, Slides, and has a broken analytics connection. It also can't take actions (create, edit) on those services.
+Your GHL integration has **three layers**:
 
-The Google 404 links are likely from the AI returning API resource IDs or malformed URLs instead of proper user-facing links.
+1. **GHL Proxy Edge Function** (`supabase/functions/gohighlevel/index.ts`) — supports 30 actions
+2. **Chat AI Tools** (`supabase/functions/chat/index.ts`) — exposes only **11 tools** to the AI
+3. **Chat `callGHL` helper** — calls the GHL API directly (not via the proxy function)
 
-## What's Broken / Missing
+The AI can only do what's defined as a tool in the chat function. The proxy edge function has more coverage but the AI doesn't use it.
 
-| Connected Service | Can Read? | Can Write? | Issue |
-|---|---|---|---|
-| Google Mail | Yes | Yes | Working |
-| Google Calendar | Yes | Yes | Working |
-| Google Drive | Yes | Search only | Working |
-| Google Search Console | Yes | N/A | Working |
-| Google Analytics | **No** | N/A | Name mismatch: connection is `google-analytics-data`, fetcher uses `google-analytics` |
-| Google Docs | **No** | **No** | No fetcher or tools |
-| Google Sheets | **No** | **No** | No fetcher or tools |
-| Google Slides | **No** | **No** | No fetcher or tools |
-| YouTube | **No** | **No** | No fetcher or tools |
-| Google Meet | **No** | **No** | No fetcher or tools |
-| ClickUp | **No** | **No** | Generic fetcher with wrong endpoint, no write tools |
+## What's Missing
 
-## What Gets Fixed
+### Tier 1: Already in proxy, NOT exposed as AI tools (high impact)
 
-### 1. Add read fetchers for all missing services
-- **Google Docs**: List recent docs, read doc content
-- **Google Sheets**: List spreadsheets, read sheet data
-- **Google Slides**: List presentations
-- **YouTube**: List channel videos, analytics
-- **Google Meet**: List upcoming/recent meetings
-- **ClickUp**: List spaces, tasks
-- **Google Analytics**: Fix name mapping (`google-analytics-data` → proper fetcher)
+| Capability | Why it matters |
+|---|---|
+| `get_contact` — View full contact details | AI can list but can't drill into a single contact |
+| `update_contact` — Edit contact fields | Can create but can't update name, email, tags, custom fields |
+| `search_contacts` — Advanced search | Only has basic query filter, not the full POST-based search |
+| `update_opportunity` — Move deals between stages | Can create deals but can't update status or move stages |
+| `get_calendar_events` — View upcoming appointments | Can list calendars but can't see what's booked |
+| `get_free_slots` — Check availability | Can book but can't check open slots first |
+| `list_conversations` / `get_conversation_messages` — Read message threads | Can send messages but can't read conversation history |
+| `list_invoices` / `create_invoice` — Billing | Proxy supports it, AI can't access it |
+| `list_orders` / `list_transactions` — Payment data | Proxy supports it, AI can't access it |
+| `list_forms` / `get_form_submissions` — Form data | Proxy supports it, AI can't access it |
+| `list_funnels` — Funnel overview | Proxy supports it, AI can't access it |
+| `list_custom_fields` / `list_custom_values` — CRM schema | Proxy supports it, AI can't access it |
+| `list_users` — Team members | Proxy supports it, AI can't access it |
+| `list_tags` — All available tags | Can add tags but can't list what tags exist |
 
-### 2. Add write/action tools for missing services
-- **Google Docs**: `create_google_doc`, `append_to_google_doc`
-- **Google Sheets**: `create_google_sheet`, `append_sheet_rows`, `read_sheet_data`
-- **Google Slides**: `create_google_presentation`
-- **YouTube**: Read-only (no write API via gateway)
-- **Google Meet**: Read-only (meetings created via Calendar)
-- **ClickUp**: `create_clickup_task`, `list_clickup_tasks`
+### Tier 2: Not in proxy OR chat (GHL API v2 supports these)
 
-### 3. Fix service detection keywords
-Add keyword detectors for: docs, sheets, slides/presentations, youtube/videos, meet/video calls, clickup/tasks
+| Capability | Endpoint |
+|---|---|
+| Delete contact | `DELETE /contacts/{id}` |
+| Add/list contact notes | `POST/GET /contacts/{id}/notes` |
+| Add/list contact tasks | `POST/GET /contacts/{id}/tasks` |
+| Remove tags from contact | `DELETE /contacts/{id}/tags` |
+| Cancel/reschedule appointment | `PUT/DELETE /calendars/events/appointments/{id}` |
+| Trigger workflow for contact | `POST /contacts/{id}/workflow/{workflowId}` |
+| Get funnel pages | `GET /funnels/funnel/{id}` |
 
-### 4. Fix Google 404 links
-Ensure all tool results that return links use `webViewLink` or `htmlLink` fields and construct proper user-facing Google URLs (e.g., `https://docs.google.com/document/d/{id}/edit`) instead of raw API resource IDs.
+### Tier 3: Advanced (lower priority, GHL API v2)
 
-### 5. Fix analytics name mismatch
-Map `google-analytics-data` connection name to the correct fetcher, and add proper GA4 data fetching (runReport endpoint).
+Social Planner, Blogs, Products, Courses, Surveys, Media, Companies, Links
+
+## The Plan
+
+### Step 1: Add ~19 missing AI tools to chat function
+
+Expose all Tier 1 capabilities as tools the AI can call. These all use the existing `callGHL` helper — no new proxy code needed.
+
+New tools to add:
+- `ghl_get_contact` — full contact details
+- `ghl_update_contact` — edit contact fields
+- `ghl_search_contacts` — advanced POST-based search
+- `ghl_update_opportunity` — move stage, update value/status
+- `ghl_get_calendar_events` — view scheduled appointments
+- `ghl_get_free_slots` — check availability before booking
+- `ghl_list_conversations` — list recent conversations
+- `ghl_get_conversation_messages` — read message thread
+- `ghl_list_invoices` — list invoices
+- `ghl_create_invoice` — create invoice
+- `ghl_list_orders` — list payment orders
+- `ghl_list_transactions` — list payment transactions
+- `ghl_list_forms` — list forms
+- `ghl_get_form_submissions` — read form responses
+- `ghl_list_funnels` — list funnels
+- `ghl_list_custom_fields` — view CRM schema
+- `ghl_list_custom_values` — view custom values
+- `ghl_list_users` — list team members
+- `ghl_list_tags` — list all available tags
+
+### Step 2: Add Tier 2 actions to both proxy AND chat
+
+Add to the GHL proxy edge function and expose as AI tools:
+- `ghl_delete_contact`
+- `ghl_add_contact_note` / `ghl_list_contact_notes`
+- `ghl_add_contact_task` / `ghl_list_contact_tasks`
+- `ghl_remove_tags`
+- `ghl_cancel_appointment`
+- `ghl_trigger_workflow` — trigger a workflow for a specific contact
+
+### Step 3: Update intent detection keywords
+
+Add keywords for invoices, payments, transactions, forms, submissions, funnels, notes, tasks so the AI knows when to pull GHL data proactively.
 
 ## Files Changed
 
-- **`supabase/functions/chat/index.ts`** — All changes in this single file:
-  - Add ~6 new read fetcher functions
-  - Add ~6 new write tool definitions + execution handlers
-  - Add service detector keywords for missing services
-  - Fix analytics connection name mapping
-  - Fix URL construction in tool results
-  - Update `SERVICE_FETCHERS` and `MATON_ACTION_TOOLS` registries
+- **`supabase/functions/chat/index.ts`** — Add ~25 new tool definitions + execution handlers
+- **`supabase/functions/gohighlevel/index.ts`** — Add ~8 new proxy actions (notes, tasks, delete contact, remove tags, cancel appointment, trigger workflow)
 
-## What Won't Change
+## What Stays the Same
 
-- Existing working integrations (Gmail, Calendar, Drive, GSC, GHL) stay untouched
-- The Maton proxy edge function stays the same
-- Frontend code stays the same — tools are dynamically discovered based on connections
-- Database schema stays the same
+- Existing 11 working tools are untouched
+- `callGHL` helper stays the same
+- GHL_API_KEY and GHL_LOCATION_ID secrets already configured
+- Frontend code unchanged — tools are dynamically available to the AI
 
