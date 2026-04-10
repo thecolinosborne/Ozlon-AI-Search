@@ -234,6 +234,68 @@ serve(async (req) => {
         break;
       }
 
+      // ============ DELETE CONTACT ============
+      case 'delete_contact': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}`;
+        method = 'DELETE';
+        break;
+      }
+
+      // ============ CONTACT NOTES ============
+      case 'list_contact_notes': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/notes`;
+        break;
+      }
+      case 'add_contact_note': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/notes`;
+        method = 'POST';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+
+      // ============ CONTACT TASKS ============
+      case 'list_contact_tasks': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/tasks`;
+        break;
+      }
+      case 'add_contact_task': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/tasks`;
+        method = 'POST';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+
+      // ============ REMOVE TAGS ============
+      case 'remove_tags': {
+        if (!params?.contactId) throw new Error('contactId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/tags`;
+        method = 'DELETE';
+        fetchBody = JSON.stringify({ tags: reqBody?.tags || [] });
+        break;
+      }
+
+      // ============ CANCEL APPOINTMENT ============
+      case 'cancel_appointment': {
+        if (!params?.eventId) throw new Error('eventId required');
+        endpoint = `${GHL_BASE_URL}/calendars/events/appointments/${params.eventId}`;
+        method = 'DELETE';
+        break;
+      }
+
+      // ============ TRIGGER WORKFLOW ============
+      case 'trigger_workflow': {
+        if (!params?.contactId || !params?.workflowId) throw new Error('contactId and workflowId required');
+        endpoint = `${GHL_BASE_URL}/contacts/${params.contactId}/workflow/${params.workflowId}`;
+        method = 'POST';
+        fetchBody = reqBody ? JSON.stringify(reqBody) : undefined;
+        break;
+      }
+
       // ============ GENERIC PROXY ============
       case 'proxy': {
         if (!path) throw new Error('Path required for proxy action');
