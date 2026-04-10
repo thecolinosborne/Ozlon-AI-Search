@@ -1589,7 +1589,7 @@ async function executeToolCall(
         return { success: true, result: `Email ${args.message_id} marked as read.` };
       }
 
-
+      case 'create_calendar_event': {
         const connId = connMap.get('google-calendar');
         if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
         const event: Record<string, unknown> = {
