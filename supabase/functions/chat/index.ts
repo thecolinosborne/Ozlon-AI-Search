@@ -629,6 +629,156 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ GoHighLevel actions ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contacts',
+      description: 'List or search contacts in GoHighLevel CRM. Use when the user asks about their GHL contacts, leads, or CRM data.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query to filter contacts by name, email, or phone (optional)' },
+          limit: { type: 'number', description: 'Max contacts to return (default 20)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_contact',
+      description: 'Create a new contact/lead in GoHighLevel CRM.',
+      parameters: {
+        type: 'object',
+        properties: {
+          firstName: { type: 'string', description: 'First name' },
+          lastName: { type: 'string', description: 'Last name' },
+          email: { type: 'string', description: 'Email address' },
+          phone: { type: 'string', description: 'Phone number (optional)' },
+          tags: { type: 'string', description: 'Comma-separated tags (optional)' },
+          source: { type: 'string', description: 'Lead source (optional)' },
+        },
+        required: ['firstName', 'lastName', 'email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_opportunity',
+      description: 'Create a new opportunity/deal in a GoHighLevel pipeline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pipeline_id: { type: 'string', description: 'Pipeline ID to add the opportunity to' },
+          stage_id: { type: 'string', description: 'Stage ID within the pipeline' },
+          name: { type: 'string', description: 'Opportunity name' },
+          contact_id: { type: 'string', description: 'Contact ID to associate with' },
+          monetary_value: { type: 'number', description: 'Deal value in dollars (optional)' },
+          status: { type: 'string', description: 'Status: open, won, lost, abandoned (default: open)' },
+        },
+        required: ['pipeline_id', 'stage_id', 'name', 'contact_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_opportunities',
+      description: 'List opportunities/deals in a GoHighLevel pipeline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pipeline_id: { type: 'string', description: 'Pipeline ID to list opportunities from' },
+          limit: { type: 'number', description: 'Max results (default 20)' },
+        },
+        required: ['pipeline_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_pipelines',
+      description: 'List all pipelines and their stages in GoHighLevel. Use this first to discover pipeline and stage IDs.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_send_message',
+      description: 'Send an SMS or email message to a contact via GoHighLevel conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contact_id: { type: 'string', description: 'Contact ID to message' },
+          message: { type: 'string', description: 'Message text' },
+          type: { type: 'string', description: 'Message type: SMS, Email, WhatsApp (default: SMS)' },
+          subject: { type: 'string', description: 'Email subject (required for Email type)' },
+        },
+        required: ['contact_id', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_calendars',
+      description: 'List all calendars in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_book_appointment',
+      description: 'Book an appointment on a GoHighLevel calendar for a contact.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendar_id: { type: 'string', description: 'Calendar ID' },
+          contact_id: { type: 'string', description: 'Contact ID' },
+          start_time: { type: 'string', description: 'Start time ISO 8601' },
+          end_time: { type: 'string', description: 'End time ISO 8601' },
+          title: { type: 'string', description: 'Appointment title (optional)' },
+        },
+        required: ['calendar_id', 'contact_id', 'start_time', 'end_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_tags',
+      description: 'Add tags to a contact in GoHighLevel.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contact_id: { type: 'string', description: 'Contact ID' },
+          tags: { type: 'string', description: 'Comma-separated tags to add' },
+        },
+        required: ['contact_id', 'tags'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_workflows',
+      description: 'List all workflows in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_campaigns',
+      description: 'List all campaigns in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 // ============================================================================
