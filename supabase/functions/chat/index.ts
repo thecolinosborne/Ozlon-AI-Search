@@ -1767,6 +1767,17 @@ async function executeToolCall(
 ): Promise<{ success: boolean; result: string }> {
   try {
     const accountHint = args.account as string | undefined;
+
+    // Helper: generate context-aware error when connection not found
+    const noConnError = (app: string, label: string): string => {
+      const entries = connMap.get(app);
+      if (entries && entries.length > 1) {
+        const accounts = entries.map(e => e.email || e.id).join(', ');
+        return `Multiple ${label} accounts are connected (${accounts}). Please specify which account to use by including the email address in your request, then try again.`;
+      }
+      return `${label} is not connected. Ask the user to connect it in Settings > Maton AI Integrations.`;
+    };
+
     switch (toolName) {
       case 'send_email': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
