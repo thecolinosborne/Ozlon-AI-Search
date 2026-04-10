@@ -162,6 +162,7 @@ export async function streamChat({
     const decoder = new TextDecoder();
     let buffer = '';
     let currentToolCall: { name: string; arguments: string } | null = null;
+    let currentEventType = 'message';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -178,6 +179,13 @@ export async function streamChat({
         const trimmedLine = line.trim();
         
         if (!trimmedLine || trimmedLine.startsWith(':')) continue;
+
+        // Track SSE event type
+        if (trimmedLine.startsWith('event: ')) {
+          currentEventType = trimmedLine.slice(7).trim();
+          continue;
+        }
+
         if (!trimmedLine.startsWith('data: ')) continue;
 
         const data = trimmedLine.slice(6);
