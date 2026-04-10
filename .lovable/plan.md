@@ -1,72 +1,48 @@
 
 
-# Task Activity Portal + Email Management Tools
+# Fix Email Cleaning: Newest-First + Reliable Batch Trash + Real-Time Streaming
 
-## Two Problems to Solve
+## Problems
 
-### Problem 1: No email management tools
-The chat edge function has `send_email` and `create_email_draft` but **no tools for reading, filtering, trashing, or managing emails**. When you asked Ozlon to clean your inbox, it had no tool to execute that action. It could only read a summary of unread emails via the fetcher — it cannot trash, delete, label, or batch-modify messages.
+1. **Emails processed oldest-first**: Gmail API defaults to relevance-based ordering. No explicit sort is applied, so the AI processes whatever Gmail returns first — not the newest emails you care about.
+2. **`batch_trash_emails` uses wrong API**: `batchModify` with `addLabelIds: ['TRASH']` is unreliable. Gmail requires individual `POST /messages/{id}/trash` calls.
+3. **Only 25 emails per cycle**: `list_emails` caps metadata fetches at 25, so the AI thinks it's done after one small batch.
+4. **Task updates not real-time**: All `task_update` SSE events are collected and dumped at the end — the bubble never appears while work is happening.
+5. **Tool loop capped at 5 iterations**: Not enough for bulk operations (fetch → trash → fetch next page → trash → summarize).
 
-### Problem 2: No task visibility
-When the AI does execute background operations, there's no feedback showing what it's doing. The approved Task Activity Portal plan addresses this.
+## Changes
 
-## Implementation
+### `supabase/functions/chat/index.ts`
 
-### Part 1: Email Management Tools (chat edge function)
+**1. Fix `list_emails` — newest first, more results**
+- Add `&orderBy=internalDate desc` or prepend `newer_than:` to query defaults
+- Actually: Gmail `messages.list` doesn't support `orderBy`. Instead, the results are already in reverse chronological order by default when using label queries like `in:inbox`. The issue is the 25-metadata cap. Increase batch to 50 and pass `maxResults=100`.
 
-Add these tools to `supabase/functions/chat/index.ts`:
+**2. Add `list_email_ids` tool — lightweight bulk fetcher**
+- New tool that returns only message IDs (no metadata fetch), up to 500, with `pageToken` support
+- Lets the AI see the full scope before deciding what to trash
 
-| Tool | Gmail API Endpoint | Purpose |
-|------|-------------------|---------|
-| `list_emails` | `GET /messages` with query params | Search/filter emails by query (from, subject, label, date) |
-| `get_email` | `GET /messages/{id}` | Read full email content |
-| `trash_email` | `POST /messages/{id}/trash` | Move single email to trash |
-| `batch_trash_emails` | `POST /messages/batchModify` | Move multiple emails to trash at once |
-| `label_email` | `POST /messages/{id}/modify` | Add/remove labels (INBOX, STARRED, etc.) |
-| `mark_email_read` | `POST /messages/{id}/modify` | Mark as read (remove UNREAD label) |
+**3. Fix `batch_trash_emails` — use individual trash calls**
+- Replace `batchModify` with parallel `POST /messages/{id}/trash` calls in chunks of 10
+- Return success/failure count
 
-The `batch_trash_emails` tool is critical — it allows the AI to fetch emails, identify non-client ones, and trash them in a single batch call instead of one-by-one (avoiding edge function timeouts).
+**4. Increase `maxIterations` from 5 to 10**
+- Bulk email cleaning needs multiple fetch→trash cycles
 
-Tool definitions go in `MATON_ACTION_TOOLS`, execution handlers in the `executeToolCall` switch block, and service mapping in `toolToService`.
+**5. Stream task updates in real-time**
+- Replace the "collect then dump" pattern with `TransformStream`
+- Write `event: task_update` SSE lines immediately as each tool executes
+- Write final content + `[DONE]` at the end
+- The TaskActivityBubble will appear and update live
 
-### Part 2: Task Activity Portal (frontend)
+### No frontend changes needed
+- `chatService.ts` already parses `event: task_update` SSE events
+- `TaskActivityBubble` and store already work
+- The only issue was the backend wasn't streaming them in real-time
 
-**New files:**
-1. `src/stores/useTaskActivityStore.ts` — Zustand store tracking `{ id, title, status, steps: { label, status, timestamp }[] }[]`
-2. `src/components/TaskActivityBubble.tsx` — Fixed-position floating bubble (bottom-right, above bottom nav) with spinner, shows when tasks are active, click to expand
-3. `src/components/TaskActivityPortal.tsx` — Sheet/drawer showing step-by-step progress with status icons (checkmark/spinner/circle)
+## Summary of File Changes
 
-**Modified files:**
-1. `src/services/chatService.ts` — Parse `event: task_update` SSE events alongside existing `data:` events, add `onTaskUpdate` callback
-2. `src/pages/Index.tsx` — Render `<TaskActivityBubble />`, wire `onTaskUpdate` from `streamChat` to task store
-3. `supabase/functions/chat/index.ts` — Emit `event: task_update` SSE events before/after each tool execution:
-   ```
-   event: task_update
-   data: {"taskId":"...","title":"Cleaning inbox","step":"Fetching emails","status":"in_progress"}
-   ```
-
-### Part 3: Backend task update emission
-
-In the chat edge function's tool execution loop, before calling each tool:
-- Emit an SSE `task_update` event with status `in_progress`
-- After tool returns, emit another with status `done` or `error`
-- This gives the frontend real-time step-by-step visibility
-
-## Design
-- Bubble: fixed bottom-right (above bottom nav), 48px, pulsing primary ring when active, green check when done
-- Portal: Sheet sliding up, clean step list with `✓ ⏳ ○` indicators
-- Auto-dismiss 5s after all steps complete
-
-## Files Changed
-- `supabase/functions/chat/index.ts` — Add 6 email tools + task_update SSE emission
-- `src/services/chatService.ts` — Parse task_update events
-- `src/pages/Index.tsx` — Render TaskActivityBubble, wire onTaskUpdate
-- `src/stores/useTaskActivityStore.ts` — New
-- `src/components/TaskActivityBubble.tsx` — New
-- `src/components/TaskActivityPortal.tsx` — New
-
-## What Stays
-- All existing tools, fetchers, and integrations untouched
-- No database changes
-- No new edge functions (everything added to existing chat function)
+| File | Change |
+|------|--------|
+| `supabase/functions/chat/index.ts` | Add `list_email_ids` tool, fix `batch_trash_emails` to use individual trash calls, increase metadata batch to 50, bump `maxIterations` to 10, refactor action-request path to use `TransformStream` for real-time SSE |
 
