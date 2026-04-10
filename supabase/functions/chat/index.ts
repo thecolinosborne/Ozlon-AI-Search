@@ -3055,6 +3055,7 @@ serve(async (req) => {
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
+    let aliasMap: AliasEntry[] = [];
 
     if (MATON_API_KEY) {
       try {
