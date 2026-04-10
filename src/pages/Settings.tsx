@@ -36,7 +36,7 @@ import {
 
 const Settings = () => {
   const navigate = useNavigate();
-  const { user: storeUser, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
+  const { user: storeUser, updateUser, reset, clearMessages: clearStoreMessages } = useAppStore();
   const { authLoading, session, user: authUser, systemName, signOut, voiceEnabled, setVoiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!authUser;
   
