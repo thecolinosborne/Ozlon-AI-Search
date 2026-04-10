@@ -1542,12 +1542,13 @@ async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
   matonApiKey: string,
-  connMap: Map<string, string>,
+  connMap: MultiConnMap,
 ): Promise<{ success: boolean; result: string }> {
   try {
+    const accountHint = args.account as string | undefined;
     switch (toolName) {
       case 'send_email': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
