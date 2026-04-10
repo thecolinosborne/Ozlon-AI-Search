@@ -123,6 +123,7 @@ const SERVICE_DETECTORS: ServiceDetection[] = [
   { app: 'zoom', label: 'Zoom', keywords: ['zoom', 'zoom meeting', 'zoom call', 'video call'] },
   { app: 'discord', label: 'Discord', keywords: ['discord', 'discord server', 'discord channel'] },
   { app: 'typeform', label: 'Typeform', keywords: ['typeform', 'form responses', 'survey', 'survey responses'] },
+  { app: 'gohighlevel', label: 'GoHighLevel', keywords: ['gohighlevel', 'ghl', 'high level', 'highlevel', 'go high level', 'leadconnector', 'lead connector', 'sub-account', 'subaccount', 'pipeline', 'pipelines', 'opportunity', 'opportunities', 'funnels', 'funnel', 'workflows', 'workflow', 'campaigns', 'campaign', 'conversations', 'conversation'] },
 ];
 
 function detectServiceIntents(messages: { role: string; content: string }[]): string[] {
@@ -276,6 +277,84 @@ async function fetchGenericData(key: string, connId: string, app: string): Promi
     const data = await callMatonGateway(key, endpoints[app], connId);
     return JSON.stringify(data, null, 2).substring(0, 2000);
   } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
+}
+
+// ============================================================================
+// GOHIGHLEVEL DATA FETCHER (via dedicated edge function)
+// ============================================================================
+
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
+
+async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
+  const res = await fetch(`${GHL_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${GHL_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return { raw: await res.text() };
+}
+
+async function fetchGHLData(): Promise<string> {
+  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+  if (!GHL_LOCATION_ID) return 'GoHighLevel location ID not configured.';
+
+  const sections: string[] = [];
+
+  // Fetch in parallel: contacts, pipelines, calendars, conversations, campaigns
+  const [contacts, pipelines, calendars, conversations, campaigns, workflows] = await Promise.all([
+    callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; dateAdded?: string; tags?: string[] }[] } | null>,
+    callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] } | null>,
+    callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ calendars?: { id: string; name: string; description?: string }[] } | null>,
+    callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ conversations?: { id: string; contactId?: string; lastMessageBody?: string; dateUpdated?: string; type?: string }[] } | null>,
+    callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ campaigns?: { id: string; name: string; status?: string }[] } | null>,
+    callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ workflows?: { id: string; name: string; status?: string }[] } | null>,
+  ]);
+
+  if (contacts?.contacts?.length) {
+    sections.push(`### Recent Contacts (${contacts.contacts.length})\n${contacts.contacts.map(c =>
+      `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`
+    ).join('\n')}`);
+  }
+
+  if (pipelines?.pipelines?.length) {
+    sections.push(`### Pipelines (${pipelines.pipelines.length})\n${pipelines.pipelines.map(p =>
+      `- ${p.name} (ID: ${p.id})${p.stages?.length ? '\n  Stages: ' + p.stages.map(s => s.name).join(' → ') : ''}`
+    ).join('\n')}`);
+  }
+
+  if (calendars?.calendars?.length) {
+    sections.push(`### Calendars (${calendars.calendars.length})\n${calendars.calendars.map(c =>
+      `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`
+    ).join('\n')}`);
+  }
+
+  if (conversations?.conversations?.length) {
+    sections.push(`### Recent Conversations (${conversations.conversations.length})\n${conversations.conversations.map(c =>
+      `- Type: ${c.type || '?'} | Last: "${(c.lastMessageBody || '').substring(0, 80)}" | ${c.dateUpdated || ''}`
+    ).join('\n')}`);
+  }
+
+  if (campaigns?.campaigns?.length) {
+    sections.push(`### Campaigns (${campaigns.campaigns.length})\n${campaigns.campaigns.map(c =>
+      `- ${c.name} (${c.status || 'unknown'})`
+    ).join('\n')}`);
+  }
+
+  if (workflows?.workflows?.length) {
+    sections.push(`### Workflows (${workflows.workflows.length})\n${workflows.workflows.map(w =>
+      `- ${w.name} (${w.status || 'unknown'})`
+    ).join('\n')}`);
+  }
+
+  return sections.length ? sections.join('\n\n') : 'GoHighLevel is connected but no data was returned. Check your location ID and API permissions.';
 }
 
 const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
@@ -550,6 +629,156 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ GoHighLevel actions ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contacts',
+      description: 'List or search contacts in GoHighLevel CRM. Use when the user asks about their GHL contacts, leads, or CRM data.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query to filter contacts by name, email, or phone (optional)' },
+          limit: { type: 'number', description: 'Max contacts to return (default 20)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_contact',
+      description: 'Create a new contact/lead in GoHighLevel CRM.',
+      parameters: {
+        type: 'object',
+        properties: {
+          firstName: { type: 'string', description: 'First name' },
+          lastName: { type: 'string', description: 'Last name' },
+          email: { type: 'string', description: 'Email address' },
+          phone: { type: 'string', description: 'Phone number (optional)' },
+          tags: { type: 'string', description: 'Comma-separated tags (optional)' },
+          source: { type: 'string', description: 'Lead source (optional)' },
+        },
+        required: ['firstName', 'lastName', 'email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_opportunity',
+      description: 'Create a new opportunity/deal in a GoHighLevel pipeline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pipeline_id: { type: 'string', description: 'Pipeline ID to add the opportunity to' },
+          stage_id: { type: 'string', description: 'Stage ID within the pipeline' },
+          name: { type: 'string', description: 'Opportunity name' },
+          contact_id: { type: 'string', description: 'Contact ID to associate with' },
+          monetary_value: { type: 'number', description: 'Deal value in dollars (optional)' },
+          status: { type: 'string', description: 'Status: open, won, lost, abandoned (default: open)' },
+        },
+        required: ['pipeline_id', 'stage_id', 'name', 'contact_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_opportunities',
+      description: 'List opportunities/deals in a GoHighLevel pipeline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pipeline_id: { type: 'string', description: 'Pipeline ID to list opportunities from' },
+          limit: { type: 'number', description: 'Max results (default 20)' },
+        },
+        required: ['pipeline_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_pipelines',
+      description: 'List all pipelines and their stages in GoHighLevel. Use this first to discover pipeline and stage IDs.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_send_message',
+      description: 'Send an SMS or email message to a contact via GoHighLevel conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contact_id: { type: 'string', description: 'Contact ID to message' },
+          message: { type: 'string', description: 'Message text' },
+          type: { type: 'string', description: 'Message type: SMS, Email, WhatsApp (default: SMS)' },
+          subject: { type: 'string', description: 'Email subject (required for Email type)' },
+        },
+        required: ['contact_id', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_calendars',
+      description: 'List all calendars in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_book_appointment',
+      description: 'Book an appointment on a GoHighLevel calendar for a contact.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendar_id: { type: 'string', description: 'Calendar ID' },
+          contact_id: { type: 'string', description: 'Contact ID' },
+          start_time: { type: 'string', description: 'Start time ISO 8601' },
+          end_time: { type: 'string', description: 'End time ISO 8601' },
+          title: { type: 'string', description: 'Appointment title (optional)' },
+        },
+        required: ['calendar_id', 'contact_id', 'start_time', 'end_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_tags',
+      description: 'Add tags to a contact in GoHighLevel.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contact_id: { type: 'string', description: 'Contact ID' },
+          tags: { type: 'string', description: 'Comma-separated tags to add' },
+        },
+        required: ['contact_id', 'tags'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_workflows',
+      description: 'List all workflows in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_campaigns',
+      description: 'List all campaigns in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 // ============================================================================
@@ -697,6 +926,128 @@ async function executeToolCall(
         return { success: true, result: `Issue created: ${res.key} - "${args.summary}"` };
       }
 
+      // ============ GoHighLevel tools ============
+      case 'ghl_list_contacts': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const query = args.query ? `&query=${encodeURIComponent(args.query as string)}` : '';
+        const data = await callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=${limit}${query}`) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; tags?: string[] }[] };
+        const contacts = data.contacts || [];
+        if (!contacts.length) return { success: true, result: 'No contacts found.' };
+        return { success: true, result: `Found ${contacts.length} contacts:\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'} | ID: ${c.id}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`).join('\n')}` };
+      }
+
+      case 'ghl_create_contact': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const contactData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          firstName: args.firstName,
+          lastName: args.lastName,
+          email: args.email,
+        };
+        if (args.phone) contactData.phone = args.phone;
+        if (args.source) contactData.source = args.source;
+        if (args.tags) contactData.tags = (args.tags as string).split(',').map(t => t.trim());
+        const res = await callGHL('/contacts/', 'POST', contactData) as { contact?: { id: string; firstName?: string; lastName?: string }; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        return { success: true, result: `Contact created: ${res.contact?.firstName} ${res.contact?.lastName} (ID: ${res.contact?.id})` };
+      }
+
+      case 'ghl_create_opportunity': {
+        const data: Record<string, unknown> = {
+          pipelineId: args.pipeline_id,
+          pipelineStageId: args.stage_id,
+          name: args.name,
+          contactId: args.contact_id,
+          status: args.status || 'open',
+        };
+        if (args.monetary_value) data.monetaryValue = args.monetary_value;
+        const res = await callGHL('/opportunities/', 'POST', data) as { opportunity?: { id: string; name: string }; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        return { success: true, result: `Opportunity created: "${res.opportunity?.name}" (ID: ${res.opportunity?.id})` };
+      }
+
+      case 'ghl_list_opportunities': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const data = await callGHL(`/opportunities/search?locationId=${GHL_LOCATION_ID}&pipelineId=${args.pipeline_id}&limit=${limit}`) as { opportunities?: { id: string; name: string; monetaryValue?: number; status?: string; pipelineStageId?: string; contact?: { name?: string } }[] };
+        const opps = data.opportunities || [];
+        if (!opps.length) return { success: true, result: 'No opportunities found in this pipeline.' };
+        return { success: true, result: `Found ${opps.length} opportunities:\n${opps.map(o => `- ${o.name} | $${o.monetaryValue || 0} | Status: ${o.status || '?'} | ID: ${o.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_pipelines': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as { pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] };
+        const pipelines = data.pipelines || [];
+        if (!pipelines.length) return { success: true, result: 'No pipelines found.' };
+        return { success: true, result: `Pipelines:\n${pipelines.map(p => `- ${p.name} (ID: ${p.id})\n  Stages: ${(p.stages || []).map(s => `${s.name} (ID: ${s.id})`).join(' → ')}`).join('\n')}` };
+      }
+
+      case 'ghl_send_message': {
+        const type = (args.type as string) || 'SMS';
+        const msgData: Record<string, unknown> = {
+          type,
+          contactId: args.contact_id,
+          message: args.message,
+        };
+        if (type === 'Email' && args.subject) msgData.subject = args.subject;
+        const res = await callGHL('/conversations/messages', 'POST', msgData) as { messageId?: string; message?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL message error: ${res.error}` };
+        return { success: true, result: `${type} sent to contact ${args.contact_id}: "${(args.message as string).substring(0, 100)}"` };
+      }
+
+      case 'ghl_list_calendars': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as { calendars?: { id: string; name: string; description?: string }[] };
+        const cals = data.calendars || [];
+        if (!cals.length) return { success: true, result: 'No calendars found.' };
+        return { success: true, result: `Calendars:\n${cals.map(c => `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`).join('\n')}` };
+      }
+
+      case 'ghl_book_appointment': {
+        const apptData: Record<string, unknown> = {
+          calendarId: args.calendar_id,
+          contactId: args.contact_id,
+          startTime: args.start_time,
+          endTime: args.end_time,
+        };
+        if (args.title) apptData.title = args.title;
+        const res = await callGHL('/calendars/events/appointments', 'POST', apptData) as { id?: string; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL appointment error: ${res.error || res.message}` };
+        return { success: true, result: `Appointment booked: ${args.start_time} to ${args.end_time} (ID: ${res.id})` };
+      }
+
+      case 'ghl_add_tags': {
+        const tags = (args.tags as string).split(',').map(t => t.trim());
+        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'POST', { tags }) as { tags?: string[]; error?: string };
+        if (res.error) return { success: false, result: `GHL tag error: ${res.error}` };
+        return { success: true, result: `Tags added to contact ${args.contact_id}: ${tags.join(', ')}` };
+      }
+
+      case 'ghl_list_workflows': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`) as { workflows?: { id: string; name: string; status?: string }[] };
+        const workflows = data.workflows || [];
+        if (!workflows.length) return { success: true, result: 'No workflows found.' };
+        return { success: true, result: `Workflows:\n${workflows.map(w => `- ${w.name} (${w.status || 'unknown'}) | ID: ${w.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_campaigns': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`) as { campaigns?: { id: string; name: string; status?: string }[] };
+        const camps = data.campaigns || [];
+        if (!camps.length) return { success: true, result: 'No campaigns found.' };
+        return { success: true, result: `Campaigns:\n${camps.map(c => `- ${c.name} (${c.status || 'unknown'}) | ID: ${c.id}`).join('\n')}` };
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -792,6 +1143,9 @@ You are the intelligence AND action layer of ${osName}. Read data, take actions,
 // ============================================================================
 
 function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  const hasGHL = !!GHL_API_KEY;
+
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
     'create_email_draft': 'google-mail',
@@ -804,10 +1158,23 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
     'search_google_drive': 'google-drive',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
+    // GHL tools - keyed to special 'ghl' marker
+    'ghl_list_contacts': 'ghl',
+    'ghl_create_contact': 'ghl',
+    'ghl_create_opportunity': 'ghl',
+    'ghl_list_opportunities': 'ghl',
+    'ghl_list_pipelines': 'ghl',
+    'ghl_send_message': 'ghl',
+    'ghl_list_calendars': 'ghl',
+    'ghl_book_appointment': 'ghl',
+    'ghl_add_tags': 'ghl',
+    'ghl_list_workflows': 'ghl',
+    'ghl_list_campaigns': 'ghl',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
+    if (requiredService === 'ghl') return hasGHL;
     return requiredService ? connMap.has(requiredService) : true;
   });
 }
@@ -957,6 +1324,34 @@ CONNECTED SERVICES (you can read data and take actions on these)
       }
     }
 
+    // GoHighLevel data injection (separate from Maton - uses its own API key)
+    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+    if (GHL_API_KEY) {
+      // Check if user is asking about GHL
+      const ghlDetected = detectServiceIntents(messages).includes('gohighlevel');
+      if (ghlDetected) {
+        try {
+          console.log('Fetching GoHighLevel data...');
+          const ghlData = await fetchGHLData();
+          systemPrompt += `\n\n===========================================================
+GOHIGHLEVEL CRM DATA
+===========================================================
+The following is REAL data from the user's GoHighLevel account. Use this to answer questions about their CRM, pipelines, contacts, etc.\n\n${ghlData}`;
+          console.log('GHL data injected');
+        } catch (e) {
+          console.error('Error fetching GHL data:', e);
+        }
+      }
+
+      // Add GHL to connected services list
+      systemPrompt += `\n- GoHighLevel CRM (contacts, pipelines, opportunities, calendars, conversations, campaigns, workflows)`;
+
+      // If no Maton tools were added, ensure GHL tools are still available
+      if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
+        availableTools = getAvailableTools(connMap);
+      }
+    }
+
     // Build OpenAI messages
     const openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[] = [
       { role: 'system', content: systemPrompt },
@@ -978,7 +1373,7 @@ CONNECTED SERVICES (you can read data and take actions on these)
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
