@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { TaskActivityPortal } from "./TaskActivityPortal";
@@ -9,7 +9,7 @@ export const TaskActivityBubble = () => {
 
   const activeTasks = tasks.filter((t) => t.status === 'in_progress');
   const recentDone = tasks.filter(
-    (t) => t.status === 'done' && t.completedAt && Date.now() - t.completedAt < 5000
+    (t) => t.status === 'done' && t.completedAt && Date.now() - t.completedAt < (t.summary ? 15000 : 5000)
   );
   const recentError = tasks.filter(
     (t) => t.status === 'error' && t.completedAt && Date.now() - t.completedAt < 8000
@@ -26,7 +26,8 @@ export const TaskActivityBubble = () => {
 
     const timer = setTimeout(() => {
       completedTasks.forEach((t) => {
-        if (t.completedAt && Date.now() - t.completedAt >= 5000) {
+        const threshold = t.summary ? 15000 : 5000;
+        if (t.completedAt && Date.now() - t.completedAt >= threshold) {
           dismissTask(t.id);
         }
       });
@@ -58,15 +59,23 @@ export const TaskActivityBubble = () => {
         ) : (
           <AlertCircle className="w-4 h-4 text-destructive" />
         )}
-        <span className="text-sm font-medium text-foreground max-w-[200px] truncate">
+        <span className="text-sm font-medium text-foreground max-w-[240px] truncate">
           {currentTask.status === 'in_progress'
             ? currentStep?.label || currentTask.title
             : currentTask.status === 'done'
-            ? 'Task complete'
+            ? currentTask.summary || 'Task complete'
             : 'Task failed'}
         </span>
         {visibleTasks.length > 1 && (
           <span className="text-xs text-muted-foreground">+{visibleTasks.length - 1}</span>
+        )}
+        {currentTask.status !== 'in_progress' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); dismissTask(currentTask.id); }}
+            className="ml-1 text-muted-foreground hover:text-foreground"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         )}
         {activeTasks.length > 0 && (
           <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-primary animate-ping" />

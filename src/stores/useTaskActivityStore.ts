@@ -13,6 +13,7 @@ export interface ActiveTask {
   steps: TaskStep[];
   startedAt: number;
   completedAt?: number;
+  summary?: string;
 }
 
 interface TaskActivityState {
@@ -21,6 +22,7 @@ interface TaskActivityState {
   addTask: (id: string, title: string) => void;
   updateStep: (taskId: string, stepLabel: string, status: TaskStep['status']) => void;
   completeTask: (taskId: string, status?: 'done' | 'error') => void;
+  setTaskSummary: (taskId: string, summary: string) => void;
   dismissTask: (taskId: string) => void;
   setPortalOpen: (open: boolean) => void;
 }
@@ -55,6 +57,13 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === taskId ? { ...t, status, completedAt: Date.now() } : t
+      ),
+    })),
+
+  setTaskSummary: (taskId, summary) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === taskId ? { ...t, summary } : t
       ),
     })),
 

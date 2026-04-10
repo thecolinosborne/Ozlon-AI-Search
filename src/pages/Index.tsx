@@ -35,7 +35,7 @@ const Index = () => {
   const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
-  const { addTask, updateStep, completeTask } = useTaskActivityStore();
+  const { addTask, updateStep, completeTask, setTaskSummary } = useTaskActivityStore();
   
   // Redirect to onboarding if needed
   useEffect(() => {
@@ -195,7 +195,6 @@ const Index = () => {
         },
         onTaskUpdate: (update: TaskUpdate) => {
           if (update.status === 'in_progress') {
-            // Check if task exists, if not create it
             const existing = useTaskActivityStore.getState().tasks.find(t => t.id === update.taskId);
             if (!existing) {
               addTask(update.taskId, update.title);
@@ -203,6 +202,9 @@ const Index = () => {
             updateStep(update.taskId, update.step, 'in_progress');
           } else if (update.status === 'done') {
             updateStep(update.taskId, update.step, 'done');
+            if (update.summary) {
+              setTaskSummary(update.taskId, update.summary);
+            }
           } else if (update.status === 'error') {
             updateStep(update.taskId, update.step, 'error');
             completeTask(update.taskId, 'error');

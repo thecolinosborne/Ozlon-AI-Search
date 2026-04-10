@@ -91,6 +91,7 @@ export interface TaskUpdate {
   title: string;
   step: string;
   status: 'in_progress' | 'done' | 'error';
+  summary?: string;
 }
 
 export interface StreamChatOptions {
