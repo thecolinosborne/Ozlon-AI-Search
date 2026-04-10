@@ -5,25 +5,16 @@ import {
   Mic,
   Type,
   Keyboard,
-  Calendar,
-  Mail,
-  CreditCard,
   LogOut,
-  Cpu,
-  Brain,
-  MessageSquare,
-  Smile,
-  Wallet,
-  FileText,
   ArrowLeft,
   Edit3,
   Trash2,
   Volume2,
   PlayCircle,
   Phone,
+  Plug,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
-import { MatonIntegrations } from "@/components/settings/MatonIntegrations";
 import { SettingsRow } from "@/components/settings/SettingsRow";
 import { useAppStore } from "@/stores/useAppStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -45,7 +36,7 @@ import {
 
 const Settings = () => {
   const navigate = useNavigate();
-  const { user: storeUser, updateUser, connections, updateConnection, agents, toggleAgent, reset, clearMessages: clearStoreMessages } = useAppStore();
+  const { user: storeUser, updateUser, reset, clearMessages: clearStoreMessages } = useAppStore();
   const { authLoading, session, user: authUser, systemName, signOut, voiceEnabled, setVoiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!authUser;
   
@@ -183,14 +174,6 @@ const Settings = () => {
     toast.success(`System renamed to ${trimmedName}`);
   };
 
-  const agentIcons: Record<string, typeof Cpu> = {
-    memory: Brain,
-    orchestration: Cpu,
-    communication: MessageSquare,
-    personality: Smile,
-    banking: Wallet,
-    summary: FileText,
-  };
 
   // Show loading state
   if (authLoading) {
@@ -289,54 +272,14 @@ const Settings = () => {
           />
         </SettingsSection>
 
-        {/* Connections */}
-        <SettingsSection title="Connections">
+        {/* Integrations */}
+        <SettingsSection title="Integrations">
           <SettingsRow
-            icon={Calendar}
-            label="Calendar"
-            description={connections.find((c) => c.id === "calendar")?.connected ? "Connected" : "Not connected"}
-            type="toggle"
-            value={connections.find((c) => c.id === "calendar")?.connected}
-            onChange={(val) => updateConnection("calendar", val)}
+            icon={Plug}
+            label="Manage Integrations"
+            description="Connect and configure your tools"
+            onClick={() => navigate("/integrations")}
           />
-          <SettingsRow
-            icon={Mail}
-            label="Email"
-            description={connections.find((c) => c.id === "email")?.connected ? "Connected" : "Not connected"}
-            type="toggle"
-            value={connections.find((c) => c.id === "email")?.connected}
-            onChange={(val) => updateConnection("email", val)}
-          />
-          <SettingsRow
-            icon={CreditCard}
-            label="Banking"
-            description={connections.find((c) => c.id === "banking")?.connected ? "Connected" : "Not connected"}
-            type="toggle"
-            value={connections.find((c) => c.id === "banking")?.connected}
-            onChange={(val) => updateConnection("banking", val)}
-          />
-        </SettingsSection>
-
-        {/* Maton AI Integrations */}
-        <MatonIntegrations />
-
-        {/* Agents */}
-        <SettingsSection title="Agents">
-          {agents.map((agent) => {
-            const Icon = agentIcons[agent.id] || Cpu;
-            return (
-              <SettingsRow
-                key={agent.id}
-                icon={Icon}
-                label={agent.name}
-                description={agent.status === "pending" ? "Coming soon" : agent.enabled ? "Enabled" : "Disabled"}
-                type="toggle"
-                value={agent.enabled}
-                onChange={() => toggleAgent(agent.id)}
-                disabled={agent.status === "pending"}
-              />
-            );
-          })}
         </SettingsSection>
 
         {/* System */}
