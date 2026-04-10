@@ -6,26 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-/**
- * Ozlon Chat Edge Function - Agent-Expandable Architecture
- * 
- * This is Agent 0 - the main coordinating brain that handles all user requests.
- * It routes to specialized agents based on intent and supports tool calling.
- * 
- * ARCHITECTURE:
- * - Model Router: Supports multiple models (default: GPT-4.1)
- * - Tool Registry: Extensible tool/function definitions
- * - Agent Context: Metadata for multi-agent routing
- * 
- * DEVELOPER NOTES for future integrations:
- * - CHECK_MONEY: Integrate with Plaid, banking APIs for real financial data
- * - CHECK_MAIL: Integrate with Gmail/Outlook APIs for email access
- * - DAILY_DIGEST: Integrate with Google Calendar, Todoist, etc.
- * - ANALYZE_DAY: Integrate with journaling apps, activity trackers
- */
-
 // ============================================================================
-// MODEL ROUTER - Supports multiple models, extensible for future agents
+// MODEL ROUTER
 // ============================================================================
 
 interface ModelConfig {
@@ -67,330 +49,7 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
 const DEFAULT_MODEL = 'gpt-5';
 
 // ============================================================================
-// TOOL REGISTRY - Extensible tool definitions for agents
-// ============================================================================
-
-interface ToolDefinition {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-// Tool registry - agents can register their tools here
-const TOOL_REGISTRY: Record<string, ToolDefinition[]> = {
-  // Base tools available to all agents
-  base: [],
-  // Money agent tools
-  money: [
-    {
-      type: 'function',
-      function: {
-        name: 'get_account_balance',
-        description: 'Get the current balance of connected bank accounts',
-        parameters: {
-          type: 'object',
-          properties: {
-            account_type: {
-              type: 'string',
-              enum: ['checking', 'savings', 'credit', 'all'],
-              description: 'Type of account to query',
-            },
-          },
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'get_recent_transactions',
-        description: 'Get recent transactions from connected accounts',
-        parameters: {
-          type: 'object',
-          properties: {
-            days: { type: 'number', description: 'Number of days to look back' },
-            category: { type: 'string', description: 'Filter by category' },
-          },
-        },
-      },
-    },
-  ],
-  // Mail agent tools
-  mail: [
-    {
-      type: 'function',
-      function: {
-        name: 'get_unread_emails',
-        description: 'Get unread emails from connected email accounts',
-        parameters: {
-          type: 'object',
-          properties: {
-            limit: { type: 'number', description: 'Maximum number of emails' },
-            priority: { type: 'string', enum: ['high', 'normal', 'all'] },
-          },
-        },
-      },
-    },
-  ],
-  // Calendar agent tools
-  calendar: [
-    {
-      type: 'function',
-      function: {
-        name: 'get_upcoming_events',
-        description: 'Get upcoming calendar events',
-        parameters: {
-          type: 'object',
-          properties: {
-            days: { type: 'number', description: 'Number of days to look ahead' },
-          },
-        },
-      },
-    },
-  ],
-};
-
-// Get tools for a specific agent or intent
-function getToolsForAgent(agentId: string): ToolDefinition[] {
-  const tools = [...(TOOL_REGISTRY.base || [])];
-  if (TOOL_REGISTRY[agentId]) {
-    tools.push(...TOOL_REGISTRY[agentId]);
-  }
-  return tools;
-}
-
-// ============================================================================
-// AGENT CONTEXT - Metadata for multi-agent routing
-// ============================================================================
-
-interface AgentContext {
-  agentId: string;
-  intent?: string;
-  memory?: Record<string, unknown>;
-  activeTools?: string[];
-  metadata?: Record<string, unknown>;
-}
-
-// Map intents to agent IDs
-const INTENT_TO_AGENT: Record<string, string> = {
-  CHECK_MONEY: 'money',
-  CHECK_MAIL: 'mail',
-  DAILY_DIGEST: 'calendar',
-  ANALYZE_DAY: 'analysis',
-};
-
-// ============================================================================
-// SYSTEM PROMPT BUILDER
-// ============================================================================
-
-interface UserSettings {
-  communicationMode?: 'text' | 'voice' | 'both';
-  integrations?: {
-    calendar?: boolean;
-    email?: boolean;
-    banking?: boolean;
-  };
-  agents?: {
-    memory?: boolean;
-    orchestration?: boolean;
-    communication?: boolean;
-    personality?: boolean;
-    banking?: boolean;
-    summary?: boolean;
-  };
-  osName?: string;
-}
-
-const buildSystemPrompt = (
-  systemName: string, 
-  agentContext?: AgentContext, 
-  _isFirstMessage?: boolean,
-  userSettings?: UserSettings
-) => {
-  const osName = userSettings?.osName || systemName || 'Ozlon OS';
-  const commMode = userSettings?.communicationMode || 'both';
-  const integrations = userSettings?.integrations || {};
-  const agents = userSettings?.agents || {};
-
-  let basePrompt = `You are the core AI assistant for ${osName}.
-Your behavior, responses, and functionality must stay consistent across the entire app.
-
-===========================================================
-CORE ROLE
-===========================================================
-You provide:
-1. Clear responses to the user's messages (typed or spoken).
-2. Consistent behavior based on the user's Settings (toggles, modes, integrations, and user preferences).
-3. Clean, readable output using basic markdown.
-4. Understanding of the app's feature availability (some agents may be coming soon).
-5. Support for allowing the user to rename their Operating System from within Settings.
-
-===========================================================
-INPUT CONTEXT
-===========================================================
-- The user may type OR speak.
-- For voice input:
-  - The app handles audio recording and Whisper speech-to-text BEFORE sending content to you.
-  - You ONLY receive plain text.
-- For output:
-  - The app may use TTS to read your response aloud.
-  - You ONLY generate text; you do not control audio playback.
-
-===========================================================
-GLOBAL SETTINGS BEHAVIOR (ACTIVE SETTINGS)
-===========================================================
-
-COMMUNICATION MODE: ${commMode.toUpperCase()}
-${commMode === 'text' ? '- Respond with text only. DO NOT assume or request voice recording.' : ''}
-${commMode === 'voice' ? '- Respond concisely as if responses will be played out loud. Avoid long paragraphs.' : ''}
-${commMode === 'both' ? '- Default mode. Use normal, helpful responses.' : ''}
-
-INTEGRATIONS STATUS:
-- Calendar: ${integrations.calendar ? 'ON - You may reference calendar features and help schedule/summarize events.' : 'OFF - DO NOT mention calendar features.'}
-- Email: ${integrations.email ? 'ON - You may reference email features and help with messages.' : 'OFF - DO NOT mention email features.'}
-- Banking: ${integrations.banking ? 'ON - You may reference financial features and spending analysis.' : 'OFF - DO NOT mention banking features.'}
-
-If a user asks for something that requires a disabled integration, respond:
-"That feature uses your [integration name], but it's currently off in your settings. Want me to help you turn it on?"
-
-AGENTS STATUS:
-- Memory Agent: ${agents.memory ? 'ON - You may remember short-term preferences within the same session.' : 'OFF - DO NOT reference or rely on memory. Treat each message as new.'}
-- Other agents (Orchestration, Communication, Personality, Banking, Summary): Listed as "Coming Soon"
-  If asked about unavailable agents, say: "That agent is listed as Coming Soon in your settings. It isn't available yet, but I can help with anything else."
-
-OPERATING SYSTEM NAME: ${osName}
-- Always refer to this system as "${osName}"
-- Speak naturally: "${osName} settings have been updated" or "I'll make sure ${osName} uses that preference."
-
-===========================================================
-FORMATTING RULES (BASIC MARKDOWN)
-===========================================================
-The UI supports basic markdown. You SHOULD use it for readability.
-
-Allowed:
-- ## section headings
-- ### sub-headings
-- Bullet lists using -
-- Numbered steps using 1.
-- Light **bold** for emphasis
-
-Avoid:
-- Markdown tables
-- Full code blocks unless the user explicitly asks for code
-- HTML
-
-Your output must be clean, readable, and scannable on a phone.
-
-===========================================================
-TONE & RESPONSE STYLE
-===========================================================
-- Friendly, calm, and practical.
-- No robotic language.
-- Use simple language (7th-8th grade reading level).
-- If the user asks for "3rd grade level," simplify further.
-- Be informative and explain the key points clearly.
-- Give enough context so the user understands WHY, not just WHAT.
-- Stay concise but don't be overly brief - cover the main points thoroughly.
-- Use examples when they help clarify a concept.
-- No emojis.
-
-===========================================================
-IF USER IS DEBUGGING OR BUILDING THE APP
-===========================================================
-When the user asks for technical help:
-1. First restate their goal in one short sentence.
-2. Provide a clear 2-5 step explanation.
-3. Offer optional examples or snippets.
-4. Keep answers actionable and avoid rambling.
-5. Never invent buttons or menus that do not exist.
-
-===========================================================
-ERROR HANDLING
-===========================================================
-If input appears mis-transcribed:
-- Say: "It looks like the transcription might have missed something. Could you repeat or rephrase that?"
-- Never blame the user.
-
-===========================================================
-WHAT YOU MUST NOT DO
-===========================================================
-- Never reveal or generate API keys or tokens.
-- Never claim you control UI elements (like mic flashing). The app handles that.
-- Never reference internal system text unless asked.
-- No "As an AI language model..." disclaimers.
-- No raw markdown syntax appearing as text.
-- Do not over-apologize. One brief apology is enough.
-
-===========================================================
-FOLLOW-UP SUGGESTIONS
-===========================================================
-At the end of most responses, offer 2-3 contextual suggestions - things YOU can do for the user as a logical next step. Think of it like a decision tree branching from the current topic.
-
-Format them as actionable offers:
-
-**Want me to:**
-- [Action you can take based on what was just discussed]
-- [Related task that naturally follows]
-- [Deeper dive or alternative approach - optional]
-
-Examples based on context:
-- If discussing finances: "Break down your top 3 spending categories?" or "Set up a savings goal?"
-- If discussing schedule: "Block focus time for tomorrow?" or "Find conflicts this week?"
-- If explaining a concept: "Walk through an example?" or "Compare it to alternatives?"
-
-Make suggestions specific to THEIR situation, not generic. Each suggestion should feel like a natural branch the conversation could take. Skip suggestions for simple greetings or yes/no confirmations.
-
-===========================================================
-SUMMARY
-===========================================================
-Clear, friendly, and informative. Explain the main points with enough context to be useful, but stay focused. Use headings and bullets for readability. Always suggest logical next steps.
-You are the intelligence layer of ${osName}. Stay consistent. Stay helpful. Stay insightful.`;
-
-  // Add agent-specific context based on intent
-  if (agentContext?.intent) {
-    const intentContexts: Record<string, string> = {
-      CHECK_MONEY: integrations.banking ? `
-CURRENT CONTEXT: Financial Analysis Mode
-The user wants financial insights. Provide:
-- Account balances and recent transactions overview
-- Spending pattern analysis
-- Predictive insights on cash flow` : '',
-      
-      CHECK_MAIL: integrations.email ? `
-CURRENT CONTEXT: Communication Analysis Mode
-The user wants email intelligence. Provide:
-- Priority-ranked messages requiring attention
-- Pattern analysis of communication
-- Action items extracted from emails` : '',
-      
-      DAILY_DIGEST: `
-CURRENT CONTEXT: Daily Intelligence Briefing Mode
-Structure your response as:
-- Schedule Overview - Key commitments
-- Priority Matrix - What needs immediate attention
-- Strategic Focus - Highest-leverage activities`,
-      
-      ANALYZE_DAY: `
-CURRENT CONTEXT: Reflection and Pattern Analysis Mode
-Help the user extract value from their day:
-- What worked and what didn't
-- Recurring themes or blockers
-- Key insights for future optimization
-- Specific next steps`,
-    };
-
-    if (intentContexts[agentContext.intent]) {
-      basePrompt += `\n\n${intentContexts[agentContext.intent]}`;
-    }
-  }
-
-  return basePrompt;
-};
-
-// ============================================================================
-// MATON GATEWAY - Multi-service real data engine
+// MATON GATEWAY
 // ============================================================================
 
 const MATON_CTRL_URL = 'https://ctrl.maton.ai';
@@ -432,12 +91,12 @@ async function callMatonGateway(
 }
 
 // ============================================================================
-// SERVICE INTENT DETECTION - Maps user messages to Maton app IDs
+// SERVICE INTENT DETECTION
 // ============================================================================
 
 interface ServiceDetection {
-  app: string;       // Maton app ID
-  label: string;     // Human-readable label
+  app: string;
+  label: string;
   keywords: string[];
 }
 
@@ -480,44 +139,37 @@ function detectServiceIntents(messages: { role: string; content: string }[]): st
 }
 
 // ============================================================================
-// SERVICE DATA FETCHERS - One per Maton app
+// SERVICE DATA FETCHERS (READ)
 // ============================================================================
 
 async function fetchGSCData(key: string, connId: string): Promise<string> {
   const sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string }[] };
   const sites = sitesData.siteEntry || [];
   if (!sites.length) return 'No sites found in GSC.';
-
-  // GSC data is delayed 2-3 days, so use a 7-day window ending 2 days ago
   const recentEnd = new Date(); recentEnd.setDate(recentEnd.getDate() - 2);
   const recentStart = new Date(); recentStart.setDate(recentStart.getDate() - 8);
   const priorEnd = new Date(); priorEnd.setDate(priorEnd.getDate() - 9);
   const priorStart = new Date(); priorStart.setDate(priorStart.getDate() - 15);
-  const recentEndStr = recentEnd.toISOString().split('T')[0];
-  const recentStartStr = recentStart.toISOString().split('T')[0];
-  const priorEndStr = priorEnd.toISOString().split('T')[0];
-  const priorStartStr = priorStart.toISOString().split('T')[0];
-
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
   const reports: string[] = [];
   for (const site of sites) {
     try {
       const [recentData, priorData] = await Promise.all([
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: recentStartStr, endDate: recentEndStr, dimensions: ['query'], rowLimit: 25 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: priorStartStr, endDate: priorEndStr, dimensions: ['query'], rowLimit: 25 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 25 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 25 }),
       ]) as [{ rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }, { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }];
       const rRows = recentData.rows || []; const pRows = priorData.rows || [];
       const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
       const pT = pRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
       let r = `### ${site.siteUrl}\n`;
-      r += `**Last 7 days (${recentStartStr} to ${recentEndStr}):** ${rT.c} clicks, ${rT.i} impressions\n`;
-      r += `**Prior 7 days (${priorStartStr} to ${priorEndStr}):** ${pT.c} clicks, ${pT.i} impressions\n`;
+      r += `**Last 7 days (${fmt(recentStart)} to ${fmt(recentEnd)}):** ${rT.c} clicks, ${rT.i} impressions\n`;
+      r += `**Prior 7 days (${fmt(priorStart)} to ${fmt(priorEnd)}):** ${pT.c} clicks, ${pT.i} impressions\n`;
       const clickChange = pT.c > 0 ? ((rT.c - pT.c) / pT.c * 100).toFixed(1) : 'N/A';
       const impChange = pT.i > 0 ? ((rT.i - pT.i) / pT.i * 100).toFixed(1) : 'N/A';
       r += `**Change:** Clicks ${clickChange}% | Impressions ${impChange}%\n`;
-      if (rRows.length) { r += '\nTop queries (last 7 days):\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
-      else r += 'No query data available yet for this site.\n';
+      if (rRows.length) { r += '\nTop queries:\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
       reports.push(r);
-    } catch (e) { reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}\n`); }
+    } catch (e) { reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}`); }
   }
   return reports.join('\n');
 }
@@ -527,8 +179,7 @@ async function fetchGmailData(key: string, connId: string): Promise<string> {
   const msgs = data.messages || [];
   if (!msgs.length) return 'No unread emails.';
   const details: string[] = [`Unread count: ~${data.resultSizeEstimate || msgs.length}`];
-  const toFetch = msgs.slice(0, 8);
-  for (const m of toFetch) {
+  for (const m of msgs.slice(0, 8)) {
     try {
       const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string };
       const headers = full.payload?.headers || [];
@@ -536,52 +187,31 @@ async function fetchGmailData(key: string, connId: string): Promise<string> {
       const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
       const date = headers.find(h => h.name === 'Date')?.value || '';
       details.push(`- From: ${from} | Subject: ${subject} | ${date}\n  Preview: ${(full.snippet || '').substring(0, 120)}`);
-    } catch { details.push(`- Message ${m.id}: could not load details`); }
+    } catch { details.push(`- Message ${m.id}: could not load`); }
   }
   return details.join('\n');
 }
 
 async function fetchCalendarData(key: string, connId: string): Promise<string> {
   const now = new Date();
-  const endOfWeek = new Date(); endOfWeek.setDate(endOfWeek.getDate() + 7);
-  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${endOfWeek.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }[] };
+  const end = new Date(); end.setDate(end.getDate() + 7);
+  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${end.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }[] };
   const events = data.items || [];
   if (!events.length) return 'No upcoming events in the next 7 days.';
-  return events.map(e => {
-    const start = e.start?.dateTime || e.start?.date || 'TBD';
-    const end = e.end?.dateTime || e.end?.date || '';
-    return `- ${e.summary || '(no title)'} | ${start}${end ? ' to ' + end : ''}${e.location ? ' | ' + e.location : ''}`;
-  }).join('\n');
+  return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'}${e.location ? ' | ' + e.location : ''}`).join('\n');
 }
 
 async function fetchGoogleDriveData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/google-drive/drive/v3/files?pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,mimeType,modifiedTime,size,webViewLink)', connId) as { files?: { name: string; mimeType: string; modifiedTime: string; webViewLink?: string }[] };
+  const data = await callMatonGateway(key, '/google-drive/drive/v3/files?pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,mimeType,modifiedTime,size,webViewLink)', connId) as { files?: { name: string; mimeType: string; modifiedTime: string }[] };
   const files = data.files || [];
-  if (!files.length) return 'No recent files found.';
+  if (!files.length) return 'No recent files.';
   return files.map(f => `- ${f.name} (${f.mimeType?.split('.').pop() || 'file'}) - modified ${f.modifiedTime}`).join('\n');
 }
 
-async function fetchGoogleAdsData(key: string, connId: string): Promise<string> {
-  try {
-    const data = await callMatonGateway(key, '/google-ads/v17/customers:listAccessibleCustomers', connId) as { resourceNames?: string[] };
-    const customers = data.resourceNames || [];
-    return `Accessible Google Ads accounts: ${customers.length}\n${customers.map(c => `- ${c}`).join('\n')}`;
-  } catch { return 'Could not fetch Google Ads data. The API may require additional configuration.'; }
-}
-
-async function fetchGoogleAnalyticsData(key: string, connId: string): Promise<string> {
-  try {
-    const data = await callMatonGateway(key, '/google-analytics/analytics/data/v1beta/properties:runReport', connId, 'POST', {}) as Record<string, unknown>;
-    return `Google Analytics data:\n${JSON.stringify(data, null, 2).substring(0, 2000)}`;
-  } catch { return 'Could not fetch Google Analytics data. Try asking about a specific property.'; }
-}
-
 async function fetchSlackData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/slack/api/conversations.list?types=public_channel,private_channel&limit=10', connId) as { channels?: { name: string; num_members?: number; purpose?: { value?: string } }[] };
+  const data = await callMatonGateway(key, '/slack/api/conversations.list?types=public_channel,private_channel&limit=10', connId) as { channels?: { name: string; id: string; num_members?: number }[] };
   const channels = data.channels || [];
-  const unread = await callMatonGateway(key, '/slack/api/conversations.list?types=im&limit=5', connId) as { channels?: { user?: string }[] };
-  const dms = unread.channels || [];
-  return `Channels (${channels.length}):\n${channels.map(c => `- #${c.name} (${c.num_members || '?'} members)`).join('\n')}\n\nDirect messages: ${dms.length} recent conversations`;
+  return `Channels (${channels.length}):\n${channels.map(c => `- #${c.name} (ID: ${c.id}, ${c.num_members || '?'} members)`).join('\n')}`;
 }
 
 async function fetchHubSpotData(key: string, connId: string): Promise<string> {
@@ -591,7 +221,7 @@ async function fetchHubSpotData(key: string, connId: string): Promise<string> {
   ]);
   const c = (contacts.results || []).map(r => `- ${r.properties?.firstname || ''} ${r.properties?.lastname || ''} (${r.properties?.email || 'no email'})`).join('\n');
   const d = (deals.results || []).map(r => `- ${r.properties?.dealname || 'Untitled'}: $${r.properties?.amount || '0'} (${r.properties?.dealstage || 'unknown'})`).join('\n');
-  return `Recent Contacts:\n${c || 'None'}\n\nRecent Deals:\n${d || 'None'}`;
+  return `Contacts:\n${c || 'None'}\n\nDeals:\n${d || 'None'}`;
 }
 
 async function fetchStripeData(key: string, connId: string): Promise<string> {
@@ -600,9 +230,8 @@ async function fetchStripeData(key: string, connId: string): Promise<string> {
     callMatonGateway(key, '/stripe/v1/balance', connId) as Promise<{ available?: { amount: number; currency: string }[]; pending?: { amount: number; currency: string }[] }>,
   ]);
   const bal = (balance.available || []).map(b => `${(b.amount / 100).toFixed(2)} ${b.currency.toUpperCase()}`).join(', ');
-  const pend = (balance.pending || []).map(b => `${(b.amount / 100).toFixed(2)} ${b.currency.toUpperCase()}`).join(', ');
-  const recent = (charges.data || []).map(c => `- $${(c.amount / 100).toFixed(2)} ${c.currency.toUpperCase()} - ${c.status} - ${c.description || 'no desc'} (${new Date(c.created * 1000).toLocaleDateString()})`).join('\n');
-  return `Balance: ${bal || 'N/A'} available, ${pend || 'N/A'} pending\n\nRecent charges:\n${recent || 'None'}`;
+  const recent = (charges.data || []).map(c => `- $${(c.amount / 100).toFixed(2)} ${c.currency.toUpperCase()} - ${c.status} (${new Date(c.created * 1000).toLocaleDateString()})`).join('\n');
+  return `Balance: ${bal || 'N/A'}\n\nRecent charges:\n${recent || 'None'}`;
 }
 
 async function fetchShopifyData(key: string, connId: string): Promise<string> {
@@ -613,9 +242,9 @@ async function fetchShopifyData(key: string, connId: string): Promise<string> {
 }
 
 async function fetchNotionData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/notion/v1/search', connId, 'POST', { page_size: 10, sort: { direction: 'descending', timestamp: 'last_edited_time' } }) as { results?: { object: string; id: string; properties?: Record<string, unknown>; url?: string; last_edited_time?: string; parent?: unknown }[] };
+  const data = await callMatonGateway(key, '/notion/v1/search', connId, 'POST', { page_size: 10, sort: { direction: 'descending', timestamp: 'last_edited_time' } }) as { results?: { object: string; properties?: Record<string, unknown>; last_edited_time?: string }[] };
   const results = data.results || [];
-  if (!results.length) return 'No recent Notion pages found.';
+  if (!results.length) return 'No recent Notion pages.';
   return results.map(r => {
     const titleProp = r.properties ? Object.values(r.properties).find((p: unknown) => (p as Record<string, unknown>)?.type === 'title') as { title?: { plain_text?: string }[] } | undefined : undefined;
     const title = titleProp?.title?.[0]?.plain_text || '(untitled)';
@@ -625,51 +254,51 @@ async function fetchNotionData(key: string, connId: string): Promise<string> {
 
 async function fetchGitHubData(key: string, connId: string): Promise<string> {
   const [notifications, repos] = await Promise.all([
-    callMatonGateway(key, '/github/notifications?per_page=10', connId) as Promise<{ id?: string; reason?: string; subject?: { title?: string; type?: string } }[]>,
-    callMatonGateway(key, '/github/user/repos?sort=updated&per_page=5', connId) as Promise<{ name: string; full_name: string; updated_at: string; open_issues_count?: number }[]>,
+    callMatonGateway(key, '/github/notifications?per_page=10', connId) as Promise<{ subject?: { title?: string; type?: string }; reason?: string }[]>,
+    callMatonGateway(key, '/github/user/repos?sort=updated&per_page=5', connId) as Promise<{ full_name: string; updated_at: string; open_issues_count?: number }[]>,
   ]);
-  const notifs = Array.isArray(notifications) ? notifications.map((n: { subject?: { title?: string; type?: string }; reason?: string }) => `- ${n.subject?.type || '?'}: ${n.subject?.title || '?'} (${n.reason})`).join('\n') : 'No notifications';
-  const repoList = Array.isArray(repos) ? repos.map((r: { full_name: string; updated_at: string; open_issues_count?: number }) => `- ${r.full_name} (updated ${r.updated_at}, ${r.open_issues_count || 0} issues)`).join('\n') : 'No repos';
+  const notifs = Array.isArray(notifications) ? notifications.map(n => `- ${n.subject?.type || '?'}: ${n.subject?.title || '?'} (${n.reason})`).join('\n') : 'No notifications';
+  const repoList = Array.isArray(repos) ? repos.map(r => `- ${r.full_name} (updated ${r.updated_at}, ${r.open_issues_count || 0} issues)`).join('\n') : 'No repos';
   return `Notifications:\n${notifs}\n\nRecent repos:\n${repoList}`;
 }
 
-async function fetchGenericProjectData(key: string, connId: string, app: string): Promise<string> {
-  // For Trello, Asana, ClickUp, Jira - try common task/project endpoints
+async function fetchGenericData(key: string, connId: string, app: string): Promise<string> {
   const endpoints: Record<string, string> = {
     'trello': '/trello/1/members/me/boards?fields=name,dateLastActivity',
     'asana': '/asana/api/1.0/users/me/user_task_list',
     'clickup': '/clickup/api/v2/team',
     'jira': '/jira/rest/api/3/myself',
+    'google-ads': '/google-ads/v17/customers:listAccessibleCustomers',
+    'google-analytics': '/google-analytics/analytics/data/v1beta/properties:runReport',
   };
-  if (!endpoints[app]) return `${app} is connected but no specific fetcher is configured yet.`;
+  if (!endpoints[app]) return `${app} connected but no specific fetcher configured.`;
   try {
     const data = await callMatonGateway(key, endpoints[app], connId);
     return JSON.stringify(data, null, 2).substring(0, 2000);
   } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
-// Service fetcher registry
 const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
   'google-search-console': fetchGSCData,
   'google-mail': fetchGmailData,
   'google-calendar': fetchCalendarData,
   'google-drive': fetchGoogleDriveData,
-  'google-ads': fetchGoogleAdsData,
-  'google-analytics': fetchGoogleAnalyticsData,
   'slack': fetchSlackData,
   'hubspot': fetchHubSpotData,
   'stripe': fetchStripeData,
   'shopify': fetchShopifyData,
   'notion': fetchNotionData,
   'github': fetchGitHubData,
-  'trello': (k, c) => fetchGenericProjectData(k, c, 'trello'),
-  'asana': (k, c) => fetchGenericProjectData(k, c, 'asana'),
-  'clickup': (k, c) => fetchGenericProjectData(k, c, 'clickup'),
-  'jira': (k, c) => fetchGenericProjectData(k, c, 'jira'),
+  'google-ads': (k, c) => fetchGenericData(k, c, 'google-ads'),
+  'google-analytics': (k, c) => fetchGenericData(k, c, 'google-analytics'),
+  'trello': (k, c) => fetchGenericData(k, c, 'trello'),
+  'asana': (k, c) => fetchGenericData(k, c, 'asana'),
+  'clickup': (k, c) => fetchGenericData(k, c, 'clickup'),
+  'jira': (k, c) => fetchGenericData(k, c, 'jira'),
 };
 
 // ============================================================================
-// MATON DATA INJECTION - Orchestrates multi-service pre-fetch
+// MATON DATA INJECTION (READ)
 // ============================================================================
 
 async function injectMatonData(
@@ -678,58 +307,593 @@ async function injectMatonData(
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
-
   console.log('Detected service intents:', detectedApps);
   const connections = await getMatonConnections(matonApiKey);
   const connMap = new Map<string, string>();
-  for (const c of connections) {
-    if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id);
-  }
+  for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
 
   const sections: string[] = [];
   const notConnected: string[] = [];
 
-  // Fetch all detected services in parallel
-  const fetchPromises = detectedApps.map(async (app) => {
+  await Promise.all(detectedApps.map(async (app) => {
     const connId = connMap.get(app);
-    if (!connId) {
-      const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-      notConnected.push(label);
-      return;
-    }
+    if (!connId) { notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app); return; }
     const fetcher = SERVICE_FETCHERS[app];
-    if (!fetcher) {
-      sections.push(`## ${app}\nConnected but no data fetcher configured yet.`);
-      return;
-    }
+    if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
     try {
       const data = await fetcher(matonApiKey, connId);
-      const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-      sections.push(`## ${label}\n${data}`);
+      sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
       console.log(`${app} data injected`);
     } catch (e) {
       console.error(`Error fetching ${app}:`, e);
-      sections.push(`## ${app}\nError fetching data: ${e instanceof Error ? e.message : 'Unknown'}`);
+      sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
     }
-  });
-
-  await Promise.all(fetchPromises);
+  }));
 
   if (!sections.length && !notConnected.length) return '';
 
   let injection = `\n\n===========================================================
 LIVE DATA FROM CONNECTED SERVICES
 ===========================================================
-The following is REAL data pulled from the user's connected accounts via Maton AI. Use this data to answer their question with specific numbers, dates, and details. Analyze trends and provide actionable insights.\n\n`;
-
+The following is REAL data pulled from the user's connected accounts. Use this data to answer with specific numbers, dates, and details.\n\n`;
   injection += sections.join('\n\n');
-
   if (notConnected.length) {
-    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect ${notConnected.length === 1 ? 'it' : 'them'} in Settings > Maton AI Integrations.`;
+    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
   }
-
   return injection;
 }
+
+// ============================================================================
+// ACTION TOOL DEFINITIONS - Tools the AI can call to TAKE ACTIONS
+// ============================================================================
+
+interface ToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+const MATON_ACTION_TOOLS: ToolDef[] = [
+  // Gmail actions
+  {
+    type: 'function',
+    function: {
+      name: 'send_email',
+      description: 'Send an email via Gmail. Use when the user asks to send, compose, or email someone.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient email address' },
+          subject: { type: 'string', description: 'Email subject line' },
+          body: { type: 'string', description: 'Email body text (plain text)' },
+          cc: { type: 'string', description: 'CC email address (optional)' },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_email_draft',
+      description: 'Create a draft email in Gmail for the user to review before sending.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient email address' },
+          subject: { type: 'string', description: 'Email subject line' },
+          body: { type: 'string', description: 'Email body text' },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    },
+  },
+  // Calendar actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_calendar_event',
+      description: 'Create a new Google Calendar event. Use when the user asks to schedule, book, or create a meeting/event.',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'Event title' },
+          start_time: { type: 'string', description: 'Start time in ISO 8601 format (e.g. 2025-01-15T10:00:00-05:00)' },
+          end_time: { type: 'string', description: 'End time in ISO 8601 format' },
+          description: { type: 'string', description: 'Event description (optional)' },
+          location: { type: 'string', description: 'Event location (optional)' },
+          attendees: { type: 'string', description: 'Comma-separated email addresses of attendees (optional)' },
+        },
+        required: ['summary', 'start_time', 'end_time'],
+      },
+    },
+  },
+  // Slack actions
+  {
+    type: 'function',
+    function: {
+      name: 'send_slack_message',
+      description: 'Send a message to a Slack channel or user. Use when the user asks to message, notify, or post to Slack.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', description: 'Slack channel ID (e.g. C0123456) or channel name' },
+          text: { type: 'string', description: 'Message text to send' },
+        },
+        required: ['channel', 'text'],
+      },
+    },
+  },
+  // Notion actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_notion_page',
+      description: 'Create a new page in Notion. Use when the user asks to create a note, document, or page in Notion.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Page title' },
+          content: { type: 'string', description: 'Page content as plain text' },
+          parent_page_id: { type: 'string', description: 'Parent page ID to create under (optional - uses workspace root if omitted)' },
+        },
+        required: ['title', 'content'],
+      },
+    },
+  },
+  // GitHub actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_github_issue',
+      description: 'Create a new issue in a GitHub repository.',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner: { type: 'string', description: 'Repository owner (username or org)' },
+          repo: { type: 'string', description: 'Repository name' },
+          title: { type: 'string', description: 'Issue title' },
+          body: { type: 'string', description: 'Issue body/description' },
+          labels: { type: 'string', description: 'Comma-separated labels (optional)' },
+        },
+        required: ['owner', 'repo', 'title', 'body'],
+      },
+    },
+  },
+  // HubSpot actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_hubspot_contact',
+      description: 'Create a new contact in HubSpot CRM.',
+      parameters: {
+        type: 'object',
+        properties: {
+          email: { type: 'string', description: 'Contact email' },
+          firstname: { type: 'string', description: 'First name' },
+          lastname: { type: 'string', description: 'Last name' },
+          phone: { type: 'string', description: 'Phone number (optional)' },
+          company: { type: 'string', description: 'Company name (optional)' },
+        },
+        required: ['email', 'firstname', 'lastname'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_hubspot_deal',
+      description: 'Create a new deal in HubSpot CRM.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dealname: { type: 'string', description: 'Deal name' },
+          amount: { type: 'string', description: 'Deal amount' },
+          dealstage: { type: 'string', description: 'Deal stage (e.g. appointmentscheduled, qualifiedtobuy, closedwon)' },
+          pipeline: { type: 'string', description: 'Pipeline name (optional, defaults to default pipeline)' },
+        },
+        required: ['dealname', 'amount'],
+      },
+    },
+  },
+  // Google Drive actions
+  {
+    type: 'function',
+    function: {
+      name: 'search_google_drive',
+      description: 'Search for files in Google Drive by name or content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' },
+          max_results: { type: 'number', description: 'Max results to return (default 10)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  // Trello actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_trello_card',
+      description: 'Create a new card on a Trello board.',
+      parameters: {
+        type: 'object',
+        properties: {
+          list_id: { type: 'string', description: 'Trello list ID to add the card to' },
+          name: { type: 'string', description: 'Card name/title' },
+          desc: { type: 'string', description: 'Card description (optional)' },
+        },
+        required: ['list_id', 'name'],
+      },
+    },
+  },
+  // Jira actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_jira_issue',
+      description: 'Create a new issue/ticket in Jira.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project_key: { type: 'string', description: 'Jira project key (e.g. PROJ)' },
+          summary: { type: 'string', description: 'Issue summary/title' },
+          description: { type: 'string', description: 'Issue description' },
+          issue_type: { type: 'string', description: 'Issue type (Task, Bug, Story, Epic). Default: Task' },
+        },
+        required: ['project_key', 'summary'],
+      },
+    },
+  },
+];
+
+// ============================================================================
+// TOOL EXECUTION ENGINE - Executes tool calls via Maton Gateway
+// ============================================================================
+
+async function executeToolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+  matonApiKey: string,
+  connMap: Map<string, string>,
+): Promise<{ success: boolean; result: string }> {
+  try {
+    switch (toolName) {
+      case 'send_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
+        const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
+        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to send: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Email sent successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+      }
+
+      case 'create_email_draft': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
+        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+      }
+
+      case 'create_calendar_event': {
+        const connId = connMap.get('google-calendar');
+        if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
+        const event: Record<string, unknown> = {
+          summary: args.summary,
+          start: { dateTime: args.start_time },
+          end: { dateTime: args.end_time },
+        };
+        if (args.description) event.description = args.description;
+        if (args.location) event.location = args.location;
+        if (args.attendees) {
+          event.attendees = (args.attendees as string).split(',').map(e => ({ email: e.trim() }));
+        }
+        const res = await callMatonGateway(matonApiKey, '/google-calendar/calendar/v3/calendars/primary/events', connId, 'POST', event) as { id?: string; htmlLink?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to create event: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Calendar event created: "${args.summary}" from ${args.start_time} to ${args.end_time}${res.htmlLink ? ` - ${res.htmlLink}` : ''}` };
+      }
+
+      case 'send_slack_message': {
+        const connId = connMap.get('slack');
+        if (!connId) return { success: false, result: 'Slack is not connected.' };
+        const res = await callMatonGateway(matonApiKey, '/slack/api/chat.postMessage', connId, 'POST', {
+          channel: args.channel,
+          text: args.text,
+        }) as { ok?: boolean; error?: string; ts?: string };
+        if (!res.ok) return { success: false, result: `Slack error: ${res.error || 'Unknown error'}` };
+        return { success: true, result: `Message sent to ${args.channel}: "${(args.text as string).substring(0, 100)}..."` };
+      }
+
+      case 'create_notion_page': {
+        const connId = connMap.get('notion');
+        if (!connId) return { success: false, result: 'Notion is not connected.' };
+        const pageData: Record<string, unknown> = {
+          parent: args.parent_page_id
+            ? { page_id: args.parent_page_id }
+            : { type: 'workspace', workspace: true },
+          properties: { title: [{ text: { content: args.title } }] },
+          children: [
+            { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: args.content } }] } },
+          ],
+        };
+        const res = await callMatonGateway(matonApiKey, '/notion/v1/pages', connId, 'POST', pageData) as { id?: string; url?: string; error?: string };
+        if (res.error) return { success: false, result: `Notion error: ${res.error}` };
+        return { success: true, result: `Notion page created: "${args.title}"${res.url ? ` - ${res.url}` : ''}` };
+      }
+
+      case 'create_github_issue': {
+        const connId = connMap.get('github');
+        if (!connId) return { success: false, result: 'GitHub is not connected.' };
+        const issueData: Record<string, unknown> = { title: args.title, body: args.body };
+        if (args.labels) issueData.labels = (args.labels as string).split(',').map(l => l.trim());
+        const res = await callMatonGateway(matonApiKey, `/github/repos/${args.owner}/${args.repo}/issues`, connId, 'POST', issueData) as { number?: number; html_url?: string; error?: string; message?: string };
+        if (res.message) return { success: false, result: `GitHub error: ${res.message}` };
+        return { success: true, result: `Issue #${res.number} created: "${args.title}" - ${res.html_url || ''}` };
+      }
+
+      case 'create_hubspot_contact': {
+        const connId = connMap.get('hubspot');
+        if (!connId) return { success: false, result: 'HubSpot is not connected.' };
+        const props: Record<string, string> = { email: args.email as string, firstname: args.firstname as string, lastname: args.lastname as string };
+        if (args.phone) props.phone = args.phone as string;
+        if (args.company) props.company = args.company as string;
+        const res = await callMatonGateway(matonApiKey, '/hubspot/crm/v3/objects/contacts', connId, 'POST', { properties: props }) as { id?: string; error?: string; message?: string };
+        if (res.message) return { success: false, result: `HubSpot error: ${res.message}` };
+        return { success: true, result: `Contact created: ${args.firstname} ${args.lastname} (${args.email}) - ID: ${res.id}` };
+      }
+
+      case 'create_hubspot_deal': {
+        const connId = connMap.get('hubspot');
+        if (!connId) return { success: false, result: 'HubSpot is not connected.' };
+        const props: Record<string, string> = { dealname: args.dealname as string, amount: args.amount as string };
+        if (args.dealstage) props.dealstage = args.dealstage as string;
+        if (args.pipeline) props.pipeline = args.pipeline as string;
+        const res = await callMatonGateway(matonApiKey, '/hubspot/crm/v3/objects/deals', connId, 'POST', { properties: props }) as { id?: string; message?: string };
+        if (res.message) return { success: false, result: `HubSpot error: ${res.message}` };
+        return { success: true, result: `Deal created: "${args.dealname}" ($${args.amount}) - ID: ${res.id}` };
+      }
+
+      case 'search_google_drive': {
+        const connId = connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Drive is not connected.' };
+        const maxResults = (args.max_results as number) || 10;
+        const q = encodeURIComponent(`name contains '${args.query}' or fullText contains '${args.query}'`);
+        const data = await callMatonGateway(matonApiKey, `/google-drive/drive/v3/files?q=${q}&pageSize=${maxResults}&fields=files(id,name,mimeType,modifiedTime,webViewLink)`, connId) as { files?: { name: string; mimeType: string; modifiedTime: string; webViewLink?: string }[] };
+        const files = data.files || [];
+        if (!files.length) return { success: true, result: `No files found matching "${args.query}"` };
+        return { success: true, result: `Found ${files.length} files:\n${files.map(f => `- ${f.name} (${f.mimeType?.split('.').pop()}) - ${f.webViewLink || ''}`).join('\n')}` };
+      }
+
+      case 'create_trello_card': {
+        const connId = connMap.get('trello');
+        if (!connId) return { success: false, result: 'Trello is not connected.' };
+        const cardData: Record<string, unknown> = { idList: args.list_id, name: args.name };
+        if (args.desc) cardData.desc = args.desc;
+        const res = await callMatonGateway(matonApiKey, '/trello/1/cards', connId, 'POST', cardData) as { id?: string; url?: string; error?: string };
+        if (res.error) return { success: false, result: `Trello error: ${res.error}` };
+        return { success: true, result: `Card created: "${args.name}" - ${res.url || ''}` };
+      }
+
+      case 'create_jira_issue': {
+        const connId = connMap.get('jira');
+        if (!connId) return { success: false, result: 'Jira is not connected.' };
+        const issueData = {
+          fields: {
+            project: { key: args.project_key },
+            summary: args.summary,
+            description: args.description || '',
+            issuetype: { name: args.issue_type || 'Task' },
+          },
+        };
+        const res = await callMatonGateway(matonApiKey, '/jira/rest/api/3/issue', connId, 'POST', issueData) as { key?: string; self?: string; errors?: unknown };
+        if (res.errors) return { success: false, result: `Jira error: ${JSON.stringify(res.errors)}` };
+        return { success: true, result: `Issue created: ${res.key} - "${args.summary}"` };
+      }
+
+      default:
+        return { success: false, result: `Unknown tool: ${toolName}` };
+    }
+  } catch (e) {
+    console.error(`Tool execution error (${toolName}):`, e);
+    return { success: false, result: `Error executing ${toolName}: ${e instanceof Error ? e.message : 'Unknown error'}` };
+  }
+}
+
+function buildRawEmail(to: string, subject: string, body: string, cc?: string): string {
+  let email = `To: ${to}\r\n`;
+  if (cc) email += `Cc: ${cc}\r\n`;
+  email += `Subject: ${subject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${body}`;
+  // Base64url encode
+  const encoded = btoa(unescape(encodeURIComponent(email)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return encoded;
+}
+
+// ============================================================================
+// SYSTEM PROMPT BUILDER
+// ============================================================================
+
+interface UserSettings {
+  communicationMode?: 'text' | 'voice' | 'both';
+  integrations?: { calendar?: boolean; email?: boolean; banking?: boolean };
+  agents?: { memory?: boolean; orchestration?: boolean; communication?: boolean; personality?: boolean; banking?: boolean; summary?: boolean };
+  osName?: string;
+}
+
+const buildSystemPrompt = (systemName: string, userSettings?: UserSettings) => {
+  const osName = userSettings?.osName || systemName || 'Ozlon OS';
+  const commMode = userSettings?.communicationMode || 'both';
+
+  return `You are the core AI assistant for ${osName}.
+
+===========================================================
+CORE ROLE
+===========================================================
+You are a powerful AI operating system that can both READ and WRITE across the user's connected services.
+You have access to tools that let you take real actions - send emails, create events, post messages, create issues, etc.
+
+IMPORTANT TOOL USAGE RULES:
+1. When the user asks you to DO something (send, create, schedule, post, etc.), USE THE APPROPRIATE TOOL.
+2. Always confirm the action with the user BEFORE executing destructive or important actions.
+3. If a service is not connected, tell the user to connect it in Settings > Maton AI Integrations.
+4. For drafts vs sends: default to DRAFTS for emails unless the user explicitly says "send".
+5. Include all details in tool calls - don't leave required fields empty.
+
+===========================================================
+TONE & RESPONSE STYLE
+===========================================================
+- Friendly, calm, practical. No robotic language.
+- Use simple language. Be informative and explain key points.
+- Use basic markdown (headings, bullets, bold). No tables or HTML.
+- Clean, readable, scannable on a phone.
+- No emojis. No "As an AI..." disclaimers.
+
+===========================================================
+COMMUNICATION MODE: ${commMode.toUpperCase()}
+===========================================================
+${commMode === 'voice' ? 'Respond concisely as if responses will be played out loud.' : 'Default mode. Use normal, helpful responses.'}
+
+===========================================================
+OPERATING SYSTEM NAME: ${osName}
+===========================================================
+Always refer to this system as "${osName}".
+
+===========================================================
+FOLLOW-UP SUGGESTIONS
+===========================================================
+At the end of most responses, offer 2-3 contextual suggestions as actionable offers:
+
+**Want me to:**
+- [Action based on what was discussed]
+- [Related task that naturally follows]
+
+===========================================================
+WHAT YOU MUST NOT DO
+===========================================================
+- Never reveal API keys or tokens.
+- Never claim you control UI elements.
+- Do not over-apologize.
+- Never invent data - only use real data from tool results or injected context.
+
+You are the intelligence AND action layer of ${osName}. Read data, take actions, stay helpful.`;
+};
+
+// ============================================================================
+// DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
+// ============================================================================
+
+function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
+  const toolToService: Record<string, string> = {
+    'send_email': 'google-mail',
+    'create_email_draft': 'google-mail',
+    'create_calendar_event': 'google-calendar',
+    'send_slack_message': 'slack',
+    'create_notion_page': 'notion',
+    'create_github_issue': 'github',
+    'create_hubspot_contact': 'hubspot',
+    'create_hubspot_deal': 'hubspot',
+    'search_google_drive': 'google-drive',
+    'create_trello_card': 'trello',
+    'create_jira_issue': 'jira',
+  };
+
+  return MATON_ACTION_TOOLS.filter(tool => {
+    const requiredService = toolToService[tool.function.name];
+    return requiredService ? connMap.has(requiredService) : true;
+  });
+}
+
+// ============================================================================
+// NON-STREAMING TOOL LOOP - For when tools need to be called
+// ============================================================================
+
+async function runToolLoop(
+  modelConfig: ModelConfig,
+  apiKey: string,
+  openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
+  tools: ToolDef[],
+  matonApiKey: string,
+  connMap: Map<string, string>,
+  maxIterations = 5,
+): Promise<{ role: string; content: string }> {
+  let iteration = 0;
+
+  while (iteration < maxIterations) {
+    iteration++;
+    console.log(`Tool loop iteration ${iteration}`);
+
+    const response = await fetch(modelConfig.apiEndpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelConfig.name,
+        messages: openAIMessages,
+        max_completion_tokens: modelConfig.maxTokens,
+        tools: tools.length > 0 ? tools : undefined,
+        tool_choice: tools.length > 0 ? 'auto' : undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`OpenAI error in tool loop: ${response.status}`, errText);
+      throw new Error(`AI service error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const choice = data.choices?.[0];
+    if (!choice) throw new Error('No response from AI');
+
+    const msg = choice.message;
+    openAIMessages.push(msg);
+
+    // If the model wants to call tools
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      console.log(`AI requested ${msg.tool_calls.length} tool calls:`, msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name));
+
+      // Execute all tool calls in parallel
+      const toolResults = await Promise.all(
+        msg.tool_calls.map(async (tc: { id: string; function: { name: string; arguments: string } }) => {
+          let args: Record<string, unknown>;
+          try {
+            args = JSON.parse(tc.function.arguments);
+          } catch {
+            args = {};
+          }
+          console.log(`Executing tool: ${tc.function.name}`, args);
+          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap);
+          console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
+          return {
+            role: 'tool' as const,
+            tool_call_id: tc.id,
+            name: tc.function.name,
+            content: JSON.stringify(result),
+          };
+        })
+      );
+
+      // Add all tool results to messages
+      openAIMessages.push(...toolResults);
+      // Continue the loop so the model can process tool results
+      continue;
+    }
+
+    // No tool calls - return the final response
+    return { role: 'assistant', content: msg.content || '' };
+  }
+
+  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.' };
+}
+
 // ============================================================================
 // MAIN REQUEST HANDLER
 // ============================================================================
@@ -740,53 +904,61 @@ serve(async (req) => {
   }
 
   try {
-    const { 
-      messages, 
-      intent, 
+    const {
+      messages,
+      intent,
       systemName = 'Ozlon',
       model = DEFAULT_MODEL,
-      agentId,
-      agentMetadata,
+      agentId: _agentId,
+      agentMetadata: _agentMetadata,
       enableTools = false,
       userSettings,
     } = await req.json();
 
-    // Get model configuration
     const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
     const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
-    
-    if (!apiKey) {
-      throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
-    }
+    if (!apiKey) throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
 
-    // Build agent context
-    const agentContext: AgentContext = {
-      agentId: agentId || INTENT_TO_AGENT[intent] || 'base',
-      intent,
-      metadata: agentMetadata,
-    };
+    // Build system prompt
+    let systemPrompt = buildSystemPrompt(systemName, userSettings);
 
-    // Build system prompt with user settings
-    let systemPrompt = buildSystemPrompt(systemName, agentContext, false, userSettings);
-
-    // =====================================================================
-    // PRE-FETCH: Auto-detect intents and inject real data from all Maton services
-    // =====================================================================
+    // Get Maton connections for data injection AND tool availability
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    
+    const connMap = new Map<string, string>();
+    let availableTools: ToolDef[] = [];
+
     if (MATON_API_KEY) {
       try {
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY);
-        if (matonInjection) {
-          systemPrompt += matonInjection;
+        // Get connections
+        const connections = await getMatonConnections(MATON_API_KEY);
+        for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
+        console.log(`Maton connections loaded: ${connMap.size} active`, Array.from(connMap.keys()));
+
+        // Determine available tools based on active connections
+        availableTools = getAvailableTools(connMap);
+        console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
+
+        // Add connected services info to system prompt
+        if (connMap.size > 0) {
+          const connectedServices = Array.from(connMap.keys()).map(app => {
+            const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+            return `- ${label}`;
+          }).join('\n');
+          systemPrompt += `\n\n===========================================================
+CONNECTED SERVICES (you can read data and take actions on these)
+===========================================================\n${connectedServices}`;
         }
+
+        // Inject read data for detected intents
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY);
+        if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
-        console.error('Error in Maton data injection:', e);
+        console.error('Error in Maton setup:', e);
       }
     }
 
-    // Build messages array in OpenAI format
-    const openAIMessages = [
+    // Build OpenAI messages
+    const openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[] = [
       { role: 'system', content: systemPrompt },
       ...messages.map((m: { role: string; content: string }) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -794,19 +966,43 @@ serve(async (req) => {
       })),
     ];
 
-    // Get tools for this agent
-    const tools = enableTools ? getToolsForAgent(agentContext.agentId) : [];
-
-    console.log('Calling OpenAI with:', {
+    console.log('Chat request:', {
       model: modelConfig.name,
       intent: intent || 'general',
       systemName,
-      agentId: agentContext.agentId,
       messagesCount: openAIMessages.length,
-      toolsCount: tools.length,
+      toolsCount: availableTools.length,
+      connectedServices: connMap.size,
     });
 
-    // Build request payload
+    // Detect if user is requesting an action (heuristic)
+    const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
+    const userText = (lastUserMsg?.content || '').toLowerCase();
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket'];
+    const isActionRequest = actionKeywords.some(k => userText.includes(k));
+
+    // If this looks like an action request and we have tools, use the tool loop (non-streaming)
+    if ((isActionRequest || enableTools) && availableTools.length > 0 && MATON_API_KEY) {
+      console.log('Using tool loop (non-streaming) for action request');
+
+      try {
+        const result = await runToolLoop(modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap);
+
+        // Return as a simulated SSE stream so the frontend can handle it the same way
+        const ssePayload = `data: ${JSON.stringify({
+          choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
+        })}\n\ndata: [DONE]\n\n`;
+
+        return new Response(ssePayload, {
+          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+        });
+      } catch (e) {
+        console.error('Tool loop error:', e);
+        // Fall through to streaming if tool loop fails
+      }
+    }
+
+    // Standard streaming response (no tools needed)
     const requestPayload: Record<string, unknown> = {
       model: modelConfig.name,
       messages: openAIMessages,
@@ -814,39 +1010,25 @@ serve(async (req) => {
       stream: true,
     };
 
-    // Add tools if available
-    if (tools.length > 0) {
-      requestPayload.tools = tools;
-      requestPayload.tool_choice = 'auto';
-    }
-
     const response = await fetch(modelConfig.apiEndpoint, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', response.status, errorText);
-      
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }), {
-          status: 429,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
+          status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      
       return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Stream the response directly
     return new Response(response.body, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
     });
@@ -854,8 +1036,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Chat function error:', error);
     return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });
