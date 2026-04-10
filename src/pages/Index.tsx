@@ -193,6 +193,21 @@ const Index = () => {
             prev.map((m) => (m.id === assistantId ? { ...m, content: assistantContent } : m))
           );
         },
+        onTaskUpdate: (update: TaskUpdate) => {
+          if (update.status === 'in_progress') {
+            // Check if task exists, if not create it
+            const existing = useTaskActivityStore.getState().tasks.find(t => t.id === update.taskId);
+            if (!existing) {
+              addTask(update.taskId, update.title);
+            }
+            updateStep(update.taskId, update.step, 'in_progress');
+          } else if (update.status === 'done') {
+            updateStep(update.taskId, update.step, 'done');
+          } else if (update.status === 'error') {
+            updateStep(update.taskId, update.step, 'error');
+            completeTask(update.taskId, 'error');
+          }
+        },
         onDone: () => {
           setIsLoading(false);
           // Cache assistant response when complete
