@@ -1208,8 +1208,184 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, workflow_id: { type: 'string', description: 'Workflow ID' } }, required: ['contact_id', 'workflow_id'] },
     },
   },
+  // ============ Tier 3: Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_social_accounts',
+      description: 'List connected social media accounts in GoHighLevel Social Planner.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_social_posts',
+      description: 'List social media posts in GoHighLevel Social Planner.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_social_post',
+      description: 'Create and schedule a social media post in GoHighLevel.',
+      parameters: { type: 'object', properties: { post_text: { type: 'string', description: 'Post text/caption' }, account_ids: { type: 'string', description: 'Comma-separated social account IDs to post to' }, scheduled_at: { type: 'string', description: 'Schedule time ISO 8601 (optional, publishes immediately if omitted)' }, media_urls: { type: 'string', description: 'Comma-separated media URLs (optional)' } }, required: ['post_text', 'account_ids'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_social_post',
+      description: 'Delete a social media post from GoHighLevel Social Planner.',
+      parameters: { type: 'object', properties: { post_id: { type: 'string', description: 'Post ID to delete' } }, required: ['post_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_products',
+      description: 'List products in GoHighLevel store.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_product',
+      description: 'Get details for a specific product in GoHighLevel.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string', description: 'Product ID' } }, required: ['product_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_product',
+      description: 'Create a new product in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string', description: 'Product name' }, description: { type: 'string', description: 'Product description' }, price: { type: 'number', description: 'Price in cents' } }, required: ['name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_product',
+      description: 'Update a product in GoHighLevel.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string', description: 'Product ID' }, name: { type: 'string' }, description: { type: 'string' }, price: { type: 'number', description: 'Price in cents' } }, required: ['product_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_product',
+      description: 'Delete a product from GoHighLevel.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string', description: 'Product ID' } }, required: ['product_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_courses',
+      description: 'List courses/memberships in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_surveys',
+      description: 'List surveys in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_survey_submissions',
+      description: 'Get submissions for a GoHighLevel survey.',
+      parameters: { type: 'object', properties: { survey_id: { type: 'string', description: 'Survey ID' }, limit: { type: 'number', description: 'Max results (default 20)' } }, required: ['survey_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_blog_posts',
+      description: 'List blog posts in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_blog_post',
+      description: 'Get a specific blog post from GoHighLevel.',
+      parameters: { type: 'object', properties: { post_id: { type: 'string', description: 'Blog post ID' } }, required: ['post_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_blog_post',
+      description: 'Create a new blog post in GoHighLevel.',
+      parameters: { type: 'object', properties: { title: { type: 'string', description: 'Blog post title' }, content: { type: 'string', description: 'Blog post HTML content' }, status: { type: 'string', description: 'Status: draft or published (default: draft)' } }, required: ['title', 'content'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_media_files',
+      description: 'List files in GoHighLevel media library.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 50)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_companies',
+      description: 'List companies in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_company',
+      description: 'Get details for a specific company in GoHighLevel.',
+      parameters: { type: 'object', properties: { company_id: { type: 'string', description: 'Company ID' } }, required: ['company_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_links',
+      description: 'List tracking/trigger links in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_link',
+      description: 'Create a tracking/trigger link in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string', description: 'Link name' }, redirectTo: { type: 'string', description: 'Redirect URL' } }, required: ['name', 'redirectTo'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_businesses',
+      description: 'List businesses in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_business',
+      description: 'Get details for a specific business in GoHighLevel.',
+      parameters: { type: 'object', properties: { business_id: { type: 'string', description: 'Business ID' } }, required: ['business_id'] },
+    },
+  },
 ];
-// TOOL EXECUTION ENGINE - Executes tool calls via Maton Gateway
 // ============================================================================
 
 async function executeToolCall(
