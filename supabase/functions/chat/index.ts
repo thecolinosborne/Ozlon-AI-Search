@@ -3344,6 +3344,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
                 } catch { /* stream closed */ }
               },
               userText,
+              aliasMap,
             );
 
             // Write final content as SSE
