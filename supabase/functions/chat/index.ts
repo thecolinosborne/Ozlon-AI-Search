@@ -66,6 +66,43 @@ interface MatonConnection {
 type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
 type MultiConnMap = Map<string, ConnEntry[]>;
 
+// ---------- Dynamic alias map ----------
+
+/** For each connected account, derive searchable aliases from email/metadata */
+type AliasEntry = { alias: string; email: string; connEntry: ConnEntry };
+
+function buildDynamicAliasMap(connMap: MultiConnMap): AliasEntry[] {
+  const aliases: AliasEntry[] = [];
+  for (const [, entries] of connMap) {
+    for (const entry of entries) {
+      if (!entry.email) continue;
+      const email = entry.email.toLowerCase();
+      const [localPart, fullDomain] = email.split('@');
+      const domainParts = fullDomain?.split('.') || [];
+      const domainName = domainParts[0] || ''; // "ozlon" from "ozlon.net"
+
+      // Add all derived aliases
+      aliases.push({ alias: email, email, connEntry: entry }); // full email
+      if (localPart) aliases.push({ alias: localPart, email, connEntry: entry }); // "colin"
+      if (fullDomain) aliases.push({ alias: fullDomain, email, connEntry: entry }); // "ozlon.net"
+      if (domainName && domainName.length >= 3) aliases.push({ alias: domainName, email, connEntry: entry }); // "ozlon"
+      // Multi-word domain like "colinosborne" → also add
+      if (domainName && domainName !== localPart && domainName.length >= 3) {
+        aliases.push({ alias: domainName, email, connEntry: entry });
+      }
+
+      // Also index metadata fields like displayName
+      if (entry.meta) {
+        const displayName = (entry.meta as Record<string, string>).displayName;
+        if (displayName && displayName.length >= 3) {
+          aliases.push({ alias: displayName.toLowerCase(), email, connEntry: entry });
+        }
+      }
+    }
+  }
+  return aliases;
+}
+
 // ---------- Robust account resolver ----------
 
 /** Extract an email address from a freeform string like "colin@ozlon.net gmail" */
@@ -76,7 +113,6 @@ function extractEmailFromHint(hint: string): string | null {
 
 /** Extract an email address mentioned in a user message */
 function extractAccountFromMessage(message: string): string | null {
-  // Find all email addresses in the message
   const emails = message.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi);
   return emails ? emails[0].toLowerCase() : null;
 }
@@ -87,9 +123,42 @@ function normalizeHint(hint: string): string {
 }
 
 /**
+ * Extract the best account hint from a user message using the dynamic alias map.
+ * Scans for known aliases (domain names, local parts) in the message text.
+ */
+function extractAliasHintFromMessage(message: string, aliasMap: AliasEntry[], app: string): ConnEntry | undefined {
+  const lower = message.toLowerCase();
+
+  // First check for explicit email addresses
+  const emailInMsg = extractAccountFromMessage(message);
+  if (emailInMsg) {
+    const match = aliasMap.find(a => a.email === emailInMsg && a.connEntry.id);
+    if (match) return match.connEntry;
+  }
+
+  // Then scan for domain/alias keywords — but only match entries for the requested app
+  // Get entries for this app to filter aliases
+  const appEntryIds = new Set<string>();
+  // We can't filter by app here since aliasMap is flat, so we match any and let caller validate
+
+  // Sort aliases by length descending so longer/more specific matches win
+  const sorted = [...aliasMap].sort((a, b) => b.alias.length - a.alias.length);
+  for (const entry of sorted) {
+    // Skip very short aliases that cause false positives (e.g. "colin" matching "colonial")
+    if (entry.alias.length < 4 && !entry.alias.includes('@')) continue;
+    // Check if the alias appears as a word boundary match
+    const regex = new RegExp(`\\b${entry.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lower)) return entry.connEntry;
+  }
+
+  return undefined;
+}
+
+/**
  * Resolve the correct connection for a service, supporting:
  * - exact email match (case-insensitive)
  * - email extracted from freeform hint ("colin@ozlon.net gmail")
+ * - dynamic alias matching from alias map
  * - partial/alias match ("ozlon" matches "colin@ozlon.net")
  * - fallback extraction from the latest user message
  * Returns { id, email } so callers can confirm which account was used.
@@ -99,6 +168,7 @@ function resolveConnection(
   app: string,
   hint?: string,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): { id: string; email?: string } | undefined {
   const entries = connMap.get(app);
   if (!entries?.length) return undefined;
@@ -110,7 +180,17 @@ function resolveConnection(
     if (found) return found;
   }
 
-  // Priority 2: extract email from latest user message
+  // Priority 2: dynamic alias extraction from user message
+  if (userMessage && aliasMap) {
+    const aliasMatch = extractAliasHintFromMessage(userMessage, aliasMap, app);
+    if (aliasMatch) {
+      // Verify this entry belongs to the requested app
+      const appMatch = entries.find(e => e.id === aliasMatch.id);
+      if (appMatch) return appMatch;
+    }
+  }
+
+  // Priority 3: extract email from latest user message (fallback)
   if (userMessage) {
     const msgEmail = extractAccountFromMessage(userMessage);
     if (msgEmail) {
@@ -121,13 +201,14 @@ function resolveConnection(
     const normalized = userMessage.toLowerCase();
     for (const entry of entries) {
       if (!entry.email) continue;
-      const domain = entry.email.split('@')[1]?.split('.')[0]; // "ozlon" from "colin@ozlon.net"
-      if (domain && normalized.includes(domain)) return entry;
+      const domain = entry.email.split('@')[1]?.split('.')[0];
+      if (domain && domain.length >= 3 && normalized.includes(domain)) return entry;
     }
   }
 
-  // Priority 3: default to first
-  return entries[0];
+  // Priority 4: do NOT default — return undefined to force clarification
+  // Only default if no multi-account ambiguity exists
+  return undefined;
 }
 
 function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
@@ -152,6 +233,8 @@ function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
       if (entry.email.toLowerCase().includes(norm)) return entry;
       const domain = entry.email.split('@')[1]?.split('.')[0];
       if (domain && norm.includes(domain)) return entry;
+      const localPart = entry.email.split('@')[0];
+      if (localPart && norm.includes(localPart)) return entry;
     }
   }
 
@@ -545,6 +628,7 @@ async function injectMatonData(
   messages: { role: string; content: string }[],
   matonApiKey: string,
   multiConnMap?: MultiConnMap,
+  aliasMap?: AliasEntry[],
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
@@ -553,7 +637,6 @@ async function injectMatonData(
   // Extract account hint from latest user message
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
   const userMessageText = lastUserMsg?.content || '';
-  const userAccountHint = extractAccountFromMessage(userMessageText);
 
   // Build a simple connMap for fetchers, account-aware for multi-account services
   let connMap: Map<string, string>;
@@ -564,9 +647,16 @@ async function injectMatonData(
       if (entries.length === 1) {
         connMap.set(app, entries[0].id);
       } else {
-        // For multi-account services, resolve using user's message hint
-        const resolved = resolveConnection(multiConnMap, app, userAccountHint || undefined, userMessageText);
-        if (resolved) connMap.set(app, resolved.id);
+        // For multi-account services, resolve using dynamic alias map + user message
+        const resolved = resolveConnection(multiConnMap, app, undefined, userMessageText, aliasMap);
+        if (resolved) {
+          connMap.set(app, resolved.id);
+          console.log(`Multi-account resolved for ${app}: ${resolved.email || resolved.id}`);
+        } else {
+          // No clear account specified — don't inject any single account's data
+          // Instead, we'll note which accounts are available
+          console.log(`Multi-account ambiguous for ${app}, skipping data injection`);
+        }
       }
     }
   } else {
@@ -577,6 +667,7 @@ async function injectMatonData(
 
   const sections: string[] = [];
   const notConnected: string[] = [];
+  const ambiguousAccounts: { app: string; accounts: string[] }[] = [];
 
   // Fallback mapping: services that use another connection's credentials
   const CONNECTION_FALLBACKS: Record<string, string[]> = {
@@ -595,7 +686,19 @@ async function injectMatonData(
         if (connId) break;
       }
     }
-    if (!connId) { notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app); return; }
+    if (!connId) {
+      // Check if this is because of ambiguous multi-account
+      const entries = multiConnMap?.get(app);
+      if (entries && entries.length > 1) {
+        ambiguousAccounts.push({
+          app: SERVICE_DETECTORS.find(s => s.app === app)?.label || app,
+          accounts: entries.map(e => e.email || e.id),
+        });
+        return;
+      }
+      notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app);
+      return;
+    }
     const fetcher = SERVICE_FETCHERS[app];
     if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
     try {
@@ -615,13 +718,19 @@ async function injectMatonData(
     }
   }));
 
-  if (!sections.length && !notConnected.length) return '';
+  if (!sections.length && !notConnected.length && !ambiguousAccounts.length) return '';
 
   let injection = `\n\n===========================================================
 LIVE DATA FROM CONNECTED SERVICES
 ===========================================================
 The following is REAL data pulled from the user's connected accounts. Use this data to answer with specific numbers, dates, and details.\n\n`;
   injection += sections.join('\n\n');
+  if (ambiguousAccounts.length) {
+    injection += `\n\nIMPORTANT: The user asked about ${ambiguousAccounts.map(a => a.app).join(', ')} but has MULTIPLE accounts connected. You did NOT pre-load data for these because the account was ambiguous. Ask the user which account to use:\n`;
+    for (const a of ambiguousAccounts) {
+      injection += `- ${a.app}: ${a.accounts.join(', ')}\n`;
+    }
+  }
   if (notConnected.length) {
     injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
   }
@@ -1654,14 +1763,26 @@ async function executeToolCall(
   matonApiKey: string,
   connMap: MultiConnMap,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): Promise<{ success: boolean; result: string }> {
   try {
     const accountHint = args.account as string | undefined;
+
+    // Helper: generate context-aware error when connection not found
+    const noConnError = (app: string, label: string): string => {
+      const entries = connMap.get(app);
+      if (entries && entries.length > 1) {
+        const accounts = entries.map(e => e.email || e.id).join(', ');
+        return `Multiple ${label} accounts are connected (${accounts}). Please specify which account to use by including the email address in your request, then try again.`;
+      }
+      return `${label} is not connected. Ask the user to connect it in Settings > Maton AI Integrations.`;
+    };
+
     switch (toolName) {
       case 'send_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to send: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1669,9 +1790,9 @@ async function executeToolCall(
       }
 
       case 'create_email_draft': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1679,9 +1800,9 @@ async function executeToolCall(
       }
 
       case 'list_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const maxResults = Math.min((args.max_results as number) || 50, 100);
         const query = encodeURIComponent(args.query as string);
         const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
@@ -1705,9 +1826,9 @@ async function executeToolCall(
       }
 
       case 'get_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
         const headers = full.payload?.headers || [];
         const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
@@ -1726,18 +1847,18 @@ async function executeToolCall(
       }
 
       case 'trash_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
       }
 
       case 'batch_trash_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
         // Use individual trash calls in parallel chunks of 10 (Gmail's official trash endpoint)
@@ -1759,9 +1880,9 @@ async function executeToolCall(
       }
 
       case 'list_email_ids': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const maxResults = Math.min((args.max_results as number) || 100, 500);
         const query = encodeURIComponent(args.query as string);
         let url = `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`;
@@ -1773,9 +1894,9 @@ async function executeToolCall(
       }
 
       case 'label_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const modifyData: Record<string, string[]> = {};
         if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
         if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
@@ -1785,16 +1906,16 @@ async function executeToolCall(
       }
 
       case 'mark_email_read': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} marked as read.` };
       }
 
       case 'create_calendar_event': {
-        const resolved = resolveConnection(connMap, 'google-calendar', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-calendar', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
         const event: Record<string, unknown> = {
@@ -1873,7 +1994,7 @@ async function executeToolCall(
       }
 
       case 'search_google_drive': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected.' };
         const maxResults = (args.max_results as number) || 10;
@@ -2276,7 +2397,7 @@ async function executeToolCall(
 
       // ============ Google Docs tools ============
       case 'create_google_doc': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
@@ -2286,7 +2407,7 @@ async function executeToolCall(
         let result = `Google Doc created: "${args.title}" — ${link}`;
         if (args.content) {
           try {
-            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage)?.id || connId;
+            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage, aliasMap)?.id || connId;
             await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
               requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
             });
@@ -2298,7 +2419,7 @@ async function executeToolCall(
 
       // ============ Google Sheets tools ============
       case 'create_google_sheet': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
@@ -2309,7 +2430,7 @@ async function executeToolCall(
       }
 
       case 'read_sheet_data': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
@@ -2320,7 +2441,7 @@ async function executeToolCall(
       }
 
       case 'append_sheet_rows': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
@@ -2332,7 +2453,7 @@ async function executeToolCall(
 
       // ============ Google Slides tools ============
       case 'create_google_presentation': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
@@ -2823,6 +2944,7 @@ async function runToolLoop(
   maxIterations = 5,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
@@ -2882,7 +3004,7 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage);
+          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage, aliasMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
@@ -2944,6 +3066,7 @@ serve(async (req) => {
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
+    let aliasMap: AliasEntry[] = [];
 
     if (MATON_API_KEY) {
       try {
@@ -2952,6 +3075,10 @@ serve(async (req) => {
         const builtMap = buildMultiConnMap(connections);
         for (const [app, entries] of builtMap) connMap.set(app, entries);
         console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
+
+        // Build dynamic alias map from all connections
+        aliasMap = buildDynamicAliasMap(connMap);
+        console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap);
@@ -2975,20 +3102,49 @@ CONNECTED SERVICES (you can read data and take actions on these)
           // Add multi-account instruction if any service has multiple accounts
           const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
           if (multiAccountServices.length > 0) {
-            systemPrompt += `\n\n===========================================================
-MULTI-ACCOUNT INSTRUCTIONS (CRITICAL — READ CAREFULLY)
-===========================================================
-IMPORTANT: Some services have MULTIPLE accounts connected. You MUST follow these rules:
+            // Build dynamic examples from actual connected accounts
+            const dynamicExamples: string[] = [];
+            const identityList: string[] = [];
+            for (const [app, entries] of multiAccountServices) {
+              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+              for (const e of entries) {
+                if (!e.email) continue;
+                const email = e.email.toLowerCase();
+                const domain = email.split('@')[1]?.split('.')[0] || '';
+                const fullDomain = email.split('@')[1] || '';
+                dynamicExamples.push(`   - "${email}" → account: "${email}"`);
+                dynamicExamples.push(`   - "${email} ${label.toLowerCase()}" → account: "${email}"`);
+                if (domain.length >= 3) {
+                  dynamicExamples.push(`   - "my ${domain} email" → account: "${email}" (domain alias)`);
+                  dynamicExamples.push(`   - "${domain} inbox" → account: "${email}"`);
+                }
+                identityList.push(`  * ${email} (aliases: "${domain}", "${fullDomain}")`);
+              }
+            }
 
-1. ALWAYS check if the user mentions a specific account (email address, domain name like "ozlon", or alias).
-2. When you detect an account reference, you MUST pass the exact email address in the "account" parameter of EVERY tool call for that service.
-3. Examples of account references:
-   - "colin@ozlon.net" → account: "colin@ozlon.net"
-   - "colin@Ozlon.net gmail" → account: "colin@ozlon.net"
-   - "my ozlon email" → account: "colin@ozlon.net" (match by domain)
-   - "from colin@colinosborne.com" → account: "colin@colinosborne.com"
-4. If the user does NOT specify an account and multiple exist, ask them which account to use. Do NOT silently default.
-5. NEVER ignore an account specification. If the user says "colin@ozlon.net", that tool call MUST use that account.
+            systemPrompt += `\n\n===========================================================
+CONTEXT-SENSITIVE ACCOUNT RESOLUTION (CRITICAL)
+===========================================================
+CONNECTED IDENTITIES:
+${identityList.join('\n')}
+
+RESOLUTION RULES — follow this priority order:
+1. If the user explicitly mentions an email, brand, domain, or workspace name → use that account.
+2. If the user mentions contextual keywords that imply a specific account (e.g. a business name that matches a domain) → use that account.
+3. Scan the conversation for context clues before defaulting. Use the most relevant account, not the most convenient.
+4. If genuinely ambiguous and it would materially affect the outcome → ask which account to use.
+5. NEVER silently default to one account when multiple exist and the user has given any signal.
+
+When you identify the account, pass the EXACT email address in the "account" parameter of EVERY tool call.
+
+DYNAMIC EXAMPLES (auto-generated from connected accounts):
+${dynamicExamples.join('\n')}
+
+BEHAVIOR:
+- Do NOT automatically prioritize whichever account is easiest to access or appears first.
+- Do NOT assume one identity is always primary.
+- When a connected account is mentioned or implied, resolve through it first, then validate, then respond.
+- Every tool result will confirm which account was used — verify it matches the user's intent.
 \n`;
             for (const [app, entries] of multiAccountServices) {
               const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
@@ -3000,8 +3156,8 @@ IMPORTANT: Some services have MULTIPLE accounts connected. You MUST follow these
           }
         }
 
-        // Inject read data for detected intents
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap);
+        // Inject read data for detected intents (with alias map for smart resolution)
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap, aliasMap);
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
         console.error('Error in Maton setup:', e);
@@ -3199,6 +3355,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
                 } catch { /* stream closed */ }
               },
               userText,
+              aliasMap,
             );
 
             // Write final content as SSE
