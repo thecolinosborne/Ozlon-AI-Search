@@ -1,42 +1,72 @@
 
 
-# Fix Maton Error Badges and GHL Sync Validation
+# Task Activity Portal + Email Management Tools
 
-## Problem 1: Maton Services All Showing "Error"
+## Two Problems to Solve
 
-**Root cause**: Case mismatch. The Maton API returns `status: "ACTIVE"` (uppercase), but MatonDetail.tsx line 113 checks `conn.status === "active"` (lowercase). Every single connection fails this check and falls through to `"error"` status.
+### Problem 1: No email management tools
+The chat edge function has `send_email` and `create_email_draft` but **no tools for reading, filtering, trashing, or managing emails**. When you asked Ozlon to clean your inbox, it had no tool to execute that action. It could only read a summary of unread emails via the fetcher — it cannot trash, delete, label, or batch-modify messages.
 
-**Fix**: Change the comparison to be case-insensitive: `conn.status.toLowerCase() === "active"`. Also add handling for `"PENDING"` connections so they show as "disconnected" instead of "error". Filter out or visually differentiate PENDING vs ACTIVE connections.
+### Problem 2: No task visibility
+When the AI does execute background operations, there's no feedback showing what it's doing. The approved Task Activity Portal plan addresses this.
 
-## Problem 2: GHL Sync Toggles Not Actually Syncing
+## Implementation
 
-**Root cause**: The `handleSync` function (line 88-94) is a fake 1.5-second `setTimeout` that never calls the GHL API. The data sync toggles just flip local Zustand state without verifying anything. Default `conversations` is `false`.
+### Part 1: Email Management Tools (chat edge function)
 
-**Fix**: 
-- Make `handleSync` actually call the GHL proxy for each enabled data type (contacts, pipelines, conversations) to validate the connection works
-- Default all three sync toggles to `true` since the API is confirmed working
-- On mount, when GHL connection is detected, also initialize `syncData` with all toggles on
+Add these tools to `supabase/functions/chat/index.ts`:
+
+| Tool | Gmail API Endpoint | Purpose |
+|------|-------------------|---------|
+| `list_emails` | `GET /messages` with query params | Search/filter emails by query (from, subject, label, date) |
+| `get_email` | `GET /messages/{id}` | Read full email content |
+| `trash_email` | `POST /messages/{id}/trash` | Move single email to trash |
+| `batch_trash_emails` | `POST /messages/batchModify` | Move multiple emails to trash at once |
+| `label_email` | `POST /messages/{id}/modify` | Add/remove labels (INBOX, STARRED, etc.) |
+| `mark_email_read` | `POST /messages/{id}/modify` | Mark as read (remove UNREAD label) |
+
+The `batch_trash_emails` tool is critical — it allows the AI to fetch emails, identify non-client ones, and trash them in a single batch call instead of one-by-one (avoiding edge function timeouts).
+
+Tool definitions go in `MATON_ACTION_TOOLS`, execution handlers in the `executeToolCall` switch block, and service mapping in `toolToService`.
+
+### Part 2: Task Activity Portal (frontend)
+
+**New files:**
+1. `src/stores/useTaskActivityStore.ts` — Zustand store tracking `{ id, title, status, steps: { label, status, timestamp }[] }[]`
+2. `src/components/TaskActivityBubble.tsx` — Fixed-position floating bubble (bottom-right, above bottom nav) with spinner, shows when tasks are active, click to expand
+3. `src/components/TaskActivityPortal.tsx` — Sheet/drawer showing step-by-step progress with status icons (checkmark/spinner/circle)
+
+**Modified files:**
+1. `src/services/chatService.ts` — Parse `event: task_update` SSE events alongside existing `data:` events, add `onTaskUpdate` callback
+2. `src/pages/Index.tsx` — Render `<TaskActivityBubble />`, wire `onTaskUpdate` from `streamChat` to task store
+3. `supabase/functions/chat/index.ts` — Emit `event: task_update` SSE events before/after each tool execution:
+   ```
+   event: task_update
+   data: {"taskId":"...","title":"Cleaning inbox","step":"Fetching emails","status":"in_progress"}
+   ```
+
+### Part 3: Backend task update emission
+
+In the chat edge function's tool execution loop, before calling each tool:
+- Emit an SSE `task_update` event with status `in_progress`
+- After tool returns, emit another with status `done` or `error`
+- This gives the frontend real-time step-by-step visibility
+
+## Design
+- Bubble: fixed bottom-right (above bottom nav), 48px, pulsing primary ring when active, green check when done
+- Portal: Sheet sliding up, clean step list with `✓ ⏳ ○` indicators
+- Auto-dismiss 5s after all steps complete
 
 ## Files Changed
+- `supabase/functions/chat/index.ts` — Add 6 email tools + task_update SSE emission
+- `src/services/chatService.ts` — Parse task_update events
+- `src/pages/Index.tsx` — Render TaskActivityBubble, wire onTaskUpdate
+- `src/stores/useTaskActivityStore.ts` — New
+- `src/components/TaskActivityBubble.tsx` — New
+- `src/components/TaskActivityPortal.tsx` — New
 
-### `src/pages/integrations/MatonDetail.tsx`
-- Fix status comparison: `conn.status.toUpperCase() === "ACTIVE"` maps to `"connected"`, `"PENDING"` maps to `"disconnected"`, everything else maps to `"error"`
-- Add a count summary showing active vs pending vs total connections
-- Sort connections: active first, then pending
-
-### `src/pages/integrations/GoHighLevelDetail.tsx`
-- Replace fake `handleSync` with real API validation calls to the GHL proxy for contacts, pipelines, and conversations
-- Default `syncData` to `{ contacts: true, pipelines: true, conversations: true }`
-- On mount auto-detect, also set `syncData` defaults to all `true`
-- Show per-data-type sync status feedback (success/failure per type)
-
-### `src/services/matonService.ts`
-- Add a `url` field to the `MatonConnection` interface (already returned by API but not typed)
-- No logic changes needed here
-
-## What Stays the Same
-- Edge functions untouched
-- IntegrationStatusBadge component untouched
-- Integrations overview page untouched
-- Store logic untouched
+## What Stays
+- All existing tools, fetchers, and integrations untouched
+- No database changes
+- No new edge functions (everything added to existing chat function)
 
