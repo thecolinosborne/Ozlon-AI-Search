@@ -66,6 +66,43 @@ interface MatonConnection {
 type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
 type MultiConnMap = Map<string, ConnEntry[]>;
 
+// ---------- Dynamic alias map ----------
+
+/** For each connected account, derive searchable aliases from email/metadata */
+type AliasEntry = { alias: string; email: string; connEntry: ConnEntry };
+
+function buildDynamicAliasMap(connMap: MultiConnMap): AliasEntry[] {
+  const aliases: AliasEntry[] = [];
+  for (const [, entries] of connMap) {
+    for (const entry of entries) {
+      if (!entry.email) continue;
+      const email = entry.email.toLowerCase();
+      const [localPart, fullDomain] = email.split('@');
+      const domainParts = fullDomain?.split('.') || [];
+      const domainName = domainParts[0] || ''; // "ozlon" from "ozlon.net"
+
+      // Add all derived aliases
+      aliases.push({ alias: email, email, connEntry: entry }); // full email
+      if (localPart) aliases.push({ alias: localPart, email, connEntry: entry }); // "colin"
+      if (fullDomain) aliases.push({ alias: fullDomain, email, connEntry: entry }); // "ozlon.net"
+      if (domainName && domainName.length >= 3) aliases.push({ alias: domainName, email, connEntry: entry }); // "ozlon"
+      // Multi-word domain like "colinosborne" → also add
+      if (domainName && domainName !== localPart && domainName.length >= 3) {
+        aliases.push({ alias: domainName, email, connEntry: entry });
+      }
+
+      // Also index metadata fields like displayName
+      if (entry.meta) {
+        const displayName = (entry.meta as Record<string, string>).displayName;
+        if (displayName && displayName.length >= 3) {
+          aliases.push({ alias: displayName.toLowerCase(), email, connEntry: entry });
+        }
+      }
+    }
+  }
+  return aliases;
+}
+
 // ---------- Robust account resolver ----------
 
 /** Extract an email address from a freeform string like "colin@ozlon.net gmail" */
@@ -76,7 +113,6 @@ function extractEmailFromHint(hint: string): string | null {
 
 /** Extract an email address mentioned in a user message */
 function extractAccountFromMessage(message: string): string | null {
-  // Find all email addresses in the message
   const emails = message.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi);
   return emails ? emails[0].toLowerCase() : null;
 }
@@ -87,9 +123,42 @@ function normalizeHint(hint: string): string {
 }
 
 /**
+ * Extract the best account hint from a user message using the dynamic alias map.
+ * Scans for known aliases (domain names, local parts) in the message text.
+ */
+function extractAliasHintFromMessage(message: string, aliasMap: AliasEntry[], app: string): ConnEntry | undefined {
+  const lower = message.toLowerCase();
+
+  // First check for explicit email addresses
+  const emailInMsg = extractAccountFromMessage(message);
+  if (emailInMsg) {
+    const match = aliasMap.find(a => a.email === emailInMsg && a.connEntry.id);
+    if (match) return match.connEntry;
+  }
+
+  // Then scan for domain/alias keywords — but only match entries for the requested app
+  // Get entries for this app to filter aliases
+  const appEntryIds = new Set<string>();
+  // We can't filter by app here since aliasMap is flat, so we match any and let caller validate
+
+  // Sort aliases by length descending so longer/more specific matches win
+  const sorted = [...aliasMap].sort((a, b) => b.alias.length - a.alias.length);
+  for (const entry of sorted) {
+    // Skip very short aliases that cause false positives (e.g. "colin" matching "colonial")
+    if (entry.alias.length < 4 && !entry.alias.includes('@')) continue;
+    // Check if the alias appears as a word boundary match
+    const regex = new RegExp(`\\b${entry.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lower)) return entry.connEntry;
+  }
+
+  return undefined;
+}
+
+/**
  * Resolve the correct connection for a service, supporting:
  * - exact email match (case-insensitive)
  * - email extracted from freeform hint ("colin@ozlon.net gmail")
+ * - dynamic alias matching from alias map
  * - partial/alias match ("ozlon" matches "colin@ozlon.net")
  * - fallback extraction from the latest user message
  * Returns { id, email } so callers can confirm which account was used.
@@ -99,6 +168,7 @@ function resolveConnection(
   app: string,
   hint?: string,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): { id: string; email?: string } | undefined {
   const entries = connMap.get(app);
   if (!entries?.length) return undefined;
@@ -110,7 +180,17 @@ function resolveConnection(
     if (found) return found;
   }
 
-  // Priority 2: extract email from latest user message
+  // Priority 2: dynamic alias extraction from user message
+  if (userMessage && aliasMap) {
+    const aliasMatch = extractAliasHintFromMessage(userMessage, aliasMap, app);
+    if (aliasMatch) {
+      // Verify this entry belongs to the requested app
+      const appMatch = entries.find(e => e.id === aliasMatch.id);
+      if (appMatch) return appMatch;
+    }
+  }
+
+  // Priority 3: extract email from latest user message (fallback)
   if (userMessage) {
     const msgEmail = extractAccountFromMessage(userMessage);
     if (msgEmail) {
@@ -121,13 +201,14 @@ function resolveConnection(
     const normalized = userMessage.toLowerCase();
     for (const entry of entries) {
       if (!entry.email) continue;
-      const domain = entry.email.split('@')[1]?.split('.')[0]; // "ozlon" from "colin@ozlon.net"
-      if (domain && normalized.includes(domain)) return entry;
+      const domain = entry.email.split('@')[1]?.split('.')[0];
+      if (domain && domain.length >= 3 && normalized.includes(domain)) return entry;
     }
   }
 
-  // Priority 3: default to first
-  return entries[0];
+  // Priority 4: do NOT default — return undefined to force clarification
+  // Only default if no multi-account ambiguity exists
+  return undefined;
 }
 
 function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
@@ -152,6 +233,8 @@ function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
       if (entry.email.toLowerCase().includes(norm)) return entry;
       const domain = entry.email.split('@')[1]?.split('.')[0];
       if (domain && norm.includes(domain)) return entry;
+      const localPart = entry.email.split('@')[0];
+      if (localPart && norm.includes(localPart)) return entry;
     }
   }
 
