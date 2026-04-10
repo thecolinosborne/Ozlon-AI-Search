@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { streamChat, UserSettings } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
+import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
@@ -13,6 +14,7 @@ import ReactMarkdown from "react-markdown";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
+import { TaskActivityBubble } from "@/components/TaskActivityBubble";
 
 type Message = {
   id: string;
