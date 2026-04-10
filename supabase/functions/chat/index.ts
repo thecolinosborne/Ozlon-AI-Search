@@ -1502,7 +1502,94 @@ async function executeToolCall(
         return { success: true, result: `Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
       }
 
-      case 'create_calendar_event': {
+      case 'list_emails': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const maxResults = Math.min((args.max_results as number) || 20, 100);
+        const query = encodeURIComponent(args.query as string);
+        const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
+        const msgs = data.messages || [];
+        if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
+        // Fetch metadata for each message (batch up to 25)
+        const details: string[] = [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 25)}:`];
+        const batch = msgs.slice(0, 25);
+        const metadataResults = await Promise.all(batch.map(async (m) => {
+          try {
+            const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
+            const headers = full.payload?.headers || [];
+            const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+            const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+            const date = headers.find(h => h.name === 'Date')?.value || '';
+            return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}`;
+          } catch { return `- ID: ${m.id} | (metadata unavailable)`; }
+        }));
+        details.push(...metadataResults);
+        return { success: true, result: details.join('\n') };
+      }
+
+      case 'get_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
+        const headers = full.payload?.headers || [];
+        const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+        const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+        const date = headers.find(h => h.name === 'Date')?.value || '';
+        const to = headers.find(h => h.name === 'To')?.value || '';
+        // Decode body
+        let bodyText = '';
+        const bodyData = full.payload?.body?.data || full.payload?.parts?.find(p => p.mimeType === 'text/plain')?.body?.data;
+        if (bodyData) {
+          try { bodyText = atob(bodyData.replace(/-/g, '+').replace(/_/g, '/')); } catch { bodyText = full.snippet || ''; }
+        } else {
+          bodyText = full.snippet || '';
+        }
+        return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 2000)}` };
+      }
+
+      case 'trash_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Email ${args.message_id} moved to trash.` };
+      }
+
+      case 'batch_trash_emails': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
+        if (!ids.length) return { success: false, result: 'No message IDs provided.' };
+        // Gmail batchModify endpoint
+        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/batchModify', connId, 'POST', {
+          ids,
+          addLabelIds: ['TRASH'],
+          removeLabelIds: ['INBOX'],
+        }) as { error?: { message?: string } };
+        if (res.error) return { success: false, result: `Batch trash failed: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `${ids.length} emails moved to trash.` };
+      }
+
+      case 'label_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const modifyData: Record<string, string[]> = {};
+        if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
+        if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', modifyData) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Label modification failed: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Labels updated on email ${args.message_id}.` };
+      }
+
+      case 'mark_email_read': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Email ${args.message_id} marked as read.` };
+      }
+
+
         const connId = connMap.get('google-calendar');
         if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
         const event: Record<string, unknown> = {
