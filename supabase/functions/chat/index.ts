@@ -2992,22 +2992,29 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
                   await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
                 } catch { /* stream closed */ }
               }
-        );
+            );
 
-        // Build SSE response with task_update events followed by the final content
-        let ssePayload = '';
-        for (const tu of taskUpdates) {
-          ssePayload += `event: task_update\ndata: ${JSON.stringify(tu)}\n\n`;
-        }
-        ssePayload += `data: ${JSON.stringify({
-          choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
-        })}\n\ndata: [DONE]\n\n`;
+            // Write final content as SSE
+            await writer.write(encoder.encode(`data: ${JSON.stringify({
+              choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
+            })}\n\n`));
+            await writer.write(encoder.encode('data: [DONE]\n\n'));
+          } catch (e) {
+            console.error('Tool loop error:', e);
+            await writer.write(encoder.encode(`data: ${JSON.stringify({
+              choices: [{ delta: { content: 'I encountered an error while executing that task. Please try again.' }, finish_reason: 'stop' }],
+            })}\n\n`));
+            await writer.write(encoder.encode('data: [DONE]\n\n'));
+          } finally {
+            await writer.close();
+          }
+        })();
 
-        return new Response(ssePayload, {
+        return new Response(readable, {
           headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
         });
       } catch (e) {
-        console.error('Tool loop error:', e);
+        console.error('Tool loop setup error:', e);
         // Fall through to streaming if tool loop fails
       }
     }
