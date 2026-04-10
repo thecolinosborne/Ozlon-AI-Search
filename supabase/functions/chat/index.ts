@@ -2993,7 +2993,7 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage);
+          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage, aliasMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
