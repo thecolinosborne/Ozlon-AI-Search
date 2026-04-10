@@ -482,6 +482,49 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 }
 
 // ============================================================================
+// GOHIGHLEVEL DIRECT API HELPER
+// ============================================================================
+
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
+
+async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
+  const res = await fetch(`${GHL_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${GHL_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return { raw: await res.text() };
+}
+
+async function fetchGHLData(): Promise<string> {
+  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+  if (!GHL_LOCATION_ID) return 'GHL location not configured.';
+  const sections: string[] = [];
+  try {
+    const [contactsData, pipelinesData, calendarsData] = await Promise.all([
+      callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
+      callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
+      callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as Promise<{ calendars?: { id: string; name: string }[] }>,
+    ]);
+    const contacts = contactsData.contacts || [];
+    if (contacts.length) sections.push(`**Recent Contacts (${contacts.length}):**\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}`);
+    const pipelines = pipelinesData.pipelines || [];
+    if (pipelines.length) sections.push(`**Pipelines:**\n${pipelines.map(p => `- ${p.name} (ID: ${p.id}) — Stages: ${(p.stages || []).map(s => s.name).join(' → ')}`).join('\n')}`);
+    const calendars = calendarsData.calendars || [];
+    if (calendars.length) sections.push(`**Calendars:**\n${calendars.map(c => `- ${c.name} (ID: ${c.id})`).join('\n')}`);
+  } catch (e) { sections.push(`Error: ${e instanceof Error ? e.message : 'Unknown'}`); }
+  return sections.join('\n\n') || 'No GHL data found.';
+}
+
+// ============================================================================
 // ACTION TOOL DEFINITIONS - Tools the AI can call to TAKE ACTIONS
 // ============================================================================
 
