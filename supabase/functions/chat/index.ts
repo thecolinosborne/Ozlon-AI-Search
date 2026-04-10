@@ -2975,14 +2975,25 @@ CONNECTED SERVICES (you can read data and take actions on these)
           const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
           if (multiAccountServices.length > 0) {
             systemPrompt += `\n\n===========================================================
-MULTI-ACCOUNT INSTRUCTIONS
+MULTI-ACCOUNT INSTRUCTIONS (CRITICAL — READ CAREFULLY)
 ===========================================================
-Some services have multiple accounts connected. When the user specifies which account to use (e.g. "colin@ozlon.net" or "my ozlon email"), pass the matching email address in the "account" parameter of the tool call. If the user doesn't specify, use the first/default account.\n`;
+IMPORTANT: Some services have MULTIPLE accounts connected. You MUST follow these rules:
+
+1. ALWAYS check if the user mentions a specific account (email address, domain name like "ozlon", or alias).
+2. When you detect an account reference, you MUST pass the exact email address in the "account" parameter of EVERY tool call for that service.
+3. Examples of account references:
+   - "colin@ozlon.net" → account: "colin@ozlon.net"
+   - "colin@Ozlon.net gmail" → account: "colin@ozlon.net"
+   - "my ozlon email" → account: "colin@ozlon.net" (match by domain)
+   - "from colin@colinosborne.com" → account: "colin@colinosborne.com"
+4. If the user does NOT specify an account and multiple exist, ask them which account to use. Do NOT silently default.
+5. NEVER ignore an account specification. If the user says "colin@ozlon.net", that tool call MUST use that account.
+\n`;
             for (const [app, entries] of multiAccountServices) {
               const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
               systemPrompt += `\n${label} accounts:\n`;
               for (const e of entries) {
-                systemPrompt += `- ${e.email || 'unknown'}\n`;
+                systemPrompt += `- ${e.email || 'unknown'} (connection: ${e.id.substring(0, 8)})\n`;
               }
             }
           }
