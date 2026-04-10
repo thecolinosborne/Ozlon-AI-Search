@@ -197,6 +197,15 @@ export async function streamChat({
 
         try {
           const parsed = JSON.parse(data);
+
+          // Handle task_update events
+          if (currentEventType === 'task_update' && onTaskUpdate) {
+            onTaskUpdate(parsed as TaskUpdate);
+            currentEventType = 'message';
+            continue;
+          }
+          currentEventType = 'message';
+
           const choice = parsed.choices?.[0];
 
           if (!choice) continue;
