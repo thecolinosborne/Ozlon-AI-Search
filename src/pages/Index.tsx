@@ -35,6 +35,7 @@ const Index = () => {
   const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
+  const { addTask, updateStep, completeTask } = useTaskActivityStore();
   
   // Redirect to onboarding if needed
   useEffect(() => {
