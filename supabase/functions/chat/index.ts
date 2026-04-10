@@ -104,9 +104,14 @@ const SERVICE_DETECTORS: ServiceDetection[] = [
   { app: 'google-search-console', label: 'Google Search Console', keywords: ['search console', 'gsc', 'seo', 'search performance', 'impressions', 'clicks', 'search queries', 'keyword', 'ranking', 'serp', 'search traffic', 'ctr', 'click-through', 'search analytics', 'organic search', 'web traffic'] },
   { app: 'google-mail', label: 'Gmail', keywords: ['email', 'emails', 'gmail', 'mail', 'inbox', 'unread', 'messages', 'send email', 'draft', 'newsletter'] },
   { app: 'google-calendar', label: 'Google Calendar', keywords: ['calendar', 'schedule', 'meeting', 'meetings', 'event', 'events', 'appointment', 'appointments', 'busy', 'free time', 'availability', 'agenda', 'tomorrow', 'this week', 'next week'] },
-  { app: 'google-drive', label: 'Google Drive', keywords: ['drive', 'google drive', 'files', 'documents', 'docs', 'sheets', 'slides', 'spreadsheet', 'folder', 'shared drive'] },
+  { app: 'google-drive', label: 'Google Drive', keywords: ['drive', 'google drive', 'files', 'folder', 'shared drive', 'my drive'] },
+  { app: 'google-docs', label: 'Google Docs', keywords: ['google doc', 'google docs', 'gdoc', 'gdocs', 'create a doc', 'write a doc', 'document'] },
+  { app: 'google-sheets', label: 'Google Sheets', keywords: ['google sheet', 'google sheets', 'spreadsheet', 'spreadsheets', 'gsheet', 'gsheets', 'csv data', 'rows and columns'] },
+  { app: 'google-slides', label: 'Google Slides', keywords: ['google slides', 'presentation', 'presentations', 'slide deck', 'slides', 'gslides'] },
+  { app: 'youtube', label: 'YouTube', keywords: ['youtube', 'video', 'videos', 'channel', 'subscribers', 'views', 'youtube analytics', 'uploads', 'my channel'] },
+  { app: 'google-meet', label: 'Google Meet', keywords: ['google meet', 'meet', 'video call', 'video meeting', 'gmeet'] },
   { app: 'google-ads', label: 'Google Ads', keywords: ['google ads', 'adwords', 'ad campaign', 'ad spend', 'ppc', 'cost per click', 'ad performance', 'campaigns', 'ad groups'] },
-  { app: 'google-analytics', label: 'Google Analytics', keywords: ['analytics', 'google analytics', 'ga4', 'page views', 'sessions', 'bounce rate', 'visitors', 'website traffic', 'site traffic', 'user behavior'] },
+  { app: 'google-analytics-data', label: 'Google Analytics', keywords: ['analytics', 'google analytics', 'ga4', 'page views', 'sessions', 'bounce rate', 'visitors', 'website traffic', 'site traffic', 'user behavior'] },
   { app: 'slack', label: 'Slack', keywords: ['slack', 'slack message', 'channel', 'channels', 'dm', 'direct message', 'workspace'] },
   { app: 'notion', label: 'Notion', keywords: ['notion', 'notion page', 'notion database', 'wiki', 'notes'] },
   { app: 'airtable', label: 'Airtable', keywords: ['airtable', 'base', 'airtable base', 'airtable table'] },
@@ -116,7 +121,7 @@ const SERVICE_DETECTORS: ServiceDetection[] = [
   { app: 'shopify', label: 'Shopify', keywords: ['shopify', 'store', 'orders', 'products', 'inventory', 'ecommerce', 'e-commerce', 'sales'] },
   { app: 'trello', label: 'Trello', keywords: ['trello', 'trello board', 'cards', 'trello cards'] },
   { app: 'asana', label: 'Asana', keywords: ['asana', 'asana task', 'asana project'] },
-  { app: 'clickup', label: 'ClickUp', keywords: ['clickup', 'clickup task'] },
+  { app: 'clickup', label: 'ClickUp', keywords: ['clickup', 'click up', 'clickup task', 'clickup tasks', 'task management'] },
   { app: 'jira', label: 'Jira', keywords: ['jira', 'jira ticket', 'jira issue', 'sprint', 'backlog'] },
   { app: 'github', label: 'GitHub', keywords: ['github', 'pull request', 'pr', 'commit', 'commits', 'repository', 'repo', 'issues', 'merge'] },
   { app: 'microsoft-teams', label: 'Microsoft Teams', keywords: ['teams', 'microsoft teams', 'ms teams'] },
@@ -263,14 +268,126 @@ async function fetchGitHubData(key: string, connId: string): Promise<string> {
   return `Notifications:\n${notifs}\n\nRecent repos:\n${repoList}`;
 }
 
+// ---------- Google Docs ----------
+async function fetchGoogleDocsData(key: string, connId: string): Promise<string> {
+  // Docs API doesn't have a list endpoint; use Drive to find docs
+  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.document'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+  const files = data.files || [];
+  if (!files.length) return 'No Google Docs found.';
+  return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/document/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
+}
+
+// ---------- Google Sheets ----------
+async function fetchGoogleSheetsData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.spreadsheet'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+  const files = data.files || [];
+  if (!files.length) return 'No Google Sheets found.';
+  return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
+}
+
+// ---------- Google Slides ----------
+async function fetchGoogleSlidesData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.presentation'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+  const files = data.files || [];
+  if (!files.length) return 'No Google Slides found.';
+  return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
+}
+
+// ---------- YouTube ----------
+async function fetchYouTubeData(key: string, connId: string): Promise<string> {
+  try {
+    const channelData = await callMatonGateway(key, '/youtube/youtube/v3/channels?part=snippet,statistics&mine=true', connId) as { items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string; videoCount?: string; viewCount?: string } }[] };
+    const ch = channelData.items?.[0];
+    let result = '';
+    if (ch) {
+      result += `**Channel:** ${ch.snippet?.title || 'Unknown'}\n`;
+      result += `Subscribers: ${ch.statistics?.subscriberCount || '?'} | Videos: ${ch.statistics?.videoCount || '?'} | Total views: ${ch.statistics?.viewCount || '?'}\n\n`;
+    }
+    const videosData = await callMatonGateway(key, '/youtube/youtube/v3/search?part=snippet&forMine=true&type=video&maxResults=10&order=date', connId) as { items?: { id?: { videoId?: string }; snippet?: { title?: string; publishedAt?: string } }[] };
+    const vids = videosData.items || [];
+    if (vids.length) {
+      result += 'Recent uploads:\n';
+      result += vids.map(v => `- [${v.snippet?.title || '(untitled)'}](https://youtube.com/watch?v=${v.id?.videoId}) — ${v.snippet?.publishedAt || ''}`).join('\n');
+    }
+    return result || 'YouTube connected but no channel data found.';
+  } catch (e) { return `YouTube error: ${e instanceof Error ? e.message : 'Unknown'}`; }
+}
+
+// ---------- Google Meet (via Calendar) ----------
+async function fetchGoogleMeetData(key: string, connId: string): Promise<string> {
+  const now = new Date();
+  const end = new Date(); end.setDate(end.getDate() + 14);
+  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${end.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20&q=meet.google.com`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; hangoutLink?: string; htmlLink?: string }[] };
+  const events = data.items || [];
+  if (!events.length) return 'No upcoming Google Meet meetings found.';
+  return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
+}
+
+// ---------- ClickUp ----------
+async function fetchClickUpData(key: string, connId: string): Promise<string> {
+  const teamsData = await callMatonGateway(key, '/clickup/api/v2/team', connId) as { teams?: { id: string; name: string }[] };
+  const teams = teamsData.teams || [];
+  if (!teams.length) return 'No ClickUp workspaces found.';
+  const sections: string[] = [];
+  for (const team of teams.slice(0, 2)) {
+    const spacesData = await callMatonGateway(key, `/clickup/api/v2/team/${team.id}/space?archived=false`, connId) as { spaces?: { id: string; name: string }[] };
+    const spaces = spacesData.spaces || [];
+    let teamSection = `**Workspace:** ${team.name}\n`;
+    for (const space of spaces.slice(0, 3)) {
+      teamSection += `  Space: ${space.name}\n`;
+      try {
+        const listsData = await callMatonGateway(key, `/clickup/api/v2/space/${space.id}/list`, connId) as { lists?: { id: string; name: string; task_count?: number }[] };
+        const lists = listsData.lists || [];
+        for (const list of lists.slice(0, 3)) {
+          teamSection += `    - ${list.name} (${list.task_count || 0} tasks)\n`;
+        }
+      } catch { teamSection += '    - Could not load lists\n'; }
+    }
+    sections.push(teamSection);
+  }
+  return sections.join('\n');
+}
+
+// ---------- Google Analytics (GA4) ----------
+async function fetchGoogleAnalyticsData(key: string, connId: string): Promise<string> {
+  try {
+    // List GA4 properties
+    const accountsData = await callMatonGateway(key, '/google-analytics-data/analytics/admin/v1beta/accountSummaries', connId) as { accountSummaries?: { account?: string; displayName?: string; propertySummaries?: { property?: string; displayName?: string }[] }[] };
+    const accounts = accountsData.accountSummaries || [];
+    if (!accounts.length) return 'No Google Analytics accounts found.';
+    const prop = accounts[0]?.propertySummaries?.[0];
+    if (!prop?.property) return 'No GA4 properties found.';
+    const propertyId = prop.property.replace('properties/', '');
+    // Run a basic report
+    const reportData = await callMatonGateway(key, `/google-analytics-data/analytics/data/v1beta/properties/${propertyId}:runReport`, connId, 'POST', {
+      dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+      metrics: [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'screenPageViews' }, { name: 'bounceRate' }],
+      dimensions: [{ name: 'date' }],
+      orderBys: [{ dimension: { dimensionName: 'date' }, desc: false }],
+    }) as { rows?: { dimensionValues?: { value: string }[]; metricValues?: { value: string }[] }[] };
+    const rows = reportData.rows || [];
+    if (!rows.length) return `GA4 Property: ${prop.displayName}\nNo data in the last 7 days.`;
+    let result = `**GA4 Property:** ${prop.displayName}\n**Last 7 days:**\n`;
+    const totals = { users: 0, sessions: 0, pageviews: 0 };
+    for (const row of rows) {
+      const date = row.dimensionValues?.[0]?.value || '?';
+      const users = parseInt(row.metricValues?.[0]?.value || '0');
+      const sessions = parseInt(row.metricValues?.[1]?.value || '0');
+      const pv = parseInt(row.metricValues?.[2]?.value || '0');
+      totals.users += users; totals.sessions += sessions; totals.pageviews += pv;
+      result += `- ${date}: ${users} users, ${sessions} sessions, ${pv} pageviews\n`;
+    }
+    result += `\n**Totals:** ${totals.users} users, ${totals.sessions} sessions, ${totals.pageviews} pageviews`;
+    return result;
+  } catch (e) { return `Google Analytics error: ${e instanceof Error ? e.message : 'Unknown'}`; }
+}
+
 async function fetchGenericData(key: string, connId: string, app: string): Promise<string> {
   const endpoints: Record<string, string> = {
     'trello': '/trello/1/members/me/boards?fields=name,dateLastActivity',
     'asana': '/asana/api/1.0/users/me/user_task_list',
-    'clickup': '/clickup/api/v2/team',
     'jira': '/jira/rest/api/3/myself',
     'google-ads': '/google-ads/v17/customers:listAccessibleCustomers',
-    'google-analytics': '/google-analytics/analytics/data/v1beta/properties:runReport',
   };
   if (!endpoints[app]) return `${app} connected but no specific fetcher configured.`;
   try {
@@ -279,89 +396,18 @@ async function fetchGenericData(key: string, connId: string, app: string): Promi
   } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
-// ============================================================================
-// GOHIGHLEVEL DATA FETCHER (via dedicated edge function)
-// ============================================================================
-
-const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
-
-async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
-  const res = await fetch(`${GHL_BASE_URL}${path}`, {
-    method,
-    headers: {
-      'Authorization': `Bearer ${GHL_API_KEY}`,
-      'Content-Type': 'application/json',
-      'Version': '2021-07-28',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return { raw: await res.text() };
-}
-
-async function fetchGHLData(): Promise<string> {
-  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
-  if (!GHL_LOCATION_ID) return 'GoHighLevel location ID not configured.';
-
-  const sections: string[] = [];
-
-  // Fetch in parallel: contacts, pipelines, calendars, conversations, campaigns
-  const [contacts, pipelines, calendars, conversations, campaigns, workflows] = await Promise.all([
-    callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; dateAdded?: string; tags?: string[] }[] } | null>,
-    callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] } | null>,
-    callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ calendars?: { id: string; name: string; description?: string }[] } | null>,
-    callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ conversations?: { id: string; contactId?: string; lastMessageBody?: string; dateUpdated?: string; type?: string }[] } | null>,
-    callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ campaigns?: { id: string; name: string; status?: string }[] } | null>,
-    callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ workflows?: { id: string; name: string; status?: string }[] } | null>,
-  ]);
-
-  if (contacts?.contacts?.length) {
-    sections.push(`### Recent Contacts (${contacts.contacts.length})\n${contacts.contacts.map(c =>
-      `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`
-    ).join('\n')}`);
-  }
-
-  if (pipelines?.pipelines?.length) {
-    sections.push(`### Pipelines (${pipelines.pipelines.length})\n${pipelines.pipelines.map(p =>
-      `- ${p.name} (ID: ${p.id})${p.stages?.length ? '\n  Stages: ' + p.stages.map(s => s.name).join(' → ') : ''}`
-    ).join('\n')}`);
-  }
-
-  if (calendars?.calendars?.length) {
-    sections.push(`### Calendars (${calendars.calendars.length})\n${calendars.calendars.map(c =>
-      `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`
-    ).join('\n')}`);
-  }
-
-  if (conversations?.conversations?.length) {
-    sections.push(`### Recent Conversations (${conversations.conversations.length})\n${conversations.conversations.map(c =>
-      `- Type: ${c.type || '?'} | Last: "${(c.lastMessageBody || '').substring(0, 80)}" | ${c.dateUpdated || ''}`
-    ).join('\n')}`);
-  }
-
-  if (campaigns?.campaigns?.length) {
-    sections.push(`### Campaigns (${campaigns.campaigns.length})\n${campaigns.campaigns.map(c =>
-      `- ${c.name} (${c.status || 'unknown'})`
-    ).join('\n')}`);
-  }
-
-  if (workflows?.workflows?.length) {
-    sections.push(`### Workflows (${workflows.workflows.length})\n${workflows.workflows.map(w =>
-      `- ${w.name} (${w.status || 'unknown'})`
-    ).join('\n')}`);
-  }
-
-  return sections.length ? sections.join('\n\n') : 'GoHighLevel is connected but no data was returned. Check your location ID and API permissions.';
-}
-
 const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
   'google-search-console': fetchGSCData,
   'google-mail': fetchGmailData,
   'google-calendar': fetchCalendarData,
   'google-drive': fetchGoogleDriveData,
+  'google-docs': fetchGoogleDocsData,
+  'google-sheets': fetchGoogleSheetsData,
+  'google-slides': fetchGoogleSlidesData,
+  'youtube': fetchYouTubeData,
+  'google-meet': fetchGoogleMeetData,
+  'google-analytics-data': fetchGoogleAnalyticsData,
+  'clickup': fetchClickUpData,
   'slack': fetchSlackData,
   'hubspot': fetchHubSpotData,
   'stripe': fetchStripeData,
@@ -369,10 +415,8 @@ const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<
   'notion': fetchNotionData,
   'github': fetchGitHubData,
   'google-ads': (k, c) => fetchGenericData(k, c, 'google-ads'),
-  'google-analytics': (k, c) => fetchGenericData(k, c, 'google-analytics'),
   'trello': (k, c) => fetchGenericData(k, c, 'trello'),
   'asana': (k, c) => fetchGenericData(k, c, 'asana'),
-  'clickup': (k, c) => fetchGenericData(k, c, 'clickup'),
   'jira': (k, c) => fetchGenericData(k, c, 'jira'),
 };
 
@@ -591,6 +635,115 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           max_results: { type: 'number', description: 'Max results to return (default 10)' },
         },
         required: ['query'],
+      },
+    },
+  },
+  // Google Docs actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_google_doc',
+      description: 'Create a new Google Doc with a title and optional content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Document title' },
+          content: { type: 'string', description: 'Initial text content for the document (optional)' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  // Google Sheets actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_google_sheet',
+      description: 'Create a new Google Sheets spreadsheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Spreadsheet title' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_sheet_data',
+      description: 'Read data from a Google Sheets spreadsheet by its ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          spreadsheet_id: { type: 'string', description: 'The spreadsheet ID (from its URL)' },
+          range: { type: 'string', description: "Cell range to read, e.g. 'Sheet1!A1:D10'. Defaults to 'Sheet1'" },
+        },
+        required: ['spreadsheet_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'append_sheet_rows',
+      description: 'Append rows of data to a Google Sheets spreadsheet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          spreadsheet_id: { type: 'string', description: 'The spreadsheet ID' },
+          range: { type: 'string', description: "Range to append to, e.g. 'Sheet1!A:D'. Defaults to 'Sheet1'" },
+          values: { type: 'string', description: 'JSON array of arrays representing rows, e.g. [["Name","Email"],["John","john@example.com"]]' },
+        },
+        required: ['spreadsheet_id', 'values'],
+      },
+    },
+  },
+  // Google Slides actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_google_presentation',
+      description: 'Create a new Google Slides presentation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Presentation title' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  // ClickUp actions
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_task',
+      description: 'Create a new task in ClickUp.',
+      parameters: {
+        type: 'object',
+        properties: {
+          list_id: { type: 'string', description: 'ClickUp list ID to create the task in' },
+          name: { type: 'string', description: 'Task name' },
+          description: { type: 'string', description: 'Task description (optional)' },
+          priority: { type: 'number', description: 'Priority: 1=Urgent, 2=High, 3=Normal, 4=Low (optional)' },
+        },
+        required: ['list_id', 'name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_tasks',
+      description: 'List tasks from a ClickUp list.',
+      parameters: {
+        type: 'object',
+        properties: {
+          list_id: { type: 'string', description: 'ClickUp list ID' },
+        },
+        required: ['list_id'],
       },
     },
   },
@@ -1048,6 +1201,92 @@ async function executeToolCall(
         return { success: true, result: `Campaigns:\n${camps.map(c => `- ${c.name} (${c.status || 'unknown'}) | ID: ${c.id}`).join('\n')}` };
       }
 
+      // ============ Google Docs tools ============
+      case 'create_google_doc': {
+        const connId = connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
+        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
+        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to create doc: ${res.error.message || JSON.stringify(res.error)}` };
+        const link = res.webViewLink || `https://docs.google.com/document/d/${res.id}/edit`;
+        let result = `Google Doc created: "${args.title}" — ${link}`;
+        if (args.content) {
+          try {
+            const docConnId = connMap.get('google-docs') || connId;
+            await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
+              requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
+            });
+            result += '\nContent added successfully.';
+          } catch { result += '\nDoc created but could not insert content (Docs API may not be connected).'; }
+        }
+        return { success: true, result };
+      }
+
+      // ============ Google Sheets tools ============
+      case 'create_google_sheet': {
+        const connId = connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
+        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
+        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to create sheet: ${res.error.message || JSON.stringify(res.error)}` };
+        const link = res.webViewLink || `https://docs.google.com/spreadsheets/d/${res.id}/edit`;
+        return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
+      }
+
+      case 'read_sheet_data': {
+        const connId = connMap.get('google-sheets') || connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
+        const range = encodeURIComponent((args.range as string) || 'Sheet1');
+        const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
+        if (data.error) return { success: false, result: `Failed to read sheet: ${data.error.message}` };
+        const rows = data.values || [];
+        if (!rows.length) return { success: true, result: 'Sheet is empty or range has no data.' };
+        return { success: true, result: `Read ${rows.length} rows:\n${rows.slice(0, 50).map(r => r.join(' | ')).join('\n')}${rows.length > 50 ? `\n... and ${rows.length - 50} more rows` : ''}` };
+      }
+
+      case 'append_sheet_rows': {
+        const connId = connMap.get('google-sheets') || connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
+        const range = encodeURIComponent((args.range as string) || 'Sheet1');
+        let values: string[][];
+        try { values = JSON.parse(args.values as string); } catch { return { success: false, result: 'Invalid values format. Must be a JSON array of arrays.' }; }
+        const res = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}:append?valueInputOption=USER_ENTERED`, connId, 'POST', { values }) as { updates?: { updatedRows?: number }; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to append: ${res.error.message}` };
+        return { success: true, result: `Appended ${res.updates?.updatedRows || values.length} rows to the spreadsheet.` };
+      }
+
+      // ============ Google Slides tools ============
+      case 'create_google_presentation': {
+        const connId = connMap.get('google-drive');
+        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
+        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
+        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to create presentation: ${res.error.message || JSON.stringify(res.error)}` };
+        const link = res.webViewLink || `https://docs.google.com/presentation/d/${res.id}/edit`;
+        return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
+      }
+
+      // ============ ClickUp tools ============
+      case 'create_clickup_task': {
+        const connId = connMap.get('clickup');
+        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
+        const taskData: Record<string, unknown> = { name: args.name };
+        if (args.description) taskData.description = args.description;
+        if (args.priority) taskData.priority = args.priority;
+        const res = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task`, connId, 'POST', taskData) as { id?: string; name?: string; url?: string; err?: string };
+        if (res.err) return { success: false, result: `ClickUp error: ${res.err}` };
+        return { success: true, result: `Task created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+      }
+
+      case 'list_clickup_tasks': {
+        const connId = connMap.get('clickup');
+        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
+        const data = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task?page=0`, connId) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string; priority?: { priority?: string } }[] };
+        const tasks = data.tasks || [];
+        if (!tasks.length) return { success: true, result: 'No tasks in this list.' };
+        return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map(t => `- ${t.name} (${t.status?.status || '?'}) — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -1175,9 +1414,16 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
     'create_hubspot_contact': 'hubspot',
     'create_hubspot_deal': 'hubspot',
     'search_google_drive': 'google-drive',
+    'create_google_doc': 'google-drive',
+    'create_google_sheet': 'google-drive',
+    'read_sheet_data': 'google-drive',
+    'append_sheet_rows': 'google-drive',
+    'create_google_presentation': 'google-drive',
+    'create_clickup_task': 'clickup',
+    'list_clickup_tasks': 'clickup',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
-    // GHL tools - keyed to special 'ghl' marker
+    // GHL tools
     'ghl_list_contacts': 'ghl',
     'ghl_create_contact': 'ghl',
     'ghl_create_opportunity': 'ghl',
@@ -1510,7 +1756,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
