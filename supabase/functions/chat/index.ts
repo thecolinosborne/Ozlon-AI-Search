@@ -721,6 +721,60 @@ The following is REAL data pulled from the user's connected accounts via Maton A
 
   return injection;
 }
+// ============================================================================
+// MAIN REQUEST HANDLER
+// ============================================================================
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { 
+      messages, 
+      intent, 
+      systemName = 'Ozlon',
+      model = DEFAULT_MODEL,
+      agentId,
+      agentMetadata,
+      enableTools = false,
+      userSettings,
+    } = await req.json();
+
+    // Get model configuration
+    const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
+    const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
+    
+    if (!apiKey) {
+      throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
+    }
+
+    // Build agent context
+    const agentContext: AgentContext = {
+      agentId: agentId || INTENT_TO_AGENT[intent] || 'base',
+      intent,
+      metadata: agentMetadata,
+    };
+
+    // Build system prompt with user settings
+    let systemPrompt = buildSystemPrompt(systemName, agentContext, false, userSettings);
+
+    // =====================================================================
+    // PRE-FETCH: Auto-detect intents and inject real data from all Maton services
+    // =====================================================================
+    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
+    
+    if (MATON_API_KEY) {
+      try {
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY);
+        if (matonInjection) {
+          systemPrompt += matonInjection;
+        }
+      } catch (e) {
+        console.error('Error in Maton data injection:', e);
+      }
+    }
 
     // Build messages array in OpenAI format
     const openAIMessages = [
@@ -741,7 +795,6 @@ The following is REAL data pulled from the user's connected accounts via Maton A
       agentId: agentContext.agentId,
       messagesCount: openAIMessages.length,
       toolsCount: tools.length,
-      systemPromptPreview: systemPrompt.substring(0, 200) + '...',
     });
 
     // Build request payload
@@ -784,7 +837,7 @@ The following is REAL data pulled from the user's connected accounts via Maton A
       });
     }
 
-    // Stream the response directly - OpenAI format is already compatible
+    // Stream the response directly
     return new Response(response.body, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
     });
