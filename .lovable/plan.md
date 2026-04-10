@@ -1,87 +1,90 @@
 
 
-# Knowledge Repository: Installing the Minds of the Greats
+# Wisdom Engine -- What to Keep, What to Add, What to Skip
 
-## The Concept
+## What You Already Have (KEEP as-is)
+- `knowledge_entries` + `knowledge_sources` tables with pgvector, RLS, and vector indexes
+- `match_knowledge` SQL function for semantic search
+- `knowledge-ingest` edge function (extracts frameworks from text, embeds, stores)
+- `knowledge-search` edge function (standalone semantic lookup)
+- Chat function already injects top 8 knowledge results into system prompt
+- 148 pre-seeded entries from Hormozi, Munger, Brunson, Pelosi, AI gurus, etc.
+- `memoryService.ts` client-side service (but no `memories` table exists in DB yet)
 
-You want a **wisdom engine** -- a searchable database of mental models, frameworks, strategies, and philosophies from the world's best entrepreneurs, marketers, and CEOs. When you're chatting with Ozlon about a business problem, it pulls the most relevant wisdom and applies it.
+## What to ADD (new tables and functions)
 
-## Where It Lives
+### 1. `wisdom_memories` table
+Your memory service references a `memories` table that doesn't exist. This is the core gap. This table stores durable facts about YOU -- preferences, patterns, business context, life details -- so the AI gets smarter over time.
 
-**Two new database tables in your Lovable Cloud backend:**
+### 2. `reflection_notes` table
+System-generated insights distilled from conversations. After meaningful chats, the AI can produce a short reflection note summarizing what it learned -- patterns it noticed, advice it gave, themes emerging across sessions.
 
-### 1. `knowledge_entries` -- The Raw Wisdom
-Stores individual pieces of knowledge: principles, frameworks, quotes, strategies.
+### 3. `chat_sessions` + `chat_messages` tables
+Currently chat history lives only in the frontend (Zustand store, last 10 messages). These tables persist full conversation history with embeddings so the AI can reference past conversations.
 
-| Column | Purpose |
-|--------|---------|
-| `id` | Primary key |
-| `user_id` | Owner (so each user can have their own library) |
-| `source_person` | "Alex Hormozi", "Charlie Munger", "Steve Jobs" |
-| `source_material` | "$100M Offers", "Poor Charlie's Almanack", etc. |
-| `category` | `framework`, `principle`, `strategy`, `mental_model`, `quote`, `playbook` |
-| `domain` | `marketing`, `sales`, `leadership`, `finance`, `ops`, `product`, `mindset` |
-| `title` | Short name: "The Value Equation", "Inversion Thinking" |
-| `content` | The actual knowledge -- detailed explanation |
-| `embedding` | 1536-dim vector (pgvector) for semantic search |
-| `tags` | Array of searchable tags |
-| `created_at` | Timestamp |
+### 4. `system_evolution_proposals` table
+Safe self-improvement: the AI can propose prompt changes, memory reorganizations, or new wisdom structures, but nothing executes without your approval.
 
-### 2. `knowledge_sources` -- Track What's Been Ingested
-Tracks books, podcasts, courses you've loaded so you don't duplicate.
+### 5. Multi-scope `knowledge-search` upgrade
+Current search only hits `knowledge_entries`. Upgrade to search across memories, reflections, knowledge, and wisdom packs simultaneously with weighted ranking.
 
-| Column | Purpose |
-|--------|---------|
-| `id` | Primary key |
-| `user_id` | Owner |
-| `person` | Author/speaker |
-| `title` | Book/course/podcast name |
-| `type` | `book`, `course`, `podcast`, `article`, `framework_set` |
-| `entry_count` | How many entries extracted |
-| `created_at` | Timestamp |
+### 6. Chat function upgrade
+- Store messages to `chat_messages`
+- After each response, extract durable memories (facts, preferences, patterns)
+- Optionally generate reflection notes
+- Search memories + reflections alongside knowledge for context injection
 
-## How It Gets Smart
+### 7. Starter wisdom pack (separate from entrepreneur frameworks)
+40-60 personal growth entries: self-discipline, emotional regulation, decision-making, execution, resilience. These are universal, not tied to a specific person.
 
-### Ingestion Edge Function (`knowledge-ingest`)
-An edge function that:
-1. Takes raw text (book summaries, framework descriptions, or structured JSON)
-2. Uses AI to break it into discrete knowledge entries (principles, frameworks, mental models)
-3. Generates vector embeddings for each entry
-4. Stores everything in the database
+## What to SKIP (overkill for now)
 
-You can feed it by:
-- Pasting book summaries or notes
-- Uploading documents through chat
-- Asking Ozlon to "learn about Alex Hormozi's value equation" and it researches + stores it
-- Pre-seeding with curated framework packs
+| Proposed | Why Skip |
+|----------|----------|
+| `knowledge_documents` + `knowledge_chunks` | You already have `knowledge_entries` which serves the same purpose. Adding a document/chunk layer is redundant -- your ingest function already chunks and embeds. Revisit only if you need to ingest 50+ page documents. |
+| `wisdom_packs` + `wisdom_pack_items` as separate tables | The starter wisdom can go directly into `knowledge_entries` with a special `source_person = 'Wisdom Engine'`. No need for extra tables. |
+| HNSW indexes | ivfflat is already configured and works fine at your scale (hundreds of entries). HNSW is for millions. |
 
-### Semantic Search Function (`match_knowledge`)
-A Postgres function using pgvector that finds the most relevant knowledge entries based on what you're currently discussing. When you say "how should I price my offer?", it pulls Hormozi's Value Equation, Munger's pricing mental models, etc.
+## Implementation Plan
 
-## How It Connects to Chat
+### Step 1: Database Migration
+Create 4 new tables with RLS, indexes, triggers, and search functions:
+- `wisdom_memories` (user facts/patterns with salience, confidence, recurrence)
+- `reflection_notes` (AI-generated insights)
+- `chat_sessions` + `chat_messages` (persistent conversation history)
+- `system_evolution_proposals` (safe self-improvement proposals)
+- New `match_wisdom_memories` and `match_reflections` SQL functions
+- Update `match_knowledge` isn't needed -- it already works
 
-Update the chat edge function to:
-1. Detect when business/strategy context would help
-2. Run a semantic search against your knowledge repository
-3. Inject the top 5-10 most relevant frameworks/principles into the AI's context
-4. The AI applies those frameworks to your specific situation
+### Step 2: Rebuild `knowledge-ingest`
+Keep existing logic but add:
+- After ingesting knowledge, optionally extract memory candidates into `wisdom_memories`
+- Optionally produce a reflection note summarizing the ingested material
 
-## Implementation Steps
+### Step 3: Upgrade `knowledge-search`
+Add multi-scope search:
+- `scope = knowledge | memory | reflection | all`
+- Weighted ranking: similarity + recency + salience + confidence
+- Returns grouped results with a pre-built context bundle for chat injection
 
-1. **Enable pgvector extension** in the database
-2. **Create `knowledge_sources` and `knowledge_entries` tables** with RLS policies
-3. **Create `match_knowledge` SQL function** for similarity search
-4. **Build `knowledge-ingest` edge function** -- accepts text, breaks into entries, embeds, stores
-5. **Build `knowledge-search` edge function** -- semantic search endpoint
-6. **Update chat edge function** -- auto-inject relevant knowledge into conversations
-7. **Pre-seed with starter pack** -- load 50-100 high-value frameworks from Hormozi, Munger, Bezos, Jobs, Musk, Buffett, Dalio, etc.
-8. **Add Knowledge section to Settings** -- view sources, entry counts, add new material
+### Step 4: Upgrade chat function
+- Persist messages to `chat_messages` (create session if needed)
+- After generating response, use AI to extract durable memories
+- Update salience/recurrence on existing memories when re-accessed
+- Inject memories + reflections + knowledge into system prompt
+- Enhanced system prompt: long-memory strategic guide, pattern recognizer, truth-seeking advisor
 
-## Technical Details
+### Step 5: Seed starter wisdom pack
+50+ entries across: self-discipline, long-term thinking, emotional regulation, resilience, decision-making, execution, identity, relationships, health, money. Embedded and stored as `knowledge_entries` with `source_person = 'Wisdom Engine'`.
 
-- **pgvector** for vector similarity search (already architected for your memories table)
-- **OpenAI text-embedding-3-small** for generating embeddings (key already configured)
-- **Cosine similarity** for matching relevance
-- All knowledge is per-user with RLS, so this scales to multiple users
-- The existing `memories` table stays separate -- memories are about *you*, knowledge is about *the world*
+### Step 6: Update `memoryService.ts`
+Point the client-side service at the new `wisdom_memories` table instead of the non-existent `memories` table.
+
+## Files Changed/Created
+- **New migration**: All new tables, RLS, indexes, search functions
+- **Updated**: `supabase/functions/knowledge-ingest/index.ts`
+- **Updated**: `supabase/functions/knowledge-search/index.ts`
+- **Updated**: `supabase/functions/chat/index.ts` (message persistence, memory extraction, reflection generation, multi-source context injection, enhanced system prompt)
+- **Updated**: `src/services/memoryService.ts` (point at real table)
+- **Seed script**: Run via the ingest function to load starter wisdom
 
