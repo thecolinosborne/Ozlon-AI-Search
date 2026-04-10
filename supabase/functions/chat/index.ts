@@ -390,49 +390,143 @@ Help the user extract value from their day:
 };
 
 // ============================================================================
-// TOOL CALL HANDLER - Process tool calls from the model
+// MATON GATEWAY - Real data from connected services
 // ============================================================================
 
-async function handleToolCall(
-  toolName: string, 
-  toolArgs: Record<string, unknown>,
-  _agentContext: AgentContext
-): Promise<string> {
-  // This is a stub - in production, this would dispatch to actual integrations
-  console.log(`Tool call: ${toolName}`, toolArgs);
-  
-  // Placeholder responses for shell functionality
-  const toolResponses: Record<string, string> = {
-    get_account_balance: JSON.stringify({
-      checking: { balance: 2450.32, currency: 'USD' },
-      savings: { balance: 8900.00, currency: 'USD' },
-      note: 'This is example data. Connect your bank to see real balances.'
-    }),
-    get_recent_transactions: JSON.stringify({
-      transactions: [
-        { date: '2024-01-15', merchant: 'Grocery Store', amount: -85.42 },
-        { date: '2024-01-14', merchant: 'Gas Station', amount: -45.00 },
-        { date: '2024-01-13', merchant: 'Direct Deposit', amount: 2500.00 },
-      ],
-      note: 'This is example data. Connect your bank to see real transactions.'
-    }),
-    get_unread_emails: JSON.stringify({
-      emails: [
-        { from: 'boss@company.com', subject: 'Q1 Planning Meeting', priority: 'high' },
-        { from: 'team@company.com', subject: 'Weekly Update', priority: 'normal' },
-      ],
-      note: 'This is example data. Connect your email to see real messages.'
-    }),
-    get_upcoming_events: JSON.stringify({
-      events: [
-        { time: '09:00', title: 'Team Standup', duration: '30min' },
-        { time: '14:00', title: 'Client Call', duration: '1hr' },
-      ],
-      note: 'This is example data. Connect your calendar to see real events.'
-    }),
-  };
+const MATON_CTRL_URL = 'https://ctrl.maton.ai';
+const MATON_GATEWAY_URL = 'https://gateway.maton.ai';
 
-  return toolResponses[toolName] || JSON.stringify({ error: 'Tool not implemented' });
+interface MatonConnection {
+  app: string;
+  connection_id: string;
+  status: string;
+}
+
+async function getMatonConnections(matonApiKey: string): Promise<MatonConnection[]> {
+  try {
+    const res = await fetch(`${MATON_CTRL_URL}/connections`, {
+      headers: { 'Authorization': `Bearer ${matonApiKey}`, 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.connections || []).filter((c: MatonConnection) => c.status === 'ACTIVE');
+  } catch { return []; }
+}
+
+async function callMatonGateway(
+  matonApiKey: string,
+  path: string,
+  connectionId: string,
+  method = 'GET',
+  body?: unknown,
+): Promise<unknown> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${matonApiKey}`,
+    'Content-Type': 'application/json',
+    'Maton-Connection': connectionId,
+  };
+  const res = await fetch(`${MATON_GATEWAY_URL}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return { raw: await res.text() };
+}
+
+// Detect if user message relates to search console / SEO
+function detectSearchConsoleIntent(messages: { role: string; content: string }[]): boolean {
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg) return false;
+  const lower = lastUserMsg.content.toLowerCase();
+  const keywords = ['search console', 'gsc', 'seo', 'search performance', 'impressions', 'clicks',
+    'search queries', 'google search', 'keyword', 'ranking', 'serp', 'search traffic',
+    'ctr', 'click-through', 'search analytics', 'organic search', 'web traffic'];
+  return keywords.some(k => lower.includes(k));
+}
+
+// Fetch Search Console data for all sites, yesterday
+async function fetchSearchConsoleData(matonApiKey: string, connectionId: string): Promise<string> {
+  try {
+    // Get sites list
+    const sitesData = await callMatonGateway(matonApiKey, '/google-search-console/webmasters/v3/sites', connectionId) as { siteEntry?: { siteUrl: string }[] };
+    const sites = sitesData.siteEntry || [];
+    if (sites.length === 0) return 'No sites found in Google Search Console.';
+
+    // Get yesterday's date
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateStr = yesterday.toISOString().split('T')[0];
+
+    // Also get day before yesterday for comparison
+    const dayBefore = new Date();
+    dayBefore.setDate(dayBefore.getDate() - 2);
+    const dayBeforeStr = dayBefore.toISOString().split('T')[0];
+
+    const allSiteData: string[] = [];
+
+    for (const site of sites) {
+      const siteUrl = site.siteUrl;
+      try {
+        // Fetch yesterday's data
+        const [yesterdayData, dayBeforeData] = await Promise.all([
+          callMatonGateway(
+            matonApiKey,
+            `/google-search-console/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+            connectionId,
+            'POST',
+            {
+              startDate: dateStr,
+              endDate: dateStr,
+              dimensions: ['query'],
+              rowLimit: 25,
+            },
+          ),
+          callMatonGateway(
+            matonApiKey,
+            `/google-search-console/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+            connectionId,
+            'POST',
+            {
+              startDate: dayBeforeStr,
+              endDate: dayBeforeStr,
+              dimensions: ['query'],
+              rowLimit: 25,
+            },
+          ),
+        ]);
+
+        const yd = yesterdayData as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        const dbd = dayBeforeData as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+
+        // Compute totals
+        const yRows = yd.rows || [];
+        const dbRows = dbd.rows || [];
+        const yTotals = yRows.reduce((acc, r) => ({ clicks: acc.clicks + r.clicks, impressions: acc.impressions + r.impressions }), { clicks: 0, impressions: 0 });
+        const dbTotals = dbRows.reduce((acc, r) => ({ clicks: acc.clicks + r.clicks, impressions: acc.impressions + r.impressions }), { clicks: 0, impressions: 0 });
+
+        let siteReport = `## ${siteUrl}\n`;
+        siteReport += `**Yesterday (${dateStr}):** ${yTotals.clicks} clicks, ${yTotals.impressions} impressions\n`;
+        siteReport += `**Day before (${dayBeforeStr}):** ${dbTotals.clicks} clicks, ${dbTotals.impressions} impressions\n`;
+        if (yRows.length > 0) {
+          siteReport += `\nTop queries:\n`;
+          for (const row of yRows.slice(0, 10)) {
+            siteReport += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} impressions, pos ${row.position.toFixed(1)}, CTR ${(row.ctr * 100).toFixed(1)}%\n`;
+          }
+        } else {
+          siteReport += `No query data available for yesterday (data may take 2-3 days to appear in GSC).\n`;
+        }
+        allSiteData.push(siteReport);
+      } catch (e) {
+        allSiteData.push(`## ${siteUrl}\nError fetching data: ${e instanceof Error ? e.message : 'Unknown error'}\n`);
+      }
+    }
+
+    return `# Google Search Console Data\nDate range: ${dateStr} vs ${dayBeforeStr}\n\n${allSiteData.join('\n')}`;
+  } catch (e) {
+    return `Error fetching Search Console data: ${e instanceof Error ? e.message : 'Unknown error'}`;
+  }
 }
 
 // ============================================================================
