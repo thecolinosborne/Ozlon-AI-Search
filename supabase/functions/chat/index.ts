@@ -620,13 +620,29 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'batch_trash_emails',
-      description: 'Move multiple emails to trash at once. More efficient than trashing one-by-one. Use this when cleaning/filtering the inbox.',
+      description: 'Move multiple emails to trash at once using individual trash calls in parallel. More efficient than trashing one-by-one. Use this when cleaning/filtering the inbox.',
       parameters: {
         type: 'object',
         properties: {
-          message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash' },
+          message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash (up to 50 at a time)' },
         },
         required: ['message_ids'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_email_ids',
+      description: 'Lightweight bulk email ID fetcher. Returns only message IDs (no metadata) for up to 500 emails matching a query. Use this first to see the full scope of emails before batch operations. Results are in newest-first order.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Gmail search query (e.g. "in:inbox -from:client@co.com")' },
+          max_results: { type: 'number', description: 'Max IDs to return (default 100, max 500)' },
+          page_token: { type: 'string', description: 'Pagination token from previous call (optional)' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -1505,14 +1521,14 @@ async function executeToolCall(
       case 'list_emails': {
         const connId = connMap.get('google-mail');
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
-        const maxResults = Math.min((args.max_results as number) || 20, 100);
+        const maxResults = Math.min((args.max_results as number) || 50, 100);
         const query = encodeURIComponent(args.query as string);
         const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
         const msgs = data.messages || [];
         if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
-        // Fetch metadata for each message (batch up to 25)
-        const details: string[] = [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 25)}:`];
-        const batch = msgs.slice(0, 25);
+        // Fetch metadata for each message (batch up to 50)
+        const details: string[] = [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 50)}:`];
+        const batch = msgs.slice(0, 50);
         const metadataResults = await Promise.all(batch.map(async (m) => {
           try {
             const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
@@ -1560,14 +1576,35 @@ async function executeToolCall(
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
-        // Gmail batchModify endpoint
-        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/batchModify', connId, 'POST', {
-          ids,
-          addLabelIds: ['TRASH'],
-          removeLabelIds: ['INBOX'],
-        }) as { error?: { message?: string } };
-        if (res.error) return { success: false, result: `Batch trash failed: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `${ids.length} emails moved to trash.` };
+        // Use individual trash calls in parallel chunks of 10 (Gmail's official trash endpoint)
+        let successCount = 0;
+        let failCount = 0;
+        const chunkSize = 10;
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          const results = await Promise.all(chunk.map(async (id) => {
+            try {
+              const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
+              return !res.error;
+            } catch { return false; }
+          }));
+          successCount += results.filter(Boolean).length;
+          failCount += results.filter(r => !r).length;
+        }
+        return { success: true, result: `Batch trash complete: ${successCount} emails trashed${failCount > 0 ? `, ${failCount} failed` : ''}.` };
+      }
+
+      case 'list_email_ids': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const maxResults = Math.min((args.max_results as number) || 100, 500);
+        const query = encodeURIComponent(args.query as string);
+        let url = `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`;
+        if (args.page_token) url += `&pageToken=${args.page_token}`;
+        const data = await callMatonGateway(matonApiKey, url, connId) as { messages?: { id: string }[]; nextPageToken?: string; resultSizeEstimate?: number };
+        const msgs = data.messages || [];
+        if (!msgs.length) return { success: true, result: JSON.stringify({ ids: [], total: 0 }) };
+        return { success: true, result: JSON.stringify({ ids: msgs.map(m => m.id), nextPageToken: data.nextPageToken || null, total: data.resultSizeEstimate || msgs.length }) };
       }
 
       case 'label_email': {
@@ -2467,6 +2504,7 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
     'get_email': 'google-mail',
     'trash_email': 'google-mail',
     'batch_trash_emails': 'google-mail',
+    'list_email_ids': 'google-mail',
     'label_email': 'google-mail',
     'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
@@ -2571,6 +2609,7 @@ interface TaskUpdateEvent {
 // Human-readable tool names for display
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_emails': 'Fetching emails',
+  'list_email_ids': 'Scanning email IDs',
   'get_email': 'Reading email',
   'trash_email': 'Moving email to trash',
   'batch_trash_emails': 'Batch trashing emails',
@@ -2610,7 +2649,7 @@ async function runToolLoop(
   matonApiKey: string,
   connMap: Map<string, string>,
   maxIterations = 5,
-  onTaskUpdate?: (event: TaskUpdateEvent) => void,
+  onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
@@ -2653,7 +2692,7 @@ async function runToolLoop(
       // Create task on first tool call
       if (!taskCreated && onTaskUpdate) {
         const title = inferTaskTitle(toolNames);
-        onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
+        await onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
         taskCreated = true;
       }
 
@@ -2667,13 +2706,13 @@ async function runToolLoop(
             args = {};
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
-          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
+          if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
           const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
-          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
+          if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
           return {
             role: 'tool' as const,
@@ -2692,7 +2731,7 @@ async function runToolLoop(
 
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
-      onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
+      await onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
     }
     return { role: 'assistant', content: msg.content || '' };
   }
@@ -2938,26 +2977,44 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       console.log('Using tool loop (non-streaming) for action request');
 
       try {
-        const taskUpdates: TaskUpdateEvent[] = [];
-        const result = await runToolLoop(
-          modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 5,
-          (event) => { taskUpdates.push(event); }
-        );
+        // Use TransformStream for real-time SSE streaming of task updates
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
 
-        // Build SSE response with task_update events followed by the final content
-        let ssePayload = '';
-        for (const tu of taskUpdates) {
-          ssePayload += `event: task_update\ndata: ${JSON.stringify(tu)}\n\n`;
-        }
-        ssePayload += `data: ${JSON.stringify({
-          choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
-        })}\n\ndata: [DONE]\n\n`;
+        // Run tool loop in background, streaming task updates as they happen
+        (async () => {
+          try {
+            const result = await runToolLoop(
+              modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 10,
+              async (event) => {
+                try {
+                  await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
+                } catch { /* stream closed */ }
+              }
+            );
 
-        return new Response(ssePayload, {
+            // Write final content as SSE
+            await writer.write(encoder.encode(`data: ${JSON.stringify({
+              choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
+            })}\n\n`));
+            await writer.write(encoder.encode('data: [DONE]\n\n'));
+          } catch (e) {
+            console.error('Tool loop error:', e);
+            await writer.write(encoder.encode(`data: ${JSON.stringify({
+              choices: [{ delta: { content: 'I encountered an error while executing that task. Please try again.' }, finish_reason: 'stop' }],
+            })}\n\n`));
+            await writer.write(encoder.encode('data: [DONE]\n\n'));
+          } finally {
+            await writer.close();
+          }
+        })();
+
+        return new Response(readable, {
           headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
         });
       } catch (e) {
-        console.error('Tool loop error:', e);
+        console.error('Tool loop setup error:', e);
         // Fall through to streaming if tool loop fails
       }
     }
