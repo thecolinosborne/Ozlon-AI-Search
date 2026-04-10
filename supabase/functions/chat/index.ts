@@ -2266,7 +2266,7 @@ async function executeToolCall(
         let result = `Google Doc created: "${args.title}" — ${link}`;
         if (args.content) {
           try {
-            const docConnId = resolveConnection(connMap, 'google-docs', accountHint) || connId;
+            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage)?.id || connId;
             await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
               requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
             });
@@ -2289,7 +2289,7 @@ async function executeToolCall(
       }
 
       case 'read_sheet_data': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint) || resolveConnection(connMap, 'google-drive', accountHint);
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
@@ -2300,7 +2300,7 @@ async function executeToolCall(
       }
 
       case 'append_sheet_rows': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint) || resolveConnection(connMap, 'google-drive', accountHint);
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
