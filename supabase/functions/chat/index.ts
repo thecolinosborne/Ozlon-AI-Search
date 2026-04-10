@@ -2649,7 +2649,7 @@ async function runToolLoop(
   matonApiKey: string,
   connMap: Map<string, string>,
   maxIterations = 5,
-  onTaskUpdate?: (event: TaskUpdateEvent) => void,
+  onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
