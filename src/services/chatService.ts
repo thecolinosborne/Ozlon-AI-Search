@@ -86,6 +86,13 @@ export interface UserSettings {
   osName?: string;
 }
 
+export interface TaskUpdate {
+  taskId: string;
+  title: string;
+  step: string;
+  status: 'in_progress' | 'done' | 'error';
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -97,6 +104,7 @@ export interface StreamChatOptions {
   userSettings?: UserSettings;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
+  onTaskUpdate?: (update: TaskUpdate) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -116,6 +124,7 @@ export async function streamChat({
   userSettings,
   onDelta,
   onToolCall,
+  onTaskUpdate,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
