@@ -2540,7 +2540,7 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
+function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
   const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
   const hasGHL = !!GHL_API_KEY;
 
@@ -2694,7 +2694,7 @@ async function runToolLoop(
   openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
   tools: ToolDef[],
   matonApiKey: string,
-  connMap: Map<string, string>,
+  connMap: MultiConnMap,
   maxIterations = 5,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
 ): Promise<{ role: string; content: string }> {
@@ -2816,33 +2816,55 @@ serve(async (req) => {
 
     // Get Maton connections for data injection AND tool availability
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    const connMap = new Map<string, string>();
+    const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
 
     if (MATON_API_KEY) {
       try {
-        // Get connections
+        // Get connections and build multi-account map
         const connections = await getMatonConnections(MATON_API_KEY);
-        for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
-        console.log(`Maton connections loaded: ${connMap.size} active`, Array.from(connMap.keys()));
+        const builtMap = buildMultiConnMap(connections);
+        for (const [app, entries] of builtMap) connMap.set(app, entries);
+        console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
 
-        // Add connected services info to system prompt
+        // Add connected services info to system prompt with account details
         if (connMap.size > 0) {
-          const connectedServices = Array.from(connMap.keys()).map(app => {
+          const connectedServices = Array.from(connMap.entries()).map(([app, entries]) => {
             const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-            return `- ${label}`;
+            if (entries.length > 1) {
+              const accounts = entries.map(e => e.email || e.id).join(', ');
+              return `- ${label} (${entries.length} accounts: ${accounts})`;
+            }
+            const email = entries[0]?.email;
+            return `- ${label}${email ? ` (${email})` : ''}`;
           }).join('\n');
           systemPrompt += `\n\n===========================================================
 CONNECTED SERVICES (you can read data and take actions on these)
 ===========================================================\n${connectedServices}`;
+
+          // Add multi-account instruction if any service has multiple accounts
+          const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
+          if (multiAccountServices.length > 0) {
+            systemPrompt += `\n\n===========================================================
+MULTI-ACCOUNT INSTRUCTIONS
+===========================================================
+Some services have multiple accounts connected. When the user specifies which account to use (e.g. "colin@ozlon.net" or "my ozlon email"), pass the matching email address in the "account" parameter of the tool call. If the user doesn't specify, use the first/default account.\n`;
+            for (const [app, entries] of multiAccountServices) {
+              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+              systemPrompt += `\n${label} accounts:\n`;
+              for (const e of entries) {
+                systemPrompt += `- ${e.email || 'unknown'}\n`;
+              }
+            }
+          }
         }
 
         // Inject read data for detected intents
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY);
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap);
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
         console.error('Error in Maton setup:', e);
