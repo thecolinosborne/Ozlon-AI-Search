@@ -210,6 +210,9 @@ const Index = () => {
         },
         onDone: () => {
           setIsLoading(false);
+          // Complete any active tasks
+          const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
+          activeTasks.forEach(t => completeTask(t.id, 'done'));
           // Cache assistant response when complete
           if (assistantContent) {
             saveMessageToCache({ id: assistantId, role: "assistant", content: assistantContent });
@@ -887,6 +890,7 @@ const Index = () => {
           userId={user.id}
         />
       )}
+      <TaskActivityBubble />
     </div>
   );
 };
