@@ -62,6 +62,33 @@ interface MatonConnection {
   metadata?: Record<string, unknown>;
 }
 
+// Multi-account connection support
+type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
+type MultiConnMap = Map<string, ConnEntry[]>;
+
+function resolveConnection(connMap: MultiConnMap, app: string, hint?: string): string | undefined {
+  const entries = connMap.get(app);
+  if (!entries?.length) return undefined;
+  if (entries.length === 1 || !hint) return entries[0].id;
+  const hintLower = hint.toLowerCase();
+  const match = entries.find(e => e.email?.toLowerCase() === hintLower);
+  return match?.id || entries[0].id;
+}
+
+function buildMultiConnMap(connections: MatonConnection[]): MultiConnMap {
+  const map: MultiConnMap = new Map();
+  for (const c of connections) {
+    const existing = map.get(c.app) || [];
+    existing.push({
+      id: c.connection_id,
+      email: (c.metadata as Record<string, string>)?.email || undefined,
+      meta: c.metadata,
+    });
+    map.set(c.app, existing);
+  }
+  return map;
+}
+
 async function getMatonConnections(matonApiKey: string): Promise<MatonConnection[]> {
   try {
     const res = await fetch(`${MATON_CTRL_URL}/connections`, {
@@ -427,13 +454,23 @@ const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<
 async function injectMatonData(
   messages: { role: string; content: string }[],
   matonApiKey: string,
+  multiConnMap?: MultiConnMap,
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
   console.log('Detected service intents:', detectedApps);
-  const connections = await getMatonConnections(matonApiKey);
-  const connMap = new Map<string, string>();
-  for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
+  // Build a simple connMap for fetchers (first connection per app) from multi-conn map
+  let connMap: Map<string, string>;
+  if (multiConnMap) {
+    connMap = new Map();
+    for (const [app, entries] of multiConnMap) {
+      if (entries.length) connMap.set(app, entries[0].id);
+    }
+  } else {
+    const connections = await getMatonConnections(matonApiKey);
+    connMap = new Map();
+    for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
+  }
 
   const sections: string[] = [];
   const notConnected: string[] = [];
@@ -543,7 +580,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'send_email',
-      description: 'Send an email via Gmail. Use when the user asks to send, compose, or email someone.',
+      description: 'Send an email via Gmail. Use when the user asks to send, compose, or email someone. If the user specifies which Gmail account to use (e.g. "from colin@ozlon.net"), pass the email as the account parameter.',
       parameters: {
         type: 'object',
         properties: {
@@ -551,6 +588,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           subject: { type: 'string', description: 'Email subject line' },
           body: { type: 'string', description: 'Email body text (plain text)' },
           cc: { type: 'string', description: 'CC email address (optional)' },
+          account: { type: 'string', description: 'Gmail account email to send from (optional, use when user specifies which account)' },
         },
         required: ['to', 'subject', 'body'],
       },
@@ -567,6 +605,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           to: { type: 'string', description: 'Recipient email address' },
           subject: { type: 'string', description: 'Email subject line' },
           body: { type: 'string', description: 'Email body text' },
+          account: { type: 'string', description: 'Gmail account email (optional, use when user specifies which account)' },
         },
         required: ['to', 'subject', 'body'],
       },
@@ -583,6 +622,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         properties: {
           query: { type: 'string', description: 'Gmail search query (e.g. "is:unread", "from:client@co.com", "subject:invoice newer_than:30d")' },
           max_results: { type: 'number', description: 'Max emails to return (default 20, max 100)' },
+          account: { type: 'string', description: 'Gmail account email (optional, use when user specifies which account)' },
         },
         required: ['query'],
       },
@@ -597,6 +637,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -611,6 +652,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID to trash' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -625,6 +667,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash (up to 50 at a time)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_ids'],
       },
@@ -641,6 +684,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           query: { type: 'string', description: 'Gmail search query (e.g. "in:inbox -from:client@co.com")' },
           max_results: { type: 'number', description: 'Max IDs to return (default 100, max 500)' },
           page_token: { type: 'string', description: 'Pagination token from previous call (optional)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['query'],
       },
@@ -657,6 +701,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           message_id: { type: 'string', description: 'Gmail message ID' },
           add_labels: { type: 'string', description: 'Comma-separated label IDs to add (optional)' },
           remove_labels: { type: 'string', description: 'Comma-separated label IDs to remove (optional)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -671,6 +716,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -1496,12 +1542,13 @@ async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
   matonApiKey: string,
-  connMap: Map<string, string>,
+  connMap: MultiConnMap,
 ): Promise<{ success: boolean; result: string }> {
   try {
+    const accountHint = args.account as string | undefined;
     switch (toolName) {
       case 'send_email': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
@@ -1510,7 +1557,7 @@ async function executeToolCall(
       }
 
       case 'create_email_draft': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
@@ -1519,7 +1566,7 @@ async function executeToolCall(
       }
 
       case 'list_emails': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const maxResults = Math.min((args.max_results as number) || 50, 100);
         const query = encodeURIComponent(args.query as string);
@@ -1544,7 +1591,7 @@ async function executeToolCall(
       }
 
       case 'get_email': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
         const headers = full.payload?.headers || [];
@@ -1564,7 +1611,7 @@ async function executeToolCall(
       }
 
       case 'trash_email': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1572,7 +1619,7 @@ async function executeToolCall(
       }
 
       case 'batch_trash_emails': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
@@ -1595,7 +1642,7 @@ async function executeToolCall(
       }
 
       case 'list_email_ids': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const maxResults = Math.min((args.max_results as number) || 100, 500);
         const query = encodeURIComponent(args.query as string);
@@ -1608,7 +1655,7 @@ async function executeToolCall(
       }
 
       case 'label_email': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const modifyData: Record<string, string[]> = {};
         if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
@@ -1619,7 +1666,7 @@ async function executeToolCall(
       }
 
       case 'mark_email_read': {
-        const connId = connMap.get('google-mail');
+        const connId = resolveConnection(connMap, 'google-mail', accountHint);
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1627,7 +1674,7 @@ async function executeToolCall(
       }
 
       case 'create_calendar_event': {
-        const connId = connMap.get('google-calendar');
+        const connId = resolveConnection(connMap, 'google-calendar', accountHint);
         if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
         const event: Record<string, unknown> = {
           summary: args.summary,
@@ -1645,7 +1692,7 @@ async function executeToolCall(
       }
 
       case 'send_slack_message': {
-        const connId = connMap.get('slack');
+        const connId = resolveConnection(connMap, 'slack');
         if (!connId) return { success: false, result: 'Slack is not connected.' };
         const res = await callMatonGateway(matonApiKey, '/slack/api/chat.postMessage', connId, 'POST', {
           channel: args.channel,
@@ -1656,7 +1703,7 @@ async function executeToolCall(
       }
 
       case 'create_notion_page': {
-        const connId = connMap.get('notion');
+        const connId = resolveConnection(connMap, 'notion');
         if (!connId) return { success: false, result: 'Notion is not connected.' };
         const pageData: Record<string, unknown> = {
           parent: args.parent_page_id
@@ -1673,7 +1720,7 @@ async function executeToolCall(
       }
 
       case 'create_github_issue': {
-        const connId = connMap.get('github');
+        const connId = resolveConnection(connMap, 'github');
         if (!connId) return { success: false, result: 'GitHub is not connected.' };
         const issueData: Record<string, unknown> = { title: args.title, body: args.body };
         if (args.labels) issueData.labels = (args.labels as string).split(',').map(l => l.trim());
@@ -1683,7 +1730,7 @@ async function executeToolCall(
       }
 
       case 'create_hubspot_contact': {
-        const connId = connMap.get('hubspot');
+        const connId = resolveConnection(connMap, 'hubspot');
         if (!connId) return { success: false, result: 'HubSpot is not connected.' };
         const props: Record<string, string> = { email: args.email as string, firstname: args.firstname as string, lastname: args.lastname as string };
         if (args.phone) props.phone = args.phone as string;
@@ -1694,7 +1741,7 @@ async function executeToolCall(
       }
 
       case 'create_hubspot_deal': {
-        const connId = connMap.get('hubspot');
+        const connId = resolveConnection(connMap, 'hubspot');
         if (!connId) return { success: false, result: 'HubSpot is not connected.' };
         const props: Record<string, string> = { dealname: args.dealname as string, amount: args.amount as string };
         if (args.dealstage) props.dealstage = args.dealstage as string;
@@ -1705,7 +1752,7 @@ async function executeToolCall(
       }
 
       case 'search_google_drive': {
-        const connId = connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Drive is not connected.' };
         const maxResults = (args.max_results as number) || 10;
         const q = encodeURIComponent(`name contains '${args.query}' or fullText contains '${args.query}'`);
@@ -1716,7 +1763,7 @@ async function executeToolCall(
       }
 
       case 'create_trello_card': {
-        const connId = connMap.get('trello');
+        const connId = resolveConnection(connMap, 'trello');
         if (!connId) return { success: false, result: 'Trello is not connected.' };
         const cardData: Record<string, unknown> = { idList: args.list_id, name: args.name };
         if (args.desc) cardData.desc = args.desc;
@@ -1726,7 +1773,7 @@ async function executeToolCall(
       }
 
       case 'create_jira_issue': {
-        const connId = connMap.get('jira');
+        const connId = resolveConnection(connMap, 'jira');
         if (!connId) return { success: false, result: 'Jira is not connected.' };
         const issueData = {
           fields: {
@@ -2107,7 +2154,7 @@ async function executeToolCall(
 
       // ============ Google Docs tools ============
       case 'create_google_doc': {
-        const connId = connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
         const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
@@ -2116,7 +2163,7 @@ async function executeToolCall(
         let result = `Google Doc created: "${args.title}" — ${link}`;
         if (args.content) {
           try {
-            const docConnId = connMap.get('google-docs') || connId;
+            const docConnId = resolveConnection(connMap, 'google-docs', accountHint) || connId;
             await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
               requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
             });
@@ -2128,7 +2175,7 @@ async function executeToolCall(
 
       // ============ Google Sheets tools ============
       case 'create_google_sheet': {
-        const connId = connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
         const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
@@ -2138,7 +2185,7 @@ async function executeToolCall(
       }
 
       case 'read_sheet_data': {
-        const connId = connMap.get('google-sheets') || connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint) || resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
@@ -2149,7 +2196,7 @@ async function executeToolCall(
       }
 
       case 'append_sheet_rows': {
-        const connId = connMap.get('google-sheets') || connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint) || resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
@@ -2161,7 +2208,7 @@ async function executeToolCall(
 
       // ============ Google Slides tools ============
       case 'create_google_presentation': {
-        const connId = connMap.get('google-drive');
+        const connId = resolveConnection(connMap, 'google-drive', accountHint);
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
         const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
@@ -2172,7 +2219,7 @@ async function executeToolCall(
 
       // ============ ClickUp tools ============
       case 'create_clickup_task': {
-        const connId = connMap.get('clickup');
+        const connId = resolveConnection(connMap, 'clickup');
         if (!connId) return { success: false, result: 'ClickUp is not connected.' };
         const taskData: Record<string, unknown> = { name: args.name };
         if (args.description) taskData.description = args.description;
@@ -2183,7 +2230,7 @@ async function executeToolCall(
       }
 
       case 'list_clickup_tasks': {
-        const connId = connMap.get('clickup');
+        const connId = resolveConnection(connMap, 'clickup');
         if (!connId) return { success: false, result: 'ClickUp is not connected.' };
         const data = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task?page=0`, connId) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string; priority?: { priority?: string } }[] };
         const tasks = data.tasks || [];
@@ -2493,7 +2540,7 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
+function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
   const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
   const hasGHL = !!GHL_API_KEY;
 
@@ -2647,7 +2694,7 @@ async function runToolLoop(
   openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
   tools: ToolDef[],
   matonApiKey: string,
-  connMap: Map<string, string>,
+  connMap: MultiConnMap,
   maxIterations = 5,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
 ): Promise<{ role: string; content: string }> {
@@ -2769,33 +2816,55 @@ serve(async (req) => {
 
     // Get Maton connections for data injection AND tool availability
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    const connMap = new Map<string, string>();
+    const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
 
     if (MATON_API_KEY) {
       try {
-        // Get connections
+        // Get connections and build multi-account map
         const connections = await getMatonConnections(MATON_API_KEY);
-        for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
-        console.log(`Maton connections loaded: ${connMap.size} active`, Array.from(connMap.keys()));
+        const builtMap = buildMultiConnMap(connections);
+        for (const [app, entries] of builtMap) connMap.set(app, entries);
+        console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
 
-        // Add connected services info to system prompt
+        // Add connected services info to system prompt with account details
         if (connMap.size > 0) {
-          const connectedServices = Array.from(connMap.keys()).map(app => {
+          const connectedServices = Array.from(connMap.entries()).map(([app, entries]) => {
             const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-            return `- ${label}`;
+            if (entries.length > 1) {
+              const accounts = entries.map(e => e.email || e.id).join(', ');
+              return `- ${label} (${entries.length} accounts: ${accounts})`;
+            }
+            const email = entries[0]?.email;
+            return `- ${label}${email ? ` (${email})` : ''}`;
           }).join('\n');
           systemPrompt += `\n\n===========================================================
 CONNECTED SERVICES (you can read data and take actions on these)
 ===========================================================\n${connectedServices}`;
+
+          // Add multi-account instruction if any service has multiple accounts
+          const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
+          if (multiAccountServices.length > 0) {
+            systemPrompt += `\n\n===========================================================
+MULTI-ACCOUNT INSTRUCTIONS
+===========================================================
+Some services have multiple accounts connected. When the user specifies which account to use (e.g. "colin@ozlon.net" or "my ozlon email"), pass the matching email address in the "account" parameter of the tool call. If the user doesn't specify, use the first/default account.\n`;
+            for (const [app, entries] of multiAccountServices) {
+              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+              systemPrompt += `\n${label} accounts:\n`;
+              for (const e of entries) {
+                systemPrompt += `- ${e.email || 'unknown'}\n`;
+              }
+            }
+          }
         }
 
         // Inject read data for detected intents
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY);
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap);
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
         console.error('Error in Maton setup:', e);
