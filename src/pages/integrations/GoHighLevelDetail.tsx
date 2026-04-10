@@ -22,10 +22,45 @@ const GoHighLevelDetail = () => {
   const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("gohighlevel");
   const settings = integration.settings as { subAccounts?: SubAccount[]; syncData?: Record<string, boolean> };
+  const [loading, setLoading] = useState(true);
 
   const [selectedAccount, setSelectedAccount] = useState<string | null>(
     (settings.subAccounts?.[0]?.id) || null
   );
+
+  // Auto-detect GHL connection on mount by calling the proxy
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({ action: "list_contacts", params: { limit: 1 } }),
+          }
+        );
+        if (response.ok) {
+          setStatus("gohighlevel", "connected");
+          setLastSync("gohighlevel", new Date().toISOString());
+          if (!settings.subAccounts?.length) {
+            updateSettings("gohighlevel", {
+              subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
+            });
+            setSelectedAccount("default");
+          }
+        }
+      } catch {
+        // silently fail — stays disconnected
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkConnection();
+  }, []);
 
   const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: false };
 
