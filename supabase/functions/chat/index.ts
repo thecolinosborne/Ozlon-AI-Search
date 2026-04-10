@@ -1782,7 +1782,7 @@ async function executeToolCall(
       case 'send_email': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to send: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1792,7 +1792,7 @@ async function executeToolCall(
       case 'create_email_draft': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
@@ -1802,7 +1802,7 @@ async function executeToolCall(
       case 'list_emails': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const maxResults = Math.min((args.max_results as number) || 50, 100);
         const query = encodeURIComponent(args.query as string);
         const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
@@ -1828,7 +1828,7 @@ async function executeToolCall(
       case 'get_email': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
         const headers = full.payload?.headers || [];
         const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
@@ -1849,7 +1849,7 @@ async function executeToolCall(
       case 'trash_email': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
@@ -1858,7 +1858,7 @@ async function executeToolCall(
       case 'batch_trash_emails': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
         // Use individual trash calls in parallel chunks of 10 (Gmail's official trash endpoint)
@@ -1882,7 +1882,7 @@ async function executeToolCall(
       case 'list_email_ids': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const maxResults = Math.min((args.max_results as number) || 100, 500);
         const query = encodeURIComponent(args.query as string);
         let url = `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`;
@@ -1896,7 +1896,7 @@ async function executeToolCall(
       case 'label_email': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const modifyData: Record<string, string[]> = {};
         if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
         if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
@@ -1908,7 +1908,7 @@ async function executeToolCall(
       case 'mark_email_read': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} marked as read.` };
