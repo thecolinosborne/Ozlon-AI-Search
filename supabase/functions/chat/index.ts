@@ -387,7 +387,7 @@ async function fetchGmailData(key: string, connId: string): Promise<string> {
   const details: string[] = [`Unread count: ~${data.resultSizeEstimate || msgs.length}`];
   for (const m of msgs.slice(0, 8)) {
     try {
-      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string };
+      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string };
       const headers = full.payload?.headers || [];
       const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
       const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
@@ -1813,7 +1813,7 @@ async function executeToolCall(
         const batch = msgs.slice(0, 50);
         const metadataResults = await Promise.all(batch.map(async (m) => {
           try {
-            const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
+            const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
             const headers = full.payload?.headers || [];
             const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
             const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
@@ -1850,7 +1850,9 @@ async function executeToolCall(
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
+        console.log(`[trash_email] Trashing message ${args.message_id} via connection ${connId} (${resolved?.email})`);
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; labelIds?: string[]; error?: { message?: string } };
+        console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK, labels: ${(res.labelIds || []).join(',')}`);
         if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
       }
@@ -1869,9 +1871,11 @@ async function executeToolCall(
           const chunk = ids.slice(i, i + chunkSize);
           const results = await Promise.all(chunk.map(async (id) => {
             try {
-              const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
+              console.log(`[batch_trash] Trashing ${id} via ${connId} (${resolved?.email})`);
+              const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}/trash`, connId, 'POST') as { id?: string; labelIds?: string[]; error?: { message?: string } };
+              console.log(`[batch_trash] ${id}: ${res.error ? 'FAILED' : 'OK'}`);
               return !res.error;
-            } catch { return false; }
+            } catch (e) { console.error(`[batch_trash] ${id}: exception`, e); return false; }
           }));
           successCount += results.filter(Boolean).length;
           failCount += results.filter(r => !r).length;
@@ -2941,7 +2945,7 @@ async function runToolLoop(
   tools: ToolDef[],
   matonApiKey: string,
   connMap: MultiConnMap,
-  maxIterations = 5,
+  maxIterations = 10,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
   userMessage?: string,
   aliasMap?: AliasEntry[],
@@ -3026,7 +3030,9 @@ async function runToolLoop(
 
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
-      await onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
+      // Extract a short summary from the AI's final response for the task bubble
+      const summary = (msg.content || '').substring(0, 200);
+      await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
     return { role: 'assistant', content: msg.content || '' };
   }
