@@ -1143,6 +1143,9 @@ You are the intelligence AND action layer of ${osName}. Read data, take actions,
 // ============================================================================
 
 function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  const hasGHL = !!GHL_API_KEY;
+
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
     'create_email_draft': 'google-mail',
@@ -1155,10 +1158,23 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
     'search_google_drive': 'google-drive',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
+    // GHL tools - keyed to special 'ghl' marker
+    'ghl_list_contacts': 'ghl',
+    'ghl_create_contact': 'ghl',
+    'ghl_create_opportunity': 'ghl',
+    'ghl_list_opportunities': 'ghl',
+    'ghl_list_pipelines': 'ghl',
+    'ghl_send_message': 'ghl',
+    'ghl_list_calendars': 'ghl',
+    'ghl_book_appointment': 'ghl',
+    'ghl_add_tags': 'ghl',
+    'ghl_list_workflows': 'ghl',
+    'ghl_list_campaigns': 'ghl',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
+    if (requiredService === 'ghl') return hasGHL;
     return requiredService ? connMap.has(requiredService) : true;
   });
 }
