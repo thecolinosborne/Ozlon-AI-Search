@@ -62,6 +62,33 @@ interface MatonConnection {
   metadata?: Record<string, unknown>;
 }
 
+// Multi-account connection support
+type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
+type MultiConnMap = Map<string, ConnEntry[]>;
+
+function resolveConnection(connMap: MultiConnMap, app: string, hint?: string): string | undefined {
+  const entries = connMap.get(app);
+  if (!entries?.length) return undefined;
+  if (entries.length === 1 || !hint) return entries[0].id;
+  const hintLower = hint.toLowerCase();
+  const match = entries.find(e => e.email?.toLowerCase() === hintLower);
+  return match?.id || entries[0].id;
+}
+
+function buildMultiConnMap(connections: MatonConnection[]): MultiConnMap {
+  const map: MultiConnMap = new Map();
+  for (const c of connections) {
+    const existing = map.get(c.app) || [];
+    existing.push({
+      id: c.connection_id,
+      email: (c.metadata as Record<string, string>)?.email || undefined,
+      meta: c.metadata,
+    });
+    map.set(c.app, existing);
+  }
+  return map;
+}
+
 async function getMatonConnections(matonApiKey: string): Promise<MatonConnection[]> {
   try {
     const res = await fetch(`${MATON_CTRL_URL}/connections`, {
@@ -427,13 +454,23 @@ const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<
 async function injectMatonData(
   messages: { role: string; content: string }[],
   matonApiKey: string,
+  multiConnMap?: MultiConnMap,
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
   console.log('Detected service intents:', detectedApps);
-  const connections = await getMatonConnections(matonApiKey);
-  const connMap = new Map<string, string>();
-  for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
+  // Build a simple connMap for fetchers (first connection per app) from multi-conn map
+  let connMap: Map<string, string>;
+  if (multiConnMap) {
+    connMap = new Map();
+    for (const [app, entries] of multiConnMap) {
+      if (entries.length) connMap.set(app, entries[0].id);
+    }
+  } else {
+    const connections = await getMatonConnections(matonApiKey);
+    connMap = new Map();
+    for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
+  }
 
   const sections: string[] = [];
   const notConnected: string[] = [];
@@ -543,7 +580,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'send_email',
-      description: 'Send an email via Gmail. Use when the user asks to send, compose, or email someone.',
+      description: 'Send an email via Gmail. Use when the user asks to send, compose, or email someone. If the user specifies which Gmail account to use (e.g. "from colin@ozlon.net"), pass the email as the account parameter.',
       parameters: {
         type: 'object',
         properties: {
@@ -551,6 +588,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           subject: { type: 'string', description: 'Email subject line' },
           body: { type: 'string', description: 'Email body text (plain text)' },
           cc: { type: 'string', description: 'CC email address (optional)' },
+          account: { type: 'string', description: 'Gmail account email to send from (optional, use when user specifies which account)' },
         },
         required: ['to', 'subject', 'body'],
       },
@@ -567,6 +605,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           to: { type: 'string', description: 'Recipient email address' },
           subject: { type: 'string', description: 'Email subject line' },
           body: { type: 'string', description: 'Email body text' },
+          account: { type: 'string', description: 'Gmail account email (optional, use when user specifies which account)' },
         },
         required: ['to', 'subject', 'body'],
       },
@@ -583,6 +622,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         properties: {
           query: { type: 'string', description: 'Gmail search query (e.g. "is:unread", "from:client@co.com", "subject:invoice newer_than:30d")' },
           max_results: { type: 'number', description: 'Max emails to return (default 20, max 100)' },
+          account: { type: 'string', description: 'Gmail account email (optional, use when user specifies which account)' },
         },
         required: ['query'],
       },
@@ -597,6 +637,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -611,6 +652,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID to trash' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -625,6 +667,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash (up to 50 at a time)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_ids'],
       },
@@ -641,6 +684,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           query: { type: 'string', description: 'Gmail search query (e.g. "in:inbox -from:client@co.com")' },
           max_results: { type: 'number', description: 'Max IDs to return (default 100, max 500)' },
           page_token: { type: 'string', description: 'Pagination token from previous call (optional)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['query'],
       },
@@ -657,6 +701,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
           message_id: { type: 'string', description: 'Gmail message ID' },
           add_labels: { type: 'string', description: 'Comma-separated label IDs to add (optional)' },
           remove_labels: { type: 'string', description: 'Comma-separated label IDs to remove (optional)' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
@@ -671,6 +716,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'Gmail message ID' },
+          account: { type: 'string', description: 'Gmail account email (optional)' },
         },
         required: ['message_id'],
       },
