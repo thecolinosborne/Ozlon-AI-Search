@@ -2692,7 +2692,7 @@ async function runToolLoop(
       // Create task on first tool call
       if (!taskCreated && onTaskUpdate) {
         const title = inferTaskTitle(toolNames);
-        onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
+        await onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
         taskCreated = true;
       }
 
@@ -2706,13 +2706,13 @@ async function runToolLoop(
             args = {};
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
-          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
+          if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
           const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
-          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
+          if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
           return {
             role: 'tool' as const,
@@ -2731,7 +2731,7 @@ async function runToolLoop(
 
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
-      onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
+      await onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
     }
     return { role: 'assistant', content: msg.content || '' };
   }
