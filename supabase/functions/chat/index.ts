@@ -990,9 +990,225 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  // ============ Tier 1: Expose existing proxy capabilities as AI tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_contact',
+      description: 'Get full details for a specific GoHighLevel contact by ID.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_contact',
+      description: 'Update fields on a GoHighLevel contact (name, email, phone, tags, custom fields).',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, tags: { type: 'string', description: 'Comma-separated tags to set' }, customFields: { type: 'string', description: 'JSON string of custom field key-value pairs' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_search_contacts',
+      description: 'Advanced search for contacts in GoHighLevel using filters (POST-based search).',
+      parameters: { type: 'object', properties: { query: { type: 'string', description: 'Search query' }, filters: { type: 'string', description: 'JSON string of filter criteria (optional)' }, limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_opportunity',
+      description: 'Update a GoHighLevel opportunity (move stage, update value, change status).',
+      parameters: { type: 'object', properties: { opportunity_id: { type: 'string', description: 'Opportunity ID' }, stage_id: { type: 'string', description: 'New stage ID' }, monetary_value: { type: 'number', description: 'Updated deal value' }, status: { type: 'string', description: 'Status: open, won, lost, abandoned' }, name: { type: 'string', description: 'Updated name' } }, required: ['opportunity_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_calendar_events',
+      description: 'View upcoming appointments/events on a GoHighLevel calendar.',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string', description: 'Calendar ID' }, start_time: { type: 'string', description: 'Start time ISO 8601 (default: now)' }, end_time: { type: 'string', description: 'End time ISO 8601 (default: 7 days from now)' } }, required: ['calendar_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_free_slots',
+      description: 'Check available free slots on a GoHighLevel calendar.',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string', description: 'Calendar ID' }, start_date: { type: 'string', description: 'Start date YYYY-MM-DD (default: today)' }, end_date: { type: 'string', description: 'End date YYYY-MM-DD (default: 7 days out)' } }, required: ['calendar_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_conversations',
+      description: 'List recent conversations/message threads in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_conversation_messages',
+      description: 'Read messages in a GoHighLevel conversation thread.',
+      parameters: { type: 'object', properties: { conversation_id: { type: 'string', description: 'Conversation ID' } }, required: ['conversation_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_invoices',
+      description: 'List invoices in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_invoice',
+      description: 'Create a new invoice in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string', description: 'Invoice name/title' }, contact_id: { type: 'string', description: 'Contact ID to bill' }, items: { type: 'string', description: 'JSON array of line items [{name, amount, qty}]' } }, required: ['name', 'contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_orders',
+      description: 'List payment orders in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_transactions',
+      description: 'List payment transactions in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_forms',
+      description: 'List all forms in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_form_submissions',
+      description: 'Get submissions/responses for a GoHighLevel form.',
+      parameters: { type: 'object', properties: { form_id: { type: 'string', description: 'Form ID' }, limit: { type: 'number', description: 'Max results (default 20)' } }, required: ['form_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_funnels',
+      description: 'List all funnels in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_custom_fields',
+      description: 'List all custom fields in GoHighLevel CRM.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_custom_values',
+      description: 'List all custom values in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_users',
+      description: 'List all team members/users in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_tags',
+      description: 'List all available tags in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  // ============ Tier 2: New GHL capabilities ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_contact',
+      description: 'Delete a contact from GoHighLevel CRM.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID to delete' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_contact_note',
+      description: 'Add a note to a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, body: { type: 'string', description: 'Note content' } }, required: ['contact_id', 'body'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contact_notes',
+      description: 'List notes for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_contact_task',
+      description: 'Add a task/to-do for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional)' } }, required: ['contact_id', 'title'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contact_tasks',
+      description: 'List tasks for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_remove_tags',
+      description: 'Remove tags from a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, tags: { type: 'string', description: 'Comma-separated tags to remove' } }, required: ['contact_id', 'tags'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_cancel_appointment',
+      description: 'Cancel/delete an appointment in GoHighLevel.',
+      parameters: { type: 'object', properties: { event_id: { type: 'string', description: 'Appointment/event ID' } }, required: ['event_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_trigger_workflow',
+      description: 'Trigger a workflow for a specific contact in GoHighLevel.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, workflow_id: { type: 'string', description: 'Workflow ID' } }, required: ['contact_id', 'workflow_id'] },
+    },
+  },
 ];
-
-// ============================================================================
 // TOOL EXECUTION ENGINE - Executes tool calls via Maton Gateway
 // ============================================================================
 
