@@ -128,7 +128,7 @@ const SERVICE_DETECTORS: ServiceDetection[] = [
   { app: 'zoom', label: 'Zoom', keywords: ['zoom', 'zoom meeting', 'zoom call', 'video call'] },
   { app: 'discord', label: 'Discord', keywords: ['discord', 'discord server', 'discord channel'] },
   { app: 'typeform', label: 'Typeform', keywords: ['typeform', 'form responses', 'survey', 'survey responses'] },
-  { app: 'gohighlevel', label: 'GoHighLevel', keywords: ['gohighlevel', 'ghl', 'high level', 'highlevel', 'go high level', 'leadconnector', 'lead connector', 'sub-account', 'subaccount', 'pipeline', 'pipelines', 'opportunity', 'opportunities', 'funnels', 'funnel', 'workflows', 'workflow', 'campaigns', 'campaign', 'conversations', 'conversation'] },
+  { app: 'gohighlevel', label: 'GoHighLevel', keywords: ['gohighlevel', 'ghl', 'high level', 'highlevel', 'go high level', 'leadconnector', 'lead connector', 'sub-account', 'subaccount', 'pipeline', 'pipelines', 'opportunity', 'opportunities', 'funnels', 'funnel', 'workflows', 'workflow', 'campaigns', 'campaign', 'conversations', 'conversation', 'invoice', 'invoices', 'orders', 'transactions', 'crm contacts', 'custom fields', 'custom values', 'form submissions'] },
 ];
 
 function detectServiceIntents(messages: { role: string; content: string }[]): string[] {
@@ -479,6 +479,49 @@ The following is REAL data pulled from the user's connected accounts. Use this d
     injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
   }
   return injection;
+}
+
+// ============================================================================
+// GOHIGHLEVEL DIRECT API HELPER
+// ============================================================================
+
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
+
+async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
+  const res = await fetch(`${GHL_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${GHL_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return { raw: await res.text() };
+}
+
+async function fetchGHLData(): Promise<string> {
+  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+  if (!GHL_LOCATION_ID) return 'GHL location not configured.';
+  const sections: string[] = [];
+  try {
+    const [contactsData, pipelinesData, calendarsData] = await Promise.all([
+      callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
+      callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
+      callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as Promise<{ calendars?: { id: string; name: string }[] }>,
+    ]);
+    const contacts = contactsData.contacts || [];
+    if (contacts.length) sections.push(`**Recent Contacts (${contacts.length}):**\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}`);
+    const pipelines = pipelinesData.pipelines || [];
+    if (pipelines.length) sections.push(`**Pipelines:**\n${pipelines.map(p => `- ${p.name} (ID: ${p.id}) — Stages: ${(p.stages || []).map(s => s.name).join(' → ')}`).join('\n')}`);
+    const calendars = calendarsData.calendars || [];
+    if (calendars.length) sections.push(`**Calendars:**\n${calendars.map(c => `- ${c.name} (ID: ${c.id})`).join('\n')}`);
+  } catch (e) { sections.push(`Error: ${e instanceof Error ? e.message : 'Unknown'}`); }
+  return sections.join('\n\n') || 'No GHL data found.';
 }
 
 // ============================================================================
@@ -947,9 +990,225 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  // ============ Tier 1: Expose existing proxy capabilities as AI tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_contact',
+      description: 'Get full details for a specific GoHighLevel contact by ID.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_contact',
+      description: 'Update fields on a GoHighLevel contact (name, email, phone, tags, custom fields).',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, tags: { type: 'string', description: 'Comma-separated tags to set' }, customFields: { type: 'string', description: 'JSON string of custom field key-value pairs' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_search_contacts',
+      description: 'Advanced search for contacts in GoHighLevel using filters (POST-based search).',
+      parameters: { type: 'object', properties: { query: { type: 'string', description: 'Search query' }, filters: { type: 'string', description: 'JSON string of filter criteria (optional)' }, limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_opportunity',
+      description: 'Update a GoHighLevel opportunity (move stage, update value, change status).',
+      parameters: { type: 'object', properties: { opportunity_id: { type: 'string', description: 'Opportunity ID' }, stage_id: { type: 'string', description: 'New stage ID' }, monetary_value: { type: 'number', description: 'Updated deal value' }, status: { type: 'string', description: 'Status: open, won, lost, abandoned' }, name: { type: 'string', description: 'Updated name' } }, required: ['opportunity_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_calendar_events',
+      description: 'View upcoming appointments/events on a GoHighLevel calendar.',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string', description: 'Calendar ID' }, start_time: { type: 'string', description: 'Start time ISO 8601 (default: now)' }, end_time: { type: 'string', description: 'End time ISO 8601 (default: 7 days from now)' } }, required: ['calendar_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_free_slots',
+      description: 'Check available free slots on a GoHighLevel calendar.',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string', description: 'Calendar ID' }, start_date: { type: 'string', description: 'Start date YYYY-MM-DD (default: today)' }, end_date: { type: 'string', description: 'End date YYYY-MM-DD (default: 7 days out)' } }, required: ['calendar_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_conversations',
+      description: 'List recent conversations/message threads in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_conversation_messages',
+      description: 'Read messages in a GoHighLevel conversation thread.',
+      parameters: { type: 'object', properties: { conversation_id: { type: 'string', description: 'Conversation ID' } }, required: ['conversation_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_invoices',
+      description: 'List invoices in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_invoice',
+      description: 'Create a new invoice in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string', description: 'Invoice name/title' }, contact_id: { type: 'string', description: 'Contact ID to bill' }, items: { type: 'string', description: 'JSON array of line items [{name, amount, qty}]' } }, required: ['name', 'contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_orders',
+      description: 'List payment orders in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_transactions',
+      description: 'List payment transactions in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_forms',
+      description: 'List all forms in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_form_submissions',
+      description: 'Get submissions/responses for a GoHighLevel form.',
+      parameters: { type: 'object', properties: { form_id: { type: 'string', description: 'Form ID' }, limit: { type: 'number', description: 'Max results (default 20)' } }, required: ['form_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_funnels',
+      description: 'List all funnels in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_custom_fields',
+      description: 'List all custom fields in GoHighLevel CRM.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_custom_values',
+      description: 'List all custom values in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_users',
+      description: 'List all team members/users in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_tags',
+      description: 'List all available tags in GoHighLevel.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  // ============ Tier 2: New GHL capabilities ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_contact',
+      description: 'Delete a contact from GoHighLevel CRM.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID to delete' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_contact_note',
+      description: 'Add a note to a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, body: { type: 'string', description: 'Note content' } }, required: ['contact_id', 'body'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contact_notes',
+      description: 'List notes for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_add_contact_task',
+      description: 'Add a task/to-do for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional)' } }, required: ['contact_id', 'title'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_contact_tasks',
+      description: 'List tasks for a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' } }, required: ['contact_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_remove_tags',
+      description: 'Remove tags from a GoHighLevel contact.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, tags: { type: 'string', description: 'Comma-separated tags to remove' } }, required: ['contact_id', 'tags'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_cancel_appointment',
+      description: 'Cancel/delete an appointment in GoHighLevel.',
+      parameters: { type: 'object', properties: { event_id: { type: 'string', description: 'Appointment/event ID' } }, required: ['event_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_trigger_workflow',
+      description: 'Trigger a workflow for a specific contact in GoHighLevel.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, workflow_id: { type: 'string', description: 'Workflow ID' } }, required: ['contact_id', 'workflow_id'] },
+    },
+  },
 ];
-
-// ============================================================================
 // TOOL EXECUTION ENGINE - Executes tool calls via Maton Gateway
 // ============================================================================
 
@@ -1216,6 +1475,248 @@ async function executeToolCall(
         return { success: true, result: `Campaigns:\n${camps.map(c => `- ${c.name} (${c.status || 'unknown'}) | ID: ${c.id}`).join('\n')}` };
       }
 
+      // ============ Tier 1: New GHL tool handlers ============
+      case 'ghl_get_contact': {
+        const data = await callGHL(`/contacts/${args.contact_id}`) as { contact?: Record<string, unknown>; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const c = data.contact as Record<string, unknown> | undefined;
+        if (!c) return { success: false, result: 'Contact not found.' };
+        return { success: true, result: `Contact: ${c.firstName || ''} ${c.lastName || ''}\nEmail: ${c.email || 'N/A'}\nPhone: ${c.phone || 'N/A'}\nTags: ${(c.tags as string[])?.join(', ') || 'none'}\nSource: ${c.source || 'N/A'}\nDate Added: ${c.dateAdded || 'N/A'}\nID: ${c.id}` };
+      }
+
+      case 'ghl_update_contact': {
+        const updateData: Record<string, unknown> = {};
+        if (args.firstName) updateData.firstName = args.firstName;
+        if (args.lastName) updateData.lastName = args.lastName;
+        if (args.email) updateData.email = args.email;
+        if (args.phone) updateData.phone = args.phone;
+        if (args.tags) updateData.tags = (args.tags as string).split(',').map(t => t.trim());
+        if (args.customFields) { try { updateData.customFields = JSON.parse(args.customFields as string); } catch { /* ignore */ } }
+        const res = await callGHL(`/contacts/${args.contact_id}`, 'PUT', updateData) as { contact?: { id: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Contact ${args.contact_id} updated successfully.` };
+      }
+
+      case 'ghl_search_contacts': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageSize: (args.limit as number) || 20 };
+        if (args.query) searchBody.query = args.query;
+        if (args.filters) { try { Object.assign(searchBody, JSON.parse(args.filters as string)); } catch { /* ignore */ } }
+        const data = await callGHL('/contacts/search', 'POST', searchBody) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
+        const contacts = data.contacts || [];
+        if (!contacts.length) return { success: true, result: 'No contacts found matching search.' };
+        return { success: true, result: `Found ${contacts.length} contacts:\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}` };
+      }
+
+      case 'ghl_update_opportunity': {
+        const updateData: Record<string, unknown> = {};
+        if (args.stage_id) updateData.pipelineStageId = args.stage_id;
+        if (args.monetary_value) updateData.monetaryValue = args.monetary_value;
+        if (args.status) updateData.status = args.status;
+        if (args.name) updateData.name = args.name;
+        const res = await callGHL(`/opportunities/${args.opportunity_id}`, 'PUT', updateData) as { opportunity?: { id: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Opportunity ${args.opportunity_id} updated successfully.` };
+      }
+
+      case 'ghl_get_calendar_events': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const startTime = (args.start_time as string) || new Date().toISOString();
+        const endTime = (args.end_time as string) || new Date(Date.now() + 7 * 86400000).toISOString();
+        const data = await callGHL(`/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${args.calendar_id}&startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}`) as { events?: { id: string; title?: string; startTime?: string; endTime?: string; contactId?: string; status?: string }[] };
+        const events = data.events || [];
+        if (!events.length) return { success: true, result: 'No events found in this time range.' };
+        return { success: true, result: `Found ${events.length} events:\n${events.map(e => `- ${e.title || '(untitled)'} | ${e.startTime} → ${e.endTime} | Status: ${e.status || '?'} | ID: ${e.id}`).join('\n')}` };
+      }
+
+      case 'ghl_get_free_slots': {
+        const startDate = (args.start_date as string) || new Date().toISOString().split('T')[0];
+        const endDate = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?startDate=${startDate}&endDate=${endDate}`) as Record<string, { slots?: string[] }>;
+        const allSlots: string[] = [];
+        for (const [date, info] of Object.entries(data)) {
+          if (info?.slots?.length) { allSlots.push(`${date}: ${info.slots.join(', ')}`); }
+        }
+        if (!allSlots.length) return { success: true, result: 'No free slots available in this date range.' };
+        return { success: true, result: `Free slots:\n${allSlots.join('\n')}` };
+      }
+
+      case 'ghl_list_conversations': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const data = await callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=${limit}`) as { conversations?: { id: string; contactId?: string; type?: string; lastMessageDate?: string; fullName?: string }[] };
+        const convos = data.conversations || [];
+        if (!convos.length) return { success: true, result: 'No conversations found.' };
+        return { success: true, result: `Found ${convos.length} conversations:\n${convos.map(c => `- ${c.fullName || 'Unknown'} | Type: ${c.type || '?'} | Last: ${c.lastMessageDate || '?'} | ID: ${c.id}`).join('\n')}` };
+      }
+
+      case 'ghl_get_conversation_messages': {
+        const data = await callGHL(`/conversations/${args.conversation_id}/messages`) as { messages?: { id: string; body?: string; type?: string; direction?: string; dateAdded?: string }[] };
+        const msgs = data.messages || [];
+        if (!msgs.length) return { success: true, result: 'No messages in this conversation.' };
+        return { success: true, result: `Messages (${msgs.length}):\n${msgs.slice(0, 30).map(m => `- [${m.direction || '?'}] ${m.body?.substring(0, 200) || '(empty)'} (${m.dateAdded || ''})`).join('\n')}` };
+      }
+
+      case 'ghl_list_invoices': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const data = await callGHL(`/invoices/?altId=${GHL_LOCATION_ID}&altType=location&limit=${limit}`) as { invoices?: { _id: string; name?: string; total?: number; status?: string; createdAt?: string }[] };
+        const invoices = data.invoices || [];
+        if (!invoices.length) return { success: true, result: 'No invoices found.' };
+        return { success: true, result: `Invoices (${invoices.length}):\n${invoices.map(i => `- ${i.name || 'Untitled'} | $${i.total || 0} | ${i.status || '?'} | ID: ${i._id}`).join('\n')}` };
+      }
+
+      case 'ghl_create_invoice': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const invoiceData: Record<string, unknown> = { altId: GHL_LOCATION_ID, altType: 'location', name: args.name, contactId: args.contact_id };
+        if (args.items) { try { invoiceData.items = JSON.parse(args.items as string); } catch { /* ignore */ } }
+        const res = await callGHL('/invoices/', 'POST', invoiceData) as { invoice?: { _id: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Invoice created: "${args.name}" (ID: ${res.invoice?._id})` };
+      }
+
+      case 'ghl_list_orders': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`) as { data?: { id: string; name?: string; amount?: number; status?: string }[] };
+        const orders = data.data || [];
+        if (!orders.length) return { success: true, result: 'No orders found.' };
+        return { success: true, result: `Orders (${orders.length}):\n${orders.map(o => `- ${o.name || 'Order'} | $${o.amount || 0} | ${o.status || '?'} | ID: ${o.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_transactions': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/payments/transactions?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`) as { data?: { id: string; amount?: number; status?: string; createdAt?: string }[] };
+        const txns = data.data || [];
+        if (!txns.length) return { success: true, result: 'No transactions found.' };
+        return { success: true, result: `Transactions (${txns.length}):\n${txns.map(t => `- $${t.amount || 0} | ${t.status || '?'} | ${t.createdAt || ''} | ID: ${t.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_forms': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/forms/?locationId=${GHL_LOCATION_ID}`) as { forms?: { id: string; name: string }[] };
+        const forms = data.forms || [];
+        if (!forms.length) return { success: true, result: 'No forms found.' };
+        return { success: true, result: `Forms:\n${forms.map(f => `- ${f.name} | ID: ${f.id}`).join('\n')}` };
+      }
+
+      case 'ghl_get_form_submissions': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const data = await callGHL(`/forms/submissions?locationId=${GHL_LOCATION_ID}&formId=${args.form_id}&limit=${limit}`) as { submissions?: { id: string; contactId?: string; createdAt?: string; data?: Record<string, string> }[] };
+        const subs = data.submissions || [];
+        if (!subs.length) return { success: true, result: 'No submissions found for this form.' };
+        return { success: true, result: `Submissions (${subs.length}):\n${subs.map(s => `- Contact: ${s.contactId || '?'} | ${s.createdAt || ''} | Data: ${JSON.stringify(s.data || {}).substring(0, 200)}`).join('\n')}` };
+      }
+
+      case 'ghl_list_funnels': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/funnels/funnel/list?locationId=${GHL_LOCATION_ID}`) as { funnels?: { id: string; name: string; steps?: number }[] };
+        const funnels = data.funnels || [];
+        if (!funnels.length) return { success: true, result: 'No funnels found.' };
+        return { success: true, result: `Funnels:\n${funnels.map(f => `- ${f.name} | ID: ${f.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_custom_fields': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`) as { customFields?: { id: string; name: string; fieldKey?: string; dataType?: string }[] };
+        const fields = data.customFields || [];
+        if (!fields.length) return { success: true, result: 'No custom fields found.' };
+        return { success: true, result: `Custom Fields:\n${fields.map(f => `- ${f.name} (${f.dataType || '?'}) | Key: ${f.fieldKey || f.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_custom_values': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues`) as { customValues?: { id: string; name: string; value?: string }[] };
+        const values = data.customValues || [];
+        if (!values.length) return { success: true, result: 'No custom values found.' };
+        return { success: true, result: `Custom Values:\n${values.map(v => `- ${v.name}: ${v.value || '(empty)'} | ID: ${v.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_users': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/users/?locationId=${GHL_LOCATION_ID}`) as { users?: { id: string; name?: string; email?: string; role?: string }[] };
+        const users = data.users || [];
+        if (!users.length) return { success: true, result: 'No users found.' };
+        return { success: true, result: `Users:\n${users.map(u => `- ${u.name || 'Unknown'} | ${u.email || ''} | ${u.role || '?'} | ID: ${u.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_tags': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/tags`) as { tags?: { id: string; name: string }[] };
+        const tags = data.tags || [];
+        if (!tags.length) return { success: true, result: 'No tags found.' };
+        return { success: true, result: `Tags:\n${tags.map(t => `- ${t.name} | ID: ${t.id}`).join('\n')}` };
+      }
+
+      // ============ Tier 2: New GHL action handlers ============
+      case 'ghl_delete_contact': {
+        const res = await callGHL(`/contacts/${args.contact_id}`, 'DELETE') as { succeded?: boolean; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Contact ${args.contact_id} deleted.` };
+      }
+
+      case 'ghl_add_contact_note': {
+        const res = await callGHL(`/contacts/${args.contact_id}/notes`, 'POST', { body: args.body }) as { id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Note added to contact ${args.contact_id}.` };
+      }
+
+      case 'ghl_list_contact_notes': {
+        const data = await callGHL(`/contacts/${args.contact_id}/notes`) as { notes?: { id: string; body?: string; dateAdded?: string }[] };
+        const notes = data.notes || [];
+        if (!notes.length) return { success: true, result: 'No notes found for this contact.' };
+        return { success: true, result: `Notes (${notes.length}):\n${notes.map(n => `- ${n.body?.substring(0, 200) || '(empty)'} (${n.dateAdded || ''})`).join('\n')}` };
+      }
+
+      case 'ghl_add_contact_task': {
+        const taskData: Record<string, unknown> = { title: args.title };
+        if (args.body) taskData.body = args.body;
+        if (args.dueDate) taskData.dueDate = args.dueDate;
+        const res = await callGHL(`/contacts/${args.contact_id}/tasks`, 'POST', taskData) as { id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}.` };
+      }
+
+      case 'ghl_list_contact_tasks': {
+        const data = await callGHL(`/contacts/${args.contact_id}/tasks`) as { tasks?: { id: string; title?: string; body?: string; completed?: boolean; dueDate?: string }[] };
+        const tasks = data.tasks || [];
+        if (!tasks.length) return { success: true, result: 'No tasks found for this contact.' };
+        return { success: true, result: `Tasks (${tasks.length}):\n${tasks.map(t => `- ${t.completed ? '✅' : '⬜'} ${t.title || '(untitled)'} | Due: ${t.dueDate || 'N/A'} | ID: ${t.id}`).join('\n')}` };
+      }
+
+      case 'ghl_remove_tags': {
+        const tags = (args.tags as string).split(',').map(t => t.trim());
+        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'DELETE', { tags }) as { tags?: string[]; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Tags removed from contact ${args.contact_id}: ${tags.join(', ')}` };
+      }
+
+      case 'ghl_cancel_appointment': {
+        const res = await callGHL(`/calendars/events/appointments/${args.event_id}`, 'DELETE') as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Appointment ${args.event_id} cancelled.` };
+      }
+
+      case 'ghl_trigger_workflow': {
+        const res = await callGHL(`/contacts/${args.contact_id}/workflow/${args.workflow_id}`, 'POST') as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Workflow ${args.workflow_id} triggered for contact ${args.contact_id}.` };
+      }
+
       // ============ Google Docs tools ============
       case 'create_google_doc': {
         const connId = connMap.get('google-drive');
@@ -1450,6 +1951,33 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
     'ghl_add_tags': 'ghl',
     'ghl_list_workflows': 'ghl',
     'ghl_list_campaigns': 'ghl',
+    'ghl_get_contact': 'ghl',
+    'ghl_update_contact': 'ghl',
+    'ghl_search_contacts': 'ghl',
+    'ghl_update_opportunity': 'ghl',
+    'ghl_get_calendar_events': 'ghl',
+    'ghl_get_free_slots': 'ghl',
+    'ghl_list_conversations': 'ghl',
+    'ghl_get_conversation_messages': 'ghl',
+    'ghl_list_invoices': 'ghl',
+    'ghl_create_invoice': 'ghl',
+    'ghl_list_orders': 'ghl',
+    'ghl_list_transactions': 'ghl',
+    'ghl_list_forms': 'ghl',
+    'ghl_get_form_submissions': 'ghl',
+    'ghl_list_funnels': 'ghl',
+    'ghl_list_custom_fields': 'ghl',
+    'ghl_list_custom_values': 'ghl',
+    'ghl_list_users': 'ghl',
+    'ghl_list_tags': 'ghl',
+    'ghl_delete_contact': 'ghl',
+    'ghl_add_contact_note': 'ghl',
+    'ghl_list_contact_notes': 'ghl',
+    'ghl_add_contact_task': 'ghl',
+    'ghl_list_contact_tasks': 'ghl',
+    'ghl_remove_tags': 'ghl',
+    'ghl_cancel_appointment': 'ghl',
+    'ghl_trigger_workflow': 'ghl',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -1771,7 +2299,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
