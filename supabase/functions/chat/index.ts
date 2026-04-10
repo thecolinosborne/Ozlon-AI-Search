@@ -3197,7 +3197,8 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
                 try {
                   await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
                 } catch { /* stream closed */ }
-              }
+              },
+              userText,
             );
 
             // Write final content as SSE
