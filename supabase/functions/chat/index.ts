@@ -279,6 +279,84 @@ async function fetchGenericData(key: string, connId: string, app: string): Promi
   } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
+// ============================================================================
+// GOHIGHLEVEL DATA FETCHER (via dedicated edge function)
+// ============================================================================
+
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
+
+async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
+  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
+  const res = await fetch(`${GHL_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${GHL_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Version': '2021-07-28',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return { raw: await res.text() };
+}
+
+async function fetchGHLData(): Promise<string> {
+  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+  if (!GHL_LOCATION_ID) return 'GoHighLevel location ID not configured.';
+
+  const sections: string[] = [];
+
+  // Fetch in parallel: contacts, pipelines, calendars, conversations, campaigns
+  const [contacts, pipelines, calendars, conversations, campaigns, workflows] = await Promise.all([
+    callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; dateAdded?: string; tags?: string[] }[] } | null>,
+    callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] } | null>,
+    callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ calendars?: { id: string; name: string; description?: string }[] } | null>,
+    callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=10`).catch(() => null) as Promise<{ conversations?: { id: string; contactId?: string; lastMessageBody?: string; dateUpdated?: string; type?: string }[] } | null>,
+    callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ campaigns?: { id: string; name: string; status?: string }[] } | null>,
+    callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`).catch(() => null) as Promise<{ workflows?: { id: string; name: string; status?: string }[] } | null>,
+  ]);
+
+  if (contacts?.contacts?.length) {
+    sections.push(`### Recent Contacts (${contacts.contacts.length})\n${contacts.contacts.map(c =>
+      `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`
+    ).join('\n')}`);
+  }
+
+  if (pipelines?.pipelines?.length) {
+    sections.push(`### Pipelines (${pipelines.pipelines.length})\n${pipelines.pipelines.map(p =>
+      `- ${p.name} (ID: ${p.id})${p.stages?.length ? '\n  Stages: ' + p.stages.map(s => s.name).join(' → ') : ''}`
+    ).join('\n')}`);
+  }
+
+  if (calendars?.calendars?.length) {
+    sections.push(`### Calendars (${calendars.calendars.length})\n${calendars.calendars.map(c =>
+      `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`
+    ).join('\n')}`);
+  }
+
+  if (conversations?.conversations?.length) {
+    sections.push(`### Recent Conversations (${conversations.conversations.length})\n${conversations.conversations.map(c =>
+      `- Type: ${c.type || '?'} | Last: "${(c.lastMessageBody || '').substring(0, 80)}" | ${c.dateUpdated || ''}`
+    ).join('\n')}`);
+  }
+
+  if (campaigns?.campaigns?.length) {
+    sections.push(`### Campaigns (${campaigns.campaigns.length})\n${campaigns.campaigns.map(c =>
+      `- ${c.name} (${c.status || 'unknown'})`
+    ).join('\n')}`);
+  }
+
+  if (workflows?.workflows?.length) {
+    sections.push(`### Workflows (${workflows.workflows.length})\n${workflows.workflows.map(w =>
+      `- ${w.name} (${w.status || 'unknown'})`
+    ).join('\n')}`);
+  }
+
+  return sections.length ? sections.join('\n\n') : 'GoHighLevel is connected but no data was returned. Check your location ID and API permissions.';
+}
+
 const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
   'google-search-console': fetchGSCData,
   'google-mail': fetchGmailData,
