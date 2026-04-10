@@ -3066,7 +3066,7 @@ serve(async (req) => {
         console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Build dynamic alias map from all connections
-        const aliasMap = buildDynamicAliasMap(connMap);
+        aliasMap = buildDynamicAliasMap(connMap);
         console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
 
         // Determine available tools based on active connections
