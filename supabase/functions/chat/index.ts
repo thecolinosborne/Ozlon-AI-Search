@@ -3062,6 +3062,10 @@ serve(async (req) => {
         for (const [app, entries] of builtMap) connMap.set(app, entries);
         console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
+        // Build dynamic alias map from all connections
+        const aliasMap = buildDynamicAliasMap(connMap);
+        console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
+
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
@@ -3084,20 +3088,49 @@ CONNECTED SERVICES (you can read data and take actions on these)
           // Add multi-account instruction if any service has multiple accounts
           const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
           if (multiAccountServices.length > 0) {
-            systemPrompt += `\n\n===========================================================
-MULTI-ACCOUNT INSTRUCTIONS (CRITICAL — READ CAREFULLY)
-===========================================================
-IMPORTANT: Some services have MULTIPLE accounts connected. You MUST follow these rules:
+            // Build dynamic examples from actual connected accounts
+            const dynamicExamples: string[] = [];
+            const identityList: string[] = [];
+            for (const [app, entries] of multiAccountServices) {
+              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+              for (const e of entries) {
+                if (!e.email) continue;
+                const email = e.email.toLowerCase();
+                const domain = email.split('@')[1]?.split('.')[0] || '';
+                const fullDomain = email.split('@')[1] || '';
+                dynamicExamples.push(`   - "${email}" → account: "${email}"`);
+                dynamicExamples.push(`   - "${email} ${label.toLowerCase()}" → account: "${email}"`);
+                if (domain.length >= 3) {
+                  dynamicExamples.push(`   - "my ${domain} email" → account: "${email}" (domain alias)`);
+                  dynamicExamples.push(`   - "${domain} inbox" → account: "${email}"`);
+                }
+                identityList.push(`  * ${email} (aliases: "${domain}", "${fullDomain}")`);
+              }
+            }
 
-1. ALWAYS check if the user mentions a specific account (email address, domain name like "ozlon", or alias).
-2. When you detect an account reference, you MUST pass the exact email address in the "account" parameter of EVERY tool call for that service.
-3. Examples of account references:
-   - "colin@ozlon.net" → account: "colin@ozlon.net"
-   - "colin@Ozlon.net gmail" → account: "colin@ozlon.net"
-   - "my ozlon email" → account: "colin@ozlon.net" (match by domain)
-   - "from colin@colinosborne.com" → account: "colin@colinosborne.com"
-4. If the user does NOT specify an account and multiple exist, ask them which account to use. Do NOT silently default.
-5. NEVER ignore an account specification. If the user says "colin@ozlon.net", that tool call MUST use that account.
+            systemPrompt += `\n\n===========================================================
+CONTEXT-SENSITIVE ACCOUNT RESOLUTION (CRITICAL)
+===========================================================
+CONNECTED IDENTITIES:
+${identityList.join('\n')}
+
+RESOLUTION RULES — follow this priority order:
+1. If the user explicitly mentions an email, brand, domain, or workspace name → use that account.
+2. If the user mentions contextual keywords that imply a specific account (e.g. a business name that matches a domain) → use that account.
+3. Scan the conversation for context clues before defaulting. Use the most relevant account, not the most convenient.
+4. If genuinely ambiguous and it would materially affect the outcome → ask which account to use.
+5. NEVER silently default to one account when multiple exist and the user has given any signal.
+
+When you identify the account, pass the EXACT email address in the "account" parameter of EVERY tool call.
+
+DYNAMIC EXAMPLES (auto-generated from connected accounts):
+${dynamicExamples.join('\n')}
+
+BEHAVIOR:
+- Do NOT automatically prioritize whichever account is easiest to access or appears first.
+- Do NOT assume one identity is always primary.
+- When a connected account is mentioned or implied, resolve through it first, then validate, then respond.
+- Every tool result will confirm which account was used — verify it matches the user's intent.
 \n`;
             for (const [app, entries] of multiAccountServices) {
               const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
@@ -3109,8 +3142,8 @@ IMPORTANT: Some services have MULTIPLE accounts connected. You MUST follow these
           }
         }
 
-        // Inject read data for detected intents
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap);
+        // Inject read data for detected intents (with alias map for smart resolution)
+        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap, aliasMap);
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
         console.error('Error in Maton setup:', e);
