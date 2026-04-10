@@ -438,8 +438,23 @@ async function injectMatonData(
   const sections: string[] = [];
   const notConnected: string[] = [];
 
+  // Fallback mapping: services that use another connection's credentials
+  const CONNECTION_FALLBACKS: Record<string, string[]> = {
+    'google-docs': ['google-drive'],
+    'google-sheets': ['google-drive'],
+    'google-slides': ['google-drive'],
+    'google-meet': ['google-calendar'],
+  };
+
   await Promise.all(detectedApps.map(async (app) => {
-    const connId = connMap.get(app);
+    let connId = connMap.get(app);
+    // Try fallback connections if primary isn't found
+    if (!connId && CONNECTION_FALLBACKS[app]) {
+      for (const fallback of CONNECTION_FALLBACKS[app]) {
+        connId = connMap.get(fallback);
+        if (connId) break;
+      }
+    }
     if (!connId) { notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app); return; }
     const fetcher = SERVICE_FETCHERS[app];
     if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
