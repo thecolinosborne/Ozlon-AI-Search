@@ -2938,10 +2938,18 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       console.log('Using tool loop (non-streaming) for action request');
 
       try {
-        const result = await runToolLoop(modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap);
+        const taskUpdates: TaskUpdateEvent[] = [];
+        const result = await runToolLoop(
+          modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 5,
+          (event) => { taskUpdates.push(event); }
+        );
 
-        // Return as a simulated SSE stream so the frontend can handle it the same way
-        const ssePayload = `data: ${JSON.stringify({
+        // Build SSE response with task_update events followed by the final content
+        let ssePayload = '';
+        for (const tu of taskUpdates) {
+          ssePayload += `event: task_update\ndata: ${JSON.stringify(tu)}\n\n`;
+        }
+        ssePayload += `data: ${JSON.stringify({
           choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
         })}\n\ndata: [DONE]\n\n`;
 
