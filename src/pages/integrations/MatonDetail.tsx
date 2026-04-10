@@ -89,7 +89,14 @@ const MatonDetail = () => {
 
       {/* Connected Services */}
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Connected Services</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-foreground">Connected Services</h3>
+          {!loading && connections.length > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              {connections.filter(c => c.status.toUpperCase() === "ACTIVE").length} active / {connections.length} total
+            </span>
+          )}
+        </div>
         {loading ? (
           <div className="flex justify-center py-8">
             <div className="w-6 h-6 border-2 border-muted border-t-primary rounded-full animate-spin" />
@@ -100,20 +107,27 @@ const MatonDetail = () => {
           </p>
         ) : (
           <div className="space-y-2">
-            {connections.map((conn) => (
-              <div
-                key={conn.connection_id}
-                className="flex items-center justify-between p-3.5 rounded-xl border border-border/40 bg-card/60"
-              >
-                <div>
-                  <p className="text-sm font-medium text-foreground">{formatAppName(conn.app)}</p>
-                  <p className="text-[11px] text-muted-foreground capitalize">{conn.method}</p>
-                </div>
-                <IntegrationStatusBadge
-                  status={conn.status === "active" ? "connected" : "error"}
-                />
-              </div>
-            ))}
+            {[...connections]
+              .sort((a, b) => {
+                const order = (s: string) => s.toUpperCase() === "ACTIVE" ? 0 : s.toUpperCase() === "PENDING" ? 1 : 2;
+                return order(a.status) - order(b.status);
+              })
+              .map((conn) => {
+                const upper = conn.status.toUpperCase();
+                const badgeStatus = upper === "ACTIVE" ? "connected" : upper === "PENDING" ? "disconnected" : "error";
+                return (
+                  <div
+                    key={conn.connection_id}
+                    className="flex items-center justify-between p-3.5 rounded-xl border border-border/40 bg-card/60"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{formatAppName(conn.app)}</p>
+                      <p className="text-[11px] text-muted-foreground capitalize">{conn.method}</p>
+                    </div>
+                    <IntegrationStatusBadge status={badgeStatus} />
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>
