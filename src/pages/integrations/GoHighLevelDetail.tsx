@@ -49,6 +49,7 @@ const GoHighLevelDetail = () => {
           if (!settings.subAccounts?.length) {
             updateSettings("gohighlevel", {
               subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
+              syncData: { contacts: true, pipelines: true, conversations: true },
             });
             setSelectedAccount("default");
           }
@@ -62,7 +63,7 @@ const GoHighLevelDetail = () => {
     checkConnection();
   }, []);
 
-  const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: false };
+  const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: true };
 
   const handleConnect = () => {
     setStatus("gohighlevel", "connected");
@@ -87,10 +88,35 @@ const GoHighLevelDetail = () => {
 
   const handleSync = async () => {
     setStatus("gohighlevel", "syncing");
-    await new Promise((r) => setTimeout(r, 1500));
-    setStatus("gohighlevel", "connected");
-    setLastSync("gohighlevel", new Date().toISOString());
-    toast.success("GHL data synced");
+    const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`;
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    };
+
+    const actions: { key: string; action: string }[] = [];
+    if (syncData.contacts) actions.push({ key: "contacts", action: "list_contacts" });
+    if (syncData.pipelines) actions.push({ key: "pipelines", action: "list_pipelines" });
+    if (syncData.conversations) actions.push({ key: "conversations", action: "list_conversations" });
+
+    try {
+      const results = await Promise.allSettled(
+        actions.map((a) =>
+          fetch(baseUrl, { method: "POST", headers, body: JSON.stringify({ action: a.action, params: { limit: 1 } }) })
+            .then((r) => { if (!r.ok) throw new Error(`${a.key} failed`); return r.json(); })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length === actions.length && actions.length > 0) {
+        throw new Error("All syncs failed");
+      }
+      setStatus("gohighlevel", "connected");
+      setLastSync("gohighlevel", new Date().toISOString());
+      toast.success(`GHL synced: ${actions.length - failed.length}/${actions.length} data types`);
+    } catch {
+      setStatus("gohighlevel", "error");
+      toast.error("GHL sync failed");
+    }
   };
 
   return (

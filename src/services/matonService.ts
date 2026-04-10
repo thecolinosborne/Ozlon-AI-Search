@@ -3,6 +3,7 @@ export interface MatonConnection {
   connection_id: string;
   status: string;
   method: string;
+  url?: string;
   metadata?: Record<string, unknown>;
   creation_time: string;
   last_updated_time: string;
