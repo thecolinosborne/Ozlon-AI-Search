@@ -66,13 +66,103 @@ interface MatonConnection {
 type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
 type MultiConnMap = Map<string, ConnEntry[]>;
 
-function resolveConnection(connMap: MultiConnMap, app: string, hint?: string): string | undefined {
+// ---------- Robust account resolver ----------
+
+/** Extract an email address from a freeform string like "colin@ozlon.net gmail" */
+function extractEmailFromHint(hint: string): string | null {
+  const match = hint.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  return match ? match[0].toLowerCase() : null;
+}
+
+/** Extract an email address mentioned in a user message */
+function extractAccountFromMessage(message: string): string | null {
+  // Find all email addresses in the message
+  const emails = message.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi);
+  return emails ? emails[0].toLowerCase() : null;
+}
+
+/** Normalize a hint for partial matching: lowercase, strip spaces/punctuation/trailing words */
+function normalizeHint(hint: string): string {
+  return hint.toLowerCase().replace(/\s*(gmail|email|mail|inbox|account)\s*/gi, '').trim();
+}
+
+/**
+ * Resolve the correct connection for a service, supporting:
+ * - exact email match (case-insensitive)
+ * - email extracted from freeform hint ("colin@ozlon.net gmail")
+ * - partial/alias match ("ozlon" matches "colin@ozlon.net")
+ * - fallback extraction from the latest user message
+ * Returns { id, email } so callers can confirm which account was used.
+ */
+function resolveConnection(
+  connMap: MultiConnMap,
+  app: string,
+  hint?: string,
+  userMessage?: string,
+): { id: string; email?: string } | undefined {
   const entries = connMap.get(app);
   if (!entries?.length) return undefined;
-  if (entries.length === 1 || !hint) return entries[0].id;
-  const hintLower = hint.toLowerCase();
-  const match = entries.find(e => e.email?.toLowerCase() === hintLower);
-  return match?.id || entries[0].id;
+  if (entries.length === 1) return entries[0];
+
+  // Priority 1: explicit tool arg hint
+  if (hint) {
+    const found = matchEntry(entries, hint);
+    if (found) return found;
+  }
+
+  // Priority 2: extract email from latest user message
+  if (userMessage) {
+    const msgEmail = extractAccountFromMessage(userMessage);
+    if (msgEmail) {
+      const found = matchEntry(entries, msgEmail);
+      if (found) return found;
+    }
+    // Try partial/alias match against user message words
+    const normalized = userMessage.toLowerCase();
+    for (const entry of entries) {
+      if (!entry.email) continue;
+      const domain = entry.email.split('@')[1]?.split('.')[0]; // "ozlon" from "colin@ozlon.net"
+      if (domain && normalized.includes(domain)) return entry;
+    }
+  }
+
+  // Priority 3: default to first
+  return entries[0];
+}
+
+function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
+  const hintLower = hint.toLowerCase().trim();
+
+  // Try exact email match
+  const exactMatch = entries.find(e => e.email?.toLowerCase() === hintLower);
+  if (exactMatch) return exactMatch;
+
+  // Try extracting an email from the hint string
+  const extracted = extractEmailFromHint(hint);
+  if (extracted) {
+    const emailMatch = entries.find(e => e.email?.toLowerCase() === extracted);
+    if (emailMatch) return emailMatch;
+  }
+
+  // Try partial/alias match (e.g. "ozlon" matches "colin@ozlon.net")
+  const norm = normalizeHint(hint);
+  if (norm.length >= 3) {
+    for (const entry of entries) {
+      if (!entry.email) continue;
+      if (entry.email.toLowerCase().includes(norm)) return entry;
+      const domain = entry.email.split('@')[1]?.split('.')[0];
+      if (domain && norm.includes(domain)) return entry;
+    }
+  }
+
+  // Check metadata fields
+  for (const entry of entries) {
+    if (!entry.meta) continue;
+    const metaStr = JSON.stringify(entry.meta).toLowerCase();
+    if (metaStr.includes(hintLower) || (extracted && metaStr.includes(extracted))) return entry;
+  }
+
+  return undefined;
 }
 
 function buildMultiConnMap(connections: MatonConnection[]): MultiConnMap {
