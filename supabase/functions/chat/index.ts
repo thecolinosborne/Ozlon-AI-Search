@@ -628,6 +628,7 @@ async function injectMatonData(
   messages: { role: string; content: string }[],
   matonApiKey: string,
   multiConnMap?: MultiConnMap,
+  aliasMap?: AliasEntry[],
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
@@ -636,7 +637,6 @@ async function injectMatonData(
   // Extract account hint from latest user message
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
   const userMessageText = lastUserMsg?.content || '';
-  const userAccountHint = extractAccountFromMessage(userMessageText);
 
   // Build a simple connMap for fetchers, account-aware for multi-account services
   let connMap: Map<string, string>;
@@ -647,9 +647,16 @@ async function injectMatonData(
       if (entries.length === 1) {
         connMap.set(app, entries[0].id);
       } else {
-        // For multi-account services, resolve using user's message hint
-        const resolved = resolveConnection(multiConnMap, app, userAccountHint || undefined, userMessageText);
-        if (resolved) connMap.set(app, resolved.id);
+        // For multi-account services, resolve using dynamic alias map + user message
+        const resolved = resolveConnection(multiConnMap, app, undefined, userMessageText, aliasMap);
+        if (resolved) {
+          connMap.set(app, resolved.id);
+          console.log(`Multi-account resolved for ${app}: ${resolved.email || resolved.id}`);
+        } else {
+          // No clear account specified — don't inject any single account's data
+          // Instead, we'll note which accounts are available
+          console.log(`Multi-account ambiguous for ${app}, skipping data injection`);
+        }
       }
     }
   } else {
@@ -660,6 +667,7 @@ async function injectMatonData(
 
   const sections: string[] = [];
   const notConnected: string[] = [];
+  const ambiguousAccounts: { app: string; accounts: string[] }[] = [];
 
   // Fallback mapping: services that use another connection's credentials
   const CONNECTION_FALLBACKS: Record<string, string[]> = {
@@ -678,7 +686,19 @@ async function injectMatonData(
         if (connId) break;
       }
     }
-    if (!connId) { notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app); return; }
+    if (!connId) {
+      // Check if this is because of ambiguous multi-account
+      const entries = multiConnMap?.get(app);
+      if (entries && entries.length > 1) {
+        ambiguousAccounts.push({
+          app: SERVICE_DETECTORS.find(s => s.app === app)?.label || app,
+          accounts: entries.map(e => e.email || e.id),
+        });
+        return;
+      }
+      notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app);
+      return;
+    }
     const fetcher = SERVICE_FETCHERS[app];
     if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
     try {
@@ -698,13 +718,19 @@ async function injectMatonData(
     }
   }));
 
-  if (!sections.length && !notConnected.length) return '';
+  if (!sections.length && !notConnected.length && !ambiguousAccounts.length) return '';
 
   let injection = `\n\n===========================================================
 LIVE DATA FROM CONNECTED SERVICES
 ===========================================================
 The following is REAL data pulled from the user's connected accounts. Use this data to answer with specific numbers, dates, and details.\n\n`;
   injection += sections.join('\n\n');
+  if (ambiguousAccounts.length) {
+    injection += `\n\nIMPORTANT: The user asked about ${ambiguousAccounts.map(a => a.app).join(', ')} but has MULTIPLE accounts connected. You did NOT pre-load data for these because the account was ambiguous. Ask the user which account to use:\n`;
+    for (const a of ambiguousAccounts) {
+      injection += `- ${a.app}: ${a.accounts.join(', ')}\n`;
+    }
+  }
   if (notConnected.length) {
     injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
   }
