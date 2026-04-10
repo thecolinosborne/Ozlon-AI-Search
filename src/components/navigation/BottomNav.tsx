@@ -1,10 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, MessageCircle, Settings } from "lucide-react";
+import { Home, MessageCircle, Plug, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/home", icon: Home, label: "Home" },
   { path: "/chat", icon: MessageCircle, label: "Chat" },
+  { path: "/integrations", icon: Plug, label: "Integrations" },
   { path: "/settings", icon: Settings, label: "Settings" },
 ];
 

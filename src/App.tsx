@@ -15,6 +15,12 @@ import AuthPage from "@/pages/AuthPage";
 import Profile from "@/pages/Profile";
 import Billing from "@/pages/Billing";
 import Onboarding from "@/pages/onboarding";
+import Integrations from "@/pages/Integrations";
+import MatonDetail from "@/pages/integrations/MatonDetail";
+import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
+import DescriptDetail from "@/pages/integrations/DescriptDetail";
+import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
+import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +56,12 @@ const App = () => (
             <Route path="/settings" element={<Settings />} />
             <Route path="/developer" element={<Developer />} />
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/integrations" element={<Integrations />} />
+            <Route path="/integrations/maton" element={<MatonDetail />} />
+            <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
+            <Route path="/integrations/descript" element={<DescriptDetail />} />
+            <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
+            <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
             <Route path="/" element={<Index />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

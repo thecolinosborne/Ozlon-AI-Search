@@ -5,25 +5,16 @@ import {
   Mic,
   Type,
   Keyboard,
-  Calendar,
-  Mail,
-  CreditCard,
   LogOut,
-  Cpu,
-  Brain,
-  MessageSquare,
-  Smile,
-  Wallet,
-  FileText,
   ArrowLeft,
   Edit3,
   Trash2,
   Volume2,
   PlayCircle,
   Phone,
+  Plug,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
-import { MatonIntegrations } from "@/components/settings/MatonIntegrations";
 import { SettingsRow } from "@/components/settings/SettingsRow";
 import { useAppStore } from "@/stores/useAppStore";
 import { supabase } from "@/integrations/supabase/client";
