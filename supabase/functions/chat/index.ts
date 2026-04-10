@@ -549,12 +549,25 @@ async function injectMatonData(
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
   console.log('Detected service intents:', detectedApps);
-  // Build a simple connMap for fetchers (first connection per app) from multi-conn map
+
+  // Extract account hint from latest user message
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const userMessageText = lastUserMsg?.content || '';
+  const userAccountHint = extractAccountFromMessage(userMessageText);
+
+  // Build a simple connMap for fetchers, account-aware for multi-account services
   let connMap: Map<string, string>;
   if (multiConnMap) {
     connMap = new Map();
     for (const [app, entries] of multiConnMap) {
-      if (entries.length) connMap.set(app, entries[0].id);
+      if (!entries.length) continue;
+      if (entries.length === 1) {
+        connMap.set(app, entries[0].id);
+      } else {
+        // For multi-account services, resolve using user's message hint
+        const resolved = resolveConnection(multiConnMap, app, userAccountHint || undefined, userMessageText);
+        if (resolved) connMap.set(app, resolved.id);
+      }
     }
   } else {
     const connections = await getMatonConnections(matonApiKey);
@@ -587,8 +600,15 @@ async function injectMatonData(
     if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
     try {
       const data = await fetcher(matonApiKey, connId);
-      sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
-      console.log(`${app} data injected`);
+      // For multi-account services, indicate which account the data came from
+      const entries = multiConnMap?.get(app);
+      let accountLabel = '';
+      if (entries && entries.length > 1) {
+        const usedEntry = entries.find(e => e.id === connId);
+        accountLabel = usedEntry?.email ? ` (account: ${usedEntry.email})` : '';
+      }
+      sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}${accountLabel}\n${data}`);
+      console.log(`${app} data injected${accountLabel}`);
     } catch (e) {
       console.error(`Error fetching ${app}:`, e);
       sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
