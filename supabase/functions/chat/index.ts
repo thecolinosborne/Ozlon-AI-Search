@@ -1324,6 +1324,34 @@ CONNECTED SERVICES (you can read data and take actions on these)
       }
     }
 
+    // GoHighLevel data injection (separate from Maton - uses its own API key)
+    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+    if (GHL_API_KEY) {
+      // Check if user is asking about GHL
+      const ghlDetected = detectServiceIntents(messages).includes('gohighlevel');
+      if (ghlDetected) {
+        try {
+          console.log('Fetching GoHighLevel data...');
+          const ghlData = await fetchGHLData();
+          systemPrompt += `\n\n===========================================================
+GOHIGHLEVEL CRM DATA
+===========================================================
+The following is REAL data from the user's GoHighLevel account. Use this to answer questions about their CRM, pipelines, contacts, etc.\n\n${ghlData}`;
+          console.log('GHL data injected');
+        } catch (e) {
+          console.error('Error fetching GHL data:', e);
+        }
+      }
+
+      // Add GHL to connected services list
+      systemPrompt += `\n- GoHighLevel CRM (contacts, pipelines, opportunities, calendars, conversations, campaigns, workflows)`;
+
+      // If no Maton tools were added, ensure GHL tools are still available
+      if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
+        availableTools = getAvailableTools(connMap);
+      }
+    }
+
     // Build OpenAI messages
     const openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[] = [
       { role: 'system', content: systemPrompt },
