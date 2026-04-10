@@ -926,6 +926,128 @@ async function executeToolCall(
         return { success: true, result: `Issue created: ${res.key} - "${args.summary}"` };
       }
 
+      // ============ GoHighLevel tools ============
+      case 'ghl_list_contacts': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const query = args.query ? `&query=${encodeURIComponent(args.query as string)}` : '';
+        const data = await callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=${limit}${query}`) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; tags?: string[] }[] };
+        const contacts = data.contacts || [];
+        if (!contacts.length) return { success: true, result: 'No contacts found.' };
+        return { success: true, result: `Found ${contacts.length} contacts:\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'} | ID: ${c.id}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`).join('\n')}` };
+      }
+
+      case 'ghl_create_contact': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const contactData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          firstName: args.firstName,
+          lastName: args.lastName,
+          email: args.email,
+        };
+        if (args.phone) contactData.phone = args.phone;
+        if (args.source) contactData.source = args.source;
+        if (args.tags) contactData.tags = (args.tags as string).split(',').map(t => t.trim());
+        const res = await callGHL('/contacts/', 'POST', contactData) as { contact?: { id: string; firstName?: string; lastName?: string }; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        return { success: true, result: `Contact created: ${res.contact?.firstName} ${res.contact?.lastName} (ID: ${res.contact?.id})` };
+      }
+
+      case 'ghl_create_opportunity': {
+        const data: Record<string, unknown> = {
+          pipelineId: args.pipeline_id,
+          pipelineStageId: args.stage_id,
+          name: args.name,
+          contactId: args.contact_id,
+          status: args.status || 'open',
+        };
+        if (args.monetary_value) data.monetaryValue = args.monetary_value;
+        const res = await callGHL('/opportunities/', 'POST', data) as { opportunity?: { id: string; name: string }; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        return { success: true, result: `Opportunity created: "${res.opportunity?.name}" (ID: ${res.opportunity?.id})` };
+      }
+
+      case 'ghl_list_opportunities': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const data = await callGHL(`/opportunities/search?locationId=${GHL_LOCATION_ID}&pipelineId=${args.pipeline_id}&limit=${limit}`) as { opportunities?: { id: string; name: string; monetaryValue?: number; status?: string; pipelineStageId?: string; contact?: { name?: string } }[] };
+        const opps = data.opportunities || [];
+        if (!opps.length) return { success: true, result: 'No opportunities found in this pipeline.' };
+        return { success: true, result: `Found ${opps.length} opportunities:\n${opps.map(o => `- ${o.name} | $${o.monetaryValue || 0} | Status: ${o.status || '?'} | ID: ${o.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_pipelines': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as { pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] };
+        const pipelines = data.pipelines || [];
+        if (!pipelines.length) return { success: true, result: 'No pipelines found.' };
+        return { success: true, result: `Pipelines:\n${pipelines.map(p => `- ${p.name} (ID: ${p.id})\n  Stages: ${(p.stages || []).map(s => `${s.name} (ID: ${s.id})`).join(' → ')}`).join('\n')}` };
+      }
+
+      case 'ghl_send_message': {
+        const type = (args.type as string) || 'SMS';
+        const msgData: Record<string, unknown> = {
+          type,
+          contactId: args.contact_id,
+          message: args.message,
+        };
+        if (type === 'Email' && args.subject) msgData.subject = args.subject;
+        const res = await callGHL('/conversations/messages', 'POST', msgData) as { messageId?: string; message?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL message error: ${res.error}` };
+        return { success: true, result: `${type} sent to contact ${args.contact_id}: "${(args.message as string).substring(0, 100)}"` };
+      }
+
+      case 'ghl_list_calendars': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as { calendars?: { id: string; name: string; description?: string }[] };
+        const cals = data.calendars || [];
+        if (!cals.length) return { success: true, result: 'No calendars found.' };
+        return { success: true, result: `Calendars:\n${cals.map(c => `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`).join('\n')}` };
+      }
+
+      case 'ghl_book_appointment': {
+        const apptData: Record<string, unknown> = {
+          calendarId: args.calendar_id,
+          contactId: args.contact_id,
+          startTime: args.start_time,
+          endTime: args.end_time,
+        };
+        if (args.title) apptData.title = args.title;
+        const res = await callGHL('/calendars/events/appointments', 'POST', apptData) as { id?: string; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL appointment error: ${res.error || res.message}` };
+        return { success: true, result: `Appointment booked: ${args.start_time} to ${args.end_time} (ID: ${res.id})` };
+      }
+
+      case 'ghl_add_tags': {
+        const tags = (args.tags as string).split(',').map(t => t.trim());
+        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'POST', { tags }) as { tags?: string[]; error?: string };
+        if (res.error) return { success: false, result: `GHL tag error: ${res.error}` };
+        return { success: true, result: `Tags added to contact ${args.contact_id}: ${tags.join(', ')}` };
+      }
+
+      case 'ghl_list_workflows': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`) as { workflows?: { id: string; name: string; status?: string }[] };
+        const workflows = data.workflows || [];
+        if (!workflows.length) return { success: true, result: 'No workflows found.' };
+        return { success: true, result: `Workflows:\n${workflows.map(w => `- ${w.name} (${w.status || 'unknown'}) | ID: ${w.id}`).join('\n')}` };
+      }
+
+      case 'ghl_list_campaigns': {
+        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`) as { campaigns?: { id: string; name: string; status?: string }[] };
+        const camps = data.campaigns || [];
+        if (!camps.length) return { success: true, result: 'No campaigns found.' };
+        return { success: true, result: `Campaigns:\n${camps.map(c => `- ${c.name} (${c.status || 'unknown'}) | ID: ${c.id}`).join('\n')}` };
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
