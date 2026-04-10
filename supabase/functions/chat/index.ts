@@ -1763,6 +1763,7 @@ async function executeToolCall(
   matonApiKey: string,
   connMap: MultiConnMap,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): Promise<{ success: boolean; result: string }> {
   try {
     const accountHint = args.account as string | undefined;
