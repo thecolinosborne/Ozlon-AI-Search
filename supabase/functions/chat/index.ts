@@ -2558,7 +2558,49 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
 
 // ============================================================================
 // NON-STREAMING TOOL LOOP - For when tools need to be called
+// Now emits task_update SSE events for frontend visibility
 // ============================================================================
+
+interface TaskUpdateEvent {
+  taskId: string;
+  title: string;
+  step: string;
+  status: 'in_progress' | 'done' | 'error';
+}
+
+// Human-readable tool names for display
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'list_emails': 'Fetching emails',
+  'get_email': 'Reading email',
+  'trash_email': 'Moving email to trash',
+  'batch_trash_emails': 'Batch trashing emails',
+  'label_email': 'Updating email labels',
+  'mark_email_read': 'Marking email as read',
+  'send_email': 'Sending email',
+  'create_email_draft': 'Creating email draft',
+  'create_calendar_event': 'Creating calendar event',
+  'send_slack_message': 'Sending Slack message',
+  'create_notion_page': 'Creating Notion page',
+  'create_github_issue': 'Creating GitHub issue',
+  'search_google_drive': 'Searching Google Drive',
+  'create_google_doc': 'Creating Google Doc',
+  'create_google_sheet': 'Creating Google Sheet',
+  'ghl_list_contacts': 'Listing GHL contacts',
+  'ghl_create_contact': 'Creating GHL contact',
+  'ghl_send_message': 'Sending GHL message',
+};
+
+function inferTaskTitle(toolNames: string[]): string {
+  if (toolNames.some(n => n.includes('trash') || n.includes('label') || n === 'list_emails')) return 'Managing emails';
+  if (toolNames.some(n => n.includes('email') || n.includes('mail'))) return 'Handling email';
+  if (toolNames.some(n => n.includes('calendar'))) return 'Managing calendar';
+  if (toolNames.some(n => n.includes('slack'))) return 'Messaging on Slack';
+  if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
+  if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
+  if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
+  if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
+  return 'Executing task';
+}
 
 async function runToolLoop(
   modelConfig: ModelConfig,
@@ -2568,8 +2610,11 @@ async function runToolLoop(
   matonApiKey: string,
   connMap: Map<string, string>,
   maxIterations = 5,
+  onTaskUpdate?: (event: TaskUpdateEvent) => void,
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
+  const taskId = crypto.randomUUID();
+  let taskCreated = false;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -2602,9 +2647,17 @@ async function runToolLoop(
 
     // If the model wants to call tools
     if (msg.tool_calls && msg.tool_calls.length > 0) {
-      console.log(`AI requested ${msg.tool_calls.length} tool calls:`, msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name));
+      const toolNames = msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name);
+      console.log(`AI requested ${msg.tool_calls.length} tool calls:`, toolNames);
 
-      // Execute all tool calls in parallel
+      // Create task on first tool call
+      if (!taskCreated && onTaskUpdate) {
+        const title = inferTaskTitle(toolNames);
+        onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
+        taskCreated = true;
+      }
+
+      // Execute all tool calls in parallel with task updates
       const toolResults = await Promise.all(
         msg.tool_calls.map(async (tc: { id: string; function: { name: string; arguments: string } }) => {
           let args: Record<string, unknown>;
@@ -2613,9 +2666,15 @@ async function runToolLoop(
           } catch {
             args = {};
           }
+          const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
+          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
+
           console.log(`Executing tool: ${tc.function.name}`, args);
           const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
+
+          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
+
           return {
             role: 'tool' as const,
             tool_call_id: tc.id,
@@ -2632,6 +2691,9 @@ async function runToolLoop(
     }
 
     // No tool calls - return the final response
+    if (taskCreated && onTaskUpdate) {
+      onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
+    }
     return { role: 'assistant', content: msg.content || '' };
   }
 
