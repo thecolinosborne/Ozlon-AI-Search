@@ -2463,6 +2463,12 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
     'create_email_draft': 'google-mail',
+    'list_emails': 'google-mail',
+    'get_email': 'google-mail',
+    'trash_email': 'google-mail',
+    'batch_trash_emails': 'google-mail',
+    'label_email': 'google-mail',
+    'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
     'send_slack_message': 'slack',
     'create_notion_page': 'notion',
