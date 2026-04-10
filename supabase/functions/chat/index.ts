@@ -2933,6 +2933,7 @@ async function runToolLoop(
   maxIterations = 5,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
   userMessage?: string,
+  aliasMap?: AliasEntry[],
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
