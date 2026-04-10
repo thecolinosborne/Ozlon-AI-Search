@@ -572,6 +572,94 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // Gmail management tools
+  {
+    type: 'function',
+    function: {
+      name: 'list_emails',
+      description: 'Search and list emails in Gmail. Use Gmail query syntax (e.g. "from:someone@example.com", "is:unread", "subject:invoice", "newer_than:7d"). Returns message IDs and metadata.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Gmail search query (e.g. "is:unread", "from:client@co.com", "subject:invoice newer_than:30d")' },
+          max_results: { type: 'number', description: 'Max emails to return (default 20, max 100)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_email',
+      description: 'Get full details of a specific email by its message ID, including sender, subject, date, and body content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'trash_email',
+      description: 'Move a single email to trash by its message ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID to trash' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'batch_trash_emails',
+      description: 'Move multiple emails to trash at once. More efficient than trashing one-by-one. Use this when cleaning/filtering the inbox.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash' },
+        },
+        required: ['message_ids'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'label_email',
+      description: 'Add or remove labels on an email (INBOX, STARRED, IMPORTANT, UNREAD, SPAM, TRASH, or custom labels).',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+          add_labels: { type: 'string', description: 'Comma-separated label IDs to add (optional)' },
+          remove_labels: { type: 'string', description: 'Comma-separated label IDs to remove (optional)' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'mark_email_read',
+      description: 'Mark an email as read (removes the UNREAD label).',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
   // Calendar actions
   {
     type: 'function',
@@ -1412,6 +1500,93 @@ async function executeToolCall(
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
         return { success: true, result: `Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+      }
+
+      case 'list_emails': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const maxResults = Math.min((args.max_results as number) || 20, 100);
+        const query = encodeURIComponent(args.query as string);
+        const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
+        const msgs = data.messages || [];
+        if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
+        // Fetch metadata for each message (batch up to 25)
+        const details: string[] = [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 25)}:`];
+        const batch = msgs.slice(0, 25);
+        const metadataResults = await Promise.all(batch.map(async (m) => {
+          try {
+            const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
+            const headers = full.payload?.headers || [];
+            const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+            const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+            const date = headers.find(h => h.name === 'Date')?.value || '';
+            return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}`;
+          } catch { return `- ID: ${m.id} | (metadata unavailable)`; }
+        }));
+        details.push(...metadataResults);
+        return { success: true, result: details.join('\n') };
+      }
+
+      case 'get_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
+        const headers = full.payload?.headers || [];
+        const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+        const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+        const date = headers.find(h => h.name === 'Date')?.value || '';
+        const to = headers.find(h => h.name === 'To')?.value || '';
+        // Decode body
+        let bodyText = '';
+        const bodyData = full.payload?.body?.data || full.payload?.parts?.find(p => p.mimeType === 'text/plain')?.body?.data;
+        if (bodyData) {
+          try { bodyText = atob(bodyData.replace(/-/g, '+').replace(/_/g, '/')); } catch { bodyText = full.snippet || ''; }
+        } else {
+          bodyText = full.snippet || '';
+        }
+        return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 2000)}` };
+      }
+
+      case 'trash_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Email ${args.message_id} moved to trash.` };
+      }
+
+      case 'batch_trash_emails': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
+        if (!ids.length) return { success: false, result: 'No message IDs provided.' };
+        // Gmail batchModify endpoint
+        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/batchModify', connId, 'POST', {
+          ids,
+          addLabelIds: ['TRASH'],
+          removeLabelIds: ['INBOX'],
+        }) as { error?: { message?: string } };
+        if (res.error) return { success: false, result: `Batch trash failed: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `${ids.length} emails moved to trash.` };
+      }
+
+      case 'label_email': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const modifyData: Record<string, string[]> = {};
+        if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
+        if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', modifyData) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Label modification failed: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Labels updated on email ${args.message_id}.` };
+      }
+
+      case 'mark_email_read': {
+        const connId = connMap.get('google-mail');
+        if (!connId) return { success: false, result: 'Gmail is not connected.' };
+        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
+        if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
+        return { success: true, result: `Email ${args.message_id} marked as read.` };
       }
 
       case 'create_calendar_event': {
@@ -2288,6 +2463,12 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
     'create_email_draft': 'google-mail',
+    'list_emails': 'google-mail',
+    'get_email': 'google-mail',
+    'trash_email': 'google-mail',
+    'batch_trash_emails': 'google-mail',
+    'label_email': 'google-mail',
+    'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
     'send_slack_message': 'slack',
     'create_notion_page': 'notion',
@@ -2377,7 +2558,49 @@ function getAvailableTools(connMap: Map<string, string>): ToolDef[] {
 
 // ============================================================================
 // NON-STREAMING TOOL LOOP - For when tools need to be called
+// Now emits task_update SSE events for frontend visibility
 // ============================================================================
+
+interface TaskUpdateEvent {
+  taskId: string;
+  title: string;
+  step: string;
+  status: 'in_progress' | 'done' | 'error';
+}
+
+// Human-readable tool names for display
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'list_emails': 'Fetching emails',
+  'get_email': 'Reading email',
+  'trash_email': 'Moving email to trash',
+  'batch_trash_emails': 'Batch trashing emails',
+  'label_email': 'Updating email labels',
+  'mark_email_read': 'Marking email as read',
+  'send_email': 'Sending email',
+  'create_email_draft': 'Creating email draft',
+  'create_calendar_event': 'Creating calendar event',
+  'send_slack_message': 'Sending Slack message',
+  'create_notion_page': 'Creating Notion page',
+  'create_github_issue': 'Creating GitHub issue',
+  'search_google_drive': 'Searching Google Drive',
+  'create_google_doc': 'Creating Google Doc',
+  'create_google_sheet': 'Creating Google Sheet',
+  'ghl_list_contacts': 'Listing GHL contacts',
+  'ghl_create_contact': 'Creating GHL contact',
+  'ghl_send_message': 'Sending GHL message',
+};
+
+function inferTaskTitle(toolNames: string[]): string {
+  if (toolNames.some(n => n.includes('trash') || n.includes('label') || n === 'list_emails')) return 'Managing emails';
+  if (toolNames.some(n => n.includes('email') || n.includes('mail'))) return 'Handling email';
+  if (toolNames.some(n => n.includes('calendar'))) return 'Managing calendar';
+  if (toolNames.some(n => n.includes('slack'))) return 'Messaging on Slack';
+  if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
+  if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
+  if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
+  if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
+  return 'Executing task';
+}
 
 async function runToolLoop(
   modelConfig: ModelConfig,
@@ -2387,8 +2610,11 @@ async function runToolLoop(
   matonApiKey: string,
   connMap: Map<string, string>,
   maxIterations = 5,
+  onTaskUpdate?: (event: TaskUpdateEvent) => void,
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
+  const taskId = crypto.randomUUID();
+  let taskCreated = false;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -2421,9 +2647,17 @@ async function runToolLoop(
 
     // If the model wants to call tools
     if (msg.tool_calls && msg.tool_calls.length > 0) {
-      console.log(`AI requested ${msg.tool_calls.length} tool calls:`, msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name));
+      const toolNames = msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name);
+      console.log(`AI requested ${msg.tool_calls.length} tool calls:`, toolNames);
 
-      // Execute all tool calls in parallel
+      // Create task on first tool call
+      if (!taskCreated && onTaskUpdate) {
+        const title = inferTaskTitle(toolNames);
+        onTaskUpdate({ taskId, title, step: 'Starting...', status: 'in_progress' });
+        taskCreated = true;
+      }
+
+      // Execute all tool calls in parallel with task updates
       const toolResults = await Promise.all(
         msg.tool_calls.map(async (tc: { id: string; function: { name: string; arguments: string } }) => {
           let args: Record<string, unknown>;
@@ -2432,9 +2666,15 @@ async function runToolLoop(
           } catch {
             args = {};
           }
+          const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
+          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
+
           console.log(`Executing tool: ${tc.function.name}`, args);
           const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
+
+          if (onTaskUpdate) onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
+
           return {
             role: 'tool' as const,
             tool_call_id: tc.id,
@@ -2451,6 +2691,9 @@ async function runToolLoop(
     }
 
     // No tool calls - return the final response
+    if (taskCreated && onTaskUpdate) {
+      onTaskUpdate({ taskId, title: '', step: 'Preparing response', status: 'done' });
+    }
     return { role: 'assistant', content: msg.content || '' };
   }
 
@@ -2687,7 +2930,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
@@ -2695,10 +2938,18 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       console.log('Using tool loop (non-streaming) for action request');
 
       try {
-        const result = await runToolLoop(modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap);
+        const taskUpdates: TaskUpdateEvent[] = [];
+        const result = await runToolLoop(
+          modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 5,
+          (event) => { taskUpdates.push(event); }
+        );
 
-        // Return as a simulated SSE stream so the frontend can handle it the same way
-        const ssePayload = `data: ${JSON.stringify({
+        // Build SSE response with task_update events followed by the final content
+        let ssePayload = '';
+        for (const tu of taskUpdates) {
+          ssePayload += `event: task_update\ndata: ${JSON.stringify(tu)}\n\n`;
+        }
+        ssePayload += `data: ${JSON.stringify({
           choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
         })}\n\ndata: [DONE]\n\n`;
 

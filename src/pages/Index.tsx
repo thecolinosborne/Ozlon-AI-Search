@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { streamChat, UserSettings } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
+import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
@@ -13,6 +14,7 @@ import ReactMarkdown from "react-markdown";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
+import { TaskActivityBubble } from "@/components/TaskActivityBubble";
 
 type Message = {
   id: string;
@@ -33,6 +35,7 @@ const Index = () => {
   const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
+  const { addTask, updateStep, completeTask } = useTaskActivityStore();
   
   // Redirect to onboarding if needed
   useEffect(() => {
@@ -190,8 +193,26 @@ const Index = () => {
             prev.map((m) => (m.id === assistantId ? { ...m, content: assistantContent } : m))
           );
         },
+        onTaskUpdate: (update: TaskUpdate) => {
+          if (update.status === 'in_progress') {
+            // Check if task exists, if not create it
+            const existing = useTaskActivityStore.getState().tasks.find(t => t.id === update.taskId);
+            if (!existing) {
+              addTask(update.taskId, update.title);
+            }
+            updateStep(update.taskId, update.step, 'in_progress');
+          } else if (update.status === 'done') {
+            updateStep(update.taskId, update.step, 'done');
+          } else if (update.status === 'error') {
+            updateStep(update.taskId, update.step, 'error');
+            completeTask(update.taskId, 'error');
+          }
+        },
         onDone: () => {
           setIsLoading(false);
+          // Complete any active tasks
+          const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
+          activeTasks.forEach(t => completeTask(t.id, 'done'));
           // Cache assistant response when complete
           if (assistantContent) {
             saveMessageToCache({ id: assistantId, role: "assistant", content: assistantContent });
@@ -869,6 +890,7 @@ const Index = () => {
           userId={user.id}
         />
       )}
+      <TaskActivityBubble />
     </div>
   );
 };

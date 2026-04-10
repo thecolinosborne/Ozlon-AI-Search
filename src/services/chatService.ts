@@ -86,6 +86,13 @@ export interface UserSettings {
   osName?: string;
 }
 
+export interface TaskUpdate {
+  taskId: string;
+  title: string;
+  step: string;
+  status: 'in_progress' | 'done' | 'error';
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -97,6 +104,7 @@ export interface StreamChatOptions {
   userSettings?: UserSettings;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
+  onTaskUpdate?: (update: TaskUpdate) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -116,6 +124,7 @@ export async function streamChat({
   userSettings,
   onDelta,
   onToolCall,
+  onTaskUpdate,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -153,6 +162,7 @@ export async function streamChat({
     const decoder = new TextDecoder();
     let buffer = '';
     let currentToolCall: { name: string; arguments: string } | null = null;
+    let currentEventType = 'message';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -169,6 +179,13 @@ export async function streamChat({
         const trimmedLine = line.trim();
         
         if (!trimmedLine || trimmedLine.startsWith(':')) continue;
+
+        // Track SSE event type
+        if (trimmedLine.startsWith('event: ')) {
+          currentEventType = trimmedLine.slice(7).trim();
+          continue;
+        }
+
         if (!trimmedLine.startsWith('data: ')) continue;
 
         const data = trimmedLine.slice(6);
@@ -180,6 +197,15 @@ export async function streamChat({
 
         try {
           const parsed = JSON.parse(data);
+
+          // Handle task_update events
+          if (currentEventType === 'task_update' && onTaskUpdate) {
+            onTaskUpdate(parsed as TaskUpdate);
+            currentEventType = 'message';
+            continue;
+          }
+          currentEventType = 'message';
+
           const choice = parsed.choices?.[0];
 
           if (!choice) continue;
