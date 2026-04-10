@@ -390,7 +390,7 @@ Help the user extract value from their day:
 };
 
 // ============================================================================
-// MATON GATEWAY - Real data from connected services
+// MATON GATEWAY - Multi-service real data engine
 // ============================================================================
 
 const MATON_CTRL_URL = 'https://ctrl.maton.ai';
@@ -400,6 +400,7 @@ interface MatonConnection {
   app: string;
   connection_id: string;
   status: string;
+  metadata?: Record<string, unknown>;
 }
 
 async function getMatonConnections(matonApiKey: string): Promise<MatonConnection[]> {
@@ -414,20 +415,15 @@ async function getMatonConnections(matonApiKey: string): Promise<MatonConnection
 }
 
 async function callMatonGateway(
-  matonApiKey: string,
-  path: string,
-  connectionId: string,
-  method = 'GET',
-  body?: unknown,
+  matonApiKey: string, path: string, connectionId: string, method = 'GET', body?: unknown,
 ): Promise<unknown> {
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${matonApiKey}`,
-    'Content-Type': 'application/json',
-    'Maton-Connection': connectionId,
-  };
   const res = await fetch(`${MATON_GATEWAY_URL}${path}`, {
     method,
-    headers,
+    headers: {
+      'Authorization': `Bearer ${matonApiKey}`,
+      'Content-Type': 'application/json',
+      'Maton-Connection': connectionId,
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const ct = res.headers.get('content-type') || '';
@@ -435,165 +431,296 @@ async function callMatonGateway(
   return { raw: await res.text() };
 }
 
-// Detect if user message relates to search console / SEO
-function detectSearchConsoleIntent(messages: { role: string; content: string }[]): boolean {
+// ============================================================================
+// SERVICE INTENT DETECTION - Maps user messages to Maton app IDs
+// ============================================================================
+
+interface ServiceDetection {
+  app: string;       // Maton app ID
+  label: string;     // Human-readable label
+  keywords: string[];
+}
+
+const SERVICE_DETECTORS: ServiceDetection[] = [
+  { app: 'google-search-console', label: 'Google Search Console', keywords: ['search console', 'gsc', 'seo', 'search performance', 'impressions', 'clicks', 'search queries', 'keyword', 'ranking', 'serp', 'search traffic', 'ctr', 'click-through', 'search analytics', 'organic search', 'web traffic'] },
+  { app: 'google-mail', label: 'Gmail', keywords: ['email', 'emails', 'gmail', 'mail', 'inbox', 'unread', 'messages', 'send email', 'draft', 'newsletter'] },
+  { app: 'google-calendar', label: 'Google Calendar', keywords: ['calendar', 'schedule', 'meeting', 'meetings', 'event', 'events', 'appointment', 'appointments', 'busy', 'free time', 'availability', 'agenda', 'tomorrow', 'this week', 'next week'] },
+  { app: 'google-drive', label: 'Google Drive', keywords: ['drive', 'google drive', 'files', 'documents', 'docs', 'sheets', 'slides', 'spreadsheet', 'folder', 'shared drive'] },
+  { app: 'google-ads', label: 'Google Ads', keywords: ['google ads', 'adwords', 'ad campaign', 'ad spend', 'ppc', 'cost per click', 'ad performance', 'campaigns', 'ad groups'] },
+  { app: 'google-analytics', label: 'Google Analytics', keywords: ['analytics', 'google analytics', 'ga4', 'page views', 'sessions', 'bounce rate', 'visitors', 'website traffic', 'site traffic', 'user behavior'] },
+  { app: 'slack', label: 'Slack', keywords: ['slack', 'slack message', 'channel', 'channels', 'dm', 'direct message', 'workspace'] },
+  { app: 'notion', label: 'Notion', keywords: ['notion', 'notion page', 'notion database', 'wiki', 'notes'] },
+  { app: 'airtable', label: 'Airtable', keywords: ['airtable', 'base', 'airtable base', 'airtable table'] },
+  { app: 'hubspot', label: 'HubSpot', keywords: ['hubspot', 'crm', 'contacts', 'deals', 'pipeline', 'leads', 'sales pipeline'] },
+  { app: 'quickbooks-online', label: 'QuickBooks', keywords: ['quickbooks', 'accounting', 'invoices', 'expenses', 'profit', 'loss', 'revenue', 'bookkeeping', 'p&l', 'balance sheet'] },
+  { app: 'stripe', label: 'Stripe', keywords: ['stripe', 'payments', 'charges', 'subscriptions', 'mrr', 'revenue', 'customers', 'payment'] },
+  { app: 'shopify', label: 'Shopify', keywords: ['shopify', 'store', 'orders', 'products', 'inventory', 'ecommerce', 'e-commerce', 'sales'] },
+  { app: 'trello', label: 'Trello', keywords: ['trello', 'trello board', 'cards', 'trello cards'] },
+  { app: 'asana', label: 'Asana', keywords: ['asana', 'asana task', 'asana project'] },
+  { app: 'clickup', label: 'ClickUp', keywords: ['clickup', 'clickup task'] },
+  { app: 'jira', label: 'Jira', keywords: ['jira', 'jira ticket', 'jira issue', 'sprint', 'backlog'] },
+  { app: 'github', label: 'GitHub', keywords: ['github', 'pull request', 'pr', 'commit', 'commits', 'repository', 'repo', 'issues', 'merge'] },
+  { app: 'microsoft-teams', label: 'Microsoft Teams', keywords: ['teams', 'microsoft teams', 'ms teams'] },
+  { app: 'zoom', label: 'Zoom', keywords: ['zoom', 'zoom meeting', 'zoom call', 'video call'] },
+  { app: 'discord', label: 'Discord', keywords: ['discord', 'discord server', 'discord channel'] },
+  { app: 'typeform', label: 'Typeform', keywords: ['typeform', 'form responses', 'survey', 'survey responses'] },
+];
+
+function detectServiceIntents(messages: { role: string; content: string }[]): string[] {
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-  if (!lastUserMsg) return false;
+  if (!lastUserMsg) return [];
   const lower = lastUserMsg.content.toLowerCase();
-  const keywords = ['search console', 'gsc', 'seo', 'search performance', 'impressions', 'clicks',
-    'search queries', 'google search', 'keyword', 'ranking', 'serp', 'search traffic',
-    'ctr', 'click-through', 'search analytics', 'organic search', 'web traffic'];
-  return keywords.some(k => lower.includes(k));
-}
-
-// Fetch Search Console data for all sites, yesterday
-async function fetchSearchConsoleData(matonApiKey: string, connectionId: string): Promise<string> {
-  try {
-    // Get sites list
-    const sitesData = await callMatonGateway(matonApiKey, '/google-search-console/webmasters/v3/sites', connectionId) as { siteEntry?: { siteUrl: string }[] };
-    const sites = sitesData.siteEntry || [];
-    if (sites.length === 0) return 'No sites found in Google Search Console.';
-
-    // Get yesterday's date
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = yesterday.toISOString().split('T')[0];
-
-    // Also get day before yesterday for comparison
-    const dayBefore = new Date();
-    dayBefore.setDate(dayBefore.getDate() - 2);
-    const dayBeforeStr = dayBefore.toISOString().split('T')[0];
-
-    const allSiteData: string[] = [];
-
-    for (const site of sites) {
-      const siteUrl = site.siteUrl;
-      try {
-        // Fetch yesterday's data
-        const [yesterdayData, dayBeforeData] = await Promise.all([
-          callMatonGateway(
-            matonApiKey,
-            `/google-search-console/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-            connectionId,
-            'POST',
-            {
-              startDate: dateStr,
-              endDate: dateStr,
-              dimensions: ['query'],
-              rowLimit: 25,
-            },
-          ),
-          callMatonGateway(
-            matonApiKey,
-            `/google-search-console/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-            connectionId,
-            'POST',
-            {
-              startDate: dayBeforeStr,
-              endDate: dayBeforeStr,
-              dimensions: ['query'],
-              rowLimit: 25,
-            },
-          ),
-        ]);
-
-        const yd = yesterdayData as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
-        const dbd = dayBeforeData as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
-
-        // Compute totals
-        const yRows = yd.rows || [];
-        const dbRows = dbd.rows || [];
-        const yTotals = yRows.reduce((acc, r) => ({ clicks: acc.clicks + r.clicks, impressions: acc.impressions + r.impressions }), { clicks: 0, impressions: 0 });
-        const dbTotals = dbRows.reduce((acc, r) => ({ clicks: acc.clicks + r.clicks, impressions: acc.impressions + r.impressions }), { clicks: 0, impressions: 0 });
-
-        let siteReport = `## ${siteUrl}\n`;
-        siteReport += `**Yesterday (${dateStr}):** ${yTotals.clicks} clicks, ${yTotals.impressions} impressions\n`;
-        siteReport += `**Day before (${dayBeforeStr}):** ${dbTotals.clicks} clicks, ${dbTotals.impressions} impressions\n`;
-        if (yRows.length > 0) {
-          siteReport += `\nTop queries:\n`;
-          for (const row of yRows.slice(0, 10)) {
-            siteReport += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} impressions, pos ${row.position.toFixed(1)}, CTR ${(row.ctr * 100).toFixed(1)}%\n`;
-          }
-        } else {
-          siteReport += `No query data available for yesterday (data may take 2-3 days to appear in GSC).\n`;
-        }
-        allSiteData.push(siteReport);
-      } catch (e) {
-        allSiteData.push(`## ${siteUrl}\nError fetching data: ${e instanceof Error ? e.message : 'Unknown error'}\n`);
-      }
+  const detected: string[] = [];
+  for (const svc of SERVICE_DETECTORS) {
+    if (svc.keywords.some(k => lower.includes(k))) {
+      detected.push(svc.app);
     }
-
-    return `# Google Search Console Data\nDate range: ${dateStr} vs ${dayBeforeStr}\n\n${allSiteData.join('\n')}`;
-  } catch (e) {
-    return `Error fetching Search Console data: ${e instanceof Error ? e.message : 'Unknown error'}`;
   }
+  return detected;
 }
 
 // ============================================================================
-// MAIN REQUEST HANDLER
+// SERVICE DATA FETCHERS - One per Maton app
 // ============================================================================
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+function getYesterdayAndDayBefore(): [string, string] {
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const db = new Date(); db.setDate(db.getDate() - 2);
+  return [y.toISOString().split('T')[0], db.toISOString().split('T')[0]];
+}
+
+async function fetchGSCData(key: string, connId: string): Promise<string> {
+  const sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string }[] };
+  const sites = sitesData.siteEntry || [];
+  if (!sites.length) return 'No sites found in GSC.';
+  const [dateStr, dayBeforeStr] = getYesterdayAndDayBefore();
+  const reports: string[] = [];
+  for (const site of sites) {
+    try {
+      const [yd, dbd] = await Promise.all([
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: dateStr, endDate: dateStr, dimensions: ['query'], rowLimit: 20 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: dayBeforeStr, endDate: dayBeforeStr, dimensions: ['query'], rowLimit: 20 }),
+      ]) as [{ rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }, { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }];
+      const yRows = yd.rows || []; const dbRows = dbd.rows || [];
+      const yT = yRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      const dbT = dbRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      let r = `### ${site.siteUrl}\nYesterday (${dateStr}): ${yT.c} clicks, ${yT.i} impressions | Day before: ${dbT.c} clicks, ${dbT.i} impressions\n`;
+      if (yRows.length) { r += 'Top queries:\n'; for (const row of yRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      else r += 'No query data for yesterday (GSC data may be delayed 2-3 days).\n';
+      reports.push(r);
+    } catch (e) { reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}\n`); }
+  }
+  return reports.join('\n');
+}
+
+async function fetchGmailData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=15&q=is:unread', connId) as { messages?: { id: string }[]; resultSizeEstimate?: number };
+  const msgs = data.messages || [];
+  if (!msgs.length) return 'No unread emails.';
+  const details: string[] = [`Unread count: ~${data.resultSizeEstimate || msgs.length}`];
+  const toFetch = msgs.slice(0, 8);
+  for (const m of toFetch) {
+    try {
+      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string };
+      const headers = full.payload?.headers || [];
+      const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+      const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+      const date = headers.find(h => h.name === 'Date')?.value || '';
+      details.push(`- From: ${from} | Subject: ${subject} | ${date}\n  Preview: ${(full.snippet || '').substring(0, 120)}`);
+    } catch { details.push(`- Message ${m.id}: could not load details`); }
+  }
+  return details.join('\n');
+}
+
+async function fetchCalendarData(key: string, connId: string): Promise<string> {
+  const now = new Date();
+  const endOfWeek = new Date(); endOfWeek.setDate(endOfWeek.getDate() + 7);
+  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${endOfWeek.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }[] };
+  const events = data.items || [];
+  if (!events.length) return 'No upcoming events in the next 7 days.';
+  return events.map(e => {
+    const start = e.start?.dateTime || e.start?.date || 'TBD';
+    const end = e.end?.dateTime || e.end?.date || '';
+    return `- ${e.summary || '(no title)'} | ${start}${end ? ' to ' + end : ''}${e.location ? ' | ' + e.location : ''}`;
+  }).join('\n');
+}
+
+async function fetchGoogleDriveData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, '/google-drive/drive/v3/files?pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,mimeType,modifiedTime,size,webViewLink)', connId) as { files?: { name: string; mimeType: string; modifiedTime: string; webViewLink?: string }[] };
+  const files = data.files || [];
+  if (!files.length) return 'No recent files found.';
+  return files.map(f => `- ${f.name} (${f.mimeType?.split('.').pop() || 'file'}) - modified ${f.modifiedTime}`).join('\n');
+}
+
+async function fetchGoogleAdsData(key: string, connId: string): Promise<string> {
+  try {
+    const data = await callMatonGateway(key, '/google-ads/v17/customers:listAccessibleCustomers', connId) as { resourceNames?: string[] };
+    const customers = data.resourceNames || [];
+    return `Accessible Google Ads accounts: ${customers.length}\n${customers.map(c => `- ${c}`).join('\n')}`;
+  } catch { return 'Could not fetch Google Ads data. The API may require additional configuration.'; }
+}
+
+async function fetchGoogleAnalyticsData(key: string, connId: string): Promise<string> {
+  try {
+    const data = await callMatonGateway(key, '/google-analytics/analytics/data/v1beta/properties:runReport', connId, 'POST', {}) as Record<string, unknown>;
+    return `Google Analytics data:\n${JSON.stringify(data, null, 2).substring(0, 2000)}`;
+  } catch { return 'Could not fetch Google Analytics data. Try asking about a specific property.'; }
+}
+
+async function fetchSlackData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, '/slack/api/conversations.list?types=public_channel,private_channel&limit=10', connId) as { channels?: { name: string; num_members?: number; purpose?: { value?: string } }[] };
+  const channels = data.channels || [];
+  const unread = await callMatonGateway(key, '/slack/api/conversations.list?types=im&limit=5', connId) as { channels?: { user?: string }[] };
+  const dms = unread.channels || [];
+  return `Channels (${channels.length}):\n${channels.map(c => `- #${c.name} (${c.num_members || '?'} members)`).join('\n')}\n\nDirect messages: ${dms.length} recent conversations`;
+}
+
+async function fetchHubSpotData(key: string, connId: string): Promise<string> {
+  const [contacts, deals] = await Promise.all([
+    callMatonGateway(key, '/hubspot/crm/v3/objects/contacts?limit=10&properties=firstname,lastname,email,createdate', connId) as Promise<{ results?: { properties?: Record<string, string> }[] }>,
+    callMatonGateway(key, '/hubspot/crm/v3/objects/deals?limit=10&properties=dealname,amount,dealstage,createdate', connId) as Promise<{ results?: { properties?: Record<string, string> }[] }>,
+  ]);
+  const c = (contacts.results || []).map(r => `- ${r.properties?.firstname || ''} ${r.properties?.lastname || ''} (${r.properties?.email || 'no email'})`).join('\n');
+  const d = (deals.results || []).map(r => `- ${r.properties?.dealname || 'Untitled'}: $${r.properties?.amount || '0'} (${r.properties?.dealstage || 'unknown'})`).join('\n');
+  return `Recent Contacts:\n${c || 'None'}\n\nRecent Deals:\n${d || 'None'}`;
+}
+
+async function fetchStripeData(key: string, connId: string): Promise<string> {
+  const [charges, balance] = await Promise.all([
+    callMatonGateway(key, '/stripe/v1/charges?limit=10', connId) as Promise<{ data?: { amount: number; currency: string; status: string; created: number; description?: string }[] }>,
+    callMatonGateway(key, '/stripe/v1/balance', connId) as Promise<{ available?: { amount: number; currency: string }[]; pending?: { amount: number; currency: string }[] }>,
+  ]);
+  const bal = (balance.available || []).map(b => `${(b.amount / 100).toFixed(2)} ${b.currency.toUpperCase()}`).join(', ');
+  const pend = (balance.pending || []).map(b => `${(b.amount / 100).toFixed(2)} ${b.currency.toUpperCase()}`).join(', ');
+  const recent = (charges.data || []).map(c => `- $${(c.amount / 100).toFixed(2)} ${c.currency.toUpperCase()} - ${c.status} - ${c.description || 'no desc'} (${new Date(c.created * 1000).toLocaleDateString()})`).join('\n');
+  return `Balance: ${bal || 'N/A'} available, ${pend || 'N/A'} pending\n\nRecent charges:\n${recent || 'None'}`;
+}
+
+async function fetchShopifyData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, '/shopify/admin/api/2024-01/orders.json?status=any&limit=10', connId) as { orders?: { name: string; total_price: string; created_at: string; financial_status: string }[] };
+  const orders = data.orders || [];
+  if (!orders.length) return 'No recent orders.';
+  return orders.map(o => `- ${o.name}: $${o.total_price} (${o.financial_status}) - ${new Date(o.created_at).toLocaleDateString()}`).join('\n');
+}
+
+async function fetchNotionData(key: string, connId: string): Promise<string> {
+  const data = await callMatonGateway(key, '/notion/v1/search', connId, 'POST', { page_size: 10, sort: { direction: 'descending', timestamp: 'last_edited_time' } }) as { results?: { object: string; id: string; properties?: Record<string, unknown>; url?: string; last_edited_time?: string; parent?: unknown }[] };
+  const results = data.results || [];
+  if (!results.length) return 'No recent Notion pages found.';
+  return results.map(r => {
+    const titleProp = r.properties ? Object.values(r.properties).find((p: unknown) => (p as Record<string, unknown>)?.type === 'title') as { title?: { plain_text?: string }[] } | undefined : undefined;
+    const title = titleProp?.title?.[0]?.plain_text || '(untitled)';
+    return `- ${r.object}: ${title} (edited ${r.last_edited_time || 'unknown'})`;
+  }).join('\n');
+}
+
+async function fetchGitHubData(key: string, connId: string): Promise<string> {
+  const [notifications, repos] = await Promise.all([
+    callMatonGateway(key, '/github/notifications?per_page=10', connId) as Promise<{ id?: string; reason?: string; subject?: { title?: string; type?: string } }[]>,
+    callMatonGateway(key, '/github/user/repos?sort=updated&per_page=5', connId) as Promise<{ name: string; full_name: string; updated_at: string; open_issues_count?: number }[]>,
+  ]);
+  const notifs = Array.isArray(notifications) ? notifications.map((n: { subject?: { title?: string; type?: string }; reason?: string }) => `- ${n.subject?.type || '?'}: ${n.subject?.title || '?'} (${n.reason})`).join('\n') : 'No notifications';
+  const repoList = Array.isArray(repos) ? repos.map((r: { full_name: string; updated_at: string; open_issues_count?: number }) => `- ${r.full_name} (updated ${r.updated_at}, ${r.open_issues_count || 0} issues)`).join('\n') : 'No repos';
+  return `Notifications:\n${notifs}\n\nRecent repos:\n${repoList}`;
+}
+
+async function fetchGenericProjectData(key: string, connId: string, app: string): Promise<string> {
+  // For Trello, Asana, ClickUp, Jira - try common task/project endpoints
+  const endpoints: Record<string, string> = {
+    'trello': '/trello/1/members/me/boards?fields=name,dateLastActivity',
+    'asana': '/asana/api/1.0/users/me/user_task_list',
+    'clickup': '/clickup/api/v2/team',
+    'jira': '/jira/rest/api/3/myself',
+  };
+  if (!endpoints[app]) return `${app} is connected but no specific fetcher is configured yet.`;
+  try {
+    const data = await callMatonGateway(key, endpoints[app], connId);
+    return JSON.stringify(data, null, 2).substring(0, 2000);
+  } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
+}
+
+// Service fetcher registry
+const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
+  'google-search-console': fetchGSCData,
+  'google-mail': fetchGmailData,
+  'google-calendar': fetchCalendarData,
+  'google-drive': fetchGoogleDriveData,
+  'google-ads': fetchGoogleAdsData,
+  'google-analytics': fetchGoogleAnalyticsData,
+  'slack': fetchSlackData,
+  'hubspot': fetchHubSpotData,
+  'stripe': fetchStripeData,
+  'shopify': fetchShopifyData,
+  'notion': fetchNotionData,
+  'github': fetchGitHubData,
+  'trello': (k, c) => fetchGenericProjectData(k, c, 'trello'),
+  'asana': (k, c) => fetchGenericProjectData(k, c, 'asana'),
+  'clickup': (k, c) => fetchGenericProjectData(k, c, 'clickup'),
+  'jira': (k, c) => fetchGenericProjectData(k, c, 'jira'),
+};
+
+// ============================================================================
+// MATON DATA INJECTION - Orchestrates multi-service pre-fetch
+// ============================================================================
+
+async function injectMatonData(
+  messages: { role: string; content: string }[],
+  matonApiKey: string,
+): Promise<string> {
+  const detectedApps = detectServiceIntents(messages);
+  if (!detectedApps.length) return '';
+
+  console.log('Detected service intents:', detectedApps);
+  const connections = await getMatonConnections(matonApiKey);
+  const connMap = new Map<string, string>();
+  for (const c of connections) {
+    if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id);
   }
 
-  try {
-    const { 
-      messages, 
-      intent, 
-      systemName = 'Ozlon',
-      model = DEFAULT_MODEL,
-      agentId,
-      agentMetadata,
-      enableTools = false,
-      userSettings,
-    } = await req.json();
+  const sections: string[] = [];
+  const notConnected: string[] = [];
 
-    // Get model configuration
-    const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
-    const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
-    
-    if (!apiKey) {
-      throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
+  // Fetch all detected services in parallel
+  const fetchPromises = detectedApps.map(async (app) => {
+    const connId = connMap.get(app);
+    if (!connId) {
+      const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+      notConnected.push(label);
+      return;
     }
+    const fetcher = SERVICE_FETCHERS[app];
+    if (!fetcher) {
+      sections.push(`## ${app}\nConnected but no data fetcher configured yet.`);
+      return;
+    }
+    try {
+      const data = await fetcher(matonApiKey, connId);
+      const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
+      sections.push(`## ${label}\n${data}`);
+      console.log(`${app} data injected`);
+    } catch (e) {
+      console.error(`Error fetching ${app}:`, e);
+      sections.push(`## ${app}\nError fetching data: ${e instanceof Error ? e.message : 'Unknown'}`);
+    }
+  });
 
-    // Build agent context
-    const agentContext: AgentContext = {
-      agentId: agentId || INTENT_TO_AGENT[intent] || 'base',
-      intent,
-      metadata: agentMetadata,
-    };
+  await Promise.all(fetchPromises);
 
-    // Build system prompt with user settings
-    let systemPrompt = buildSystemPrompt(systemName, agentContext, false, userSettings);
+  if (!sections.length && !notConnected.length) return '';
 
-    // =====================================================================
-    // PRE-FETCH: Detect intents and inject real data from Maton integrations
-    // =====================================================================
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    
-    if (MATON_API_KEY && detectSearchConsoleIntent(messages)) {
-      console.log('Search Console intent detected - fetching real data via Maton');
-      try {
-        const connections = await getMatonConnections(MATON_API_KEY);
-        const gscConnection = connections.find(c => c.app === 'google-search-console');
-        if (gscConnection) {
-          const gscData = await fetchSearchConsoleData(MATON_API_KEY, gscConnection.connection_id);
-          systemPrompt += `\n\n===========================================================
-LIVE DATA: GOOGLE SEARCH CONSOLE
+  let injection = `\n\n===========================================================
+LIVE DATA FROM CONNECTED SERVICES
 ===========================================================
-The following is REAL data pulled from the user's Google Search Console account. Use this to answer their question. Analyze trends, highlight notable changes, and provide actionable insights.
+The following is REAL data pulled from the user's connected accounts via Maton AI. Use this data to answer their question with specific numbers, dates, and details. Analyze trends and provide actionable insights.\n\n`;
 
-${gscData}`;
-          console.log('GSC data injected into context');
-        } else {
-          systemPrompt += `\n\nNote: The user asked about Google Search Console but no active GSC connection was found via Maton AI. Let them know they can connect it in Settings > Maton AI Integrations.`;
-        }
-      } catch (e) {
-        console.error('Error fetching GSC data:', e);
-      }
-    }
+  injection += sections.join('\n\n');
+
+  if (notConnected.length) {
+    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect ${notConnected.length === 1 ? 'it' : 'them'} in Settings > Maton AI Integrations.`;
+  }
+
+  return injection;
+}
 
     // Build messages array in OpenAI format
     const openAIMessages = [
