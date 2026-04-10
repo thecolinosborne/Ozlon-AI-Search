@@ -1353,16 +1353,18 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
     }
 
     // ================================================================
-    // KNOWLEDGE REPOSITORY INJECTION - Semantic wisdom from the greats
+    // WISDOM ENGINE — Multi-source context injection
+    // Searches: knowledge entries, wisdom memories, reflection notes
     // ================================================================
     const OPENAI_KEY_FOR_EMBED = Deno.env.get('OPENAI_API_KEY');
+    let wisdomUserId: string | null = null;
+
     if (OPENAI_KEY_FOR_EMBED) {
       try {
         const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
         const queryText = lastUserMsg?.content || '';
-        
+
         if (queryText.length > 10) {
-          // Generate embedding for user's message
           const embRes = await fetch('https://api.openai.com/v1/embeddings', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${OPENAI_KEY_FOR_EMBED}`, 'Content-Type': 'application/json' },
@@ -1373,52 +1375,98 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
             const embData = await embRes.json();
             const queryEmbedding = embData.data[0].embedding;
 
-            // Search knowledge base (using service role to bypass RLS for now - filter by auth header user if available)
             const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
             const supabaseUrl = Deno.env.get('SUPABASE_URL');
             if (serviceRoleKey && supabaseUrl) {
-              // Try to get user ID from auth header
               const authHeader = req.headers.get('Authorization');
-              let userId: string | null = null;
               if (authHeader) {
                 try {
                   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
                   const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
                   const { data: { user } } = await userClient.auth.getUser();
-                  userId = user?.id || null;
+                  wisdomUserId = user?.id || null;
                 } catch { /* no auth */ }
               }
 
-              if (userId) {
+              if (wisdomUserId) {
                 const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 const adminClient = createClient(supabaseUrl, serviceRoleKey);
-                const { data: knowledgeResults } = await adminClient.rpc('match_knowledge', {
-                  query_embedding: JSON.stringify(queryEmbedding),
-                  match_threshold: 0.45,
-                  match_count: 8,
-                  filter_user_id: userId,
-                  filter_domain: null,
-                  filter_category: null,
-                });
 
-                if (knowledgeResults && knowledgeResults.length > 0) {
-                  const knowledgeInjection = knowledgeResults.map((k: { source_person: string; title: string; content: string; domain: string; category: string; similarity: number }) =>
+                // Run all three searches in parallel
+                const [knowledgeRes, memoriesRes, reflectionsRes] = await Promise.all([
+                  adminClient.rpc('match_knowledge', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.45,
+                    match_count: 8,
+                    filter_user_id: wisdomUserId,
+                    filter_domain: null,
+                    filter_category: null,
+                  }),
+                  adminClient.rpc('match_wisdom_memories', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.4,
+                    match_count: 6,
+                    filter_user_id: wisdomUserId,
+                    filter_memory_type: null,
+                  }),
+                  adminClient.rpc('match_reflections', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.4,
+                    match_count: 4,
+                    filter_user_id: wisdomUserId,
+                    filter_note_type: null,
+                  }),
+                ]);
+
+                // Inject knowledge
+                const knowledgeResults = knowledgeRes.data || [];
+                if (knowledgeResults.length > 0) {
+                  const injection = knowledgeResults.map((k: { source_person: string; title: string; content: string; category: string; domain: string; similarity: number }) =>
                     `**${k.title}** (${k.source_person} - ${k.category}/${k.domain}, relevance: ${(k.similarity * 100).toFixed(0)}%)\n${k.content}`
                   ).join('\n\n');
-
                   systemPrompt += `\n\n===========================================================
 KNOWLEDGE REPOSITORY - RELEVANT WISDOM
 ===========================================================
-The following frameworks, principles, and mental models from world-class entrepreneurs and thinkers are relevant to this conversation. Apply them naturally when giving advice - don't just quote them, USE them to inform your analysis and recommendations.\n\n${knowledgeInjection}`;
+Apply these frameworks naturally when giving advice.\n\n${injection}`;
                   console.log(`Injected ${knowledgeResults.length} knowledge entries`);
+                }
+
+                // Inject memories
+                const memoryResults = memoriesRes.data || [];
+                if (memoryResults.length > 0) {
+                  const injection = memoryResults.map((m: { memory_type: string; content: string; summary: string; confidence: number }) =>
+                    `[${m.memory_type}] ${m.summary || m.content} (confidence: ${(m.confidence * 100).toFixed(0)}%)`
+                  ).join('\n');
+                  systemPrompt += `\n\n===========================================================
+LIVING MEMORY - WHAT I KNOW ABOUT THIS USER
+===========================================================
+These are durable facts, preferences, and patterns I've learned about the user. Use them to personalize responses. Distinguish between known memory and inference.\n\n${injection}`;
+                  console.log(`Injected ${memoryResults.length} memories`);
+
+                  // Update last_accessed_at for matched memories
+                  const memIds = memoryResults.map((m: { id: string }) => m.id);
+                  adminClient.from('wisdom_memories').update({ last_accessed_at: new Date().toISOString() }).in('id', memIds).then(() => {});
+                }
+
+                // Inject reflections
+                const reflectionResults = reflectionsRes.data || [];
+                if (reflectionResults.length > 0) {
+                  const injection = reflectionResults.map((r: { note_type: string; content: string; importance: number }) =>
+                    `[${r.note_type}] ${r.content}`
+                  ).join('\n');
+                  systemPrompt += `\n\n===========================================================
+REFLECTION LAYER - SYNTHESIZED INSIGHTS
+===========================================================
+These are patterns and lessons distilled from past conversations.\n\n${injection}`;
+                  console.log(`Injected ${reflectionResults.length} reflections`);
                 }
               }
             }
           }
         }
       } catch (e) {
-        console.error('Knowledge injection error:', e);
+        console.error('Wisdom Engine injection error:', e);
       }
     }
 
