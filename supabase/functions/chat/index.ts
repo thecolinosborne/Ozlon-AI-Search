@@ -2901,6 +2901,7 @@ interface TaskUpdateEvent {
   title: string;
   step: string;
   status: 'in_progress' | 'done' | 'error';
+  summary?: string;
 }
 
 // Human-readable tool names for display
