@@ -1633,6 +1633,7 @@ async function executeToolCall(
   args: Record<string, unknown>,
   matonApiKey: string,
   connMap: MultiConnMap,
+  userMessage?: string,
 ): Promise<{ success: boolean; result: string }> {
   try {
     const accountHint = args.account as string | undefined;
