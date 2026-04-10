@@ -1645,7 +1645,7 @@ async function executeToolCall(
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to send: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Email sent successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email sent successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
       }
 
       case 'create_email_draft': {
@@ -1655,7 +1655,7 @@ async function executeToolCall(
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
         const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
       }
 
       case 'list_emails': {
@@ -1668,7 +1668,7 @@ async function executeToolCall(
         const msgs = data.messages || [];
         if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
         // Fetch metadata for each message (batch up to 50)
-        const details: string[] = [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 50)}:`];
+        const details: string[] = [`[Using Gmail: ${resolved?.email || "default"}] Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 50)}:`];
         const batch = msgs.slice(0, 50);
         const metadataResults = await Promise.all(batch.map(async (m) => {
           try {
@@ -1711,7 +1711,7 @@ async function executeToolCall(
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Email ${args.message_id} moved to trash.` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
       }
 
       case 'batch_trash_emails': {
@@ -1735,7 +1735,7 @@ async function executeToolCall(
           successCount += results.filter(Boolean).length;
           failCount += results.filter(r => !r).length;
         }
-        return { success: true, result: `Batch trash complete: ${successCount} emails trashed${failCount > 0 ? `, ${failCount} failed` : ''}.` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash complete: ${successCount} emails trashed${failCount > 0 ? `, ${failCount} failed` : ""}.` };
       }
 
       case 'list_email_ids': {
@@ -1761,7 +1761,7 @@ async function executeToolCall(
         if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', modifyData) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Label modification failed: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Labels updated on email ${args.message_id}.` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Labels updated on email ${args.message_id}.` };
       }
 
       case 'mark_email_read': {
@@ -1770,7 +1770,7 @@ async function executeToolCall(
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
         if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Email ${args.message_id} marked as read.` };
+        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} marked as read.` };
       }
 
       case 'create_calendar_event': {
