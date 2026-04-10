@@ -14,6 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          metadata: Json | null
+          role: string
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          metadata?: Json | null
+          role: string
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          metadata?: Json | null
+          role?: string
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       knowledge_entries: {
         Row: {
           category: string
@@ -157,6 +222,126 @@ export type Database = {
         }
         Relationships: []
       }
+      reflection_notes: {
+        Row: {
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          importance: number | null
+          metadata: Json | null
+          note_type: string
+          source_ids: Json | null
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          importance?: number | null
+          metadata?: Json | null
+          note_type?: string
+          source_ids?: Json | null
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          importance?: number | null
+          metadata?: Json | null
+          note_type?: string
+          source_ids?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      system_evolution_proposals: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          metadata: Json | null
+          patch_text: string | null
+          proposal_type: string
+          status: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          metadata?: Json | null
+          patch_text?: string | null
+          proposal_type?: string
+          status?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          metadata?: Json | null
+          patch_text?: string | null
+          proposal_type?: string
+          status?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wisdom_memories: {
+        Row: {
+          confidence: number | null
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          last_accessed_at: string | null
+          memory_type: string
+          metadata: Json | null
+          recurrence_count: number | null
+          salience: number | null
+          summary: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          last_accessed_at?: string | null
+          memory_type?: string
+          metadata?: Json | null
+          recurrence_count?: number | null
+          salience?: number | null
+          summary?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          last_accessed_at?: string | null
+          memory_type?: string
+          metadata?: Json | null
+          recurrence_count?: number | null
+          salience?: number | null
+          summary?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -181,6 +366,47 @@ export type Database = {
           source_person: string
           tags: string[]
           title: string
+        }[]
+      }
+      match_reflections: {
+        Args: {
+          filter_note_type?: string
+          filter_user_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          created_at: string
+          id: string
+          importance: number
+          metadata: Json
+          note_type: string
+          similarity: number
+          source_ids: Json
+        }[]
+      }
+      match_wisdom_memories: {
+        Args: {
+          filter_memory_type?: string
+          filter_user_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          confidence: number
+          content: string
+          id: string
+          last_accessed_at: string
+          memory_type: string
+          metadata: Json
+          recurrence_count: number
+          salience: number
+          similarity: number
+          summary: string
+          updated_at: string
         }[]
       }
     }

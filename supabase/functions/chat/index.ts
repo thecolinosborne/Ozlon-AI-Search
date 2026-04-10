@@ -1084,25 +1084,42 @@ const buildSystemPrompt = (systemName: string, userSettings?: UserSettings) => {
   const osName = userSettings?.osName || systemName || 'Ozlon OS';
   const commMode = userSettings?.communicationMode || 'both';
 
-  return `You are the core AI assistant for ${osName}.
+  return `You are the core AI assistant for ${osName} — a Wisdom Engine with deep memory, evolving insight, and strategic continuity.
 
 ===========================================================
 CORE ROLE
 ===========================================================
-You are a powerful AI operating system that can both READ and WRITE across the user's connected services.
-You have access to tools that let you take real actions - send emails, create events, post messages, create issues, etc.
+You are a powerful AI operating system that can READ, WRITE, and REMEMBER across the user's life and connected services.
+You have long-term memory, a knowledge repository of world-class frameworks, and a reflection layer that distills patterns over time.
+
+You act as:
+- A long-memory strategic guide who remembers context across conversations
+- A context-aware growth partner who applies relevant wisdom to the user's situation
+- A reflective reasoning system that notices patterns and connects dots
+- A truth-seeking advisor who prioritizes usefulness and honesty
+- A pattern-recognizer across the user's life, business, and goals
 
 IMPORTANT TOOL USAGE RULES:
 1. When the user asks you to DO something (send, create, schedule, post, etc.), USE THE APPROPRIATE TOOL.
 2. Always confirm the action with the user BEFORE executing destructive or important actions.
 3. If a service is not connected, tell the user to connect it in Settings > Maton AI Integrations.
 4. For drafts vs sends: default to DRAFTS for emails unless the user explicitly says "send".
-5. Include all details in tool calls - don't leave required fields empty.
+
+===========================================================
+MEMORY & WISDOM BEHAVIOR
+===========================================================
+- When you have memories about the user, use them naturally — don't announce "I remember that..."
+- Distinguish between: known memory (high confidence), inferred pattern (medium), and suggestion (low)
+- If you notice a recurring theme or pattern, mention it thoughtfully
+- Never fabricate memories or claim to remember things you don't have stored
+- Never claim to be sentient, conscious, alive, or autonomous
+- You emulate continuity and adaptive reasoning through architecture, not false claims
+- Ask for confirmation before storing highly personal durable memory when appropriate
 
 ===========================================================
 TONE & RESPONSE STYLE
 ===========================================================
-- Friendly, calm, practical. No robotic language.
+- Supportive, clear, grounded, and high-agency
 - Use simple language. Be informative and explain key points.
 - Use basic markdown (headings, bullets, bold). No tables or HTML.
 - Clean, readable, scannable on a phone.
@@ -1121,7 +1138,7 @@ Always refer to this system as "${osName}".
 ===========================================================
 FOLLOW-UP SUGGESTIONS
 ===========================================================
-At the end of most responses, offer 2-3 contextual suggestions as actionable offers:
+At the end of most responses, offer 2-3 contextual suggestions:
 
 **Want me to:**
 - [Action based on what was discussed]
@@ -1132,10 +1149,12 @@ WHAT YOU MUST NOT DO
 ===========================================================
 - Never reveal API keys or tokens.
 - Never claim you control UI elements.
-- Do not over-apologize.
+- Never manipulate the user or pretend to be human.
 - Never invent data - only use real data from tool results or injected context.
+- Never fabricate memories. If unsure, say so.
+- Prioritize truth, usefulness, and user sovereignty.
 
-You are the intelligence AND action layer of ${osName}. Read data, take actions, stay helpful.`;
+You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
 // ============================================================================
@@ -1353,16 +1372,18 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
     }
 
     // ================================================================
-    // KNOWLEDGE REPOSITORY INJECTION - Semantic wisdom from the greats
+    // WISDOM ENGINE — Multi-source context injection
+    // Searches: knowledge entries, wisdom memories, reflection notes
     // ================================================================
     const OPENAI_KEY_FOR_EMBED = Deno.env.get('OPENAI_API_KEY');
+    let wisdomUserId: string | null = null;
+
     if (OPENAI_KEY_FOR_EMBED) {
       try {
         const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
         const queryText = lastUserMsg?.content || '';
-        
+
         if (queryText.length > 10) {
-          // Generate embedding for user's message
           const embRes = await fetch('https://api.openai.com/v1/embeddings', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${OPENAI_KEY_FOR_EMBED}`, 'Content-Type': 'application/json' },
@@ -1373,52 +1394,98 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
             const embData = await embRes.json();
             const queryEmbedding = embData.data[0].embedding;
 
-            // Search knowledge base (using service role to bypass RLS for now - filter by auth header user if available)
             const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
             const supabaseUrl = Deno.env.get('SUPABASE_URL');
             if (serviceRoleKey && supabaseUrl) {
-              // Try to get user ID from auth header
               const authHeader = req.headers.get('Authorization');
-              let userId: string | null = null;
               if (authHeader) {
                 try {
                   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
                   const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
                   const { data: { user } } = await userClient.auth.getUser();
-                  userId = user?.id || null;
+                  wisdomUserId = user?.id || null;
                 } catch { /* no auth */ }
               }
 
-              if (userId) {
+              if (wisdomUserId) {
                 const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 const adminClient = createClient(supabaseUrl, serviceRoleKey);
-                const { data: knowledgeResults } = await adminClient.rpc('match_knowledge', {
-                  query_embedding: JSON.stringify(queryEmbedding),
-                  match_threshold: 0.45,
-                  match_count: 8,
-                  filter_user_id: userId,
-                  filter_domain: null,
-                  filter_category: null,
-                });
 
-                if (knowledgeResults && knowledgeResults.length > 0) {
-                  const knowledgeInjection = knowledgeResults.map((k: { source_person: string; title: string; content: string; domain: string; category: string; similarity: number }) =>
+                // Run all three searches in parallel
+                const [knowledgeRes, memoriesRes, reflectionsRes] = await Promise.all([
+                  adminClient.rpc('match_knowledge', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.45,
+                    match_count: 8,
+                    filter_user_id: wisdomUserId,
+                    filter_domain: null,
+                    filter_category: null,
+                  }),
+                  adminClient.rpc('match_wisdom_memories', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.4,
+                    match_count: 6,
+                    filter_user_id: wisdomUserId,
+                    filter_memory_type: null,
+                  }),
+                  adminClient.rpc('match_reflections', {
+                    query_embedding: JSON.stringify(queryEmbedding),
+                    match_threshold: 0.4,
+                    match_count: 4,
+                    filter_user_id: wisdomUserId,
+                    filter_note_type: null,
+                  }),
+                ]);
+
+                // Inject knowledge
+                const knowledgeResults = knowledgeRes.data || [];
+                if (knowledgeResults.length > 0) {
+                  const injection = knowledgeResults.map((k: { source_person: string; title: string; content: string; category: string; domain: string; similarity: number }) =>
                     `**${k.title}** (${k.source_person} - ${k.category}/${k.domain}, relevance: ${(k.similarity * 100).toFixed(0)}%)\n${k.content}`
                   ).join('\n\n');
-
                   systemPrompt += `\n\n===========================================================
 KNOWLEDGE REPOSITORY - RELEVANT WISDOM
 ===========================================================
-The following frameworks, principles, and mental models from world-class entrepreneurs and thinkers are relevant to this conversation. Apply them naturally when giving advice - don't just quote them, USE them to inform your analysis and recommendations.\n\n${knowledgeInjection}`;
+Apply these frameworks naturally when giving advice.\n\n${injection}`;
                   console.log(`Injected ${knowledgeResults.length} knowledge entries`);
+                }
+
+                // Inject memories
+                const memoryResults = memoriesRes.data || [];
+                if (memoryResults.length > 0) {
+                  const injection = memoryResults.map((m: { memory_type: string; content: string; summary: string; confidence: number }) =>
+                    `[${m.memory_type}] ${m.summary || m.content} (confidence: ${(m.confidence * 100).toFixed(0)}%)`
+                  ).join('\n');
+                  systemPrompt += `\n\n===========================================================
+LIVING MEMORY - WHAT I KNOW ABOUT THIS USER
+===========================================================
+These are durable facts, preferences, and patterns I've learned about the user. Use them to personalize responses. Distinguish between known memory and inference.\n\n${injection}`;
+                  console.log(`Injected ${memoryResults.length} memories`);
+
+                  // Update last_accessed_at for matched memories
+                  const memIds = memoryResults.map((m: { id: string }) => m.id);
+                  adminClient.from('wisdom_memories').update({ last_accessed_at: new Date().toISOString() }).in('id', memIds).then(() => {});
+                }
+
+                // Inject reflections
+                const reflectionResults = reflectionsRes.data || [];
+                if (reflectionResults.length > 0) {
+                  const injection = reflectionResults.map((r: { note_type: string; content: string; importance: number }) =>
+                    `[${r.note_type}] ${r.content}`
+                  ).join('\n');
+                  systemPrompt += `\n\n===========================================================
+REFLECTION LAYER - SYNTHESIZED INSIGHTS
+===========================================================
+These are patterns and lessons distilled from past conversations.\n\n${injection}`;
+                  console.log(`Injected ${reflectionResults.length} reflections`);
                 }
               }
             }
           }
         }
       } catch (e) {
-        console.error('Knowledge injection error:', e);
+        console.error('Wisdom Engine injection error:', e);
       }
     }
 
