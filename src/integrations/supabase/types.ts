@@ -14,6 +14,92 @@ export type Database = {
   }
   public: {
     Tables: {
+      knowledge_entries: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          domain: string
+          embedding: string | null
+          id: string
+          source_id: string | null
+          source_material: string | null
+          source_person: string
+          tags: string[] | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          content: string
+          created_at?: string
+          domain?: string
+          embedding?: string | null
+          id?: string
+          source_id?: string | null
+          source_material?: string | null
+          source_person: string
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          domain?: string
+          embedding?: string | null
+          id?: string
+          source_id?: string | null
+          source_material?: string | null
+          source_person?: string
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_entries_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_sources: {
+        Row: {
+          created_at: string
+          entry_count: number
+          id: string
+          person: string
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_count?: number
+          id?: string
+          person: string
+          title: string
+          type?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_count?: number
+          id?: string
+          person?: string
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           auto_play_responses: boolean | null
@@ -76,7 +162,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_knowledge: {
+        Args: {
+          filter_category?: string
+          filter_domain?: string
+          filter_user_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          category: string
+          content: string
+          domain: string
+          id: string
+          similarity: number
+          source_material: string
+          source_person: string
+          tags: string[]
+          title: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
