@@ -572,6 +572,94 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // Gmail management tools
+  {
+    type: 'function',
+    function: {
+      name: 'list_emails',
+      description: 'Search and list emails in Gmail. Use Gmail query syntax (e.g. "from:someone@example.com", "is:unread", "subject:invoice", "newer_than:7d"). Returns message IDs and metadata.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Gmail search query (e.g. "is:unread", "from:client@co.com", "subject:invoice newer_than:30d")' },
+          max_results: { type: 'number', description: 'Max emails to return (default 20, max 100)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_email',
+      description: 'Get full details of a specific email by its message ID, including sender, subject, date, and body content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'trash_email',
+      description: 'Move a single email to trash by its message ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID to trash' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'batch_trash_emails',
+      description: 'Move multiple emails to trash at once. More efficient than trashing one-by-one. Use this when cleaning/filtering the inbox.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to trash' },
+        },
+        required: ['message_ids'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'label_email',
+      description: 'Add or remove labels on an email (INBOX, STARRED, IMPORTANT, UNREAD, SPAM, TRASH, or custom labels).',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+          add_labels: { type: 'string', description: 'Comma-separated label IDs to add (optional)' },
+          remove_labels: { type: 'string', description: 'Comma-separated label IDs to remove (optional)' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'mark_email_read',
+      description: 'Mark an email as read (removes the UNREAD label).',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
   // Calendar actions
   {
     type: 'function',
