@@ -566,7 +566,34 @@ serve(async (req) => {
     };
 
     // Build system prompt with user settings
-    const systemPrompt = buildSystemPrompt(systemName, agentContext, false, userSettings);
+    let systemPrompt = buildSystemPrompt(systemName, agentContext, false, userSettings);
+
+    // =====================================================================
+    // PRE-FETCH: Detect intents and inject real data from Maton integrations
+    // =====================================================================
+    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
+    
+    if (MATON_API_KEY && detectSearchConsoleIntent(messages)) {
+      console.log('Search Console intent detected - fetching real data via Maton');
+      try {
+        const connections = await getMatonConnections(MATON_API_KEY);
+        const gscConnection = connections.find(c => c.app === 'google-search-console');
+        if (gscConnection) {
+          const gscData = await fetchSearchConsoleData(MATON_API_KEY, gscConnection.connection_id);
+          systemPrompt += `\n\n===========================================================
+LIVE DATA: GOOGLE SEARCH CONSOLE
+===========================================================
+The following is REAL data pulled from the user's Google Search Console account. Use this to answer their question. Analyze trends, highlight notable changes, and provide actionable insights.
+
+${gscData}`;
+          console.log('GSC data injected into context');
+        } else {
+          systemPrompt += `\n\nNote: The user asked about Google Search Console but no active GSC connection was found via Maton AI. Let them know they can connect it in Settings > Maton AI Integrations.`;
+        }
+      } catch (e) {
+        console.error('Error fetching GSC data:', e);
+      }
+    }
 
     // Build messages array in OpenAI format
     const openAIMessages = [
