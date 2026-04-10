@@ -1769,7 +1769,7 @@ async function executeToolCall(
     const accountHint = args.account as string | undefined;
     switch (toolName) {
       case 'send_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected. Ask the user to connect it in Settings > Maton AI Integrations.' };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
@@ -1779,7 +1779,7 @@ async function executeToolCall(
       }
 
       case 'create_email_draft': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
@@ -1789,7 +1789,7 @@ async function executeToolCall(
       }
 
       case 'list_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const maxResults = Math.min((args.max_results as number) || 50, 100);
@@ -1815,7 +1815,7 @@ async function executeToolCall(
       }
 
       case 'get_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
@@ -1836,7 +1836,7 @@ async function executeToolCall(
       }
 
       case 'trash_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; error?: { message?: string } };
@@ -1845,7 +1845,7 @@ async function executeToolCall(
       }
 
       case 'batch_trash_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
@@ -1869,7 +1869,7 @@ async function executeToolCall(
       }
 
       case 'list_email_ids': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const maxResults = Math.min((args.max_results as number) || 100, 500);
@@ -1883,7 +1883,7 @@ async function executeToolCall(
       }
 
       case 'label_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const modifyData: Record<string, string[]> = {};
@@ -1895,7 +1895,7 @@ async function executeToolCall(
       }
 
       case 'mark_email_read': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Gmail is not connected.' };
         const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
@@ -1904,7 +1904,7 @@ async function executeToolCall(
       }
 
       case 'create_calendar_event': {
-        const resolved = resolveConnection(connMap, 'google-calendar', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-calendar', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
         const event: Record<string, unknown> = {
@@ -1983,7 +1983,7 @@ async function executeToolCall(
       }
 
       case 'search_google_drive': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected.' };
         const maxResults = (args.max_results as number) || 10;
@@ -2386,7 +2386,7 @@ async function executeToolCall(
 
       // ============ Google Docs tools ============
       case 'create_google_doc': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
@@ -2396,7 +2396,7 @@ async function executeToolCall(
         let result = `Google Doc created: "${args.title}" — ${link}`;
         if (args.content) {
           try {
-            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage)?.id || connId;
+            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage, aliasMap)?.id || connId;
             await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
               requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
             });
@@ -2408,7 +2408,7 @@ async function executeToolCall(
 
       // ============ Google Sheets tools ============
       case 'create_google_sheet': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
@@ -2419,7 +2419,7 @@ async function executeToolCall(
       }
 
       case 'read_sheet_data': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
@@ -2430,7 +2430,7 @@ async function executeToolCall(
       }
 
       case 'append_sheet_rows': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage)?.id;
+        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
         if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
         const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
@@ -2442,7 +2442,7 @@ async function executeToolCall(
 
       // ============ Google Slides tools ============
       case 'create_google_presentation': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage);
+        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
         if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
         const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
