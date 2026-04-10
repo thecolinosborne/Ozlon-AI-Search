@@ -296,6 +296,157 @@ serve(async (req) => {
         break;
       }
 
+      // ============ SOCIAL PLANNER ============
+      case 'list_social_accounts': {
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/accounts`;
+        break;
+      }
+      case 'list_social_posts': {
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts`;
+        break;
+      }
+      case 'get_social_post': {
+        if (!params?.postId) throw new Error('postId required');
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts/${params.postId}`;
+        break;
+      }
+      case 'create_social_post': {
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts`;
+        method = 'POST';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+      case 'edit_social_post': {
+        if (!params?.postId) throw new Error('postId required');
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts/${params.postId}`;
+        method = 'PUT';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+      case 'delete_social_post': {
+        if (!params?.postId) throw new Error('postId required');
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts/${params.postId}`;
+        method = 'DELETE';
+        break;
+      }
+
+      // ============ PRODUCTS ============
+      case 'list_products': {
+        endpoint = `${GHL_BASE_URL}/products/?locationId=${GHL_LOCATION_ID}&limit=${params?.limit || 20}`;
+        break;
+      }
+      case 'get_product': {
+        if (!params?.productId) throw new Error('productId required');
+        endpoint = `${GHL_BASE_URL}/products/${params.productId}`;
+        break;
+      }
+      case 'create_product': {
+        endpoint = `${GHL_BASE_URL}/products/`;
+        method = 'POST';
+        fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
+        break;
+      }
+      case 'update_product': {
+        if (!params?.productId) throw new Error('productId required');
+        endpoint = `${GHL_BASE_URL}/products/${params.productId}`;
+        method = 'PUT';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+      case 'delete_product': {
+        if (!params?.productId) throw new Error('productId required');
+        endpoint = `${GHL_BASE_URL}/products/${params.productId}`;
+        method = 'DELETE';
+        break;
+      }
+
+      // ============ COURSES ============
+      case 'list_courses': {
+        endpoint = `${GHL_BASE_URL}/courses/?locationId=${GHL_LOCATION_ID}`;
+        break;
+      }
+      case 'import_courses': {
+        endpoint = `${GHL_BASE_URL}/courses/courses-exporter/public/import`;
+        method = 'POST';
+        fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
+        break;
+      }
+
+      // ============ SURVEYS ============
+      case 'list_surveys': {
+        endpoint = `${GHL_BASE_URL}/surveys/?locationId=${GHL_LOCATION_ID}`;
+        break;
+      }
+      case 'get_survey_submissions': {
+        if (!params?.surveyId) throw new Error('surveyId required');
+        endpoint = `${GHL_BASE_URL}/surveys/submissions?locationId=${GHL_LOCATION_ID}&surveyId=${params.surveyId}&limit=${params?.limit || 20}`;
+        break;
+      }
+
+      // ============ BLOGS ============
+      case 'list_blog_posts': {
+        endpoint = `${GHL_BASE_URL}/blogs/posts?locationId=${GHL_LOCATION_ID}&limit=${params?.limit || 20}`;
+        break;
+      }
+      case 'get_blog_post': {
+        if (!params?.postId) throw new Error('postId required');
+        endpoint = `${GHL_BASE_URL}/blogs/posts/${params.postId}`;
+        break;
+      }
+      case 'create_blog_post': {
+        endpoint = `${GHL_BASE_URL}/blogs/posts`;
+        method = 'POST';
+        fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
+        break;
+      }
+
+      // ============ MEDIA ============
+      case 'list_media_files': {
+        endpoint = `${GHL_BASE_URL}/medias/files?altId=${GHL_LOCATION_ID}&altType=location&limit=${params?.limit || 50}`;
+        break;
+      }
+
+      // ============ COMPANIES ============
+      case 'list_companies': {
+        endpoint = `${GHL_BASE_URL}/companies/?locationId=${GHL_LOCATION_ID}&limit=${params?.limit || 20}`;
+        break;
+      }
+      case 'get_company': {
+        if (!params?.companyId) throw new Error('companyId required');
+        endpoint = `${GHL_BASE_URL}/companies/${params.companyId}`;
+        break;
+      }
+
+      // ============ LINKS ============
+      case 'list_links': {
+        endpoint = `${GHL_BASE_URL}/links/?locationId=${GHL_LOCATION_ID}`;
+        break;
+      }
+      case 'create_link': {
+        endpoint = `${GHL_BASE_URL}/links/`;
+        method = 'POST';
+        fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
+        break;
+      }
+      case 'update_link': {
+        if (!params?.linkId) throw new Error('linkId required');
+        endpoint = `${GHL_BASE_URL}/links/${params.linkId}`;
+        method = 'PUT';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+
+      // ============ BUSINESSES ============
+      case 'list_businesses': {
+        endpoint = `${GHL_BASE_URL}/businesses/?locationId=${GHL_LOCATION_ID}`;
+        break;
+      }
+      case 'get_business': {
+        if (!params?.businessId) throw new Error('businessId required');
+        endpoint = `${GHL_BASE_URL}/businesses/${params.businessId}`;
+        break;
+      }
+
       // ============ GENERIC PROXY ============
       case 'proxy': {
         if (!path) throw new Error('Path required for proxy action');
