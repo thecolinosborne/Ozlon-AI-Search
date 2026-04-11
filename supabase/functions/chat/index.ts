@@ -3338,8 +3338,19 @@ serve(async (req) => {
   }
 
   try {
+    const body = await req.json();
+    // Support both { messages: [...] } and { message: "..." } formats
+    let messages = body.messages;
+    if (!Array.isArray(messages)) {
+      if (typeof body.message === 'string') {
+        messages = [{ role: 'user', content: body.message }];
+      } else {
+        return new Response(JSON.stringify({ error: 'messages array is required' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
     const {
-      messages,
       intent,
       systemName = 'Ozlon',
       model = DEFAULT_MODEL,
@@ -3347,7 +3358,7 @@ serve(async (req) => {
       agentMetadata: _agentMetadata,
       enableTools = false,
       userSettings,
-    } = await req.json();
+    } = body;
 
     const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
     const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
