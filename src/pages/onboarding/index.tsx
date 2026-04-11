@@ -5,126 +5,77 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOnboardingVoice } from "@/hooks/useOnboardingVoice";
 import { OnboardingLayout } from "@/components/onboarding/OnboardingLayout";
 import { WelcomeScreen } from "@/components/onboarding/screens/WelcomeScreen";
-import { PersonalSnapshotScreen } from "@/components/onboarding/screens/PersonalSnapshotScreen";
-import { DailyRhythmScreen } from "@/components/onboarding/screens/DailyRhythmScreen";
-import { CommunicationStyleScreen } from "@/components/onboarding/screens/CommunicationStyleScreen";
-import { PrimaryNeedScreen } from "@/components/onboarding/screens/PrimaryNeedScreen";
-import { ProactivityScreen } from "@/components/onboarding/screens/ProactivityScreen";
-import { InteractionPreferenceScreen } from "@/components/onboarding/screens/InteractionPreferenceScreen";
+import { PreferencesScreen } from "@/components/onboarding/screens/PreferencesScreen";
 import { CompletionScreen } from "@/components/onboarding/screens/CompletionScreen";
-import type { UserProfile } from "@/types";
 
-type Step = 
-  | "welcome"
-  | "personal"
-  | "rhythm"
-  | "communication"
-  | "need"
-  | "proactivity"
-  | "interaction"
-  | "complete";
+type Step = "welcome" | "preferences" | "complete";
 
-const steps: Step[] = [
-  "welcome",
-  "personal",
-  "rhythm",
-  "communication",
-  "need",
-  "proactivity",
-  "interaction",
-  "complete",
-];
+const steps: Step[] = ["welcome", "preferences", "complete"];
 
 const Onboarding = () => {
   const navigate = useNavigate();
   const { updateUser } = useAppStore();
   const { completeOnboarding } = useAuth();
   const { isSpeaking, speakForStep, replayCurrentStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
-  
-  // Profile state
+
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
-  const [profile, setProfile] = useState<UserProfile>({
-    name: "",
-    personalNotes: null,
-    wakeTime: null,
-    morningEnergy: null,
-    responseLengthPreference: "medium",
-    tonePreference: "neutral",
-    primaryNeed: null,
-    proactivityPreference: "judgment",
-    interactionPreference: "both",
-  });
+  const [name, setName] = useState("");
+  const [responseLengthPreference, setResponseLengthPreference] = useState<"short" | "medium" | "detailed">("medium");
+  const [tonePreference, setTonePreference] = useState<"casual" | "neutral" | "polished">("neutral");
+  const [interactionPreference, setInteractionPreference] = useState<"typing" | "talking" | "both">("both");
 
   const stepIndex = steps.indexOf(currentStep);
-  const progress = ((stepIndex) / (steps.length - 1)) * 100;
+  const progress = (stepIndex / (steps.length - 1)) * 100;
 
-  // Trigger voice narration when step changes
   useEffect(() => {
-    // Pass the user's name for personalized prompts
-    speakForStep(currentStep, profile.name);
-  }, [currentStep, speakForStep, profile.name]);
+    speakForStep(currentStep, name);
+  }, [currentStep, speakForStep, name]);
 
   const handleReplay = useCallback(() => {
-    replayCurrentStep(currentStep, profile.name);
-  }, [replayCurrentStep, currentStep, profile.name]);
+    replayCurrentStep(currentStep, name);
+  }, [replayCurrentStep, currentStep, name]);
 
   const handleSkipAudio = useCallback(() => {
     stopSpeaking();
   }, [stopSpeaking]);
 
   const nextStep = () => {
-    stopSpeaking(); // Stop current narration when moving to next step
+    stopSpeaking();
     const nextIndex = stepIndex + 1;
     if (nextIndex < steps.length) {
       setCurrentStep(steps[nextIndex]);
     }
   };
 
-  const updateProfile = (updates: Partial<UserProfile>) => {
-    setProfile(prev => ({ ...prev, ...updates }));
-  };
-
   const handleComplete = async () => {
     stopSpeaking();
-    
-    // Map new profile to existing user structure
-    const communicationMode = profile.interactionPreference === "typing" 
+
+    const communicationMode = interactionPreference === "typing"
       ? "text" as const
-      : profile.interactionPreference === "talking" 
-        ? "voice" as const 
+      : interactionPreference === "talking"
+        ? "voice" as const
         : "both" as const;
 
-    const insightStyle = profile.responseLengthPreference === "short"
+    const insightStyle = responseLengthPreference === "short"
       ? "direct" as const
-      : profile.responseLengthPreference === "detailed"
+      : responseLengthPreference === "detailed"
         ? "detailed" as const
         : "adaptive" as const;
 
-    // Update app store
     updateUser({
-      name: profile.name,
+      name,
       orbName: "Ozlon",
       communicationMode,
       insightStyle,
-      personalNotes: profile.personalNotes || undefined,
-      wakeTime: profile.wakeTime || undefined,
-      morningEnergy: profile.morningEnergy || undefined,
-      responseLengthPreference: profile.responseLengthPreference,
-      tonePreference: profile.tonePreference,
-      primaryNeed: profile.primaryNeed || undefined,
-      proactivityPreference: profile.proactivityPreference,
+      responseLengthPreference,
+      tonePreference,
       onboardingComplete: true,
     });
 
-    // Save to localStorage for persistence
-    localStorage.setItem("ozlon_user_name", profile.name);
+    localStorage.setItem("ozlon_user_name", name);
     localStorage.setItem("ozlon_onboarded", "true");
-    localStorage.setItem("ozlon_profile", JSON.stringify(profile));
 
-    // Complete onboarding in auth context
     await completeOnboarding("Ozlon");
-
-    // Navigate to chat, enable voice mode if preferred
     navigate("/");
   };
 
@@ -133,8 +84,8 @@ const Onboarding = () => {
       case "welcome":
         return (
           <WelcomeScreen
-            name={profile.name}
-            onNameChange={(name) => updateProfile({ name })}
+            name={name}
+            onNameChange={setName}
             onContinue={nextStep}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}
@@ -142,77 +93,15 @@ const Onboarding = () => {
           />
         );
 
-      case "personal":
+      case "preferences":
         return (
-          <PersonalSnapshotScreen
-            name={profile.name}
-            personalNotes={profile.personalNotes || ""}
-            onNotesChange={(personalNotes) => updateProfile({ personalNotes })}
-            onContinue={nextStep}
-            onSkip={nextStep}
-            isSpeaking={isSpeaking}
-            onReplay={handleReplay}
-            onSkipAudio={handleSkipAudio}
-          />
-        );
-
-      case "rhythm":
-        return (
-          <DailyRhythmScreen
-            wakeTime={profile.wakeTime || ""}
-            morningEnergy={profile.morningEnergy}
-            onWakeTimeChange={(wakeTime) => updateProfile({ wakeTime })}
-            onMorningEnergyChange={(morningEnergy) => updateProfile({ morningEnergy })}
-            onContinue={nextStep}
-            isSpeaking={isSpeaking}
-            onReplay={handleReplay}
-            onSkipAudio={handleSkipAudio}
-          />
-        );
-
-      case "communication":
-        return (
-          <CommunicationStyleScreen
-            responseLengthPreference={profile.responseLengthPreference}
-            tonePreference={profile.tonePreference}
-            onResponseLengthChange={(responseLengthPreference) => updateProfile({ responseLengthPreference })}
-            onToneChange={(tonePreference) => updateProfile({ tonePreference })}
-            onContinue={nextStep}
-            isSpeaking={isSpeaking}
-            onReplay={handleReplay}
-            onSkipAudio={handleSkipAudio}
-          />
-        );
-
-      case "need":
-        return (
-          <PrimaryNeedScreen
-            primaryNeed={profile.primaryNeed || ""}
-            onNeedChange={(primaryNeed) => updateProfile({ primaryNeed })}
-            onContinue={nextStep}
-            isSpeaking={isSpeaking}
-            onReplay={handleReplay}
-            onSkipAudio={handleSkipAudio}
-          />
-        );
-
-      case "proactivity":
-        return (
-          <ProactivityScreen
-            proactivityPreference={profile.proactivityPreference}
-            onProactivityChange={(proactivityPreference) => updateProfile({ proactivityPreference })}
-            onContinue={nextStep}
-            isSpeaking={isSpeaking}
-            onReplay={handleReplay}
-            onSkipAudio={handleSkipAudio}
-          />
-        );
-
-      case "interaction":
-        return (
-          <InteractionPreferenceScreen
-            interactionPreference={profile.interactionPreference}
-            onInteractionChange={(interactionPreference) => updateProfile({ interactionPreference })}
+          <PreferencesScreen
+            responseLengthPreference={responseLengthPreference}
+            tonePreference={tonePreference}
+            interactionPreference={interactionPreference}
+            onResponseLengthChange={setResponseLengthPreference}
+            onToneChange={setTonePreference}
+            onInteractionChange={setInteractionPreference}
             onContinue={nextStep}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}
@@ -223,8 +112,8 @@ const Onboarding = () => {
       case "complete":
         return (
           <CompletionScreen
-            name={profile.name}
-            interactionPreference={profile.interactionPreference}
+            name={name}
+            interactionPreference={interactionPreference}
             onComplete={handleComplete}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}

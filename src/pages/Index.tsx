@@ -54,6 +54,19 @@ const Index = () => {
   } = useConversations();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const prevUserIdRef = useRef<string | null>(null);
+
+  // Reset app store when user changes (isolation)
+  useEffect(() => {
+    if (!user) {
+      prevUserIdRef.current = null;
+      return;
+    }
+    if (prevUserIdRef.current && prevUserIdRef.current !== user.id) {
+      useAppStore.getState().reset();
+    }
+    prevUserIdRef.current = user.id;
+  }, [user]);
 
   // Redirect to onboarding if needed
   useEffect(() => {
