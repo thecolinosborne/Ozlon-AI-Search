@@ -54,6 +54,19 @@ const Index = () => {
   } = useConversations();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const prevUserIdRef = useRef<string | null>(null);
+
+  // Reset app store when user changes (isolation)
+  useEffect(() => {
+    if (!user) {
+      prevUserIdRef.current = null;
+      return;
+    }
+    if (prevUserIdRef.current && prevUserIdRef.current !== user.id) {
+      useAppStore.getState().reset();
+    }
+    prevUserIdRef.current = user.id;
+  }, [user]);
 
   // Redirect to onboarding if needed
   useEffect(() => {
@@ -641,14 +654,6 @@ const Index = () => {
                         <Send className="w-4 h-4" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setActiveMode('voice')}
-                      className="p-2.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
-                      title={`Talk to ${systemName}`}
-                    >
-                      <Phone className="w-5 h-5" />
-                    </button>
                     <MicButton />
                   </div>
                 </div>
@@ -680,21 +685,6 @@ const Index = () => {
               </div>
             )}
 
-            {/* Real-time Voice Call Button - before interaction */}
-            {!hasInteracted && (
-              <button
-                onClick={() => setActiveMode('voice')}
-                className={cn(
-                  "mt-6 flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-full",
-                  "bg-blue-500 text-white",
-                  "hover:bg-blue-600 hover:shadow-md",
-                  "transition-all duration-200"
-                )}
-              >
-                <Phone className="w-4 h-4" />
-                Talk to {systemName}
-              </button>
-            )}
           </div>
 
           {/* Chat Messages */}
@@ -838,14 +828,6 @@ const Index = () => {
                         <Send className="w-4 h-4" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setActiveMode('voice')}
-                      className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
-                      title={`Talk to ${systemName}`}
-                    >
-                      <Phone className="w-4 h-4" />
-                    </button>
                     <MicButton size="small" />
                   </div>
                 </div>

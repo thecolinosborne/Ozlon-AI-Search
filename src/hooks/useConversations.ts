@@ -22,13 +22,11 @@ export function useConversations() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const creatingSession = useRef(false);
-  const initRan = useRef(false);
+  const prevUserId = useRef<string | null>(null);
 
   // Create a new session
   const createSession = useCallback(async (title?: string): Promise<string | null> => {
-    if (!user || creatingSession.current) return null;
-    creatingSession.current = true;
+    if (!user) return null;
 
     try {
       console.log("[useConversations] Creating session for user:", user.id);
@@ -48,8 +46,9 @@ export function useConversations() {
       setActiveSessionId(data.id);
       setMessages([]);
       return data.id;
-    } finally {
-      creatingSession.current = false;
+    } catch (e) {
+      console.error("[useConversations] createSession exception:", e);
+      return null;
     }
   }, [user]);
 
@@ -77,10 +76,9 @@ export function useConversations() {
 
   // Start a new chat
   const startNewChat = useCallback(async () => {
+    setActiveSessionId(null);
+    setMessages([]);
     const id = await createSession();
-    if (id) {
-      setMessages([]);
-    }
     return id;
   }, [createSession]);
 
@@ -187,26 +185,24 @@ export function useConversations() {
     }
   }, [user, activeSessionId]);
 
-  // Combined initialization: load sessions then auto-create if needed
+  // Initialization: load sessions, reset when user changes
   useEffect(() => {
     if (!user) {
-      // No user — reset state
       setSessions([]);
       setActiveSessionId(null);
       setMessages([]);
       setSessionsLoaded(false);
-      initRan.current = false;
+      prevUserId.current = null;
       return;
     }
 
-    // Prevent double-run
-    if (initRan.current) return;
-    initRan.current = true;
+    // Skip if same user already initialized
+    if (prevUserId.current === user.id) return;
+    prevUserId.current = user.id;
 
     const init = async () => {
       console.log("[useConversations] Initializing for user:", user.id);
 
-      // 1. Load sessions
       const { data, error } = await supabase
         .from("chat_sessions")
         .select("id, title, created_at, updated_at")
@@ -223,10 +219,8 @@ export function useConversations() {
       console.log("[useConversations] Loaded", loadedSessions.length, "sessions");
       setSessions(loadedSessions);
 
-      // 2. Auto-create if no sessions exist
       if (loadedSessions.length === 0) {
         console.log("[useConversations] No sessions, creating first one");
-        creatingSession.current = false; // reset guard
         const { data: newSession, error: createError } = await supabase
           .from("chat_sessions")
           .insert({ user_id: user.id, title: "New conversation" })
@@ -242,9 +236,7 @@ export function useConversations() {
           setMessages([]);
         }
       } else {
-        // Activate the most recent session
         setActiveSessionId(loadedSessions[0].id);
-        // Load its messages
         const { data: msgs } = await supabase
           .from("chat_messages")
           .select("id, role, content, created_at")
@@ -263,7 +255,7 @@ export function useConversations() {
     init();
   }, [user]);
 
-  // Reload sessions helper (for sidebar refresh etc.)
+  // Reload sessions helper
   const loadSessions = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase

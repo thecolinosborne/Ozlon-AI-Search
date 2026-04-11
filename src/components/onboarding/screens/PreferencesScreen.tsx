@@ -3,76 +3,76 @@ import { OnboardingOption } from "../OnboardingOption";
 import { AIOrb } from "@/components/AIOrb";
 import { VoiceControls } from "../VoiceControls";
 
-interface CommunicationStyleScreenProps {
+interface PreferencesScreenProps {
   responseLengthPreference: "short" | "medium" | "detailed";
   tonePreference: "casual" | "neutral" | "polished";
-  onResponseLengthChange: (length: "short" | "medium" | "detailed") => void;
-  onToneChange: (tone: "casual" | "neutral" | "polished") => void;
+  interactionPreference: "typing" | "talking" | "both";
+  onResponseLengthChange: (pref: "short" | "medium" | "detailed") => void;
+  onToneChange: (pref: "casual" | "neutral" | "polished") => void;
+  onInteractionChange: (pref: "typing" | "talking" | "both") => void;
   onContinue: () => void;
   isSpeaking?: boolean;
   onReplay?: () => void;
   onSkipAudio?: () => void;
 }
 
-export const CommunicationStyleScreen = ({
+export const PreferencesScreen = ({
   responseLengthPreference,
   tonePreference,
+  interactionPreference,
   onResponseLengthChange,
   onToneChange,
+  onInteractionChange,
   onContinue,
   isSpeaking = false,
   onReplay,
   onSkipAudio,
-}: CommunicationStyleScreenProps) => {
+}: PreferencesScreenProps) => {
   return (
     <div>
       <div className="flex items-center gap-4 mb-6">
         <AIOrb isSpeaking={isSpeaking} size="md" />
         <div>
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">
-            How should I talk with you?
+            How should I communicate?
           </h1>
         </div>
       </div>
-      
-      <p className="text-muted-foreground mb-4 text-lg">
-        Do you prefer short answers, medium, or detailed?
-      </p>
-      
+
       {onReplay && onSkipAudio && (
-        <VoiceControls 
-          isSpeaking={isSpeaking} 
-          onReplay={onReplay} 
-          onSkip={onSkipAudio} 
+        <VoiceControls
+          isSpeaking={isSpeaking}
+          onReplay={onReplay}
+          onSkip={onSkipAudio}
         />
       )}
-      
-      <div className="space-y-3 mb-10 mt-6">
+
+      {/* Response Length */}
+      <p className="text-muted-foreground mb-3 mt-4 text-base font-medium">Response style</p>
+      <div className="space-y-2 mb-6">
         <OnboardingOption
-          label="Short"
-          description="Quick and to the point"
+          label="Short & direct"
+          description="Get to the point quickly"
           selected={responseLengthPreference === "short"}
           onClick={() => onResponseLengthChange("short")}
         />
         <OnboardingOption
-          label="Medium"
-          description="Balanced and clear"
+          label="Balanced"
+          description="A good mix of detail and brevity"
           selected={responseLengthPreference === "medium"}
           onClick={() => onResponseLengthChange("medium")}
         />
         <OnboardingOption
           label="Detailed"
-          description="Thorough explanations"
+          description="Thorough explanations and context"
           selected={responseLengthPreference === "detailed"}
           onClick={() => onResponseLengthChange("detailed")}
         />
       </div>
-      
-      <p className="text-muted-foreground mb-4 text-lg">
-        Is your usual tone casual, neutral, or polished?
-      </p>
-      
-      <div className="space-y-3 mb-8">
+
+      {/* Tone */}
+      <p className="text-muted-foreground mb-3 text-base font-medium">Tone</p>
+      <div className="space-y-2 mb-6">
         <OnboardingOption
           label="Casual"
           description="Friendly and relaxed"
@@ -81,18 +81,41 @@ export const CommunicationStyleScreen = ({
         />
         <OnboardingOption
           label="Neutral"
-          description="Professional but warm"
+          description="Clear and balanced"
           selected={tonePreference === "neutral"}
           onClick={() => onToneChange("neutral")}
         />
         <OnboardingOption
           label="Polished"
-          description="Refined and formal"
+          description="Professional and refined"
           selected={tonePreference === "polished"}
           onClick={() => onToneChange("polished")}
         />
       </div>
-      
+
+      {/* Interaction */}
+      <p className="text-muted-foreground mb-3 text-base font-medium">How do you prefer to interact?</p>
+      <div className="space-y-2 mb-8">
+        <OnboardingOption
+          label="Typing"
+          description="Text-based chat"
+          selected={interactionPreference === "typing"}
+          onClick={() => onInteractionChange("typing")}
+        />
+        <OnboardingOption
+          label="Talking"
+          description="Voice conversations"
+          selected={interactionPreference === "talking"}
+          onClick={() => onInteractionChange("talking")}
+        />
+        <OnboardingOption
+          label="Both"
+          description="Mix of text and voice"
+          selected={interactionPreference === "both"}
+          onClick={() => onInteractionChange("both")}
+        />
+      </div>
+
       <Button
         onClick={onContinue}
         className="w-full h-14 rounded-2xl text-lg font-medium transition-all duration-300 hover:scale-[1.02]"
