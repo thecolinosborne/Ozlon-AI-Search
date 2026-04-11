@@ -171,12 +171,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Sign out handler
   const signOut = useCallback(async () => {
     console.log("Signing out...");
+    // Clear state first to prevent re-renders from triggering profile loads
+    clearAuthState();
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      
-      // Clear state immediately (onAuthStateChange will also fire)
-      clearAuthState();
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error) {
+        console.error("Sign out API error:", error);
+      }
       toast.success("Signed out successfully");
     } catch (error: any) {
       console.error("Sign out error:", error);
