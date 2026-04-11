@@ -267,10 +267,18 @@ async function getMatonConnections(matonApiKey: string): Promise<MatonConnection
     const res = await fetch(`${MATON_CTRL_URL}/connections`, {
       headers: { 'Authorization': `Bearer ${matonApiKey}`, 'Content-Type': 'application/json' },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error(`[Maton] Failed to fetch connections: ${res.status}`);
+      return [];
+    }
     const data = await res.json();
-    return (data.connections || []).filter((c: MatonConnection) => c.status === 'ACTIVE');
-  } catch { return []; }
+    const active = (data.connections || []).filter((c: MatonConnection) => c.status === 'ACTIVE');
+    console.log(`[Maton] ${active.length} active connections loaded`);
+    return active;
+  } catch (e) {
+    console.error(`[Maton] Connection fetch error:`, e);
+    return [];
+  }
 }
 
 async function callMatonGateway(
@@ -286,8 +294,17 @@ async function callMatonGateway(
     body: body ? JSON.stringify(body) : undefined,
   });
   const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return { raw: await res.text() };
+  let data: unknown;
+  if (ct.includes('application/json')) {
+    data = await res.json();
+  } else {
+    data = { raw: await res.text() };
+  }
+  if (!res.ok) {
+    console.error(`[Maton Gateway] ${method} ${path} failed (${res.status}):`, JSON.stringify(data));
+    throw new Error(`Maton API error ${res.status} on ${path}: ${JSON.stringify(data).substring(0, 200)}`);
+  }
+  return data;
 }
 
 // ============================================================================
@@ -349,9 +366,17 @@ function detectServiceIntents(messages: { role: string; content: string }[]): st
 // ============================================================================
 
 async function fetchGSCData(key: string, connId: string): Promise<string> {
-  const sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string }[] };
+  console.log(`[GSC] Fetching sites with connection ${connId}`);
+  let sitesData: { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
+  try {
+    sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as typeof sitesData;
+  } catch (e) {
+    console.error('[GSC] Failed to fetch sites:', e);
+    return `❌ Failed to fetch GSC sites: ${e instanceof Error ? e.message : 'Unknown error'}. The connection may need to be re-authorized.`;
+  }
   const sites = sitesData.siteEntry || [];
-  if (!sites.length) return 'No sites found in GSC.';
+  if (!sites.length) return '⚠️ No sites found in Google Search Console. Make sure your GSC account has verified properties.';
+  console.log(`[GSC] Found ${sites.length} sites: ${sites.map(s => s.siteUrl).join(', ')}`);
   const recentEnd = new Date(); recentEnd.setDate(recentEnd.getDate() - 2);
   const recentStart = new Date(); recentStart.setDate(recentStart.getDate() - 8);
   const priorEnd = new Date(); priorEnd.setDate(priorEnd.getDate() - 9);
@@ -375,7 +400,10 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
       r += `**Change:** Clicks ${clickChange}% | Impressions ${impChange}%\n`;
       if (rRows.length) { r += '\nTop queries:\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
       reports.push(r);
-    } catch (e) { reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}`); }
+    } catch (e) {
+      console.error(`[GSC] Error fetching data for ${site.siteUrl}:`, e);
+      reports.push(`### ${site.siteUrl}\n❌ Error: ${e instanceof Error ? e.message : 'Unknown'}`);
+    }
   }
   return reports.join('\n');
 }

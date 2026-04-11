@@ -115,14 +115,20 @@ const MatonDetail = () => {
               .map((conn) => {
                 const upper = conn.status.toUpperCase();
                 const badgeStatus = upper === "ACTIVE" ? "connected" : upper === "PENDING" ? "disconnected" : "error";
+                const email = conn.metadata && (conn.metadata as Record<string, string>).email;
+                const displayName = conn.metadata && (conn.metadata as Record<string, string>).name;
                 return (
                   <div
                     key={conn.connection_id}
                     className="flex items-center justify-between p-3.5 rounded-xl border border-border/40 bg-card/60"
                   >
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground">{formatAppName(conn.app)}</p>
-                      <p className="text-[11px] text-muted-foreground capitalize">{conn.method}</p>
+                      {email ? (
+                        <p className="text-[11px] text-muted-foreground truncate">{displayName ? `${displayName} · ` : ''}{email}</p>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground capitalize">{conn.method}</p>
+                      )}
                     </div>
                     <IntegrationStatusBadge status={badgeStatus} />
                   </div>
