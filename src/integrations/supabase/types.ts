@@ -79,66 +79,6 @@ export type Database = {
         }
         Relationships: []
       }
-      facebook_ads_cache: {
-        Row: {
-          campaign_id: string | null
-          campaign_name: string | null
-          clicks: number | null
-          cpc: number | null
-          created_at: string
-          ctr: number | null
-          date_start: string | null
-          date_stop: string | null
-          id: string
-          impressions: number | null
-          objective: string | null
-          raw_json: Json | null
-          reach: number | null
-          spend: number | null
-          status: string | null
-          synced_at: string | null
-          user_id: string
-        }
-        Insert: {
-          campaign_id?: string | null
-          campaign_name?: string | null
-          clicks?: number | null
-          cpc?: number | null
-          created_at?: string
-          ctr?: number | null
-          date_start?: string | null
-          date_stop?: string | null
-          id?: string
-          impressions?: number | null
-          objective?: string | null
-          raw_json?: Json | null
-          reach?: number | null
-          spend?: number | null
-          status?: string | null
-          synced_at?: string | null
-          user_id: string
-        }
-        Update: {
-          campaign_id?: string | null
-          campaign_name?: string | null
-          clicks?: number | null
-          cpc?: number | null
-          created_at?: string
-          ctr?: number | null
-          date_start?: string | null
-          date_stop?: string | null
-          id?: string
-          impressions?: number | null
-          objective?: string | null
-          raw_json?: Json | null
-          reach?: number | null
-          spend?: number | null
-          status?: string | null
-          synced_at?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
       knowledge_entries: {
         Row: {
           category: string
