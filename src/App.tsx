@@ -21,6 +21,7 @@ import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
 import DescriptDetail from "@/pages/integrations/DescriptDetail";
 import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
 import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
+import FacebookAdsDetail from "@/pages/integrations/FacebookAdsDetail";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -62,6 +63,7 @@ const App = () => (
             <Route path="/integrations/descript" element={<DescriptDetail />} />
             <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
             <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
+            <Route path="/integrations/facebook-ads" element={<FacebookAdsDetail />} />
             <Route path="/" element={<Index />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
