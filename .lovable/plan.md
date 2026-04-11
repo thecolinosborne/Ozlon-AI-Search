@@ -1,27 +1,29 @@
 
 
-# Fix Gmail Tools: Remove DELETE, Always Use Trash
+# Fix: Enable Tools So Email Trash Actually Works
 
 ## Problem
-The `delete_email` and `batch_delete_emails` tools use the HTTP `DELETE` method, which fails with a permissions error on the Maton gateway. The user has confirmed that only `POST /messages/{id}/trash` works.
+When you ask "put those in trash," the chat sends `enableTools: false` (the default). The AI sees 83 available tools on the backend but the frontend never enables them, so the AI can only respond with text — it cannot execute `trash_email` or any other tool.
 
-## Changes
+## Root Cause
+In `src/pages/Index.tsx`, the `streamChat()` call does not include `enableTools: true`. The default in `chatService.ts` is `false`.
 
-### 1. Remove `delete_email` and `batch_delete_emails` tools entirely
-- Remove both tool definitions from `MATON_ACTION_TOOLS`
-- Remove both `case` handlers from `executeToolCall`
-- Remove entries from the connection map and status strings
-- The existing `trash_email` and `batch_trash_emails` tools already cover this functionality
+## Fix
 
-### 2. Update system prompt
-Add a note in the Gmail section: "Always use trash for deletion. Never use HTTP DELETE on messages."
+### 1. Enable tools in the streamChat call (`src/pages/Index.tsx`)
+Add `enableTools: true` to the `streamChat()` options object (around line 172). This tells the backend to include the tool definitions in the OpenAI request, allowing the AI to call `trash_email`, `send_email`, etc.
 
-### 3. Update `fetchGmailData` metadata fetching
-The memory notes that Maton drops repeated query params (multiple `metadataHeaders`). The current code already uses `format=full&fields=payload/headers,snippet,labelIds` which works. No change needed here — `format=full` with `fields` filtering is the correct pattern per the gateway constraint.
+### 2. Add onToolCall handler
+The `streamChat` call also needs an `onToolCall` callback. Since the backend already handles tool execution internally (the tool loop runs server-side and streams results back as content deltas), this handler can be minimal — just a log or no-op. The backend's tool execution results are already streamed back as content.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/chat/index.ts` | Remove 2 tool defs, 2 case handlers, update system prompt |
+| `src/pages/Index.tsx` | Add `enableTools: true` and `onToolCall` to `streamChat()` call |
+
+## What This Fixes
+- "Trash those emails" will actually execute the trash tool
+- "Send an email to..." will actually send
+- All 83 connected tools become usable from the chat
 
