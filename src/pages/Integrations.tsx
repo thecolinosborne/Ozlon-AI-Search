@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, Facebook } from "lucide-react";
+import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 
@@ -38,13 +38,6 @@ const integrations = [
     description: "Configure AI providers, models, and routing logic for processing.",
     icon: Cpu,
     path: "/integrations/ai-processor",
-  },
-  {
-    id: "facebook-ads",
-    name: "Facebook Ads",
-    description: "Meta Marketing API — campaigns, ad sets, and performance metrics.",
-    icon: Facebook,
-    path: "/integrations/facebook-ads",
   },
 ];
 
