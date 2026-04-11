@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare } from "lucide-react";
+import { Mic, Square, Send, Volume2, VolumeX, Loader2, Phone, Paperclip, X, FileText, Image as ImageIcon, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
-import { localDb, LocalMessage } from "@/services/localDb";
 import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,6 +14,8 @@ import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
 import { TaskActivityBubble } from "@/components/TaskActivityBubble";
+import { ConversationSidebar } from "@/components/ConversationSidebar";
+import { useConversations } from "@/hooks/useConversations";
 
 type Message = {
   id: string;
@@ -36,30 +37,52 @@ const Index = () => {
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
   const { addTask, updateStep, completeTask, setTaskSummary } = useTaskActivityStore();
-  
+
+  // Conversation session management
+  const {
+    sessions,
+    activeSessionId,
+    messages: sessionMessages,
+    setMessages: setSessionMessages,
+    sessionsLoaded,
+    switchSession,
+    startNewChat,
+    saveMessage,
+    updateMessageContent,
+    finalizeMessage,
+    deleteSession,
+  } = useConversations();
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Redirect to onboarding if needed
   useEffect(() => {
     if (!authLoading && profileLoaded && isAuthenticated && needsOnboarding) {
-      console.log("Redirecting to onboarding...");
       navigate("/onboarding");
     }
   }, [authLoading, profileLoaded, isAuthenticated, needsOnboarding, navigate]);
+
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Convert session messages to local Message type
+  const messages: Message[] = sessionMessages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+  }));
   const [isLoading, setIsLoading] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
+  const hasInteracted = messages.length > 0;
   const [welcomeShown, setWelcomeShown] = useState(false);
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
-  
+
   // File upload state
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // Mode toggle state: 'chat' or 'voice'
   const [activeMode, setActiveMode] = useState<'chat' | 'voice'>('chat');
-  
+
   // Build user settings for AI context
   const userSettings: UserSettings = {
     communicationMode: storeUser?.communicationMode || 'both',
@@ -78,37 +101,15 @@ const Index = () => {
     },
     osName: systemName,
   };
-  
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  
+
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Load cached messages on mount
-  useEffect(() => {
-    const loadCachedMessages = async () => {
-      try {
-        const cached = await localDb.getMessages(100);
-        if (cached.length > 0) {
-          const msgs: Message[] = cached.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-          }));
-          setMessages(msgs);
-          setHasInteracted(true);
-          console.log(`Loaded ${cached.length} cached messages`);
-        }
-      } catch (error) {
-        console.error('Failed to load cached messages:', error);
-      }
-    };
-    loadCachedMessages();
-  }, []);
 
   // Load auto-play setting
   useEffect(() => {
@@ -126,60 +127,46 @@ const Index = () => {
     loadAutoPlaySetting();
   }, []);
 
-  // Show welcome back message for returning users (only if no cached messages)
+  // Show welcome back message for returning users (only if no messages in current session)
   useEffect(() => {
-    if (isReturningUser && !welcomeShown && messages.length === 0) {
+    if (isReturningUser && !welcomeShown && messages.length === 0 && sessionsLoaded && activeSessionId) {
       setWelcomeShown(true);
-      const welcomeMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
+      const welcomeId = crypto.randomUUID();
+      const welcomeMsg = {
+        id: welcomeId,
+        role: "assistant" as const,
         content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`,
       };
-      setMessages([welcomeMessage]);
-      setHasInteracted(true);
+      // Add locally (don't persist welcome messages)
+      setSessionMessages((prev) => [...prev, { ...welcomeMsg, created_at: new Date().toISOString() }]);
     }
-  }, [isReturningUser, welcomeShown, systemName, messages.length]);
+  }, [isReturningUser, welcomeShown, systemName, messages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Helper to save message to local DB
-  const saveMessageToCache = async (msg: Message) => {
-    try {
-      await localDb.saveMessage({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: Date.now(),
-        synced: true,
-      });
-    } catch (error) {
-      console.error('Failed to cache message:', error);
-    }
-  };
-
   const sendMessage = async (text: string, intent?: string) => {
     if (!text.trim() || isLoading) return;
 
-    setHasInteracted(true);
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: text,
     };
-    setMessages((prev) => [...prev, userMessage]);
+
+    // Save user message to session
+    await saveMessage(userMessage);
+    await finalizeMessage(userMessage);
+
     setInput("");
     setIsLoading(true);
-
-    // Cache user message
-    saveMessageToCache(userMessage);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
 
-    // Add empty assistant message that we'll update
-    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+    // Add empty assistant placeholder
+    setSessionMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", created_at: new Date().toISOString() }]);
 
     try {
       await streamChat({
@@ -189,9 +176,7 @@ const Index = () => {
         userSettings,
         onDelta: (delta) => {
           assistantContent += delta;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: assistantContent } : m))
-          );
+          updateMessageContent(assistantId, assistantContent);
         },
         onTaskUpdate: (update: TaskUpdate) => {
           if (update.status === 'in_progress') {
@@ -212,28 +197,20 @@ const Index = () => {
         },
         onDone: () => {
           setIsLoading(false);
-          // Complete any active tasks
           const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
           activeTasks.forEach(t => completeTask(t.id, 'done'));
-          // Cache assistant response when complete
+
           if (assistantContent) {
-            saveMessageToCache({ id: assistantId, role: "assistant", content: assistantContent });
-            
-            // Auto-play if enabled
-            if (autoPlayEnabled && assistantContent) {
+            finalizeMessage({ id: assistantId, role: "assistant", content: assistantContent });
+
+            if (autoPlayEnabled) {
               playMessage(assistantId, assistantContent);
             }
           }
         },
         onError: (errorMsg: string) => {
           console.error("Chat error:", errorMsg);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: "Something went wrong. Please try again." }
-                : m
-            )
-          );
+          updateMessageContent(assistantId, "Something went wrong. Please try again.");
           setIsLoading(false);
         },
       });
@@ -267,19 +244,19 @@ const Index = () => {
   // Voice recording functions
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 24000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
-        } 
+        }
       });
-      
+
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm;codecs=opus'
       });
-      
+
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -290,20 +267,19 @@ const Index = () => {
       };
 
       mediaRecorder.onstop = async () => {
-        // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
-        
+
         if (chunksRef.current.length === 0) {
           toast.error("No audio recorded");
           return;
         }
 
         setIsTranscribing(true);
-        
+
         try {
           const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
           const base64Audio = await blobToBase64(audioBlob);
-          
+
           const response = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe`,
             {
@@ -322,9 +298,8 @@ const Index = () => {
           }
 
           const { text } = await response.json();
-          
+
           if (text && text.trim()) {
-            // Put transcribed text in input for user review before sending
             setInput(text.trim());
             toast.success("Voice transcribed - review and send when ready");
           } else {
@@ -356,7 +331,7 @@ const Index = () => {
 
   const handleMicClick = () => {
     if (isTranscribing) return;
-    
+
     if (isRecording) {
       stopRecording();
     } else {
@@ -377,21 +352,20 @@ const Index = () => {
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const validFiles = files.filter(file => {
-      const maxSize = 20 * 1024 * 1024; // 20MB
+      const maxSize = 20 * 1024 * 1024;
       if (file.size > maxSize) {
         toast.error(`${file.name} is too large (max 20MB)`);
         return false;
       }
       return true;
     });
-    
+
     if (attachedFiles.length + validFiles.length > 10) {
       toast.error("Maximum 10 files per message");
       return;
     }
-    
+
     setAttachedFiles(prev => [...prev, ...validFiles]);
-    // Reset the input value so same file can be selected again
     e.target.value = '';
   }, [attachedFiles.length]);
 
@@ -410,11 +384,11 @@ const Index = () => {
     return <FileText className="w-4 h-4" />;
   };
 
-  // Mic button component for consistency
+  // Mic button component
   const MicButton = ({ size = "normal" }: { size?: "normal" | "small" }) => {
     const isSmall = size === "small";
     const isProcessing = isTranscribing;
-    
+
     return (
       <button
         type="button"
@@ -423,11 +397,10 @@ const Index = () => {
         className={cn(
           "relative rounded-full flex items-center justify-center transition-all duration-300",
           isSmall ? "w-8 h-8" : "p-2",
-          isRecording 
-            ? "bg-red-500 text-white" 
+          isRecording
+            ? "bg-red-500 text-white"
             : "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
           isProcessing && "opacity-50 cursor-not-allowed",
-          // Flashing animation when recording
           isRecording && "animate-pulse"
         )}
       >
@@ -441,7 +414,6 @@ const Index = () => {
         ) : (
           <Mic className={cn(isSmall ? "w-4 h-4" : "w-5 h-5")} />
         )}
-        {/* Pulsing ring when recording */}
         {isRecording && (
           <span className="absolute inset-0 rounded-full bg-red-500/30 animate-ping" />
         )}
@@ -451,7 +423,21 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      {/* Global File Input - Always mounted */}
+      {/* Conversation Sidebar */}
+      <ConversationSidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onNewChat={async () => {
+          await startNewChat();
+          setWelcomeShown(false);
+        }}
+        onSelectSession={switchSession}
+        onDeleteSession={deleteSession}
+      />
+
+      {/* Global File Input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -462,56 +448,69 @@ const Index = () => {
         aria-hidden="true"
       />
 
-      {/* Header - Fixed position with high z-index */}
+      {/* Header */}
       <header className="fixed top-0 left-0 right-0 px-4 py-4 z-[60] bg-white/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          {/* Chat/Voice Toggle */}
-          <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-full">
-            <button
-              type="button"
-              onClick={() => setActiveMode('chat')}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
-                activeMode === 'chat'
-                  ? "bg-white text-neutral-900 shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-700"
-              )}
-            >
-              <MessageSquare className="w-4 h-4" />
-              Chat
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!isAuthenticated) {
-                  toast.error("Sign in to use voice conversation");
-                  return;
-                }
-                if (!voiceEnabled) {
-                  toast.error("Enable voice conversation in Settings first");
-                  return;
-                }
-                setActiveMode('voice');
-              }}
-              disabled={!isAuthenticated}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
-                activeMode === 'voice'
-                  ? "bg-white text-neutral-900 shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-700",
-                !isAuthenticated && "opacity-50 cursor-not-allowed"
-              )}
-              title={!isAuthenticated ? "Sign in to enable voice" : !voiceEnabled ? "Enable in Settings" : "Voice conversation"}
-            >
-              <Phone className="w-4 h-4" />
-              Voice
-            </button>
+          <div className="flex items-center gap-2">
+            {/* Sidebar toggle */}
+            {isAuthenticated && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 rounded-lg hover:bg-neutral-100 transition-colors"
+                title="Conversations"
+              >
+                <Menu className="w-5 h-5 text-neutral-600" />
+              </button>
+            )}
+
+            {/* Chat/Voice Toggle */}
+            <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-full">
+              <button
+                type="button"
+                onClick={() => setActiveMode('chat')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
+                  activeMode === 'chat'
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-700"
+                )}
+              >
+                <MessageSquare className="w-4 h-4" />
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isAuthenticated) {
+                    toast.error("Sign in to use voice conversation");
+                    return;
+                  }
+                  if (!voiceEnabled) {
+                    toast.error("Enable voice conversation in Settings first");
+                    return;
+                  }
+                  setActiveMode('voice');
+                }}
+                disabled={!isAuthenticated}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
+                  activeMode === 'voice'
+                    ? "bg-white text-neutral-900 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-700",
+                  !isAuthenticated && "opacity-50 cursor-not-allowed"
+                )}
+                title={!isAuthenticated ? "Sign in to enable voice" : !voiceEnabled ? "Enable in Settings" : "Voice conversation"}
+              >
+                <Phone className="w-4 h-4" />
+                Voice
+              </button>
+            </div>
           </div>
           <UserMenu />
         </div>
       </header>
 
-      {/* Voice Mode - Full Screen Realtime Chat (only if authenticated and voice enabled) */}
+      {/* Voice Mode - Full Screen Realtime Chat */}
       {activeMode === 'voice' && isAuthenticated && voiceEnabled && (
         <RealtimeVoiceChat
           systemName={systemName}
@@ -519,7 +518,7 @@ const Index = () => {
         />
       )}
 
-      {/* Voice Mode Blocked Message - show when voice selected but not enabled */}
+      {/* Voice Mode Blocked Message */}
       {activeMode === 'voice' && (!isAuthenticated || !voiceEnabled) && (
         <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
           <button
@@ -528,13 +527,13 @@ const Index = () => {
           >
             Close
           </button>
-          
+
           <div className="w-24 h-24 rounded-full bg-neutral-700 flex items-center justify-center mb-8">
             <Phone className="w-10 h-10 text-neutral-400" />
           </div>
-          
+
           <h2 className="text-white text-2xl font-light mb-4">Voice Conversation</h2>
-          
+
           {!isAuthenticated ? (
             <>
               <p className="text-neutral-400 text-center mb-6 max-w-sm">
@@ -566,14 +565,13 @@ const Index = () => {
       {/* Chat Mode Content */}
       {activeMode === 'chat' && (
         <>
-          {/* Hero Section - Always visible but shrinks after interaction */}
+          {/* Hero Section */}
           <div
             className={cn(
               "flex flex-col items-center justify-center transition-all duration-500",
               hasInteracted ? "pt-16 pb-4" : "flex-1 min-h-[60vh]"
             )}
           >
-            {/* Logo */}
             <h1
               className={cn(
                 "font-light tracking-tight text-neutral-800 transition-all duration-500",
@@ -582,306 +580,275 @@ const Index = () => {
             >
               {systemName}
             </h1>
-        <p
-          className={cn(
-            "text-neutral-500 transition-all duration-500",
-            hasInteracted ? "text-xs mb-4" : "text-base md:text-lg mb-8"
-          )}
-        >
-          Your Personal Operating System
-        </p>
+            <p
+              className={cn(
+                "text-neutral-500 transition-all duration-500",
+                hasInteracted ? "text-xs mb-4" : "text-base md:text-lg mb-8"
+              )}
+            >
+              Your Personal Operating System
+            </p>
 
-        {/* Search Input - Only show before interaction */}
-        {!hasInteracted && (
-          <form
-            onSubmit={handleSubmit}
-            className="w-full max-w-2xl px-4"
-          >
-            {/* Attached Files Preview */}
-            {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3 px-2">
-                {attachedFiles.map((file, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-full text-sm"
+            {/* Search Input - Only show before interaction */}
+            {!hasInteracted && (
+              <form onSubmit={handleSubmit} className="w-full max-w-2xl px-4">
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3 px-2">
+                    {attachedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-full text-sm">
+                        {getFileIcon(file)}
+                        <span className="max-w-[150px] truncate">{file.name}</span>
+                        <button type="button" onClick={() => removeFile(index)} className="text-neutral-400 hover:text-neutral-600">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="relative group">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={`Ask ${systemName} anything...`}
+                    disabled={isLoading || isRecording}
+                    className={cn(
+                      "w-full px-6 py-4 pl-14 text-base rounded-full",
+                      "border border-neutral-200 shadow-sm",
+                      "focus:outline-none focus:border-neutral-300 focus:shadow-md",
+                      "transition-all duration-200",
+                      "placeholder:text-neutral-400",
+                      "disabled:opacity-50"
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={triggerFileUpload}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                    title="Attach files"
                   >
-                    {getFileIcon(file)}
-                    <span className="max-w-[150px] truncate">{file.name}</span>
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    {(input.trim() || attachedFiles.length > 0) && (
+                      <button type="submit" disabled={isLoading} className="p-2 text-neutral-400 hover:text-neutral-600 transition-colors">
+                        <Send className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => removeFile(index)}
-                      className="text-neutral-400 hover:text-neutral-600"
+                      onClick={() => setActiveMode('voice')}
+                      className="p-2.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
+                      title={`Talk to ${systemName}`}
                     >
-                      <X className="w-3 h-3" />
+                      <Phone className="w-5 h-5" />
                     </button>
+                    <MicButton />
                   </div>
+                </div>
+              </form>
+            )}
+
+            {/* Quick Actions - before interaction */}
+            {!hasInteracted && (
+              <div className="flex flex-wrap justify-center gap-2 mt-6 px-4">
+                {QUICK_ACTIONS.filter((action) => {
+                  if (!action.integration) return true;
+                  return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
+                }).map((action) => (
+                  <button
+                    key={action.intent}
+                    onClick={() => handleQuickAction(action)}
+                    disabled={isLoading || isRecording}
+                    className={cn(
+                      "px-4 py-2.5 text-sm font-medium rounded-full",
+                      "bg-neutral-100 text-neutral-700",
+                      "hover:bg-neutral-200 hover:shadow-sm",
+                      "transition-all duration-200",
+                      "disabled:opacity-50 disabled:cursor-not-allowed"
+                    )}
+                  >
+                    {action.label}
+                  </button>
                 ))}
               </div>
             )}
-            
-            <div className="relative group">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Ask ${systemName} anything...`}
-                disabled={isLoading || isRecording}
-                className={cn(
-                  "w-full px-6 py-4 pl-14 text-base rounded-full",
-                  "border border-neutral-200 shadow-sm",
-                  "focus:outline-none focus:border-neutral-300 focus:shadow-md",
-                  "transition-all duration-200",
-                  "placeholder:text-neutral-400",
-                  "disabled:opacity-50"
-                )}
-              />
-              {/* Attach Button - Left side */}
-              <button
-                type="button"
-                onClick={triggerFileUpload}
-                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
-                title="Attach files"
-              >
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                {(input.trim() || attachedFiles.length > 0) && (
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="p-2 text-neutral-400 hover:text-neutral-600 transition-colors"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setActiveMode('voice')}
-                  className="p-2.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
-                  title={`Talk to ${systemName}`}
-                >
-                  <Phone className="w-5 h-5" />
-                </button>
-                <MicButton />
-              </div>
-            </div>
-          </form>
-        )}
 
-        {/* Quick Actions - Only show before interaction, filtered by integrations */}
-        {!hasInteracted && (
-          <div className="flex flex-wrap justify-center gap-2 mt-6 px-4">
-            {QUICK_ACTIONS.filter((action) => {
-              // Show action if no integration required, or if integration is enabled
-              if (!action.integration) return true;
-              return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
-            }).map((action) => (
+            {/* Real-time Voice Call Button - before interaction */}
+            {!hasInteracted && (
               <button
-                key={action.intent}
-                onClick={() => handleQuickAction(action)}
-                disabled={isLoading || isRecording}
+                onClick={() => setActiveMode('voice')}
                 className={cn(
-                  "px-4 py-2.5 text-sm font-medium rounded-full",
-                  "bg-neutral-100 text-neutral-700",
-                  "hover:bg-neutral-200 hover:shadow-sm",
-                  "transition-all duration-200",
-                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                  "mt-6 flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-full",
+                  "bg-blue-500 text-white",
+                  "hover:bg-blue-600 hover:shadow-md",
+                  "transition-all duration-200"
                 )}
               >
-                {action.label}
+                <Phone className="w-4 h-4" />
+                Talk to {systemName}
               </button>
-            ))}
-          </div>
-        )}
-
-        {/* Real-time Voice Call Button - Show before interaction */}
-        {!hasInteracted && (
-          <button
-            onClick={() => setActiveMode('voice')}
-            className={cn(
-              "mt-6 flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-full",
-              "bg-blue-500 text-white",
-              "hover:bg-blue-600 hover:shadow-md",
-              "transition-all duration-200"
             )}
-          >
-            <Phone className="w-4 h-4" />
-            Talk to {systemName}
-          </button>
-        )}
-      </div>
+          </div>
 
-      {/* Chat Messages - Show after interaction */}
-      {hasInteracted && (
-        <div className="flex-1 overflow-y-auto px-4 pb-32">
-          <div className="max-w-2xl mx-auto space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "flex",
-                  message.role === "user" ? "justify-end" : "justify-start"
-                )}
-              >
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
-                    message.role === "user"
-                      ? "bg-neutral-900 text-white"
-                      : "bg-neutral-100 text-neutral-800"
-                  )}
-                >
-                  {message.role === "assistant" ? (
-                    <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5">
-                      {message.content ? (
-                        <ReactMarkdown>{message.content}</ReactMarkdown>
+          {/* Chat Messages */}
+          {hasInteracted && (
+            <div className="flex-1 overflow-y-auto px-4 pb-32">
+              <div className="max-w-2xl mx-auto space-y-4">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={cn(
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
+                        message.role === "user"
+                          ? "bg-neutral-900 text-white"
+                          : "bg-neutral-100 text-neutral-800"
+                      )}
+                    >
+                      {message.role === "assistant" ? (
+                        <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5">
+                          {message.content ? (
+                            <ReactMarkdown>{message.content}</ReactMarkdown>
+                          ) : (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse" />
+                              <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-75" />
+                              <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
+                            </span>
+                          )}
+                        </div>
                       ) : (
-                        <span className="inline-flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse" />
-                          <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-75" />
-                          <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
-                        </span>
+                        message.content
                       )}
                     </div>
-                  ) : (
-                    message.content
-                  )}
-                </div>
-                {/* Play button for assistant messages */}
-                {message.role === "assistant" && message.content && (
-                  <button
-                    onClick={() => playMessage(message.id, message.content)}
-                    disabled={loadingAudioId === message.id}
-                    className={cn(
-                      "mt-1 p-1.5 rounded-full transition-all",
-                      "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
-                      playingMessageId === message.id && "text-blue-500",
-                      loadingAudioId === message.id && "opacity-50"
+                    {message.role === "assistant" && message.content && (
+                      <button
+                        onClick={() => playMessage(message.id, message.content)}
+                        disabled={loadingAudioId === message.id}
+                        className={cn(
+                          "mt-1 p-1.5 rounded-full transition-all",
+                          "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
+                          playingMessageId === message.id && "text-blue-500",
+                          loadingAudioId === message.id && "opacity-50"
+                        )}
+                        title={playingMessageId === message.id ? "Stop" : "Play"}
+                      >
+                        {loadingAudioId === message.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : playingMessageId === message.id ? (
+                          <VolumeX className="w-4 h-4" />
+                        ) : (
+                          <Volume2 className="w-4 h-4" />
+                        )}
+                      </button>
                     )}
-                    title={playingMessageId === message.id ? "Stop" : "Play"}
-                  >
-                    {loadingAudioId === message.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : playingMessageId === message.id ? (
-                      <VolumeX className="w-4 h-4" />
-                    ) : (
-                      <Volume2 className="w-4 h-4" />
-                    )}
-                  </button>
-                )}
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-      )}
-
-      {/* Floating Quick Actions - Show after interaction, filtered by integrations */}
-      {hasInteracted && (
-        <div className="fixed bottom-24 left-0 right-0 px-4">
-          <div className="max-w-2xl mx-auto">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              {QUICK_ACTIONS.filter((action) => {
-                if (!action.integration) return true;
-                return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
-              }).map((action) => (
-                <button
-                  key={action.intent}
-                  onClick={() => handleQuickAction(action)}
-                  disabled={isLoading || isRecording}
-                  className={cn(
-                    "px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap",
-                    "bg-white border border-neutral-200 text-neutral-600",
-                    "hover:bg-neutral-50 hover:border-neutral-300",
-                    "transition-all duration-200",
-                    "disabled:opacity-50"
-                  )}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Fixed Input at Bottom - Show after interaction */}
-      {hasInteracted && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-100 p-4">
-          <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
-            {/* Attached Files Preview */}
-            {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {attachedFiles.map((file, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-2 py-1 bg-neutral-100 rounded-full text-xs"
-                  >
-                    {getFileIcon(file)}
-                    <span className="max-w-[100px] truncate">{file.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeFile(index)}
-                      className="text-neutral-400 hover:text-neutral-600"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
                   </div>
                 ))}
-              </div>
-            )}
-            <div className="relative">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={isRecording ? "Recording..." : `Ask ${systemName} anything...`}
-                disabled={isLoading || isRecording}
-                className={cn(
-                  "w-full px-5 py-3 pl-12 pr-20 text-sm rounded-full",
-                  "border border-neutral-200 shadow-sm",
-                  "focus:outline-none focus:border-neutral-300 focus:shadow-md",
-                  "transition-all duration-200",
-                  "placeholder:text-neutral-400",
-                  "disabled:opacity-50",
-                  isRecording && "border-red-300 bg-red-50/30"
-                )}
-              />
-              {/* Attach Button - Left side */}
-              <button
-                type="button"
-                onClick={triggerFileUpload}
-                className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
-                title="Attach files"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {(input.trim() || attachedFiles.length > 0) && !isRecording && (
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="p-1.5 text-neutral-400 hover:text-neutral-600 transition-colors"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setActiveMode('voice')}
-                  className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
-                  title={`Talk to ${systemName}`}
-                >
-                  <Phone className="w-4 h-4" />
-                </button>
-                <MicButton size="small" />
+                <div ref={messagesEndRef} />
               </div>
             </div>
-          </form>
-        </div>
-      )}
-      </>
+          )}
+
+          {/* Floating Quick Actions - after interaction */}
+          {hasInteracted && (
+            <div className="fixed bottom-24 left-0 right-0 px-4">
+              <div className="max-w-2xl mx-auto">
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {QUICK_ACTIONS.filter((action) => {
+                    if (!action.integration) return true;
+                    return userSettings.integrations[action.integration as keyof typeof userSettings.integrations];
+                  }).map((action) => (
+                    <button
+                      key={action.intent}
+                      onClick={() => handleQuickAction(action)}
+                      disabled={isLoading || isRecording}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap",
+                        "bg-white border border-neutral-200 text-neutral-600",
+                        "hover:bg-neutral-50 hover:border-neutral-300",
+                        "transition-all duration-200",
+                        "disabled:opacity-50"
+                      )}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Fixed Input at Bottom - after interaction */}
+          {hasInteracted && (
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-100 p-4">
+              <form onSubmit={handleSubmit} className="max-w-2xl mx-auto">
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {attachedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center gap-2 px-2 py-1 bg-neutral-100 rounded-full text-xs">
+                        {getFileIcon(file)}
+                        <span className="max-w-[100px] truncate">{file.name}</span>
+                        <button type="button" onClick={() => removeFile(index)} className="text-neutral-400 hover:text-neutral-600">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={isRecording ? "Recording..." : `Ask ${systemName} anything...`}
+                    disabled={isLoading || isRecording}
+                    className={cn(
+                      "w-full px-5 py-3 pl-12 pr-20 text-sm rounded-full",
+                      "border border-neutral-200 shadow-sm",
+                      "focus:outline-none focus:border-neutral-300 focus:shadow-md",
+                      "transition-all duration-200",
+                      "placeholder:text-neutral-400",
+                      "disabled:opacity-50",
+                      isRecording && "border-red-300 bg-red-50/30"
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={triggerFileUpload}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                    title="Attach files"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {(input.trim() || attachedFiles.length > 0) && !isRecording && (
+                      <button type="submit" disabled={isLoading} className="p-1.5 text-neutral-400 hover:text-neutral-600 transition-colors">
+                        <Send className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveMode('voice')}
+                      className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
+                      title={`Talk to ${systemName}`}
+                    >
+                      <Phone className="w-4 h-4" />
+                    </button>
+                    <MicButton size="small" />
+                  </div>
+                </div>
+              </form>
+            </div>
+          )}
+        </>
       )}
 
       {/* System Naming Modal - Onboarding */}
