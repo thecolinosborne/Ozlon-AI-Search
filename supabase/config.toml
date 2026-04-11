@@ -24,5 +24,3 @@ verify_jwt = true
 [functions.knowledge-search]
 verify_jwt = true
 
-[functions.facebook-ads-sync]
-verify_jwt = false
