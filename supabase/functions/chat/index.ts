@@ -943,36 +943,6 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
-      name: 'delete_email',
-      description: 'PERMANENTLY delete a single email. This is IRREVERSIBLE — the email cannot be recovered. Use trash_email instead unless the user explicitly wants permanent deletion.',
-      parameters: {
-        type: 'object',
-        properties: {
-          message_id: { type: 'string', description: 'Gmail message ID to permanently delete' },
-          account: { type: 'string', description: 'Gmail account email (optional)' },
-        },
-        required: ['message_id'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'batch_delete_emails',
-      description: 'PERMANENTLY delete multiple emails at once. This is IRREVERSIBLE. Use batch_trash_emails instead unless the user explicitly wants permanent deletion. Useful for spam/junk cleanup.',
-      parameters: {
-        type: 'object',
-        properties: {
-          message_ids: { type: 'string', description: 'Comma-separated Gmail message IDs to permanently delete (up to 50 at a time)' },
-          account: { type: 'string', description: 'Gmail account email (optional)' },
-        },
-        required: ['message_ids'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'list_email_ids',
       description: 'Lightweight bulk email ID fetcher. Returns only message IDs (no metadata) for up to 500 emails matching a query. Use this first to see the full scope of emails before batch operations. Results are in newest-first order.',
       parameters: {
@@ -2036,42 +2006,6 @@ async function executeToolCall(
         return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash complete: ${successCount} emails trashed${failCount > 0 ? `, ${failCount} failed` : ""}.` };
       }
 
-      case 'delete_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        console.log(`[delete_email] Permanently deleting ${args.message_id} via ${connId} (${resolved?.email})`);
-        try {
-          await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}`, connId, 'DELETE');
-          return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} permanently deleted.` };
-        } catch (e) {
-          return { success: false, result: `Failed to delete: ${e instanceof Error ? e.message : String(e)}` };
-        }
-      }
-
-      case 'batch_delete_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
-        if (!ids.length) return { success: false, result: 'No message IDs provided.' };
-        let successCount = 0;
-        let failCount = 0;
-        const chunkSize = 10;
-        for (let i = 0; i < ids.length; i += chunkSize) {
-          const chunk = ids.slice(i, i + chunkSize);
-          const results = await Promise.all(chunk.map(async (id) => {
-            try {
-              await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}`, connId, 'DELETE');
-              return true;
-            } catch { return false; }
-          }));
-          successCount += results.filter(Boolean).length;
-          failCount += results.filter(r => !r).length;
-        }
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Batch delete complete: ${successCount} emails permanently deleted${failCount > 0 ? `, ${failCount} failed` : ""}.` };
-      }
-
       case 'list_email_ids': {
         const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
         const connId = resolved?.id;
@@ -3048,6 +2982,7 @@ IMPORTANT TOOL USAGE RULES:
 2. Always confirm the action with the user BEFORE executing destructive or important actions.
 3. If a service is not connected, tell the user to connect it in Settings > Maton AI Integrations.
 4. For drafts vs sends: default to DRAFTS for emails unless the user explicitly says "send".
+5. For email deletion: ALWAYS use trash (recoverable). Never use permanent HTTP DELETE on messages — it will fail with a permissions error.
 
 ===========================================================
 MEMORY & WISDOM BEHAVIOR
@@ -3142,8 +3077,6 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'list_email_ids': 'google-mail',
     'label_email': 'google-mail',
     'mark_email_read': 'google-mail',
-    'delete_email': 'google-mail',
-    'batch_delete_emails': 'google-mail',
     'create_calendar_event': 'google-calendar',
     'send_slack_message': 'slack',
     'create_notion_page': 'notion',
@@ -3258,8 +3191,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'get_email': 'Reading email',
   'trash_email': 'Moving email to trash',
   'batch_trash_emails': 'Batch trashing emails',
-  'delete_email': 'Permanently deleting email',
-  'batch_delete_emails': 'Batch deleting emails permanently',
   'label_email': 'Updating email labels',
   'mark_email_read': 'Marking email as read',
   'send_email': 'Sending email',
