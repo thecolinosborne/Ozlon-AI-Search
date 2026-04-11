@@ -1,33 +1,27 @@
 
 
-# Incorporate Gmail Delete Tool & Validate Connection
+# Fix Gmail Tools: Remove DELETE, Always Use Trash
 
-## Current State
-The Gmail integration is already comprehensive with 9 tools: `send_email`, `create_email_draft`, `list_emails`, `get_email`, `trash_email`, `batch_trash_emails`, `list_email_ids`, `label_email`, `mark_email_read`. All use `format=full`, the `Maton-Connection` header, and `Bearer $MATON_API_KEY` auth — matching the patterns you provided.
-
-## What's Missing
-One capability from your provided tools is not yet implemented: **permanent email deletion** (`DELETE /messages/{id}`). Currently only trash (recoverable) is supported.
+## Problem
+The `delete_email` and `batch_delete_emails` tools use the HTTP `DELETE` method, which fails with a permissions error on the Maton gateway. The user has confirmed that only `POST /messages/{id}/trash` works.
 
 ## Changes
 
-### 1. Add `delete_email` tool to `MATON_ACTION_TOOLS`
-A new tool definition for permanently deleting an email (irreversible). Description will clearly warn the user this is permanent vs trash.
+### 1. Remove `delete_email` and `batch_delete_emails` tools entirely
+- Remove both tool definitions from `MATON_ACTION_TOOLS`
+- Remove both `case` handlers from `executeToolCall`
+- Remove entries from the connection map and status strings
+- The existing `trash_email` and `batch_trash_emails` tools already cover this functionality
 
-### 2. Add `batch_delete_emails` tool
-Mirrors `batch_trash_emails` but uses the DELETE method for permanent removal. Useful for bulk cleanup of spam/junk.
+### 2. Update system prompt
+Add a note in the Gmail section: "Always use trash for deletion. Never use HTTP DELETE on messages."
 
-### 3. Add execution handlers in `executeToolCall`
-- `delete_email`: `DELETE /google-mail/gmail/v1/users/me/messages/{id}` (returns 204 on success)
-- `batch_delete_emails`: Parallel DELETE calls in chunks of 10
-
-### 4. Redeploy the chat edge function
+### 3. Update `fetchGmailData` metadata fetching
+The memory notes that Maton drops repeated query params (multiple `metadataHeaders`). The current code already uses `format=full&fields=payload/headers,snippet,labelIds` which works. No change needed here — `format=full` with `fields` filtering is the correct pattern per the gateway constraint.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/chat/index.ts` | Add 2 tool definitions + 2 case handlers |
-
-## Note
-The connection ID `18e9357f-cdfd-4112-b6d7-b69ed5cdec58` for `colin@ozlon.net` is already being resolved dynamically through the Maton connections API — no hardcoding needed. The existing `fetchGmailData` already pulls the 20 most recent emails chronologically with `format=full` and parallel metadata fetching, exactly matching the patterns you provided.
+| `supabase/functions/chat/index.ts` | Remove 2 tool defs, 2 case handlers, update system prompt |
 
