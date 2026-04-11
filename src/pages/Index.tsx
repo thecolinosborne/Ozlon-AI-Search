@@ -828,14 +828,6 @@ const Index = () => {
                         <Send className="w-4 h-4" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setActiveMode('voice')}
-                      className="p-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-all"
-                      title={`Talk to ${systemName}`}
-                    >
-                      <Phone className="w-4 h-4" />
-                    </button>
                     <MicButton size="small" />
                   </div>
                 </div>
