@@ -420,20 +420,29 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
 }
 
 async function fetchGmailData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=15&q=is:unread', connId) as { messages?: { id: string }[]; resultSizeEstimate?: number };
-  const msgs = data.messages || [];
-  if (!msgs.length) return 'No unread emails.';
-  const details: string[] = [`Unread count: ~${data.resultSizeEstimate || msgs.length}`];
-  for (const m of msgs.slice(0, 8)) {
+  // Fetch latest emails chronologically (all mail, not just unread) + unread count
+  const [recentData, unreadData] = await Promise.all([
+    callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=20', connId) as Promise<{ messages?: { id: string }[]; resultSizeEstimate?: number }>,
+    callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=1&q=is:unread', connId).catch(() => ({})) as Promise<{ resultSizeEstimate?: number }>,
+  ]);
+  const msgs = recentData.messages || [];
+  if (!msgs.length) return 'Inbox is empty.';
+  const unreadCount = unreadData.resultSizeEstimate || 0;
+  const details: string[] = [`Latest emails (newest first) | Unread: ~${unreadCount}`];
+  // Fetch metadata in parallel for speed
+  const batch = msgs.slice(0, 15);
+  const results = await Promise.all(batch.map(async (m) => {
     try {
-      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string };
+      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
       const headers = full.payload?.headers || [];
       const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
       const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
       const date = headers.find(h => h.name === 'Date')?.value || '';
-      details.push(`- From: ${from} | Subject: ${subject} | ${date}\n  Preview: ${(full.snippet || '').substring(0, 120)}`);
-    } catch { details.push(`- Message ${m.id}: could not load`); }
-  }
+      const unread = (full.labelIds || []).includes('UNREAD') ? ' [UNREAD]' : '';
+      return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}${unread}\n  Preview: ${(full.snippet || '').substring(0, 120)}`;
+    } catch { return `- ID: ${m.id}: could not load`; }
+  }));
+  details.push(...results);
   return details.join('\n');
 }
 
