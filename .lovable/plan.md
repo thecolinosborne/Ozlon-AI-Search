@@ -1,73 +1,44 @@
 
+Fix the Maton integration in two layers: the integration UI and the chat execution path.
 
-# Fix: Conversation Sessions Not Persisting
+1. Confirm the real failure path in backend logs
+- Inspect the deployed `chat` and `maton` backend logs for Google Search Console requests.
+- Verify whether GSC calls are failing because of:
+  - stale backend deployment
+  - wrong endpoint/response shape
+  - missing connection resolution
+  - swallowed gateway errors returning empty data
 
-## Problems Found
+2. Harden Maton gateway error handling
+- Update the shared Maton gateway helper in `supabase/functions/chat/index.ts` so non-2xx responses throw explicit errors instead of silently returning JSON/text.
+- Add GSC-specific diagnostics around:
+  - site listing
+  - `searchAnalytics/query`
+  - empty site lists vs actual request failure
+- Make the final assistant response say whether data was fetched, no sites were found, or the connection needs attention.
 
-**Testing results:**
-- Sent a message — AI responded, but the **user message bubble was not visible** in the chat
-- Opened the sidebar — shows "No conversations yet" despite having an active chat
-- Database has **zero rows** in both `chat_sessions` and `chat_messages` — nothing is being persisted
+3. Fix Google Search Console fetch behavior
+- Review the current GSC endpoints and payloads used in `fetchGSCData`.
+- Adjust the fetcher to match the real gateway response format and support the connected account cleanly.
+- Add fallback behavior if the first report query shape is unsupported, rather than failing the whole GSC pull.
 
-## Root Cause
+4. Improve Maton integration screen so issues are visible
+- Update the Maton detail/settings UI to surface per-connection health more clearly:
+  - app name
+  - account/email when available
+  - active vs pending vs error
+  - clearer Google Search Console labeling
+- Add actionable error text instead of generic “No services connected yet” when the backend returns a failure.
 
-The `useConversations` hook has a race condition in its initialization:
+5. Test end-to-end after implementation
+- Open the Maton integration screen and verify Google Search Console appears as connected.
+- In chat, test prompts like:
+  - “pull my google search console data”
+  - “show my search console performance for the last 7 days”
+- Confirm the assistant returns real GSC data instead of a generic/empty answer.
+- If the backend was stale, redeploy the updated function and re-test.
 
-1. On mount, `loadSessions()` fires with `user = null` → immediately sets `sessionsLoaded = true`
-2. When `user` becomes available, the auto-create effect sees `sessionsLoaded = true` and `!activeSessionId` → calls `createSession()`
-3. But `createSession` may execute before the Supabase client has fully propagated the auth token to subsequent requests, causing the INSERT to fail silently (RLS rejects because `auth.uid()` is null in the request context)
-4. Since messages depend on `activeSessionId` being set (which requires a successful `createSession`), `saveMessage` also silently does nothing
-
-Additionally, even if `createSession` did work, the user message might not appear because `saveMessage` adds to local state but could be racing with the assistant placeholder being added.
-
-## Fix Plan
-
-### 1. Fix session initialization timing (`src/hooks/useConversations.ts`)
-- Don't set `sessionsLoaded = true` when `user` is null — keep it false until we actually query with a real user
-- Add error logging to `loadSessions` if the query fails
-- Add a small guard in `createSession` to verify the session was actually created
-- Ensure `saveMessage` and `finalizeMessage` handle the case where `activeSessionId` is null by auto-creating a session first
-
-### 2. Fix the auto-create race condition
-- Instead of two separate effects (load + auto-create), combine into one sequential flow:
-  1. When `user` changes, load sessions
-  2. After sessions load, if none exist or none are active, create one
-  3. Only then set `sessionsLoaded = true`
-
-### 3. Add console logging for debugging
-- Log when `loadSessions` runs and what it returns
-- Log when `createSession` runs and whether it succeeds or fails
-- Log when `saveMessage` is called and whether `activeSessionId` is set
-
-### 4. Ensure user messages display correctly
-- Verify the `saveMessage` → local state update path isn't conflicting with the `setSessionMessages` call for the assistant placeholder
-
-## Files Changed
-
-| File | Change |
-|------|--------|
-| `src/hooks/useConversations.ts` | Fix initialization race condition, add logging, ensure sessions are created before messages are saved |
-
-## Technical Details
-
-```text
-Current broken flow:
-  mount → loadSessions(null) → sessionsLoaded=true
-  user arrives → createSession() [may fail silently]
-  user sends message → saveMessage() [activeSessionId may be null → no-op]
-
-Fixed flow:
-  mount → sessionsLoaded stays false
-  user arrives → loadSessions(user) → sessions loaded
-  → if no active session → createSession() → activeSessionId set
-  → sessionsLoaded=true
-  user sends message → saveMessage() [activeSessionId guaranteed set]
-```
-
-## Result
-- Sessions will persist to the database reliably
-- Messages will be saved per-session
-- Sidebar will show conversation history
-- Switching between conversations will work
-- User message bubbles will appear in the chat
-
+Technical notes
+- Frontend connection loading already works: the preview network snapshot shows `functions/v1/maton` returning an ACTIVE `google-search-console` connection.
+- The main gap is likely inside the deployed chat backend path, not the connection list UI.
+- The current `fetchGSCData` implementation exists, but it treats empty results as “No sites found in GSC” and the shared gateway helper does not currently fail loudly on bad Maton responses, which can hide the real issue.
