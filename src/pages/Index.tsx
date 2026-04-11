@@ -174,6 +174,10 @@ const Index = () => {
         intent,
         systemName,
         userSettings,
+        enableTools: true,
+        onToolCall: (toolName, toolArgs) => {
+          console.log(`Tool called: ${toolName}`, toolArgs);
+        },
         onDelta: (delta) => {
           assistantContent += delta;
           updateMessageContent(assistantId, assistantContent);
