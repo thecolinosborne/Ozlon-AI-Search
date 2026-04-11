@@ -1793,6 +1793,84 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { business_id: { type: 'string', description: 'Business ID' } }, required: ['business_id'] },
     },
   },
+  // ============ GSC / SEO Intelligence Tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_list_sites',
+      description: 'List all verified Google Search Console properties with their permission levels. Use this to discover which sites the user has access to.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_query',
+      description: 'Run a full Search Analytics query on a Google Search Console property. Supports custom date ranges, dimensions (query, page, country, device, date, searchAppearance), filters, and row limits up to 1000. Use for deep SEO analysis, keyword research, page performance, trend analysis, and comparative reports.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL (e.g. "sc-domain:ozlon.net" or "https://example.com/")' },
+          start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end_date: { type: 'string', description: 'End date YYYY-MM-DD' },
+          dimensions: { type: 'string', description: 'Comma-separated dimensions: query, page, country, device, date, searchAppearance (default: query)' },
+          row_limit: { type: 'number', description: 'Max rows to return (default 100, max 1000)' },
+          filters: { type: 'string', description: 'JSON array of filters e.g. [{"dimension":"query","operator":"contains","expression":"ai"}]. Operators: equals, contains, notEquals, notContains.' },
+          aggregation_type: { type: 'string', description: 'auto, byPage, or byProperty (default: auto)' },
+        },
+        required: ['site_url', 'start_date', 'end_date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_save_snapshot',
+      description: 'Save the current GSC query results as a snapshot for future trend comparison. Call this after running a gsc_query to persist the data. The AI should suggest saving snapshots after significant analyses.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL' },
+          start_date: { type: 'string', description: 'Query start date YYYY-MM-DD' },
+          end_date: { type: 'string', description: 'Query end date YYYY-MM-DD' },
+          dimensions: { type: 'string', description: 'Comma-separated dimensions used in the query' },
+          data: { type: 'string', description: 'JSON string of the query result rows' },
+          totals: { type: 'string', description: 'JSON string of aggregate totals {clicks, impressions, ctr, position}' },
+        },
+        required: ['site_url', 'start_date', 'end_date', 'data'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_compare_snapshots',
+      description: 'Load previous SEO snapshots for a site to compare with current data. Shows trend changes over time. Use when the user asks "what changed", "compare to last week/month", or wants to track SEO progress.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL to find snapshots for' },
+          limit: { type: 'number', description: 'Max snapshots to retrieve (default 5)' },
+        },
+        required: ['site_url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search_google',
+      description: 'Perform a live Google search for a keyword to see current SERP results. Use to cross-reference GSC ranking data with actual live search positions, identify competitors, and validate ranking claims. Returns top 10 organic results.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string', description: 'Search query/keyword to look up on Google' },
+          num_results: { type: 'number', description: 'Number of results to return (default 10, max 20)' },
+        },
+        required: ['keyword'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
