@@ -385,20 +385,31 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
   const reports: string[] = [];
   for (const site of sites) {
     try {
-      const [recentData, priorData] = await Promise.all([
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 25 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 25 }),
-      ]) as [{ rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }, { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }];
-      const rRows = recentData.rows || []; const pRows = priorData.rows || [];
-      const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      const [recentQueryData, priorQueryData, recentPageData, recentDateData] = await Promise.all([
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 50 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 50 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['page'], rowLimit: 25 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['date'], rowLimit: 7 }),
+      ]) as [
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+      ];
+      const rRows = recentQueryData.rows || []; const pRows = priorQueryData.rows || [];
+      const pageRows = recentPageData.rows || []; const dateRows = recentDateData.rows || [];
+      const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions, ctr: 0, pos: 0 }), { c: 0, i: 0, ctr: 0, pos: 0 });
       const pT = pRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      rT.ctr = rT.i > 0 ? rT.c / rT.i : 0;
       let r = `### ${site.siteUrl}\n`;
-      r += `**Last 7 days (${fmt(recentStart)} to ${fmt(recentEnd)}):** ${rT.c} clicks, ${rT.i} impressions\n`;
+      r += `**Last 7 days (${fmt(recentStart)} to ${fmt(recentEnd)}):** ${rT.c} clicks, ${rT.i} impressions, ${(rT.ctr * 100).toFixed(1)}% CTR\n`;
       r += `**Prior 7 days (${fmt(priorStart)} to ${fmt(priorEnd)}):** ${pT.c} clicks, ${pT.i} impressions\n`;
       const clickChange = pT.c > 0 ? ((rT.c - pT.c) / pT.c * 100).toFixed(1) : 'N/A';
       const impChange = pT.i > 0 ? ((rT.i - pT.i) / pT.i * 100).toFixed(1) : 'N/A';
       r += `**Change:** Clicks ${clickChange}% | Impressions ${impChange}%\n`;
-      if (rRows.length) { r += '\nTop queries:\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (rRows.length) { r += '\n**Top queries:**\n'; for (const row of rRows.slice(0, 15)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (pageRows.length) { r += '\n**Top pages:**\n'; for (const row of pageRows.slice(0, 10)) r += `- ${row.keys[0]}: ${row.clicks} clicks, ${row.impressions} imp, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (dateRows.length) { r += '\n**Daily trend:**\n'; for (const row of dateRows) r += `- ${row.keys[0]}: ${row.clicks} clicks, ${row.impressions} imp\n`; }
       reports.push(r);
     } catch (e) {
       console.error(`[GSC] Error fetching data for ${site.siteUrl}:`, e);
