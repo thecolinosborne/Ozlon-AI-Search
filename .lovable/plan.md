@@ -1,66 +1,55 @@
 
 
-# Comprehensive Maton Integration Fix — Subjects, Trash, and Full Tool Reliability
+# ChatGPT-Style Conversation Sessions
 
-## Root Causes (Confirmed via Live Testing)
+## Current State
+Right now, all messages load into one continuous stream from localStorage. There's no concept of separate conversations — every time you open the app, you see the entire history. The database already has `chat_sessions` and `chat_messages` tables ready to use.
 
-1. **Email subjects missing**: The Maton gateway silently drops repeated query parameters. `format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date` only returns `Date`. I tested this live — `format=full` returns all headers correctly including Subject and From.
+## What Changes
 
-2. **Trash not executing**: The trash API endpoint itself works (confirmed — returns TRASH label). The issue is the AI sees "(no subject)" for every email because of bug #1, making it unable to identify which emails to trash. It likely reports success prematurely or the tool loop runs out of iterations trying to work with missing data.
+### 1. Conversation sidebar with history
+- Add a slide-out sidebar (hamburger menu or side panel) showing past conversations
+- Each conversation shows a title (auto-generated from the first message) and timestamp
+- Clicking a conversation loads those messages
+- "New Chat" button at the top starts a fresh conversation
 
-3. **Other services**: Calendar, Drive, Docs, Sheets, Slides all have their own connection IDs and work through Maton. Some use fallback mappings (Docs falls back to Drive connection). These are functional but need the same header fix pattern.
+### 2. Session management hook — `useConversations`
+- Manages the active session ID, list of sessions, and CRUD operations
+- On sign-in: automatically creates a new session (previous ones remain accessible)
+- Loads messages for the active session from the database
+- Auto-titles sessions based on the first user message (truncated to ~50 chars)
+- Falls back to localStorage for unauthenticated users (single session)
 
-## Plan — Single File: `supabase/functions/chat/index.ts`
+### 3. Update Index.tsx
+- Replace the flat `messages` state with session-aware state from `useConversations`
+- When sending a message, save to the active session in the database
+- Pass only the current session's messages to `streamChat` (not all history)
+- Clear the chat view when switching sessions or starting a new one
+- Remove the old `localDb` message loading on mount
 
-### Fix 1: Switch `fetchGmailData` from `format=metadata` to `format=full`
-- Line 390: Replace `format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date` with `format=full`
-- Extract From, Subject, Date from the full `payload.headers` array instead of the metadata-filtered subset
-- This fixes the context injection so the AI sees real subjects in the pre-loaded inbox data
+### 4. Conversation sidebar component
+- Slide-out panel from the left (or drawer on mobile)
+- Lists sessions grouped by "Today", "Yesterday", "Previous 7 days", etc.
+- Each item shows truncated title + relative time
+- Swipe-to-delete or delete button on each conversation
+- "New Chat" button pinned at top
 
-### Fix 2: Switch `list_emails` tool from `format=metadata` to `format=full`
-- Line 1816: Same replacement — use `format=full` for individual message fetches
-- Extract headers from the full payload
-- This fixes the tool result so the AI can see subjects when listing emails via tool calls
-
-### Fix 3: Add explicit logging to trash and batch_trash operations
-- Add `console.log` before and after each trash call with message ID and connection ID
-- Log the response status and whether TRASH label was applied
-- This provides debugging visibility for any future trash issues
-
-### Fix 4: Increase default `maxIterations` parameter from 5 to 10
-- Line 2944: Change default parameter value from 5 to 10
-- The main handler already passes 10 (line 3351), but this ensures any other callers also get a reasonable limit
-
-### Fix 5: Add task completion summary to tool loop
-- When the tool loop finishes, emit a final `task_update` with a `summary` field extracted from the AI's response
-- Update `TaskUpdateEvent` interface to include optional `summary`
-- Update the frontend `TaskUpdate` type and store to handle summaries
-- Keep completed task bubbles visible for 15 seconds with the summary text
-
-### Fix 6: Frontend — Add summary support to task activity
-- `src/services/chatService.ts`: Add `summary?: string` to `TaskUpdate` interface
-- `src/stores/useTaskActivityStore.ts`: Add `summary` field to `ActiveTask`, add `setTaskSummary` action
-- `src/components/TaskActivityBubble.tsx`: Show summary text, extend auto-dismiss to 15s for completed tasks with summaries, add manual dismiss
-- `src/pages/Index.tsx`: Handle summary in `onTaskUpdate` callback
+### 5. Auto-create new session on sign-in
+- In `AuthContext`, when `SIGNED_IN` fires, the conversation hook picks it up and creates a fresh session
+- Old sessions remain in the sidebar for reference
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/chat/index.ts` | Fix `format=metadata` → `format=full` in 2 places, add trash logging, increase maxIterations default, emit task summary |
-| `src/services/chatService.ts` | Add `summary` to `TaskUpdate` |
-| `src/stores/useTaskActivityStore.ts` | Add summary field and setter |
-| `src/components/TaskActivityBubble.tsx` | Show summary, 15s dismiss, manual dismiss |
-| `src/pages/Index.tsx` | Handle summary in onTaskUpdate |
-
-## Testing Plan (Live)
-After deploying, I will:
-1. Call the chat function with "colin@ozlon.net show me my latest emails" and verify subjects appear
-2. Call with "trash the first email from my ozlon inbox" and verify the trash executes
-3. Verify the task activity bubble shows a completion summary
+| `src/hooks/useConversations.ts` | New hook — session CRUD, message loading, active session state |
+| `src/components/ConversationSidebar.tsx` | New — sidebar with conversation list, new chat button |
+| `src/pages/Index.tsx` | Replace flat messages with session-aware logic, add sidebar toggle |
+| `src/services/localDb.ts` | Minor — keep as offline fallback but no longer primary |
 
 ## Result
-- Email subjects will show correctly in both context injection and tool results
-- Trash operations will execute reliably because the AI can now identify emails by subject
-- Completed tasks will report back with a visible summary of what was done
+- Each sign-in starts a fresh conversation
+- Past conversations are accessible from a sidebar
+- Messages are persisted per-session in the database
+- Clean, ChatGPT-like UX with conversation management
 
