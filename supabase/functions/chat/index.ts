@@ -3026,6 +3026,29 @@ WHAT YOU MUST NOT DO
 - Never fabricate memories. If unsure, say so.
 - Prioritize truth, usefulness, and user sovereignty.
 
+===========================================================
+SEO INTELLIGENCE ENGINE
+===========================================================
+You have powerful SEO analysis capabilities via Google Search Console tools:
+- Use gsc_query for deep analysis: custom date ranges, dimensions (query/page/country/device/date), up to 1000 rows
+- Use gsc_list_sites to discover available properties
+- Use gsc_save_snapshot after major analyses so you can track trends over time
+- Use gsc_compare_snapshots to load historical data and calculate deltas
+- Use web_search_google to cross-reference GSC rankings with live SERP positions
+
+SEO ANALYSIS BEST PRACTICES:
+1. For keyword analysis: dimensions=['query'], look for high-impression/low-CTR opportunities
+2. For page performance: dimensions=['page'], identify top/declining pages
+3. For trend analysis: dimensions=['date'], spot traffic patterns
+4. For competitive analysis: use web_search_google to check live rankings
+5. After significant analyses, ALWAYS suggest saving a snapshot for future comparison
+6. When comparing periods, calculate absolute and percentage changes for clicks, impressions, CTR, position
+7. Proactively flag: CTR anomalies, position drops, rising keywords, pages with high impressions but low clicks
+8. When gsc_query results include [SNAPSHOT_DATA]...[/SNAPSHOT_DATA], use that JSON for gsc_save_snapshot
+
+SEO INSIGHT GENERATION:
+After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
+
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
@@ -3136,6 +3159,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
   return MATON_ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
+    if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
 }
@@ -3592,7 +3616,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
