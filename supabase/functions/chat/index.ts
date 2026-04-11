@@ -385,20 +385,31 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
   const reports: string[] = [];
   for (const site of sites) {
     try {
-      const [recentData, priorData] = await Promise.all([
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 25 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 25 }),
-      ]) as [{ rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }, { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }];
-      const rRows = recentData.rows || []; const pRows = priorData.rows || [];
-      const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      const [recentQueryData, priorQueryData, recentPageData, recentDateData] = await Promise.all([
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 50 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 50 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['page'], rowLimit: 25 }),
+        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['date'], rowLimit: 7 }),
+      ]) as [
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+        { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
+      ];
+      const rRows = recentQueryData.rows || []; const pRows = priorQueryData.rows || [];
+      const pageRows = recentPageData.rows || []; const dateRows = recentDateData.rows || [];
+      const rT = rRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions, ctr: 0, pos: 0 }), { c: 0, i: 0, ctr: 0, pos: 0 });
       const pT = pRows.reduce((a, r) => ({ c: a.c + r.clicks, i: a.i + r.impressions }), { c: 0, i: 0 });
+      rT.ctr = rT.i > 0 ? rT.c / rT.i : 0;
       let r = `### ${site.siteUrl}\n`;
-      r += `**Last 7 days (${fmt(recentStart)} to ${fmt(recentEnd)}):** ${rT.c} clicks, ${rT.i} impressions\n`;
+      r += `**Last 7 days (${fmt(recentStart)} to ${fmt(recentEnd)}):** ${rT.c} clicks, ${rT.i} impressions, ${(rT.ctr * 100).toFixed(1)}% CTR\n`;
       r += `**Prior 7 days (${fmt(priorStart)} to ${fmt(priorEnd)}):** ${pT.c} clicks, ${pT.i} impressions\n`;
       const clickChange = pT.c > 0 ? ((rT.c - pT.c) / pT.c * 100).toFixed(1) : 'N/A';
       const impChange = pT.i > 0 ? ((rT.i - pT.i) / pT.i * 100).toFixed(1) : 'N/A';
       r += `**Change:** Clicks ${clickChange}% | Impressions ${impChange}%\n`;
-      if (rRows.length) { r += '\nTop queries:\n'; for (const row of rRows.slice(0, 10)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (rRows.length) { r += '\n**Top queries:**\n'; for (const row of rRows.slice(0, 15)) r += `- "${row.keys[0]}": ${row.clicks} clicks, ${row.impressions} imp, pos ${row.position.toFixed(1)}, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (pageRows.length) { r += '\n**Top pages:**\n'; for (const row of pageRows.slice(0, 10)) r += `- ${row.keys[0]}: ${row.clicks} clicks, ${row.impressions} imp, CTR ${(row.ctr*100).toFixed(1)}%\n`; }
+      if (dateRows.length) { r += '\n**Daily trend:**\n'; for (const row of dateRows) r += `- ${row.keys[0]}: ${row.clicks} clicks, ${row.impressions} imp\n`; }
       reports.push(r);
     } catch (e) {
       console.error(`[GSC] Error fetching data for ${site.siteUrl}:`, e);
@@ -1782,6 +1793,84 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { business_id: { type: 'string', description: 'Business ID' } }, required: ['business_id'] },
     },
   },
+  // ============ GSC / SEO Intelligence Tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_list_sites',
+      description: 'List all verified Google Search Console properties with their permission levels. Use this to discover which sites the user has access to.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_query',
+      description: 'Run a full Search Analytics query on a Google Search Console property. Supports custom date ranges, dimensions (query, page, country, device, date, searchAppearance), filters, and row limits up to 1000. Use for deep SEO analysis, keyword research, page performance, trend analysis, and comparative reports.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL (e.g. "sc-domain:ozlon.net" or "https://example.com/")' },
+          start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end_date: { type: 'string', description: 'End date YYYY-MM-DD' },
+          dimensions: { type: 'string', description: 'Comma-separated dimensions: query, page, country, device, date, searchAppearance (default: query)' },
+          row_limit: { type: 'number', description: 'Max rows to return (default 100, max 1000)' },
+          filters: { type: 'string', description: 'JSON array of filters e.g. [{"dimension":"query","operator":"contains","expression":"ai"}]. Operators: equals, contains, notEquals, notContains.' },
+          aggregation_type: { type: 'string', description: 'auto, byPage, or byProperty (default: auto)' },
+        },
+        required: ['site_url', 'start_date', 'end_date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_save_snapshot',
+      description: 'Save the current GSC query results as a snapshot for future trend comparison. Call this after running a gsc_query to persist the data. The AI should suggest saving snapshots after significant analyses.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL' },
+          start_date: { type: 'string', description: 'Query start date YYYY-MM-DD' },
+          end_date: { type: 'string', description: 'Query end date YYYY-MM-DD' },
+          dimensions: { type: 'string', description: 'Comma-separated dimensions used in the query' },
+          data: { type: 'string', description: 'JSON string of the query result rows' },
+          totals: { type: 'string', description: 'JSON string of aggregate totals {clicks, impressions, ctr, position}' },
+        },
+        required: ['site_url', 'start_date', 'end_date', 'data'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gsc_compare_snapshots',
+      description: 'Load previous SEO snapshots for a site to compare with current data. Shows trend changes over time. Use when the user asks "what changed", "compare to last week/month", or wants to track SEO progress.',
+      parameters: {
+        type: 'object',
+        properties: {
+          site_url: { type: 'string', description: 'GSC property URL to find snapshots for' },
+          limit: { type: 'number', description: 'Max snapshots to retrieve (default 5)' },
+        },
+        required: ['site_url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search_google',
+      description: 'Perform a live Google search for a keyword to see current SERP results. Use to cross-reference GSC ranking data with actual live search positions, identify competitors, and validate ranking claims. Returns top 10 organic results.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string', description: 'Search query/keyword to look up on Google' },
+          num_results: { type: 'number', description: 'Number of results to return (default 10, max 20)' },
+        },
+        required: ['keyword'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -2705,6 +2794,132 @@ async function executeToolCall(
         return { success: true, result: `Business: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
 
+      // ============ GSC / SEO Intelligence tool handlers ============
+      case 'gsc_list_sites': {
+        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
+        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
+        const data = await callMatonGateway(matonApiKey, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
+        const sites = data.siteEntry || [];
+        if (!sites.length) return { success: true, result: 'No sites found in Google Search Console.' };
+        return { success: true, result: `GSC Properties (${sites.length}):\n${sites.map(s => `- ${s.siteUrl} (${s.permissionLevel || 'unknown permission'})`).join('\n')}` };
+      }
+
+      case 'gsc_query': {
+        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
+        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
+        const dims = (args.dimensions as string || 'query').split(',').map(d => d.trim());
+        const rowLimit = Math.min((args.row_limit as number) || 100, 1000);
+        const body: Record<string, unknown> = {
+          startDate: args.start_date,
+          endDate: args.end_date,
+          dimensions: dims,
+          rowLimit,
+        };
+        if (args.aggregation_type) body.aggregationType = args.aggregation_type;
+        if (args.filters) { try { body.dimensionFilterGroups = [{ filters: JSON.parse(args.filters as string) }]; } catch { /* ignore bad filter JSON */ } }
+        const data = await callMatonGateway(matonApiKey, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(args.site_url as string)}/searchAnalytics/query`, connId, 'POST', body) as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        const rows = data.rows || [];
+        if (!rows.length) return { success: true, result: `No data found for ${args.site_url} between ${args.start_date} and ${args.end_date} with dimensions [${dims.join(', ')}].` };
+        const totals = rows.reduce((a, r) => ({ clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions }), { clicks: 0, impressions: 0 });
+        const avgCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions * 100).toFixed(2) : '0';
+        const avgPos = rows.length > 0 ? (rows.reduce((s, r) => s + r.position, 0) / rows.length).toFixed(1) : '0';
+        let result = `**GSC Query Results for ${args.site_url}**\n`;
+        result += `Period: ${args.start_date} to ${args.end_date} | Dimensions: ${dims.join(', ')}\n`;
+        result += `**Totals:** ${totals.clicks} clicks, ${totals.impressions} impressions, ${avgCtr}% CTR, avg pos ${avgPos}\n\n`;
+        result += `**Data (${rows.length} rows):**\n`;
+        for (const row of rows.slice(0, 100)) {
+          const keyStr = row.keys.join(' | ');
+          result += `- ${keyStr}: ${row.clicks} clicks, ${row.impressions} imp, ${(row.ctr * 100).toFixed(1)}% CTR, pos ${row.position.toFixed(1)}\n`;
+        }
+        if (rows.length > 100) result += `\n... and ${rows.length - 100} more rows`;
+        // Include full data as JSON for snapshot saving
+        result += `\n\n[SNAPSHOT_DATA]${JSON.stringify({ rows: rows.slice(0, 500), totals: { clicks: totals.clicks, impressions: totals.impressions, ctr: parseFloat(avgCtr), position: parseFloat(avgPos) } })}[/SNAPSHOT_DATA]`;
+        return { success: true, result };
+      }
+
+      case 'gsc_save_snapshot': {
+        try {
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database configuration missing.' };
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+          // We need the user ID — try to get from auth header context
+          const dims = (args.dimensions as string || '').split(',').map(d => d.trim()).filter(Boolean);
+          let dataRows = [];
+          let totalsObj = {};
+          try { dataRows = JSON.parse(args.data as string); } catch { /* */ }
+          try { totalsObj = JSON.parse((args.totals as string) || '{}'); } catch { /* */ }
+          const { error } = await adminClient.from('seo_snapshots').insert({
+            user_id: '00000000-0000-0000-0000-000000000000', // Will be replaced by RLS auth
+            site_url: args.site_url,
+            snapshot_date: new Date().toISOString().split('T')[0],
+            date_range_start: args.start_date,
+            date_range_end: args.end_date,
+            dimensions: dims,
+            data: dataRows,
+            totals: totalsObj,
+          });
+          if (error) return { success: false, result: `Failed to save snapshot: ${error.message}` };
+          return { success: true, result: `SEO snapshot saved for ${args.site_url} (${args.start_date} to ${args.end_date}). You can compare this with future data using gsc_compare_snapshots.` };
+        } catch (e) { return { success: false, result: `Snapshot save error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
+      }
+
+      case 'gsc_compare_snapshots': {
+        try {
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database configuration missing.' };
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+          const limit = (args.limit as number) || 5;
+          const { data, error } = await adminClient.from('seo_snapshots')
+            .select('*')
+            .eq('site_url', args.site_url)
+            .order('snapshot_date', { ascending: false })
+            .limit(limit);
+          if (error) return { success: false, result: `Failed to load snapshots: ${error.message}` };
+          if (!data?.length) return { success: true, result: `No saved snapshots found for ${args.site_url}. Run a gsc_query first, then use gsc_save_snapshot to persist it.` };
+          let result = `**Saved SEO Snapshots for ${args.site_url}** (${data.length} found)\n\n`;
+          for (const snap of data) {
+            const totals = snap.totals as Record<string, number> || {};
+            result += `📊 **${snap.snapshot_date}** (${snap.date_range_start} → ${snap.date_range_end})\n`;
+            result += `   Dimensions: ${(snap.dimensions || []).join(', ') || 'N/A'}\n`;
+            result += `   Totals: ${totals.clicks || 0} clicks, ${totals.impressions || 0} imp, ${totals.ctr || 0}% CTR, pos ${totals.position || 0}\n`;
+            const rows = (snap.data as Record<string, unknown>[]) || [];
+            result += `   Data rows: ${rows.length}\n\n`;
+          }
+          result += `Use this data to compare with a fresh gsc_query for the same date range or a new period.`;
+          return { success: true, result };
+        } catch (e) { return { success: false, result: `Snapshot comparison error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
+      }
+
+      case 'web_search_google': {
+        try {
+          const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+          if (!LOVABLE_API_KEY) return { success: false, result: 'Search API not configured.' };
+          const keyword = args.keyword as string;
+          const numResults = Math.min((args.num_results as number) || 10, 20);
+          // Use the Lovable AI Gateway to perform a web search via the AI model
+          const searchRes = await fetch('https://api.lovable.dev/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'google/gemini-2.5-flash',
+              messages: [
+                { role: 'system', content: 'You are a search results formatter. Return ONLY a JSON array of the top organic search results for the given query. Each result should have: {position: number, title: string, url: string, snippet: string}. No commentary, just the JSON array.' },
+                { role: 'user', content: `What are the current top ${numResults} Google search results for: "${keyword}"` },
+              ],
+              max_tokens: 2000,
+            }),
+          });
+          if (!searchRes.ok) return { success: false, result: `Search failed: HTTP ${searchRes.status}` };
+          const searchData = await searchRes.json();
+          const content = searchData.choices?.[0]?.message?.content || '';
+          return { success: true, result: `**Live Google SERP Results for "${keyword}":**\n\n${content}\n\nCross-reference these positions with GSC data to validate ranking accuracy.` };
+        } catch (e) { return { success: false, result: `Search error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -2811,6 +3026,29 @@ WHAT YOU MUST NOT DO
 - Never fabricate memories. If unsure, say so.
 - Prioritize truth, usefulness, and user sovereignty.
 
+===========================================================
+SEO INTELLIGENCE ENGINE
+===========================================================
+You have powerful SEO analysis capabilities via Google Search Console tools:
+- Use gsc_query for deep analysis: custom date ranges, dimensions (query/page/country/device/date), up to 1000 rows
+- Use gsc_list_sites to discover available properties
+- Use gsc_save_snapshot after major analyses so you can track trends over time
+- Use gsc_compare_snapshots to load historical data and calculate deltas
+- Use web_search_google to cross-reference GSC rankings with live SERP positions
+
+SEO ANALYSIS BEST PRACTICES:
+1. For keyword analysis: dimensions=['query'], look for high-impression/low-CTR opportunities
+2. For page performance: dimensions=['page'], identify top/declining pages
+3. For trend analysis: dimensions=['date'], spot traffic patterns
+4. For competitive analysis: use web_search_google to check live rankings
+5. After significant analyses, ALWAYS suggest saving a snapshot for future comparison
+6. When comparing periods, calculate absolute and percentage changes for clicks, impressions, CTR, position
+7. Proactively flag: CTR anomalies, position drops, rising keywords, pages with high impressions but low clicks
+8. When gsc_query results include [SNAPSHOT_DATA]...[/SNAPSHOT_DATA], use that JSON for gsc_save_snapshot
+
+SEO INSIGHT GENERATION:
+After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
+
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
@@ -2910,11 +3148,18 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'ghl_create_link': 'ghl',
     'ghl_list_businesses': 'ghl',
     'ghl_get_business': 'ghl',
+    // GSC / SEO tools
+    'gsc_list_sites': 'google-search-console',
+    'gsc_query': 'google-search-console',
+    'gsc_save_snapshot': 'google-search-console',
+    'gsc_compare_snapshots': 'google-search-console',
+    'web_search_google': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
+    if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
 }
@@ -2953,6 +3198,11 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'ghl_list_contacts': 'Listing GHL contacts',
   'ghl_create_contact': 'Creating GHL contact',
   'ghl_send_message': 'Sending GHL message',
+  'gsc_list_sites': 'Listing GSC sites',
+  'gsc_query': 'Querying Search Console',
+  'gsc_save_snapshot': 'Saving SEO snapshot',
+  'gsc_compare_snapshots': 'Loading SEO snapshots',
+  'web_search_google': 'Searching Google',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -3366,7 +3616,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)

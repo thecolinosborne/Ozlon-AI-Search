@@ -258,6 +258,45 @@ export type Database = {
         }
         Relationships: []
       }
+      seo_snapshots: {
+        Row: {
+          created_at: string
+          data: Json
+          date_range_end: string
+          date_range_start: string
+          dimensions: string[]
+          id: string
+          site_url: string
+          snapshot_date: string
+          totals: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          date_range_end: string
+          date_range_start: string
+          dimensions?: string[]
+          id?: string
+          site_url: string
+          snapshot_date?: string
+          totals?: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          date_range_end?: string
+          date_range_start?: string
+          dimensions?: string[]
+          id?: string
+          site_url?: string
+          snapshot_date?: string
+          totals?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       system_evolution_proposals: {
         Row: {
           created_at: string
