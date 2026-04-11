@@ -1,68 +1,81 @@
 
 
-# Fix 5 Bugs: New Chat, Onboarding, User Isolation, Enter Key, Voice Buttons
+# Add Facebook Ads Integration (Meta Marketing API)
 
-## 1. Fix Broken New Chat (`src/hooks/useConversations.ts`)
+## Overview
 
-**Problem**: `creatingSession` ref (line 25) blocks subsequent calls if it gets stuck. `initRan` ref (line 26) prevents re-initialization entirely after first load.
+Build a secure Facebook Ads integration following the existing integration patterns (Maton, GoHighLevel). The integration uses a backend edge function to proxy all Meta API calls — the frontend never touches tokens.
 
-**Fix**:
-- Remove `creatingSession` ref and its guard on line 30
-- In `startNewChat`, ensure `setActiveSessionId(id)` and `setMessages([])` run explicitly (they already do via `createSession`, but add safety)
-- Keep `initRan` but reset it when `user.id` changes (currently only resets when user is null)
+## 1. Add Secrets (4 secrets via `add_secret` tool)
 
-**Observation notes**: `creatingSession` is a `useRef(false)` at line 25. Messages are in `useState` (line 23). `welcomeShown` in Index.tsx is `useState` (line 74) — already reset in sidebar `onNewChat` handler (line 438).
+| Secret Name | Purpose |
+|---|---|
+| `META_ACCESS_TOKEN` | Long-lived user/system token for Meta API |
+| `META_AD_ACCOUNT_ID` | Ad account ID (without `act_` prefix) |
+| `META_APP_ID` | Meta App ID |
+| `META_API_VERSION` | e.g. `v21.0` |
 
-## 2. Trim Onboarding to 3 Screens (`src/pages/onboarding/index.tsx`)
+## 2. Database Migration — `facebook_ads_cache` table
 
-**Screen 1**: WelcomeScreen (name input) — keep as-is  
-**Screen 2**: New `PreferencesScreen` — combine response length (short/medium/detailed), tone (casual/neutral/polished), and interaction preference (typing/talking/both) into one screen  
-**Screen 3**: CompletionScreen — keep as-is, update props
+Create table with RLS scoped to `user_id`:
 
-**Files to delete**:
-- `src/components/onboarding/screens/PersonalSnapshotScreen.tsx`
-- `src/components/onboarding/screens/DailyRhythmScreen.tsx`
-- `src/components/onboarding/screens/PrimaryNeedScreen.tsx`
-- `src/components/onboarding/screens/ProactivityScreen.tsx`
-- `src/components/onboarding/screens/InteractionPreferenceScreen.tsx`
-- `src/components/onboarding/screens/CommunicationStyleScreen.tsx`
+| Column | Type |
+|---|---|
+| id | uuid PK |
+| user_id | uuid (NOT NULL) |
+| campaign_id | text |
+| campaign_name | text |
+| status | text |
+| objective | text |
+| spend | numeric |
+| impressions | bigint |
+| clicks | bigint |
+| cpc | numeric |
+| ctr | numeric |
+| reach | bigint |
+| date_start | date |
+| date_stop | date |
+| raw_json | jsonb |
+| synced_at | timestamptz |
+| created_at | timestamptz |
 
-**New file**: `src/components/onboarding/screens/PreferencesScreen.tsx`  
-Props: `responseLengthPreference`, `tonePreference`, `interactionPreference`, `onResponseLengthChange`, `onToneChange`, `onInteractionChange`, `onContinue`, `isSpeaking`, `onReplay`, `onSkipAudio`
+RLS: Users can SELECT, INSERT, DELETE their own rows.
 
-**Update** `onboarding/index.tsx`: steps = `["welcome", "preferences", "complete"]`, remove unused profile fields, simplify `handleComplete`.
+## 3. Edge Function — `supabase/functions/facebook-ads-sync/index.ts`
 
-## 3. Reset App Store on User Change (`src/pages/Index.tsx`)
+Actions:
+- **test**: Validate env vars are set, call `/me` endpoint, return status
+- **sync**: Fetch campaigns from `/act_{id}/campaigns`, fetch insights from `/act_{id}/insights`, return normalized data
+- **store**: Accept normalized data, upsert into `facebook_ads_cache` using service role client
 
-**Problem**: `useAppStore` is persisted to localStorage (`ozlon-storage`). Switching users keeps stale connections/agents.
+Pattern: Same CORS + env var validation as the existing `maton` edge function.
 
-**Fix**: Add `useEffect` on `user?.id` that calls `useAppStore.getState().reset()` when user changes (not on initial mount). The store already has a `reset()` action (line 141 of useAppStore.ts) that resets to `initialState`.
+Includes retry logic (1 retry on 5xx/network errors) and structured error responses.
 
-## 4. Confirm Enter Submits Chat Input (`src/pages/Index.tsx`)
+## 4. UI — `src/pages/integrations/FacebookAdsDetail.tsx`
 
-**Finding**: Both input areas (pre-interaction line 598, post-interaction line 796) are wrapped in `<form onSubmit={handleSubmit}>`. Both use `<input type="text">` (not textarea). The Send button is `type="submit"` implicitly since it's inside a form — wait, actually the Send button is `type="submit"` at line 640/837. Enter should already work on `<input type="text">` inside a `<form>`. Will verify and add explicit `onKeyDown` as safety.
+Uses existing `IntegrationDetailLayout`, `IntegrationStatusBadge`, `SyncControl` components. Shows:
+- Connection status badge
+- Campaign count
+- Last sync time
+- "Run Test" button → calls edge function with `action: "test"`
+- "Sync Ads Data" button → calls edge function with `action: "sync"`, then `action: "store"`
 
-**Fix**: Add `onKeyDown` to both inputs that calls `handleSubmit` on Enter (without Shift).
+## 5. Routing & Navigation
 
-## 5. Remove Duplicate Voice Buttons (`src/pages/Index.tsx`)
-
-**Remove**:
-- **Phone icon inside pre-interaction input bar** (lines 644-651): the `<Phone>` button that calls `setActiveMode('voice')`
-- **"Talk to Ozlon" standalone button** (lines 684-697): the blue `<Phone>` button below quick actions
-- **Phone icon inside post-interaction input bar** (lines 841-848): same redundant Phone button
-
-**Keep**:
-- Chat/Voice toggle in header (lines 471-511)
-- MicButton for transcription (lines 652, 849)
+- Add route `/integrations/facebook-ads` in `App.tsx`
+- Add Facebook Ads card to `Integrations.tsx` list
+- Add `facebook-ads-sync` to `supabase/config.toml` with `verify_jwt = false`
 
 ## Files Changed
 
 | File | Change |
-|------|--------|
-| `src/hooks/useConversations.ts` | Remove `creatingSession` ref guard, fix `initRan` reset |
-| `src/pages/onboarding/index.tsx` | Reduce to 3 steps, simplify profile state |
-| `src/components/onboarding/screens/PreferencesScreen.tsx` | **New** — combined preferences |
-| `src/pages/Index.tsx` | Remove 3 Phone buttons, add Enter key handler, add store reset on user change |
-| `src/stores/useAppStore.ts` | No changes needed — `reset()` already exists |
-| 6 onboarding screen files | **Delete** |
+|---|---|
+| `supabase/functions/facebook-ads-sync/index.ts` | **New** — edge function |
+| `src/pages/integrations/FacebookAdsDetail.tsx` | **New** — detail page |
+| `src/pages/Integrations.tsx` | Add Facebook Ads card |
+| `src/App.tsx` | Add route |
+| `supabase/config.toml` | Add function config |
+| Migration SQL | Create `facebook_ads_cache` table + RLS |
+| 4 secrets | Added via `add_secret` tool |
 
