@@ -117,18 +117,19 @@ export function useConversations() {
   const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
     if (!user) return;
 
-    const sid = await ensureSession();
-    if (!sid) {
-      console.error("[useConversations] saveMessage: failed to get session");
-      return;
-    }
-
-    // Add to local state immediately
+    // Add to local state immediately (optimistic)
     const newMsg: ConversationMessage = {
       ...msg,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, newMsg]);
+
+    // Ensure session exists (may create one)
+    const sid = await ensureSession();
+    if (!sid) {
+      console.error("[useConversations] saveMessage: failed to get session — message only in local state");
+      return;
+    }
 
     // Save to DB
     const { error } = await supabase.from("chat_messages").insert({
@@ -141,6 +142,8 @@ export function useConversations() {
 
     if (error) {
       console.error("[useConversations] saveMessage DB error:", error);
+    } else {
+      console.log("[useConversations] saveMessage saved to DB:", msg.id);
     }
 
     // Auto-title: if this is the first user message, update the session title
