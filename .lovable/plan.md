@@ -1,34 +1,40 @@
 
 
-# Fix Chat UX, Multi-line Input, and Task Ticker Sync
+# Fix Persistent Chat History
 
-## Problem 1: Chat pushes content upward
-The hero section (title + subtitle) stays visible after messages begin, taking ~100px of vertical space and pushing messages up. The layout doesn't properly become a chat-focused view.
+## Problem
+Chat messages appear to work in the current session but may not persist reliably across page refreshes or session switches. Two root causes:
 
-**Fix**: When `hasInteracted` is true, completely hide the hero section (title + subtitle) instead of shrinking it. This gives all vertical space to the message list.
+1. **Missing UPDATE RLS policy on `chat_messages`**: The `finalizeMessage` function uses `upsert`, which requires UPDATE permission. The table only has INSERT, SELECT, and DELETE policies — no UPDATE. This means:
+   - User messages: inserted by `saveMessage`, then the upsert in `finalizeMessage` silently fails on the update path (harmless since the row already exists with correct content)
+   - Assistant messages: the upsert acts as an INSERT (works since the row doesn't exist yet), but if there's ever a conflict, it will fail silently
 
-## Problem 2: No multi-line input support
-Both input fields are `<input type="text">` which cannot handle newlines. Shift+Enter and Ctrl+Enter do nothing.
+2. **Double-insertion of user messages**: `saveMessage` inserts the user message, then `finalizeMessage` tries to upsert the same ID. Without UPDATE permission, this second call fails silently. This is wasteful but not breaking — however it should be cleaned up.
 
-**Fix**: Replace both `<input>` elements (pre-interaction and post-interaction) with auto-resizing `<textarea>` elements.
-- **Enter** alone: submits the message
-- **Shift+Enter** or **Ctrl+Enter**: inserts a newline
-- Auto-resize up to ~6 lines, then scroll internally
-- Keep the same rounded visual styling
+## Plan
 
-## Problem 3: Task ticker says "failed" when AI succeeds
-The root cause: when a tool call fails (e.g. `search_google_drive` returns 400), the backend emits `status: 'error'` for that step. The frontend `onTaskUpdate` handler calls `completeTask(taskId, 'error')`, marking the entire task as errored. But the AI recovers, tries a different approach, and eventually succeeds. The `onDone` handler then calls `completeTask` for all in-progress tasks, but this task was already marked as 'error' so it stays that way.
+### 1. Add UPDATE RLS policy on `chat_messages`
+Create a migration:
+```sql
+CREATE POLICY "Users can update own messages"
+  ON public.chat_messages FOR UPDATE
+  TO public
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+```
+This ensures `upsert` works correctly for both user and assistant messages.
 
-**Fix in `src/pages/Index.tsx`**:
-- In `onTaskUpdate` for `status: 'error'`: only mark the **step** as error, do NOT mark the entire task as error. Individual tool step failures are normal — the AI retries.
-- In `onDone`: mark ALL tasks (including errored ones) as 'done' since the AI completed successfully. Also set the summary from the final AI response.
-- Only mark a task as 'error' when `onError` fires (meaning the entire chat stream failed).
+### 2. Fix the double-save in `src/pages/Index.tsx`
+Currently `sendMessage` calls both `saveMessage(userMessage)` and `finalizeMessage(userMessage)` for the user message. Since `saveMessage` already inserts to DB and adds to local state, we should remove the redundant `finalizeMessage(userMessage)` call and instead just handle the session title update separately. Change:
+- Remove `finalizeMessage(userMessage)` from the user message save path
+- Keep `saveMessage(userMessage)` which does the insert + local state update
+- Move the auto-title logic: after `saveMessage`, update the session title if it's the first user message
 
-## Files modified
-- `src/pages/Index.tsx` — hide hero when chatting, convert inputs to textareas, fix task ticker logic
+### 3. Verify with browser testing
+After implementing, navigate to the app, send several messages, refresh the page, and confirm messages persist.
 
-## What stays untouched
-- All edge functions, stores, services, other components — zero changes
-- Task activity store, bubble, portal — unchanged
-- All existing functionality preserved (additive only)
+## Files changed
+- **Migration SQL** — add UPDATE policy on `chat_messages`
+- **`src/pages/Index.tsx`** — remove redundant `finalizeMessage(userMessage)` call
+- **`src/hooks/useConversations.ts`** — ensure `saveMessage` handles auto-titling so `finalizeMessage` is only used for assistant messages after streaming
 
