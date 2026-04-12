@@ -30,3 +30,6 @@ verify_jwt = false
 [functions.descript]
 verify_jwt = false
 
+[functions.viral-creative]
+verify_jwt = false
+
