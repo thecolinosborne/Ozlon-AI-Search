@@ -172,8 +172,8 @@ const Index = () => {
     setInput("");
     setIsLoading(true);
 
-    // Save user message to session (fire-and-forget for DB, add locally first)
-    saveMessage(userMessage);
+    // Save user message to session — await to ensure session is created before proceeding
+    await saveMessage(userMessage);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
