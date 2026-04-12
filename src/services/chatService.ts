@@ -263,9 +263,11 @@ export async function streamChat({
             return;
           }
         } catch {
-          // Re-buffer incomplete JSON
-          buffer = line + '\n' + buffer;
-          break;
+          // Only re-buffer if this looks like a split data line
+          if (trimmedLine.startsWith('data: ')) {
+            buffer = trimmedLine + '\n' + buffer;
+          }
+          // Continue processing remaining lines instead of breaking
         }
       }
     }
