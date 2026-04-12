@@ -3840,6 +3840,11 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
         // Run tool loop in background, streaming task updates as they happen
         (async () => {
           try {
+            // Emit infinity router debug event if available
+            if (infinityDebug) {
+              await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
+            }
+
             const result = await runToolLoop(
               modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 10,
               async (event) => {
@@ -3900,6 +3905,29 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       }
       return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // If we have infinity debug data, prepend it to the stream
+    if (infinityDebug) {
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+      (async () => {
+        try {
+          await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
+          const reader = response.body!.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            await writer.write(value);
+          }
+        } finally {
+          await writer.close();
+        }
+      })();
+      return new Response(readable, {
+        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
       });
     }
 
