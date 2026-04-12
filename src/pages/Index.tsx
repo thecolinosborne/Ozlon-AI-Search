@@ -210,13 +210,14 @@ const Index = () => {
             }
           } else if (update.status === 'error') {
             updateStep(update.taskId, update.step, 'error');
-            completeTask(update.taskId, 'error');
+            // Don't mark the whole task as error — the AI may recover
           }
         },
         onDone: () => {
           setIsLoading(false);
-          const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
-          activeTasks.forEach(t => completeTask(t.id, 'done'));
+          // Mark ALL tracked tasks as done — the AI stream completed successfully
+          const allTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress' || t.status === 'error');
+          allTasks.forEach(t => completeTask(t.id, 'done'));
 
           if (assistantContent) {
             finalizeMessage({ id: assistantId, role: "assistant", content: assistantContent });
@@ -230,6 +231,9 @@ const Index = () => {
           console.error("Chat error:", errorMsg);
           updateMessageContent(assistantId, "Something went wrong. Please try again.");
           setIsLoading(false);
+          // Only mark tasks as error when the entire stream fails
+          const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
+          activeTasks.forEach(t => completeTask(t.id, 'error'));
         },
       });
     } catch (error) {
@@ -357,9 +361,22 @@ const Index = () => {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+      e.preventDefault();
+      sendMessage(input);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     sendMessage(input);
+  };
+
+  // Auto-resize textarea
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 150) + 'px';
   };
 
   const handleQuickAction = (action: QuickAction) => {
@@ -583,32 +600,17 @@ const Index = () => {
       {/* Chat Mode Content */}
       {activeMode === 'chat' && (
         <>
-          {/* Hero Section */}
-          <div
-            className={cn(
-              "flex flex-col items-center justify-center transition-all duration-500",
-              hasInteracted ? "pt-16 pb-4" : "flex-1 min-h-[60vh]"
-            )}
-          >
-            <h1
-              className={cn(
-                "font-light tracking-tight text-neutral-800 transition-all duration-500",
-                hasInteracted ? "text-3xl mb-1" : "text-6xl md:text-7xl mb-2"
-              )}
-            >
-              {systemName}
-            </h1>
-            <p
-              className={cn(
-                "text-neutral-500 transition-all duration-500",
-                hasInteracted ? "text-xs mb-4" : "text-base md:text-lg mb-8"
-              )}
-            >
-              Your Personal Operating System
-            </p>
+          {/* Hero Section - hidden when chatting */}
+          {!hasInteracted && (
+            <div className="flex flex-col items-center justify-center flex-1 min-h-[60vh]">
+              <h1 className="font-light tracking-tight text-neutral-800 text-6xl md:text-7xl mb-2">
+                {systemName}
+              </h1>
+              <p className="text-neutral-500 text-base md:text-lg mb-8">
+                Your Personal Operating System
+              </p>
 
-            {/* Search Input - Only show before interaction */}
-            {!hasInteracted && (
+              {/* Search Input */}
               <form onSubmit={handleSubmit} className="w-full max-w-2xl px-4">
                 {attachedFiles.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3 px-2">
@@ -625,15 +627,16 @@ const Index = () => {
                 )}
 
                 <div className="relative group">
-                  <input
+                  <textarea
                     ref={inputRef}
-                    type="text"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => { setInput(e.target.value); autoResize(e.target); }}
+                    onKeyDown={handleKeyDown}
                     placeholder={`Ask ${systemName} anything...`}
                     disabled={isLoading || isRecording}
+                    rows={1}
                     className={cn(
-                      "w-full px-6 py-4 pl-14 text-base rounded-full",
+                      "w-full px-6 py-4 pl-14 text-base rounded-3xl resize-none",
                       "border border-neutral-200 shadow-sm",
                       "focus:outline-none focus:border-neutral-300 focus:shadow-md",
                       "transition-all duration-200",
@@ -644,12 +647,12 @@ const Index = () => {
                   <button
                     type="button"
                     onClick={triggerFileUpload}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                    className="absolute left-4 top-4 p-2 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
                     title="Attach files"
                   >
                     <Paperclip className="w-5 h-5" />
                   </button>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <div className="absolute right-4 top-4 flex items-center gap-2">
                     {(input.trim() || attachedFiles.length > 0) && (
                       <button type="submit" disabled={isLoading} className="p-2 text-neutral-400 hover:text-neutral-600 transition-colors">
                         <Send className="w-4 h-4" />
@@ -659,10 +662,8 @@ const Index = () => {
                   </div>
                 </div>
               </form>
-            )}
 
-            {/* Quick Actions - before interaction */}
-            {!hasInteracted && (
+              {/* Quick Actions */}
               <div className="flex flex-wrap justify-center gap-2 mt-6 px-4">
                 {QUICK_ACTIONS.filter((action) => {
                   if (!action.integration) return true;
@@ -684,13 +685,12 @@ const Index = () => {
                   </button>
                 ))}
               </div>
-            )}
-
-          </div>
+            </div>
+          )
 
           {/* Chat Messages */}
           {hasInteracted && (
-            <div className="flex-1 overflow-y-auto px-4 pb-32">
+            <div className="flex-1 overflow-y-auto px-4 pt-20 pb-36">
               <div className="max-w-2xl mx-auto space-y-4">
                 {messages.map((message) => (
                   <div
@@ -721,7 +721,7 @@ const Index = () => {
                           )}
                         </div>
                       ) : (
-                        message.content
+                        <span className="whitespace-pre-wrap">{message.content}</span>
                       )}
                     </div>
                     {message.role === "assistant" && message.content && (
@@ -799,14 +799,15 @@ const Index = () => {
                   </div>
                 )}
                 <div className="relative">
-                  <input
-                    type="text"
+                  <textarea
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => { setInput(e.target.value); autoResize(e.target); }}
+                    onKeyDown={handleKeyDown}
                     placeholder={isRecording ? "Recording..." : `Ask ${systemName} anything...`}
                     disabled={isLoading || isRecording}
+                    rows={1}
                     className={cn(
-                      "w-full px-5 py-3 pl-12 pr-20 text-sm rounded-full",
+                      "w-full px-5 py-3 pl-12 pr-20 text-sm rounded-2xl resize-none",
                       "border border-neutral-200 shadow-sm",
                       "focus:outline-none focus:border-neutral-300 focus:shadow-md",
                       "transition-all duration-200",
@@ -818,12 +819,12 @@ const Index = () => {
                   <button
                     type="button"
                     onClick={triggerFileUpload}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
+                    className="absolute left-3 top-3 p-1.5 text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 rounded-full transition-all"
                     title="Attach files"
                   >
                     <Paperclip className="w-4 h-4" />
                   </button>
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <div className="absolute right-3 top-3 flex items-center gap-1">
                     {(input.trim() || attachedFiles.length > 0) && !isRecording && (
                       <button type="submit" disabled={isLoading} className="p-1.5 text-neutral-400 hover:text-neutral-600 transition-colors">
                         <Send className="w-4 h-4" />
