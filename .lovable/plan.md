@@ -1,42 +1,34 @@
 
 
-# Fix Higgsfield API — Align with Official Docs + Add Image-to-Video
+# Fix Chat UX, Multi-line Input, and Task Ticker Sync
 
-The edge function uses wrong base URL (`api.higgsfield.ai/v1`), wrong auth format (`X-App-Id` + `Bearer`), and wrong endpoints. The official API docs confirm completely different patterns.
+## Problem 1: Chat pushes content upward
+The hero section (title + subtitle) stays visible after messages begin, taking ~100px of vertical space and pushing messages up. The layout doesn't properly become a chat-focused view.
 
-## Changes
+**Fix**: When `hasInteracted` is true, completely hide the hero section (title + subtitle) instead of shrinking it. This gives all vertical space to the message list.
 
-### 1. Rewrite `supabase/functions/higgsfield/index.ts`
+## Problem 2: No multi-line input support
+Both input fields are `<input type="text">` which cannot handle newlines. Shift+Enter and Ctrl+Enter do nothing.
 
-- **Base URL**: `https://platform.higgsfield.ai`
-- **Auth header**: `Authorization: Key ${HIGGSFIELD_APP_ID}:${HIGGSFIELD_API_KEY}`
-- **Actions**:
-  - `generate_image` → `POST /higgsfield-ai/soul/standard` with `{ prompt, aspect_ratio, resolution }`
-  - `generate_video` → `POST /higgsfield-ai/dop/standard` with `{ image_url, prompt, duration }` (image-to-video)
-  - `get_job_status` → `GET /requests/{request_id}/status`
-  - `cancel_job` → `POST /requests/{request_id}/cancel`
-  - `test_connection` — unchanged (checks secrets exist, no external call)
-  - Remove `list_generations` (not in API)
+**Fix**: Replace both `<input>` elements (pre-interaction and post-interaction) with auto-resizing `<textarea>` elements.
+- **Enter** alone: submits the message
+- **Shift+Enter** or **Ctrl+Enter**: inserts a newline
+- Auto-resize up to ~6 lines, then scroll internally
+- Keep the same rounded visual styling
 
-### 2. Update `src/pages/integrations/HiggsFieldDetail.tsx`
+## Problem 3: Task ticker says "failed" when AI succeeds
+The root cause: when a tool call fails (e.g. `search_google_drive` returns 400), the backend emits `status: 'error'` for that step. The frontend `onTaskUpdate` handler calls `completeTask(taskId, 'error')`, marking the entire task as errored. But the AI recovers, tries a different approach, and eventually succeeds. The `onDone` handler then calls `completeTask` for all in-progress tasks, but this task was already marked as 'error' so it stays that way.
 
-Update capabilities list and model info to reflect real API:
-- Text-to-image via `higgsfield-ai/soul/standard`
-- Image-to-video via `higgsfield-ai/dop/standard`
-- Async queue pattern with status polling
-- Request cancellation support
-- Multiple aspect ratios and resolutions
+**Fix in `src/pages/Index.tsx`**:
+- In `onTaskUpdate` for `status: 'error'`: only mark the **step** as error, do NOT mark the entire task as error. Individual tool step failures are normal — the AI retries.
+- In `onDone`: mark ALL tasks (including errored ones) as 'done' since the AI completed successfully. Also set the summary from the final AI response.
+- Only mark a task as 'error' when `onError` fires (meaning the entire chat stream failed).
 
-### 3. Deploy + test image generation
-
-Deploy the updated function, then call `generate_image` with a test prompt and poll for the result.
-
-## Files changed
-- `supabase/functions/higgsfield/index.ts` — full rewrite
-- `src/pages/integrations/HiggsFieldDetail.tsx` — update capabilities text
+## Files modified
+- `src/pages/Index.tsx` — hide hero when chatting, convert inputs to textareas, fix task ticker logic
 
 ## What stays untouched
-- All other integrations, pages, stores — zero changes
-- Secrets `HIGGSFIELD_APP_ID` and `HIGGSFIELD_API_KEY` already configured
-- Viral Creative backend function — unchanged
+- All edge functions, stores, services, other components — zero changes
+- Task activity store, bubble, portal — unchanged
+- All existing functionality preserved (additive only)
 
