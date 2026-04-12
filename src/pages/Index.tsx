@@ -168,12 +168,13 @@ const Index = () => {
       content: text,
     };
 
-    // Save user message to session
-    await saveMessage(userMessage);
-    await finalizeMessage(userMessage);
-
+    // Clear input and show loading state immediately
     setInput("");
     setIsLoading(true);
+
+    // Save user message to session (fire-and-forget for DB, add locally first)
+    saveMessage(userMessage);
+    finalizeMessage(userMessage);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
