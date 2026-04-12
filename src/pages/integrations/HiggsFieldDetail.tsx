@@ -60,10 +60,16 @@ const HiggsFieldDetail = () => {
   const handleTestConnection = async () => {
     setTesting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("higgsfield", {
-        body: { action: "test_connection" },
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ action: "test_connection" }),
       });
-      if (error) throw error;
+      const data = await res.json();
       if (data?.success) {
         toast.success("Higgsfield AI connection verified");
         setStatus("higgsfield", "connected");
