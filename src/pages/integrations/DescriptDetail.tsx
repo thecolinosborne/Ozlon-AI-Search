@@ -43,21 +43,31 @@ const DescriptDetail = () => {
 
   // Auto-detect backend API key on mount
   useEffect(() => {
+    let cancelled = false;
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        await callDescript("test_connection");
-        setStatus("descript", "connected");
-        setApiKeyConfigured("descript", true);
-        setLastSync("descript", new Date().toISOString());
-      } catch {
+        const result = await callDescript("test_connection");
+        if (cancelled) return;
+        if (result?.success) {
+          setStatus("descript", "connected");
+          setApiKeyConfigured("descript", true);
+          setLastSync("descript", new Date().toISOString());
+        } else {
+          setStatus("descript", "disconnected");
+          setApiKeyConfigured("descript", false);
+        }
+      } catch (e) {
+        console.error("Descript auto-detect failed:", e);
+        if (cancelled) return;
         setStatus("descript", "disconnected");
         setApiKeyConfigured("descript", false);
       } finally {
-        setAutoDetecting(false);
+        if (!cancelled) setAutoDetecting(false);
       }
     };
     detectKey();
+    return () => { cancelled = true; };
   }, []);
 
   const handleDisconnect = () => {
