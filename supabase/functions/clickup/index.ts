@@ -44,7 +44,9 @@ function getTeamId(): string {
 }
 
 function getListId(params?: Record<string, unknown>): string {
-  return (params?.listId as string) || Deno.env.get('CLICKUP_DEFAULT_LIST_ID') || '';
+  const raw = (params?.listId as string) || Deno.env.get('CLICKUP_DEFAULT_LIST_ID') || '';
+  // Strip ClickUp folder prefix (e.g. "6-901710746417" → "901710746417")
+  return raw.replace(/^\d+-/, '');
 }
 
 function getSupabase() {
