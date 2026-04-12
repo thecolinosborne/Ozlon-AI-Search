@@ -136,6 +136,7 @@ export async function streamChat({
   onDelta,
   onToolCall,
   onTaskUpdate,
+  onInfinityDebug,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
