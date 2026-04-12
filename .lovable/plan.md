@@ -1,34 +1,42 @@
 
 
-# Higgsfield Dual-Auth + Hide Viral Creative Layer
+# Fix Higgsfield API — Align with Official Docs + Add Image-to-Video
 
-## What's changing
+The edge function uses wrong base URL (`api.higgsfield.ai/v1`), wrong auth format (`X-App-Id` + `Bearer`), and wrong endpoints. The official API docs confirm completely different patterns.
 
-### 1. Store Higgsfield ID + Secret as separate secrets
-Currently only `HIGGSFIELD_API_KEY` exists. We need to add a second secret `HIGGSFIELD_APP_ID` for the ID (`097b0582-bdee-42e3-a280-9a413faec9b4`) and update `HIGGSFIELD_API_KEY` with the secret key you provided. The edge function will use both for authentication.
+## Changes
 
-### 2. Update Higgsfield edge function for dual-auth
-Modify `supabase/functions/higgsfield/index.ts` to read both `HIGGSFIELD_APP_ID` and `HIGGSFIELD_API_KEY`, and use them together in the API headers (likely `X-App-Id` + `Authorization: Bearer <secret>`). The `test_connection` action will verify both are present.
+### 1. Rewrite `supabase/functions/higgsfield/index.ts`
 
-### 3. Remove Viral Creative from UI — make it a pure backend service
-- Remove the "Viral Creative Intelligence" card from `src/pages/Integrations.tsx`
-- Remove the route from `App.tsx`
-- Delete `src/pages/integrations/ViralCreativeDetail.tsx`
-- Keep the `supabase/functions/viral-creative/index.ts` edge function intact — it becomes a purely internal service called by Higgsfield or other backend code
-- Keep the database tables (`viral_creative_sessions`, `creative_reference_assets`) for logging
+- **Base URL**: `https://platform.higgsfield.ai`
+- **Auth header**: `Authorization: Key ${HIGGSFIELD_APP_ID}:${HIGGSFIELD_API_KEY}`
+- **Actions**:
+  - `generate_image` → `POST /higgsfield-ai/soul/standard` with `{ prompt, aspect_ratio, resolution }`
+  - `generate_video` → `POST /higgsfield-ai/dop/standard` with `{ image_url, prompt, duration }` (image-to-video)
+  - `get_job_status` → `GET /requests/{request_id}/status`
+  - `cancel_job` → `POST /requests/{request_id}/cancel`
+  - `test_connection` — unchanged (checks secrets exist, no external call)
+  - Remove `list_generations` (not in API)
 
-### 4. Fix Higgsfield "Connected" status on integration card
-The edge function already returns `connected: true`. The Higgsfield detail page auto-detects on mount and writes to the integrations store, which persists via localStorage. The integration card on `/integrations` reads from that store. If the user hasn't visited the detail page yet, the card shows "Not Connected". Fix: run Higgsfield auto-detection from the Integrations hub page itself on mount, so the card always reflects the real status.
+### 2. Update `src/pages/integrations/HiggsFieldDetail.tsx`
+
+Update capabilities list and model info to reflect real API:
+- Text-to-image via `higgsfield-ai/soul/standard`
+- Image-to-video via `higgsfield-ai/dop/standard`
+- Async queue pattern with status polling
+- Request cancellation support
+- Multiple aspect ratios and resolutions
+
+### 3. Deploy + test image generation
+
+Deploy the updated function, then call `generate_image` with a test prompt and poll for the result.
 
 ## Files changed
-- `supabase/functions/higgsfield/index.ts` — dual-auth (ID + Secret)
-- `src/pages/Integrations.tsx` — remove Viral Creative card, add Higgsfield auto-detect on mount
-- `src/App.tsx` — remove Viral Creative route + import
-- `src/pages/integrations/ViralCreativeDetail.tsx` — delete file
-- New secret: `HIGGSFIELD_APP_ID`
+- `supabase/functions/higgsfield/index.ts` — full rewrite
+- `src/pages/integrations/HiggsFieldDetail.tsx` — update capabilities text
 
 ## What stays untouched
-- Chat, memory, Infinity Router, AI Processor, Descript, Maton, GHL, ClickUp — zero changes
-- `viral-creative` edge function and DB tables remain (backend-only)
-- All stores, services, hooks, core modules — zero changes
+- All other integrations, pages, stores — zero changes
+- Secrets `HIGGSFIELD_APP_ID` and `HIGGSFIELD_API_KEY` already configured
+- Viral Creative backend function — unchanged
 
