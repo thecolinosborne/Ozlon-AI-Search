@@ -5,35 +5,54 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOnboardingVoice } from "@/hooks/useOnboardingVoice";
 import { OnboardingLayout } from "@/components/onboarding/OnboardingLayout";
 import { WelcomeScreen } from "@/components/onboarding/screens/WelcomeScreen";
-import { PreferencesScreen } from "@/components/onboarding/screens/PreferencesScreen";
+import { NamingScreen } from "@/components/onboarding/screens/NamingScreen";
 import { CompletionScreen } from "@/components/onboarding/screens/CompletionScreen";
+import { supabase } from "@/integrations/supabase/client";
 
-type Step = "welcome" | "preferences" | "complete";
+type Step = "welcome" | "naming" | "complete";
 
-const steps: Step[] = ["welcome", "preferences", "complete"];
+const steps: Step[] = ["welcome", "naming", "complete"];
 
 const Onboarding = () => {
   const navigate = useNavigate();
   const { updateUser } = useAppStore();
-  const { completeOnboarding } = useAuth();
+  const { completeOnboarding, user } = useAuth();
   const { isSpeaking, speakForStep, replayCurrentStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
 
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
-  const [name, setName] = useState("");
-  const [responseLengthPreference, setResponseLengthPreference] = useState<"short" | "medium" | "detailed">("medium");
-  const [tonePreference, setTonePreference] = useState<"casual" | "neutral" | "polished">("neutral");
-  const [interactionPreference, setInteractionPreference] = useState<"typing" | "talking" | "both">("both");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [systemName, setSystemName] = useState("Ozlon");
 
   const stepIndex = steps.indexOf(currentStep);
   const progress = (stepIndex / (steps.length - 1)) * 100;
 
+  // Pre-fill email from auth user
   useEffect(() => {
-    speakForStep(currentStep, name);
-  }, [currentStep, speakForStep, name]);
+    if (user?.email) {
+      setEmail(user.email);
+    }
+    // Pre-fill name from user metadata if available
+    const meta = user?.user_metadata;
+    if (meta?.full_name) {
+      const parts = meta.full_name.split(" ");
+      if (parts.length >= 2) {
+        setFirstName(parts[0]);
+        setLastName(parts.slice(1).join(" "));
+      } else {
+        setFirstName(parts[0] || "");
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
+    speakForStep(currentStep, firstName);
+  }, [currentStep, speakForStep, firstName]);
 
   const handleReplay = useCallback(() => {
-    replayCurrentStep(currentStep, name);
-  }, [replayCurrentStep, currentStep, name]);
+    replayCurrentStep(currentStep, firstName);
+  }, [replayCurrentStep, currentStep, firstName]);
 
   const handleSkipAudio = useCallback(() => {
     stopSpeaking();
@@ -50,32 +69,37 @@ const Onboarding = () => {
   const handleComplete = async () => {
     stopSpeaking();
 
-    const communicationMode = interactionPreference === "typing"
-      ? "text" as const
-      : interactionPreference === "talking"
-        ? "voice" as const
-        : "both" as const;
+    const finalSystemName = systemName.trim() || "Ozlon";
+    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
-    const insightStyle = responseLengthPreference === "short"
-      ? "direct" as const
-      : responseLengthPreference === "detailed"
-        ? "detailed" as const
-        : "adaptive" as const;
+    // Save to profile
+    if (user) {
+      try {
+        await supabase
+          .from("profiles")
+          .update({
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            full_name: fullName,
+            system_name: finalSystemName,
+            onboarding_complete: true,
+          })
+          .eq("user_id", user.id);
+      } catch (error) {
+        console.error("Error saving onboarding profile:", error);
+      }
+    }
 
     updateUser({
-      name,
-      orbName: "Ozlon",
-      communicationMode,
-      insightStyle,
-      responseLengthPreference,
-      tonePreference,
+      name: fullName,
+      orbName: finalSystemName,
       onboardingComplete: true,
     });
 
-    localStorage.setItem("ozlon_user_name", name);
+    localStorage.setItem("ozlon_user_name", fullName);
     localStorage.setItem("ozlon_onboarded", "true");
 
-    await completeOnboarding("Ozlon");
+    await completeOnboarding(finalSystemName);
     navigate("/");
   };
 
@@ -84,8 +108,11 @@ const Onboarding = () => {
       case "welcome":
         return (
           <WelcomeScreen
-            name={name}
-            onNameChange={setName}
+            firstName={firstName}
+            lastName={lastName}
+            email={email}
+            onFirstNameChange={setFirstName}
+            onLastNameChange={setLastName}
             onContinue={nextStep}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}
@@ -93,15 +120,11 @@ const Onboarding = () => {
           />
         );
 
-      case "preferences":
+      case "naming":
         return (
-          <PreferencesScreen
-            responseLengthPreference={responseLengthPreference}
-            tonePreference={tonePreference}
-            interactionPreference={interactionPreference}
-            onResponseLengthChange={setResponseLengthPreference}
-            onToneChange={setTonePreference}
-            onInteractionChange={setInteractionPreference}
+          <NamingScreen
+            systemName={systemName}
+            onSystemNameChange={setSystemName}
             onContinue={nextStep}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}
@@ -112,8 +135,8 @@ const Onboarding = () => {
       case "complete":
         return (
           <CompletionScreen
-            name={name}
-            interactionPreference={interactionPreference}
+            firstName={firstName}
+            systemName={systemName}
             onComplete={handleComplete}
             isSpeaking={isSpeaking}
             onReplay={handleReplay}

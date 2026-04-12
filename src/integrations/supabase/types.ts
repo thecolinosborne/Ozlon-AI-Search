@@ -345,9 +345,12 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           elevenlabs_voice_id: string | null
+          first_name: string | null
           full_name: string | null
           id: string
           is_premium: boolean | null
+          last_name: string | null
+          onboarding_complete: boolean
           playht_voice_id: string | null
           system_name: string | null
           tts_provider: string | null
@@ -363,9 +366,12 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           elevenlabs_voice_id?: string | null
+          first_name?: string | null
           full_name?: string | null
           id?: string
           is_premium?: boolean | null
+          last_name?: string | null
+          onboarding_complete?: boolean
           playht_voice_id?: string | null
           system_name?: string | null
           tts_provider?: string | null
@@ -381,9 +387,12 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           elevenlabs_voice_id?: string | null
+          first_name?: string | null
           full_name?: string | null
           id?: string
           is_premium?: boolean | null
+          last_name?: string | null
+          onboarding_complete?: boolean
           playht_voice_id?: string | null
           system_name?: string | null
           tts_provider?: string | null

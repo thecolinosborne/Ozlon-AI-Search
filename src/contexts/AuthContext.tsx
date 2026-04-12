@@ -68,41 +68,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
-        .select("system_name, voice_enabled, elevenlabs_voice_id")
+        .select("system_name, voice_enabled, elevenlabs_voice_id, onboarding_complete")
         .eq("user_id", userId)
         .single();
 
       console.log("Profile loaded:", profile, "error:", error);
 
-      // Check if user has completed onboarding
-      const hasCustomName = profile?.system_name && profile.system_name !== "Ozlon";
+      const onboardingDone = profile?.onboarding_complete === true;
       const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
       
-      console.log("Onboarding check:", { hasCustomName, wasOnboarded, isNewSignup });
+      console.log("Onboarding check:", { onboardingDone, wasOnboarded, isNewSignup });
 
-      if (hasCustomName) {
-        // User has a custom name, they've completed onboarding
-        setSystemName(profile.system_name);
-        localStorage.setItem(STORAGE_KEY, profile.system_name);
+      if (onboardingDone) {
+        // DB says onboarding is complete — trust it
+        const name = profile?.system_name || "Ozlon";
+        setSystemName(name);
+        localStorage.setItem(STORAGE_KEY, name);
         localStorage.setItem(ONBOARDED_KEY, "true");
         setIsReturningUser(true);
         setNeedsOnboarding(false);
-        console.log("User has completed onboarding previously");
-      } else if (isNewSignup) {
-        // New signup - definitely needs onboarding
-        setNeedsOnboarding(true);
-        setIsReturningUser(false);
-        console.log("New signup - needs onboarding");
-      } else if (!wasOnboarded) {
-        // Not onboarded yet according to localStorage
-        setNeedsOnboarding(true);
-        setIsReturningUser(false);
-        console.log("Not onboarded according to localStorage - needs onboarding");
-      } else {
-        // Was onboarded but has default name
+        console.log("Onboarding already completed (DB flag)");
+      } else if (wasOnboarded) {
+        // localStorage says done but DB doesn't — trust localStorage, patch DB
+        const name = profile?.system_name || localStorage.getItem(STORAGE_KEY) || "Ozlon";
+        setSystemName(name);
         setIsReturningUser(true);
         setNeedsOnboarding(false);
-        console.log("Returning user with default name");
+        // Patch DB to sync
+        supabase.from("profiles").update({ onboarding_complete: true }).eq("user_id", userId).then(() => {});
+        console.log("Patched onboarding_complete from localStorage");
+      } else {
+        // Not onboarded
+        setNeedsOnboarding(true);
+        setIsReturningUser(false);
+        console.log("Needs onboarding");
       }
       
       // Set voice enabled state from profile
