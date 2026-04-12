@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Brain, Sparkles, Zap, Target, BarChart3, RefreshCw, Package, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
