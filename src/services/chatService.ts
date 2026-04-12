@@ -216,6 +216,12 @@ export async function streamChat({
             currentEventType = 'message';
             continue;
           }
+          // Handle infinity_router_debug events
+          if (currentEventType === 'infinity_router_debug' && onInfinityDebug) {
+            onInfinityDebug(parsed as InfinityRouterDebugEvent);
+            currentEventType = 'message';
+            continue;
+          }
           currentEventType = 'message';
 
           const choice = parsed.choices?.[0];
