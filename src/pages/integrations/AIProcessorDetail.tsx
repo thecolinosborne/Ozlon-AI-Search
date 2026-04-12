@@ -1,59 +1,108 @@
-import { useState } from "react";
-import { Cpu, Zap, Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Cpu, Zap, Check, RefreshCw, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
+import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+
 const providers = [
-  { id: "lovable", name: "Lovable AI", description: "Built-in AI gateway — no API key needed", requiresKey: false },
-  { id: "openai", name: "OpenAI", description: "GPT-5, GPT-5-mini, and more", requiresKey: true },
-  { id: "anthropic", name: "Anthropic", description: "Claude family of models", requiresKey: true },
+  { id: "openai", name: "OpenAI", description: "GPT-4.1, GPT-5, GPT-5 Mini" },
+  { id: "gemini", name: "Gemini", description: "Gemini 2.5 Flash, Gemini 2.5 Pro" },
 ];
 
 const models: Record<string, { id: string; name: string }[]> = {
-  lovable: [
-    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    { id: "openai/gpt-5-mini", name: "GPT-5 Mini" },
-    { id: "openai/gpt-5", name: "GPT-5" },
-  ],
   openai: [
+    { id: "gpt-4.1", name: "GPT-4.1" },
     { id: "gpt-5", name: "GPT-5" },
     { id: "gpt-5-mini", name: "GPT-5 Mini" },
-    { id: "gpt-5-nano", name: "GPT-5 Nano" },
   ],
-  anthropic: [
-    { id: "claude-sonnet", name: "Claude Sonnet" },
-    { id: "claude-opus", name: "Claude Opus" },
+  gemini: [
+    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
   ],
 };
 
 const AIProcessorDetail = () => {
-  const { getIntegration, setStatus, updateSettings, setApiKeyConfigured } = useIntegrationsStore();
+  const { getIntegration, setStatus, updateSettings, setSyncDirection, setLastSync } = useIntegrationsStore();
   const integration = getIntegration("ai-processor");
-  const settings = integration.settings as { provider?: string; model?: string; providerKeys?: Record<string, boolean> };
+  const settings = integration.settings as { provider?: string; model?: string };
 
-  const activeProvider = settings.provider || "lovable";
+  const activeProvider = settings.provider || "openai";
   const activeModel = settings.model || models[activeProvider]?.[0]?.id || "";
-  const providerKeys = settings.providerKeys || {};
+
+  const [verifiedProviders, setVerifiedProviders] = useState<Record<string, boolean | null>>({});
+  const [syncing, setSyncing] = useState(false);
+
+  const verifyProvider = useCallback(async (providerId: string) => {
+    setVerifiedProviders((prev) => ({ ...prev, [providerId]: null }));
+    try {
+      const testModel = providerId === "gemini" ? "google/gemini-2.5-flash" : "gpt-5-mini";
+      const response = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "ping" }],
+          model: testModel,
+        }),
+      });
+      setVerifiedProviders((prev) => ({ ...prev, [providerId]: response.ok }));
+    } catch {
+      setVerifiedProviders((prev) => ({ ...prev, [providerId]: false }));
+    }
+  }, []);
+
+  const verifyAll = useCallback(async () => {
+    setSyncing(true);
+    await Promise.all(providers.map((p) => verifyProvider(p.id)));
+    setSyncing(false);
+    setLastSync("ai-processor", new Date().toISOString());
+    const allVerified = providers.every((p) => verifiedProviders[p.id] === true);
+    setStatus("ai-processor", allVerified ? "connected" : "error");
+  }, [verifyProvider, verifiedProviders, setLastSync, setStatus]);
+
+  useEffect(() => {
+    providers.forEach((p) => verifyProvider(p.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    console.log("[AIProcessor] Providers:", providers.map((p) => p.id), "Verified:", verifiedProviders);
+  }, [verifiedProviders]);
 
   const setProvider = (id: string) => {
     const firstModel = models[id]?.[0]?.id || "";
     updateSettings("ai-processor", { provider: id, model: firstModel });
     setStatus("ai-processor", "connected");
-    toast.success(`AI Provider set to ${providers.find(p => p.id === id)?.name}`);
+    toast.success(`AI Provider set to ${providers.find((p) => p.id === id)?.name}`);
   };
 
   const setModel = (modelId: string) => {
     updateSettings("ai-processor", { model: modelId });
   };
 
-  const handleSaveKey = (providerId: string, key: string) => {
-    const updated = { ...providerKeys, [providerId]: true };
-    updateSettings("ai-processor", { providerKeys: updated });
-    setApiKeyConfigured("ai-processor", true);
-    toast.success(`${providers.find(p => p.id === providerId)?.name} key saved`);
+  const renderVerificationBadge = (providerId: string) => {
+    const status = verifiedProviders[providerId];
+    if (status === null || status === undefined) {
+      return <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />;
+    }
+    if (status) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-destructive">
+        <XCircle className="w-3.5 h-3.5" /> Unverified
+      </span>
+    );
   };
 
   return (
@@ -82,24 +131,27 @@ const AIProcessorDetail = () => {
                 <p className="text-sm font-medium text-foreground">{provider.name}</p>
                 <p className="text-[11px] text-muted-foreground">{provider.description}</p>
               </div>
-              {activeProvider === provider.id && (
-                <div className="p-1 rounded-full bg-primary">
-                  <Check className="w-3 h-3 text-primary-foreground" />
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {renderVerificationBadge(provider.id)}
+                {activeProvider === provider.id && (
+                  <div className="p-1 rounded-full bg-primary">
+                    <Check className="w-3 h-3 text-primary-foreground" />
+                  </div>
+                )}
+              </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* API Key for selected provider */}
-      {providers.find(p => p.id === activeProvider)?.requiresKey && (
-        <ApiKeyInput
-          label={`${providers.find(p => p.id === activeProvider)?.name} API Key`}
-          configured={!!providerKeys[activeProvider]}
-          onSave={(key) => handleSaveKey(activeProvider, key)}
-        />
-      )}
+      {/* Sync Control */}
+      <SyncControl
+        direction={integration.syncDirection}
+        onDirectionChange={(d) => setSyncDirection("ai-processor", d)}
+        lastSync={integration.lastSync}
+        onSync={verifyAll}
+        syncing={syncing}
+      />
 
       {/* Model Selection */}
       <div className="space-y-3">
