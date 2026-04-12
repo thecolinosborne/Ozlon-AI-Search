@@ -30,6 +30,7 @@ const GOALS = [
 
 const ViralCreativeDetail = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { getIntegration, setStatus, setApiKeyConfigured, setLastSync } = useIntegrationsStore();
   const integration = getIntegration("viral-creative");
   const higgsfield = getIntegration("higgsfield");
