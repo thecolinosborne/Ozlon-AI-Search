@@ -101,7 +101,7 @@ serve(async (req) => {
 
       // ─── IMPORT MEDIA ────────────────────────────────────
       case "import_media": {
-        const { media_url, project_id: existingProjectId } = params;
+        const { media_url, project_id: existingProjectId, project_name, file_name } = params;
         if (!media_url) {
           return new Response(JSON.stringify({ error: "media_url is required" }), {
             status: 400,
@@ -109,8 +109,12 @@ serve(async (req) => {
           });
         }
 
-        const payload: Record<string, unknown> = { input: { url: media_url } };
+        const fname = file_name || media_url.split("/").pop()?.split("?")[0] || "media";
+        const payload: Record<string, unknown> = {
+          add_media: { [fname]: { url: media_url } },
+        };
         if (existingProjectId) payload.project_id = existingProjectId;
+        if (!existingProjectId) payload.project_name = project_name || "Imported Media";
 
         const data = await descriptFetch("/jobs/import/project_media", DESCRIPT_API_KEY, {
           method: "POST",
