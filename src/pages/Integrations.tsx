@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare } from "lucide-react";
+import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare, Brain } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 
@@ -45,6 +45,13 @@ const integrations = [
     description: "Task management with AI-powered project manager replies inside task comments.",
     icon: CheckSquare,
     path: "/integrations/clickup",
+  },
+  {
+    id: "viral-creative",
+    name: "Viral Creative Intelligence",
+    description: "AI-powered creative strategy, angle discovery, and prompt optimization for Higgsfield.",
+    icon: Brain,
+    path: "/integrations/viral-creative",
   },
 ];
 

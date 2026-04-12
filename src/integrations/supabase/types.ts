@@ -178,6 +178,39 @@ export type Database = {
         }
         Relationships: []
       }
+      creative_reference_assets: {
+        Row: {
+          analysis: Json | null
+          asset_type: string | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          notes: string | null
+          source_url: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis?: Json | null
+          asset_type?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          notes?: string | null
+          source_url?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis?: Json | null
+          asset_type?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          notes?: string | null
+          source_url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       descript_jobs: {
         Row: {
           created_at: string
@@ -470,6 +503,60 @@ export type Database = {
           proposal_type?: string
           status?: string
           title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      viral_creative_sessions: {
+        Row: {
+          angle_outputs: Json | null
+          content_goal: string | null
+          created_at: string
+          hook_outputs: Json | null
+          id: string
+          output_metadata: Json | null
+          platform: string | null
+          prompt_candidates: Json | null
+          request_text: string | null
+          score_data: Json | null
+          selected_prompts: Json | null
+          source_context: Json | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          angle_outputs?: Json | null
+          content_goal?: string | null
+          created_at?: string
+          hook_outputs?: Json | null
+          id?: string
+          output_metadata?: Json | null
+          platform?: string | null
+          prompt_candidates?: Json | null
+          request_text?: string | null
+          score_data?: Json | null
+          selected_prompts?: Json | null
+          source_context?: Json | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          angle_outputs?: Json | null
+          content_goal?: string | null
+          created_at?: string
+          hook_outputs?: Json | null
+          id?: string
+          output_metadata?: Json | null
+          platform?: string | null
+          prompt_candidates?: Json | null
+          request_text?: string | null
+          score_data?: Json | null
+          selected_prompts?: Json | null
+          source_context?: Json | null
+          status?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
