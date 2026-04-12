@@ -43,21 +43,46 @@ const DescriptDetail = () => {
 
   // Auto-detect backend API key on mount
   useEffect(() => {
+    let cancelled = false;
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        await callDescript("test_connection");
-        setStatus("descript", "connected");
-        setApiKeyConfigured("descript", true);
-        setLastSync("descript", new Date().toISOString());
-      } catch {
-        setStatus("descript", "disconnected");
-        setApiKeyConfigured("descript", false);
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/descript`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ action: "test_connection" }),
+        });
+        if (cancelled) return;
+        if (res.ok) {
+          const result = await res.json();
+          if (result?.success) {
+            setStatus("descript", "connected");
+            setApiKeyConfigured("descript", true);
+            setLastSync("descript", new Date().toISOString());
+          } else {
+            setStatus("descript", "disconnected");
+            setApiKeyConfigured("descript", false);
+          }
+        } else {
+          setStatus("descript", "disconnected");
+          setApiKeyConfigured("descript", false);
+        }
+      } catch (e) {
+        console.error("Descript auto-detect failed:", e);
+        if (!cancelled) {
+          setStatus("descript", "disconnected");
+          setApiKeyConfigured("descript", false);
+        }
       } finally {
-        setAutoDetecting(false);
+        if (!cancelled) setAutoDetecting(false);
       }
     };
     detectKey();
+    return () => { cancelled = true; };
   }, []);
 
   const handleDisconnect = () => {
