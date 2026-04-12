@@ -20,7 +20,6 @@ const HiggsFieldDetail = () => {
       setAutoDetecting(true);
       try {
         const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-        console.log("[higgsfield] detecting via", url);
         const res = await fetch(url, {
           method: "POST",
           headers: {
@@ -30,7 +29,7 @@ const HiggsFieldDetail = () => {
           body: JSON.stringify({ action: "test_connection" }),
         });
         const data = await res.json();
-        console.log("[higgsfield] detection result", data);
+        
         if (cancelled) return;
         if (data?.success) {
           setStatus("higgsfield", "connected");
@@ -44,7 +43,7 @@ const HiggsFieldDetail = () => {
           setApiKeyConfigured("higgsfield", false);
         }
       } catch (e) {
-        console.error("[higgsfield] detection error", e);
+        
         if (!cancelled) {
           setStatus("higgsfield", "disconnected");
           setApiKeyConfigured("higgsfield", false);
