@@ -1,106 +1,62 @@
 
 
-# Infinity Router — Implementation Plan
+# Update AI Processor — OpenAI + Gemini Only, With Connection Verification
 
-## Overview
-Add a non-invasive intelligence orchestrator to the `chat` edge function that classifies requests and optionally pre-processes via Gemini (Lovable AI Gateway) before the existing OpenAI flow runs. Disabled by default via feature flags.
+## Summary
+Replace the provider list with only **OpenAI** and **Gemini** (the two actually connected providers), add a per-provider connection verification badge, and add the `SyncControl` component. Only `AIProcessorDetail.tsx` changes. No other files touched.
 
-## Step 1: Add Secrets
-Store two feature flag secrets:
-- `INFINITY_ROUTER_ENABLED` → `"true"` (enabled for immediate testing)
-- `INFINITY_ROUTER_DEBUG` → `"true"` (enabled for immediate testing)
+## What Changes (single file: `src/pages/integrations/AIProcessorDetail.tsx`)
 
-`LOVABLE_API_KEY` already exists for Gemini calls via Lovable AI Gateway.
+### 1. Imports
+Add: `useEffect` from React, `SyncControl` from integrations, `RefreshCw` from lucide-react, `supabase` client.
 
-## Step 2: Add Router to Edge Function
-**File: `supabase/functions/chat/index.ts`**
-
-Insert ~180 lines **before** the `serve()` handler (around line 3329). The router code is fully isolated:
-
-**a) Classifier** — pure logic function analyzing the last user message:
+### 2. Replace `providers` array (lines 9–13)
 ```typescript
-interface ClassifierOutput {
-  intent: string;
-  task_type: string;
-  input_length: number;
-  has_files: boolean;
-  file_types: string[];
-  needs_memory: boolean;
-  needs_multimodal: boolean;
-  needs_live_data: boolean;
-  needs_deep_reasoning: boolean;
-  confidence: number;
-}
-```
-Uses keyword heuristics (no API call). Detects memory keywords, analysis patterns, long input, file references.
-
-**b) Route Scorer** — weighted scoring across 6 paths:
-| Signal | Path | Weight |
-|--------|------|--------|
-| input > 8000 chars | gemini_flash | +3 |
-| file/multimodal keywords | gemini_pro | +4 |
-| simple short question | default_chat | +5 |
-| memory/remember keywords | retrieval | +4 |
-| API/service keywords | action | +5 |
-| analysis/synthesis | gemini_pro | +3 |
-| low confidence | default_chat | +3 |
-
-Highest wins. Ties → `default_chat`. `retrieval` and `action` paths just confirm the existing system handles it (no behavior change).
-
-**c) Gemini Pre-processor** — only runs for `gemini_flash`/`gemini_pro` paths:
-- Calls Lovable AI Gateway (`google/gemini-2.5-flash` or `google/gemini-2.5-pro`)
-- Sends user input with a task-specific prompt (summarize/extract/analyze)
-- Returns enriched context string
-
-**d) Router wrapper** — 5-line addition inside `serve()` handler (after request parsing, before system prompt build ~line 3366):
-```typescript
-// Infinity Router - additive pre-processing
-const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
-if (routerEnabled) {
-  try {
-    const enrichment = await runInfinityRouter(messages, Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true');
-    if (enrichment) systemPrompt += enrichment;
-  } catch (e) { console.error('[InfinityRouter] Fallback to default:', e); }
-}
+const providers = [
+  { id: "openai", name: "OpenAI", description: "GPT-4.1, GPT-5, GPT-5 Mini" },
+  { id: "gemini", name: "Gemini", description: "Gemini 2.5 Flash, Gemini 2.5 Pro" },
+];
 ```
 
-Any failure → silently skipped, existing flow runs unchanged.
+### 3. Replace `models` map (lines 15–30)
+```typescript
+const models = {
+  openai: [
+    { id: "gpt-4.1", name: "GPT-4.1" },
+    { id: "gpt-5", name: "GPT-5" },
+    { id: "gpt-5-mini", name: "GPT-5 Mini" },
+  ],
+  gemini: [
+    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+  ],
+};
+```
 
-**e) Debug logging** — when `INFINITY_ROUTER_DEBUG` is true, emits an SSE event `infinity_router_debug` with path chosen, scores, and timing. The existing `chatService.ts` already handles unknown event types gracefully (ignores them).
+### 4. Add connection verification state + on-mount check
+- State: `verifiedProviders: Record<string, boolean | null>` (null = checking)
+- On mount, ping the `chat` edge function with a minimal payload for each provider to confirm the backend secrets (`OPENAI_API_KEY`, `LOVABLE_API_KEY`) are working
+- Show a green "Verified" dot or red "Unverified" dot next to each provider card
+- Remove the `requiresKey` / `ApiKeyInput` flow entirely (keys are already configured as secrets)
 
-## Step 3: Frontend Debug Panel
-**New file: `src/components/InfinityRouterDebug.tsx`**
+### 5. Add SyncControl component
+- Import and render `SyncControl` between provider cards and model picker
+- Wire to the integrations store (`ai-processor` ID) for sync direction and last sync time
+- "Sync Now" re-runs the verification checks
 
-Small panel showing:
-- Router enabled/disabled status
-- Last selected path + reason
-- Scores breakdown
-- Execution time
-- Fallback triggered or not
+### 6. Default provider → "openai"
+Change fallback from `"lovable"` to `"openai"`.
 
-Reads from a state store that captures the debug SSE event.
-
-**Edit: `src/pages/Developer.tsx`**
-
-Import and render the debug panel at the bottom of the page.
-
-## Step 4: Handle Debug Events in Chat Service
-**Edit: `src/services/chatService.ts`**
-
-Add handling for `infinity_router_debug` event type in the SSE parser (similar to existing `task_update` handling). Store in a lightweight global/ref for the debug panel.
+### 7. Add dev console log
+```typescript
+console.log('[AIProcessor] Providers:', providers.map(p => p.id), 'Verified:', verifiedProviders);
+```
 
 ## What Does NOT Change
-- chatService.ts streaming logic (additive only)
-- AI service layer (`src/core/ai/`)
-- Orchestrator, stores, existing components
-- Memory/Wisdom Engine
-- Maton/tool integrations
-- Any existing routes, pages, or UI
-
-## Fallback Guarantees
-- Feature flag off → zero code paths execute
-- Classifier error → skip, run existing
-- Gemini call fails → skip enrichment, run existing
-- Scoring returns no winner → default_chat
-- User never sees router errors
+- `IntegrationDetailLayout` component
+- `useIntegrationsStore` store
+- `SyncControl` component
+- Model selection UI logic (same iteration pattern)
+- Fallback Routing section at the bottom (kept as-is)
+- No other pages or files
 
