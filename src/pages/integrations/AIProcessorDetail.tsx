@@ -93,7 +93,7 @@ const AIProcessorDetail = () => {
     }
     if (status) {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary">
           <CheckCircle2 className="w-3.5 h-3.5" /> Verified
         </span>
       );
