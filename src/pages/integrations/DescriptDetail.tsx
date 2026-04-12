@@ -1,8 +1,7 @@
-import { useState } from "react";
-import { Video, FolderOpen, Play, Upload, ExternalLink, RefreshCw, X, Info, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Video, Play, Upload, ExternalLink, RefreshCw, X, Info, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
-import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -21,6 +20,7 @@ const DescriptDetail = () => {
   const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured } = useIntegrationsStore();
   const integration = getIntegration("descript");
 
+  const [autoDetecting, setAutoDetecting] = useState(true);
   const [testing, setTesting] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
   const [importingMedia, setImportingMedia] = useState(false);
@@ -41,12 +41,24 @@ const DescriptDetail = () => {
     return data;
   };
 
-  const handleSaveKey = (key: string) => {
-    setApiKeyConfigured("descript", true);
-    setStatus("descript", "connected");
-    setLastSync("descript", new Date().toISOString());
-    toast.success("Descript API key saved");
-  };
+  // Auto-detect backend API key on mount
+  useEffect(() => {
+    const detectKey = async () => {
+      setAutoDetecting(true);
+      try {
+        await callDescript("test_connection");
+        setStatus("descript", "connected");
+        setApiKeyConfigured("descript", true);
+        setLastSync("descript", new Date().toISOString());
+      } catch {
+        setStatus("descript", "disconnected");
+        setApiKeyConfigured("descript", false);
+      } finally {
+        setAutoDetecting(false);
+      }
+    };
+    detectKey();
+  }, []);
 
   const handleDisconnect = () => {
     setStatus("descript", "disconnected");
@@ -159,7 +171,19 @@ const DescriptDetail = () => {
         ) : undefined
       }
     >
-      <ApiKeyInput label="Descript API Key" configured={integration.apiKeyConfigured} onSave={handleSaveKey} />
+      {autoDetecting && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 flex items-center gap-3">
+          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Detecting backend API key…</p>
+        </div>
+      )}
+
+      {!autoDetecting && integration.status === "disconnected" && (
+        <div className="p-4 rounded-2xl border border-destructive/30 bg-destructive/5 flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 text-destructive" />
+          <p className="text-sm text-destructive">Backend API key not configured. Add <code className="font-mono text-xs">DESCRIPT_API_KEY</code> as a backend secret.</p>
+        </div>
+      )}
 
       {integration.status === "connected" && (
         <>
