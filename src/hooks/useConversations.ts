@@ -142,6 +142,26 @@ export function useConversations() {
     if (error) {
       console.error("[useConversations] saveMessage DB error:", error);
     }
+
+    // Auto-title: if this is the first user message, update the session title
+    if (msg.role === "user") {
+      const existingUserMessages = messages.filter((m) => m.role === "user");
+      if (existingUserMessages.length === 0) {
+        const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+        await supabase
+          .from("chat_sessions")
+          .update({ title, updated_at: new Date().toISOString() })
+          .eq("id", sid);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sid ? { ...s, title } : s))
+        );
+      } else {
+        await supabase
+          .from("chat_sessions")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", sid);
+      }
+    }
   }, [user, ensureSession]);
 
   // Update a message content (for streaming)
