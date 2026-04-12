@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
-import { supabase } from "@/integrations/supabase/client";
+
 
 const integrations = [
   {
@@ -59,11 +59,18 @@ const Integrations = () => {
     let cancelled = false;
     const detect = async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("higgsfield", {
-          body: { action: "test_connection" },
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ action: "test_connection" }),
         });
+        const data = await res.json();
         if (cancelled) return;
-        if (!error && data?.success) {
+        if (data?.success) {
           setStatus("higgsfield", "connected");
           setApiKeyConfigured("higgsfield", true);
           setLastSync("higgsfield", new Date().toISOString());
