@@ -174,7 +174,6 @@ const Index = () => {
 
     // Save user message to session (fire-and-forget for DB, add locally first)
     saveMessage(userMessage);
-    finalizeMessage(userMessage);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
