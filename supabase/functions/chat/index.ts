@@ -3540,6 +3540,21 @@ serve(async (req) => {
     // Build system prompt
     let systemPrompt = buildSystemPrompt(systemName, userSettings);
 
+    // Infinity Router — additive pre-processing
+    let infinityDebug: InfinityRouterResult | null = null;
+    const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
+    if (routerEnabled) {
+      try {
+        const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
+        const routerResult = await runInfinityRouter(messages, debugMode);
+        if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
+        infinityDebug = routerResult.debug;
+        console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
+      } catch (e) {
+        console.error('[InfinityRouter] Fallback to default:', e);
+      }
+    }
+
     // Get Maton connections for data injection AND tool availability
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
     const connMap: MultiConnMap = new Map();
