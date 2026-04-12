@@ -332,17 +332,17 @@ const ClickUpDetail = () => {
                 <span className="text-sm text-foreground">{label}</span>
                 <button
                   onClick={() =>
-                    updateConfigField(key, !(config as Record<string, unknown>)[key])
+                    updateConfigField(key, !config[key as keyof ClickUpConfig])
                   }
                   className={cn(
                     "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    (config as Record<string, unknown>)[key] ? "bg-primary" : "bg-muted"
+                    config[key as keyof ClickUpConfig] ? "bg-primary" : "bg-muted"
                   )}
                 >
                   <div
                     className={cn(
                       "rounded-full bg-white transition-transform shadow-sm",
-                      (config as Record<string, unknown>)[key]
+                      config[key as keyof ClickUpConfig]
                         ? "translate-x-[18px]"
                         : "translate-x-0"
                     )}
