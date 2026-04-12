@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { getAllAgents, getAllHooks, getAllCards, getRegistrySummary } from "@/core/registry";
+import { InfinityRouterDebug } from "@/components/InfinityRouterDebug";
 
 const Developer = () => {
   const [testResults, setTestResults] = useState<string[]>([]);
@@ -115,6 +116,9 @@ const Developer = () => {
             </Button>
           </SettingsSection>
         )}
+
+        {/* Infinity Router Debug */}
+        <InfinityRouterDebug />
       </div>
     </div>
   );

@@ -94,6 +94,15 @@ export interface TaskUpdate {
   summary?: string;
 }
 
+export interface InfinityRouterDebugEvent {
+  path: string;
+  scores: Record<string, number>;
+  classification: Record<string, unknown>;
+  enrichment: string | null;
+  timing_ms: number;
+  fallback: boolean;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -106,6 +115,7 @@ export interface StreamChatOptions {
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
   onTaskUpdate?: (update: TaskUpdate) => void;
+  onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -126,6 +136,7 @@ export async function streamChat({
   onDelta,
   onToolCall,
   onTaskUpdate,
+  onInfinityDebug,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -202,6 +213,12 @@ export async function streamChat({
           // Handle task_update events
           if (currentEventType === 'task_update' && onTaskUpdate) {
             onTaskUpdate(parsed as TaskUpdate);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle infinity_router_debug events
+          if (currentEventType === 'infinity_router_debug' && onInfinityDebug) {
+            onInfinityDebug(parsed as InfinityRouterDebugEvent);
             currentEventType = 'message';
             continue;
           }

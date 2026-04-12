@@ -3327,6 +3327,181 @@ async function runToolLoop(
 }
 
 // ============================================================================
+// INFINITY ROUTER — Intelligent Pre-processing Layer
+// ============================================================================
+
+interface InfinityClassification {
+  intent: string;
+  input_length: number;
+  needs_memory: boolean;
+  needs_deep_reasoning: boolean;
+  needs_multimodal: boolean;
+  needs_live_data: boolean;
+  confidence: number;
+}
+
+type InfinityPath = 'gemini_flash' | 'gemini_pro' | 'retrieval' | 'action' | 'default_chat';
+
+interface InfinityRouterResult {
+  path: InfinityPath;
+  scores: Record<InfinityPath, number>;
+  classification: InfinityClassification;
+  enrichment: string | null;
+  timing_ms: number;
+  fallback: boolean;
+}
+
+function classifyMessage(messages: { role: string; content: string }[]): InfinityClassification {
+  const lastUser = [...messages].reverse().find(m => m.role === 'user');
+  const text = lastUser?.content || '';
+  const lower = text.toLowerCase();
+  const len = text.length;
+
+  const memoryKw = ['remember', 'recall', 'last time', 'you said', 'we discussed', 'previously', 'my preference', 'i told you', 'you know that'];
+  const analysisKw = ['analyze', 'analysis', 'compare', 'synthesize', 'summarize a long', 'deep dive', 'explain in detail', 'break down', 'evaluate', 'assess', 'review this', 'what do you think about'];
+  const multimodalKw = ['image', 'photo', 'screenshot', 'picture', 'file', 'pdf', 'document', 'attachment'];
+  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose'];
+  const liveDataKw = ['weather', 'stock', 'price', 'news', 'current', 'today\'s', 'latest'];
+
+  return {
+    intent: analysisKw.some(k => lower.includes(k)) ? 'analysis' : actionKw.some(k => lower.includes(k)) ? 'action' : 'general',
+    input_length: len,
+    needs_memory: memoryKw.some(k => lower.includes(k)),
+    needs_deep_reasoning: analysisKw.some(k => lower.includes(k)) || len > 2000,
+    needs_multimodal: multimodalKw.some(k => lower.includes(k)),
+    needs_live_data: liveDataKw.some(k => lower.includes(k)),
+    confidence: len < 20 ? 0.9 : len > 5000 ? 0.5 : 0.7,
+  };
+}
+
+function scoreRoutes(c: InfinityClassification): Record<InfinityPath, number> {
+  const scores: Record<InfinityPath, number> = {
+    gemini_flash: 0,
+    gemini_pro: 0,
+    retrieval: 0,
+    action: 0,
+    default_chat: 2, // base weight — default always has a floor
+  };
+
+  // Long input → flash for summarization/extraction
+  if (c.input_length > 8000) scores.gemini_flash += 3;
+  if (c.input_length > 3000) scores.gemini_flash += 1;
+
+  // Multimodal → pro
+  if (c.needs_multimodal) scores.gemini_pro += 4;
+
+  // Deep reasoning → pro
+  if (c.needs_deep_reasoning) scores.gemini_pro += 3;
+
+  // Memory → retrieval path (existing wisdom engine handles it)
+  if (c.needs_memory) scores.retrieval += 4;
+
+  // Action intent → action path (existing tool loop handles it)
+  if (c.intent === 'action') scores.action += 5;
+
+  // Simple short question → default
+  if (c.input_length < 100 && c.confidence > 0.8) scores.default_chat += 5;
+
+  // Low confidence → safe default
+  if (c.confidence < 0.5) scores.default_chat += 3;
+
+  return scores;
+}
+
+function pickRoute(scores: Record<InfinityPath, number>): InfinityPath {
+  let best: InfinityPath = 'default_chat';
+  let bestScore = -1;
+  for (const [path, score] of Object.entries(scores)) {
+    if (score > bestScore) { bestScore = score; best = path as InfinityPath; }
+  }
+  return best;
+}
+
+async function geminiPreProcess(
+  messages: { role: string; content: string }[],
+  path: 'gemini_flash' | 'gemini_pro',
+): Promise<string | null> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!apiKey) { console.error('[InfinityRouter] LOVABLE_API_KEY not set'); return null; }
+
+  const lastUser = [...messages].reverse().find(m => m.role === 'user');
+  if (!lastUser) return null;
+
+  const model = path === 'gemini_pro' ? 'google/gemini-2.5-pro' : 'google/gemini-2.5-flash';
+  const taskPrompt = path === 'gemini_pro'
+    ? 'You are a pre-processor. Analyze the user\'s input and produce a structured summary covering: key topics, implicit questions, suggested approach, and any nuances. Be concise (under 300 words).'
+    : 'You are a pre-processor. Extract the key facts, questions, and context from this input. Produce a concise structured brief (under 200 words).';
+
+  try {
+    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: taskPrompt },
+          { role: 'user', content: lastUser.content },
+        ],
+        max_tokens: 500,
+      }),
+    });
+
+    if (!res.ok) {
+      console.error(`[InfinityRouter] Gemini ${path} failed: ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+
+    return `\n\n===========================================================
+INFINITY ROUTER — PRE-PROCESSED CONTEXT (${path})
+===========================================================
+${content}`;
+  } catch (e) {
+    console.error(`[InfinityRouter] Gemini call error:`, e);
+    return null;
+  }
+}
+
+async function runInfinityRouter(
+  messages: { role: string; content: string }[],
+  debugMode: boolean,
+): Promise<{ enrichment: string | null; debug: InfinityRouterResult | null }> {
+  const start = Date.now();
+  let fallback = false;
+
+  try {
+    const classification = classifyMessage(messages);
+    const scores = scoreRoutes(classification);
+    const path = pickRoute(scores);
+
+    console.log(`[InfinityRouter] Path: ${path}, Scores:`, scores);
+
+    let enrichment: string | null = null;
+
+    // Only call Gemini for gemini_flash/gemini_pro paths
+    if (path === 'gemini_flash' || path === 'gemini_pro') {
+      enrichment = await geminiPreProcess(messages, path);
+      if (!enrichment) fallback = true; // Gemini failed, will use default flow
+    }
+    // retrieval and action paths: no enrichment needed, existing systems handle them
+
+    const timing_ms = Date.now() - start;
+    const result: InfinityRouterResult = { path, scores, classification, enrichment, timing_ms, fallback };
+
+    return {
+      enrichment,
+      debug: debugMode ? result : null,
+    };
+  } catch (e) {
+    console.error('[InfinityRouter] Error, falling back:', e);
+    return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0 }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null };
+  }
+}
+
+// ============================================================================
 // MAIN REQUEST HANDLER
 // ============================================================================
 
@@ -3364,6 +3539,21 @@ serve(async (req) => {
 
     // Build system prompt
     let systemPrompt = buildSystemPrompt(systemName, userSettings);
+
+    // Infinity Router — additive pre-processing
+    let infinityDebug: InfinityRouterResult | null = null;
+    const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
+    if (routerEnabled) {
+      try {
+        const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
+        const routerResult = await runInfinityRouter(messages, debugMode);
+        if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
+        infinityDebug = routerResult.debug;
+        console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
+      } catch (e) {
+        console.error('[InfinityRouter] Fallback to default:', e);
+      }
+    }
 
     // Get Maton connections for data injection AND tool availability
     const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
@@ -3650,6 +3840,11 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
         // Run tool loop in background, streaming task updates as they happen
         (async () => {
           try {
+            // Emit infinity router debug event if available
+            if (infinityDebug) {
+              await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
+            }
+
             const result = await runToolLoop(
               modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 10,
               async (event) => {
@@ -3710,6 +3905,29 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       }
       return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // If we have infinity debug data, prepend it to the stream
+    if (infinityDebug) {
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+      (async () => {
+        try {
+          await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
+          const reader = response.body!.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            await writer.write(value);
+          }
+        } finally {
+          await writer.close();
+        }
+      })();
+      return new Response(readable, {
+        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
       });
     }
 
