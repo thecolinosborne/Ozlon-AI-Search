@@ -208,12 +208,15 @@ const ViralCreativeDetail = () => {
       {isConnected && (
         <div className="space-y-6">
           {/* Higgsfield status */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <button
+            onClick={() => navigate("/integrations/higgsfield")}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
             <Sparkles className="w-4 h-4" />
             Higgsfield: <Badge variant={higgsfield.status === "connected" ? "default" : "secondary"}>
               {higgsfield.status === "connected" ? "Connected" : "Not Connected"}
             </Badge>
-          </div>
+          </button>
 
           {/* Campaign Input */}
           <div className="space-y-4 p-5 rounded-xl border border-border/40 bg-card/60">
