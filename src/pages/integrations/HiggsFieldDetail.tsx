@@ -149,12 +149,19 @@ const HiggsFieldDetail = () => {
 
           {/* Model & Configuration */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Model & Configuration</h3>
+            <h3 className="text-sm font-medium text-foreground">Models</h3>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
               <Settings2 className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
               <div>
-                <p className="text-sm font-medium text-foreground">Default Model</p>
-                <p className="text-[11px] text-muted-foreground">Higgsfield video & image generation engine</p>
+                <p className="text-sm font-medium text-foreground">higgsfield-ai/soul/standard</p>
+                <p className="text-[11px] text-muted-foreground">Text-to-image generation</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
+              <Settings2 className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+              <div>
+                <p className="text-sm font-medium text-foreground">higgsfield-ai/dop/standard</p>
+                <p className="text-[11px] text-muted-foreground">Image-to-video generation</p>
               </div>
             </div>
           </div>
@@ -163,14 +170,14 @@ const HiggsFieldDetail = () => {
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Capabilities</h3>
             <div className="text-[12px] text-muted-foreground space-y-1.5">
-              <p>Higgsfield serves as the visual execution engine for generating AI-powered video and image content.</p>
+              <p>Higgsfield serves as the visual execution engine for generating AI-powered video and image content via an async queue API.</p>
               <ul className="list-disc list-inside space-y-0.5">
-                <li>AI video generation from text prompts</li>
-                <li>AI image generation</li>
-                <li>Multiple aspect ratios (16:9, 9:16, 1:1)</li>
-                <li>Cinematic, commercial, and UGC styles</li>
-                <li>Job status tracking</li>
-                <li>Integrates with Viral Creative Intelligence for optimized prompts</li>
+                <li>Text-to-image generation (Soul Standard)</li>
+                <li>Image-to-video generation (DoP Standard)</li>
+                <li>Multiple aspect ratios (16:9, 9:16, 1:1, 4:3)</li>
+                <li>Multiple resolutions (720p+)</li>
+                <li>Async job queue with status polling</li>
+                <li>Request cancellation support</li>
               </ul>
             </div>
           </div>
