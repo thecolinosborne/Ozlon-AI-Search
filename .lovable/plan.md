@@ -2,84 +2,105 @@
 
 # Infinity Router — Implementation Plan
 
-## What It Does
+## Overview
+Add a non-invasive intelligence orchestrator to the `chat` edge function that classifies requests and optionally pre-processes via Gemini (Lovable AI Gateway) before the existing OpenAI flow runs. Disabled by default via feature flags.
 
-Adds a lightweight **preflight decision layer** at the top of the existing `chat` edge function. Before the current system runs, it classifies the request and optionally pre-processes via Gemini (through Lovable AI Gateway) to enrich context. The existing flow is untouched — Gemini output gets injected as additional system prompt context, then the normal OpenAI pipeline runs as-is.
+## Step 1: Add Secrets
+Store two feature flag secrets:
+- `INFINITY_ROUTER_ENABLED` → `"true"` (enabled for immediate testing)
+- `INFINITY_ROUTER_DEBUG` → `"true"` (enabled for immediate testing)
 
-## Architecture
+`LOVABLE_API_KEY` already exists for Gemini calls via Lovable AI Gateway.
 
-```text
-User Message → Feature Flag Check
-                    │
-              (disabled) → Existing flow (zero changes)
-              (enabled)  → Classify → Score → Route
-                                                │
-                    ┌───────────────────────────┤
-                    │                           │
-              default_chat              gemini_flash / gemini_pro
-              (skip, run existing)      (pre-process via Lovable AI Gateway,
-                                         inject result as context,
-                                         then run existing flow)
-```
+## Step 2: Add Router to Edge Function
+**File: `supabase/functions/chat/index.ts`**
 
-## Files Changed
+Insert ~180 lines **before** the `serve()` handler (around line 3329). The router code is fully isolated:
 
-| File | What |
-|------|------|
-| `supabase/functions/chat/index.ts` | Add ~180 lines at top: classifier, scorer, Gemini pre-processor. Wrap the serve handler entry with a 5-line feature flag check |
-| `src/components/InfinityRouterDebug.tsx` | New — small debug panel component |
-| `src/pages/Developer.tsx` | Add debug panel import + render |
-
-## No Files Modified Otherwise
-
-chatService.ts, AI service layer, stores, existing components — all untouched.
-
-## Secrets Needed
-
-- `INFINITY_ROUTER_ENABLED` — stored as secret, value "false" (disabled by default)
-- `INFINITY_ROUTER_DEBUG` — stored as secret, value "false"
-- `LOVABLE_API_KEY` — already available (used for Gemini calls via Lovable AI Gateway)
-
-No need to store your raw Gemini API key — we use the Lovable AI Gateway which has LOVABLE_API_KEY auto-provisioned.
-
-## Implementation Details
-
-### 1. Preflight Classifier (pure logic, no API call)
-Analyzes the last user message to produce:
+**a) Classifier** — pure logic function analyzing the last user message:
 ```typescript
-{ intent, task_type, input_length, has_files, file_types,
-  needs_memory, needs_multimodal, needs_live_data,
-  needs_deep_reasoning, confidence }
+interface ClassifierOutput {
+  intent: string;
+  task_type: string;
+  input_length: number;
+  has_files: boolean;
+  file_types: string[];
+  needs_memory: boolean;
+  needs_multimodal: boolean;
+  needs_live_data: boolean;
+  needs_deep_reasoning: boolean;
+  confidence: number;
+}
 ```
-Uses keyword detection + heuristics (similar to existing `detectServiceIntents`).
+Uses keyword heuristics (no API call). Detects memory keywords, analysis patterns, long input, file references.
 
-### 2. Route Scorer (weighted)
-Six paths scored with weights:
-- `input_length > 8000` → gemini_flash +3
-- `has_files / multimodal keywords` → gemini_pro +4
-- `simple question (short, no special signals)` → default_chat +5
-- `memory keywords` → retrieval +4 (triggers existing Wisdom Engine, no change)
-- `action/API keywords` → action +5 (triggers existing tool loop, no change)
-- `analysis/synthesis keywords` → gemini_pro +3
-- `low confidence` → default_chat +3 (fallback)
+**b) Route Scorer** — weighted scoring across 6 paths:
+| Signal | Path | Weight |
+|--------|------|--------|
+| input > 8000 chars | gemini_flash | +3 |
+| file/multimodal keywords | gemini_pro | +4 |
+| simple short question | default_chat | +5 |
+| memory/remember keywords | retrieval | +4 |
+| API/service keywords | action | +5 |
+| analysis/synthesis | gemini_pro | +3 |
+| low confidence | default_chat | +3 |
 
-Ties → default_chat. Retrieval and action paths don't change existing behavior — they just confirm the existing system will handle it.
+Highest wins. Ties → `default_chat`. `retrieval` and `action` paths just confirm the existing system handles it (no behavior change).
 
-### 3. Gemini Pre-Processor
-Only runs for `gemini_flash` or `gemini_pro` paths. Calls Lovable AI Gateway (`google/gemini-2.5-flash` or `google/gemini-2.5-pro`) with the user's input + a task-specific prompt (summarize, extract, analyze). Injects the result as an additional system prompt section. Then the normal OpenAI flow runs with enriched context.
+**c) Gemini Pre-processor** — only runs for `gemini_flash`/`gemini_pro` paths:
+- Calls Lovable AI Gateway (`google/gemini-2.5-flash` or `google/gemini-2.5-pro`)
+- Sends user input with a task-specific prompt (summarize/extract/analyze)
+- Returns enriched context string
 
-### 4. Fallback
-Any error in classifier, scorer, or Gemini call → silently skip, run existing flow. No user-facing errors.
+**d) Router wrapper** — 5-line addition inside `serve()` handler (after request parsing, before system prompt build ~line 3366):
+```typescript
+// Infinity Router - additive pre-processing
+const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
+if (routerEnabled) {
+  try {
+    const enrichment = await runInfinityRouter(messages, Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true');
+    if (enrichment) systemPrompt += enrichment;
+  } catch (e) { console.error('[InfinityRouter] Fallback to default:', e); }
+}
+```
 
-### 5. Debug Panel
-Small component on Developer page showing last router decision (path chosen, reason, timing). Reads from a custom SSE event `infinity_router_debug` sent only when debug mode is on.
+Any failure → silently skipped, existing flow runs unchanged.
 
-## Steps
+**e) Debug logging** — when `INFINITY_ROUTER_DEBUG` is true, emits an SSE event `infinity_router_debug` with path chosen, scores, and timing. The existing `chatService.ts` already handles unknown event types gracefully (ignores them).
 
-1. Add `INFINITY_ROUTER_ENABLED` and `INFINITY_ROUTER_DEBUG` secrets (both "false")
-2. Add router code to `supabase/functions/chat/index.ts` (isolated section before serve handler)
-3. Add 5-line wrapper in the serve handler that checks feature flag and runs router
-4. Create `src/components/InfinityRouterDebug.tsx`
-5. Add debug panel to `src/pages/Developer.tsx`
-6. Deploy edge function
+## Step 3: Frontend Debug Panel
+**New file: `src/components/InfinityRouterDebug.tsx`**
+
+Small panel showing:
+- Router enabled/disabled status
+- Last selected path + reason
+- Scores breakdown
+- Execution time
+- Fallback triggered or not
+
+Reads from a state store that captures the debug SSE event.
+
+**Edit: `src/pages/Developer.tsx`**
+
+Import and render the debug panel at the bottom of the page.
+
+## Step 4: Handle Debug Events in Chat Service
+**Edit: `src/services/chatService.ts`**
+
+Add handling for `infinity_router_debug` event type in the SSE parser (similar to existing `task_update` handling). Store in a lightweight global/ref for the debug panel.
+
+## What Does NOT Change
+- chatService.ts streaming logic (additive only)
+- AI service layer (`src/core/ai/`)
+- Orchestrator, stores, existing components
+- Memory/Wisdom Engine
+- Maton/tool integrations
+- Any existing routes, pages, or UI
+
+## Fallback Guarantees
+- Feature flag off → zero code paths execute
+- Classifier error → skip, run existing
+- Gemini call fails → skip enrichment, run existing
+- Scoring returns no winner → default_chat
+- User never sees router errors
 
