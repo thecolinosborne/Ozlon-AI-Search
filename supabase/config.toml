@@ -33,3 +33,6 @@ verify_jwt = false
 [functions.viral-creative]
 verify_jwt = false
 
+[functions.higgsfield]
+verify_jwt = false
+
