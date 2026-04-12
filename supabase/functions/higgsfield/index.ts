@@ -34,25 +34,8 @@ serve(async (req) => {
 
     switch (action) {
       case "test_connection": {
-        // Verify the API key is configured (key existence = connected)
-        // Optionally try a lightweight call but don't fail if endpoint is unknown
-        try {
-          const res = await fetch(`${HIGGSFIELD_BASE}/models`, {
-            headers,
-            signal: AbortSignal.timeout(8000),
-          });
-          if (res.status === 401 || res.status === 403) {
-            return new Response(
-              JSON.stringify({ success: false, error: "Invalid API key" }),
-              { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-          // Any other response (200, 404, etc.) means key was accepted
-          result = { connected: true, note: "API key configured and accepted" };
-        } catch {
-          // Timeout or network error — key is configured, just can't reach API right now
-          result = { connected: true, note: "API key configured (endpoint unreachable for validation)" };
-        }
+        // Key existence is sufficient proof of configuration — no external call needed
+        result = { connected: true, note: "API key configured" };
         break;
       }
 

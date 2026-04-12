@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Brain, Sparkles, Zap, Target, BarChart3, RefreshCw, Package, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -29,6 +30,7 @@ const GOALS = [
 
 const ViralCreativeDetail = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { getIntegration, setStatus, setApiKeyConfigured, setLastSync } = useIntegrationsStore();
   const integration = getIntegration("viral-creative");
   const higgsfield = getIntegration("higgsfield");
@@ -45,7 +47,7 @@ const ViralCreativeDetail = () => {
   const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
 
-  // Auto-detect on mount
+  // Auto-detect on mount — check both Viral Creative and Higgsfield
   useEffect(() => {
     const checkConnection = async () => {
       try {
@@ -63,7 +65,23 @@ const ViralCreativeDetail = () => {
         setStatus("viral-creative", "disconnected");
       }
     };
+
+    const checkHiggsfield = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("higgsfield", {
+          body: { action: "test_connection" },
+        });
+        if (!error && data?.success) {
+          setStatus("higgsfield", "connected");
+          setApiKeyConfigured("higgsfield", true);
+        }
+      } catch {
+        // Higgsfield check is best-effort
+      }
+    };
+
     checkConnection();
+    checkHiggsfield();
   }, []);
 
   const callAction = useCallback(async (action: string, params: Record<string, unknown>) => {
@@ -190,12 +208,15 @@ const ViralCreativeDetail = () => {
       {isConnected && (
         <div className="space-y-6">
           {/* Higgsfield status */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <button
+            onClick={() => navigate("/integrations/higgsfield")}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
             <Sparkles className="w-4 h-4" />
             Higgsfield: <Badge variant={higgsfield.status === "connected" ? "default" : "secondary"}>
               {higgsfield.status === "connected" ? "Connected" : "Not Connected"}
             </Badge>
-          </div>
+          </button>
 
           {/* Campaign Input */}
           <div className="space-y-4 p-5 rounded-xl border border-border/40 bg-card/60">
