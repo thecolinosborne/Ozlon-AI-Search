@@ -104,7 +104,7 @@ const HiggsFieldDetail = () => {
         <div className="p-4 rounded-2xl border border-destructive/30 bg-destructive/5 flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-destructive" />
           <p className="text-sm text-destructive">
-            Backend API key not configured. Add <code className="font-mono text-xs">HIGGSFIELD_API_KEY</code> as a backend secret.
+            Backend API key not configured. Please add it as a backend secret.
           </p>
         </div>
       )}

@@ -45,7 +45,7 @@ const ViralCreativeDetail = () => {
   const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
 
-  // Auto-detect on mount
+  // Auto-detect on mount — check both Viral Creative and Higgsfield
   useEffect(() => {
     const checkConnection = async () => {
       try {
@@ -63,7 +63,23 @@ const ViralCreativeDetail = () => {
         setStatus("viral-creative", "disconnected");
       }
     };
+
+    const checkHiggsfield = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("higgsfield", {
+          body: { action: "test_connection" },
+        });
+        if (!error && data?.success) {
+          setStatus("higgsfield", "connected");
+          setApiKeyConfigured("higgsfield", true);
+        }
+      } catch {
+        // Higgsfield check is best-effort
+      }
+    };
+
     checkConnection();
+    checkHiggsfield();
   }, []);
 
   const callAction = useCallback(async (action: string, params: Record<string, unknown>) => {
