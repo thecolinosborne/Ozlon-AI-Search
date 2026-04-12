@@ -24,33 +24,64 @@ export function useConversations() {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const prevUserId = useRef<string | null>(null);
 
-  // Create a new session
+  // Ref mirrors activeSessionId for immediate reads in async callbacks
+  const activeSessionIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync with state
+  const setActiveSession = useCallback((id: string | null) => {
+    activeSessionIdRef.current = id;
+    setActiveSessionId(id);
+  }, []);
+
+  // Guard against concurrent session creation
+  const creatingSessionRef = useRef<Promise<string | null> | null>(null);
+
+  // Create a new session (deduped)
   const createSession = useCallback(async (title?: string): Promise<string | null> => {
     if (!user) return null;
 
-    try {
-      console.log("[useConversations] Creating session for user:", user.id);
-      const { data, error } = await supabase
-        .from("chat_sessions")
-        .insert({ user_id: user.id, title: title || "New conversation" })
-        .select("id, title, created_at, updated_at")
-        .single();
-
-      if (error || !data) {
-        console.error("[useConversations] Failed to create session:", error);
-        return null;
-      }
-
-      console.log("[useConversations] Session created:", data.id);
-      setSessions((prev) => [data, ...prev]);
-      setActiveSessionId(data.id);
-      setMessages([]);
-      return data.id;
-    } catch (e) {
-      console.error("[useConversations] createSession exception:", e);
-      return null;
+    // If already creating, return the same promise
+    if (creatingSessionRef.current) {
+      return creatingSessionRef.current;
     }
-  }, [user]);
+
+    const promise = (async () => {
+      try {
+        console.log("[useConversations] Creating session for user:", user.id);
+        const { data, error } = await supabase
+          .from("chat_sessions")
+          .insert({ user_id: user.id, title: title || "New conversation" })
+          .select("id, title, created_at, updated_at")
+          .single();
+
+        if (error || !data) {
+          console.error("[useConversations] Failed to create session:", error);
+          return null;
+        }
+
+        console.log("[useConversations] Session created:", data.id);
+        setSessions((prev) => [data, ...prev]);
+        setActiveSession(data.id);
+        setMessages([]);
+        return data.id;
+      } catch (e) {
+        console.error("[useConversations] createSession exception:", e);
+        return null;
+      } finally {
+        creatingSessionRef.current = null;
+      }
+    })();
+
+    creatingSessionRef.current = promise;
+    return promise;
+  }, [user, setActiveSession]);
+
+  // Ensure we have an active session, returns the ID
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    const sid = activeSessionIdRef.current;
+    if (sid) return sid;
+    return createSession();
+  }, [createSession]);
 
   // Load messages for a session
   const loadMessages = useCallback(async (sessionId: string) => {
@@ -70,31 +101,26 @@ export function useConversations() {
 
   // Switch to a session
   const switchSession = useCallback(async (sessionId: string) => {
-    setActiveSessionId(sessionId);
+    setActiveSession(sessionId);
     await loadMessages(sessionId);
-  }, [loadMessages]);
+  }, [loadMessages, setActiveSession]);
 
   // Start a new chat
   const startNewChat = useCallback(async () => {
-    setActiveSessionId(null);
+    setActiveSession(null);
     setMessages([]);
     const id = await createSession();
     return id;
-  }, [createSession]);
+  }, [createSession, setActiveSession]);
 
   // Save a message to the active session
   const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
     if (!user) return;
 
-    // Auto-create session if none active
-    let sid = activeSessionId;
+    const sid = await ensureSession();
     if (!sid) {
-      console.log("[useConversations] saveMessage: no active session, creating one");
-      sid = await createSession();
-      if (!sid) {
-        console.error("[useConversations] saveMessage: failed to create session");
-        return;
-      }
+      console.error("[useConversations] saveMessage: failed to get session");
+      return;
     }
 
     // Add to local state immediately
@@ -116,7 +142,7 @@ export function useConversations() {
     if (error) {
       console.error("[useConversations] saveMessage DB error:", error);
     }
-  }, [user, activeSessionId, createSession]);
+  }, [user, ensureSession]);
 
   // Update a message content (for streaming)
   const updateMessageContent = useCallback((id: string, content: string) => {
@@ -129,12 +155,8 @@ export function useConversations() {
   const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
     if (!user) return;
 
-    let sid = activeSessionId;
-    if (!sid) {
-      console.log("[useConversations] finalizeMessage: no active session, creating one");
-      sid = await createSession();
-      if (!sid) return;
-    }
+    const sid = await ensureSession();
+    if (!sid) return;
 
     // Upsert the message
     const { error } = await supabase.from("chat_messages").upsert({
@@ -168,7 +190,7 @@ export function useConversations() {
           .eq("id", sid);
       }
     }
-  }, [user, activeSessionId, messages, createSession]);
+  }, [user, messages, ensureSession]);
 
   // Delete a session
   const deleteSession = useCallback(async (sessionId: string) => {
@@ -179,17 +201,17 @@ export function useConversations() {
 
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
 
-    if (activeSessionId === sessionId) {
-      setActiveSessionId(null);
+    if (activeSessionIdRef.current === sessionId) {
+      setActiveSession(null);
       setMessages([]);
     }
-  }, [user, activeSessionId]);
+  }, [user, setActiveSession]);
 
   // Initialization: load sessions, reset when user changes
   useEffect(() => {
     if (!user) {
       setSessions([]);
-      setActiveSessionId(null);
+      setActiveSession(null);
       setMessages([]);
       setSessionsLoaded(false);
       prevUserId.current = null;
@@ -232,11 +254,11 @@ export function useConversations() {
         } else {
           console.log("[useConversations] Auto-created session:", newSession.id);
           setSessions([newSession]);
-          setActiveSessionId(newSession.id);
+          setActiveSession(newSession.id);
           setMessages([]);
         }
       } else {
-        setActiveSessionId(loadedSessions[0].id);
+        setActiveSession(loadedSessions[0].id);
         const { data: msgs } = await supabase
           .from("chat_messages")
           .select("id, role, content, created_at")
@@ -253,7 +275,7 @@ export function useConversations() {
     };
 
     init();
-  }, [user]);
+  }, [user, setActiveSession]);
 
   // Reload sessions helper
   const loadSessions = useCallback(async () => {
