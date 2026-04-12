@@ -79,6 +79,105 @@ export type Database = {
         }
         Relationships: []
       }
+      clickup_integration_state: {
+        Row: {
+          ai_reply_mode: string | null
+          allow_subtask_creation: boolean | null
+          allow_task_updates: boolean | null
+          auto_reply_enabled: boolean | null
+          cooldown_seconds: number | null
+          created_at: string | null
+          default_list_id: string | null
+          id: string
+          last_error: string | null
+          last_successful_ai_reply_at: string | null
+          last_tested_at: string | null
+          last_webhook_event_at: string | null
+          max_reply_length: number | null
+          reply_trigger_mode: string | null
+          team_id: string
+          updated_at: string | null
+          webhook_id: string | null
+          webhook_status: string | null
+        }
+        Insert: {
+          ai_reply_mode?: string | null
+          allow_subtask_creation?: boolean | null
+          allow_task_updates?: boolean | null
+          auto_reply_enabled?: boolean | null
+          cooldown_seconds?: number | null
+          created_at?: string | null
+          default_list_id?: string | null
+          id?: string
+          last_error?: string | null
+          last_successful_ai_reply_at?: string | null
+          last_tested_at?: string | null
+          last_webhook_event_at?: string | null
+          max_reply_length?: number | null
+          reply_trigger_mode?: string | null
+          team_id: string
+          updated_at?: string | null
+          webhook_id?: string | null
+          webhook_status?: string | null
+        }
+        Update: {
+          ai_reply_mode?: string | null
+          allow_subtask_creation?: boolean | null
+          allow_task_updates?: boolean | null
+          auto_reply_enabled?: boolean | null
+          cooldown_seconds?: number | null
+          created_at?: string | null
+          default_list_id?: string | null
+          id?: string
+          last_error?: string | null
+          last_successful_ai_reply_at?: string | null
+          last_tested_at?: string | null
+          last_webhook_event_at?: string | null
+          max_reply_length?: number | null
+          reply_trigger_mode?: string | null
+          team_id?: string
+          updated_at?: string | null
+          webhook_id?: string | null
+          webhook_status?: string | null
+        }
+        Relationships: []
+      }
+      clickup_processed_comments: {
+        Row: {
+          comment_id: string
+          created_at: string | null
+          error_message: string | null
+          event_type: string | null
+          handled_at: string | null
+          id: string
+          response_comment_id: string | null
+          status: string
+          task_id: string
+        }
+        Insert: {
+          comment_id: string
+          created_at?: string | null
+          error_message?: string | null
+          event_type?: string | null
+          handled_at?: string | null
+          id?: string
+          response_comment_id?: string | null
+          status?: string
+          task_id: string
+        }
+        Update: {
+          comment_id?: string
+          created_at?: string | null
+          error_message?: string | null
+          event_type?: string | null
+          handled_at?: string | null
+          id?: string
+          response_comment_id?: string | null
+          status?: string
+          task_id?: string
+        }
+        Relationships: []
+      }
       knowledge_entries: {
         Row: {
           category: string
