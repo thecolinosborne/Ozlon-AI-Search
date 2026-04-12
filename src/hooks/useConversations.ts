@@ -162,7 +162,7 @@ export function useConversations() {
           .eq("id", sid);
       }
     }
-  }, [user, ensureSession]);
+  }, [user, messages, ensureSession]);
 
   // Update a message content (for streaming)
   const updateMessageContent = useCallback((id: string, content: string) => {
