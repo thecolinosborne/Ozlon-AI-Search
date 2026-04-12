@@ -47,21 +47,36 @@ const DescriptDetail = () => {
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        const result = await callDescript("test_connection");
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/descript`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ action: "test_connection" }),
+        });
         if (cancelled) return;
-        if (result?.success) {
-          setStatus("descript", "connected");
-          setApiKeyConfigured("descript", true);
-          setLastSync("descript", new Date().toISOString());
+        if (res.ok) {
+          const result = await res.json();
+          if (result?.success) {
+            setStatus("descript", "connected");
+            setApiKeyConfigured("descript", true);
+            setLastSync("descript", new Date().toISOString());
+          } else {
+            setStatus("descript", "disconnected");
+            setApiKeyConfigured("descript", false);
+          }
         } else {
           setStatus("descript", "disconnected");
           setApiKeyConfigured("descript", false);
         }
       } catch (e) {
         console.error("Descript auto-detect failed:", e);
-        if (cancelled) return;
-        setStatus("descript", "disconnected");
-        setApiKeyConfigured("descript", false);
+        if (!cancelled) {
+          setStatus("descript", "disconnected");
+          setApiKeyConfigured("descript", false);
+        }
       } finally {
         if (!cancelled) setAutoDetecting(false);
       }
