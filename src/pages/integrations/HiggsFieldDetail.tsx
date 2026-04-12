@@ -149,12 +149,19 @@ const HiggsFieldDetail = () => {
 
           {/* Model & Configuration */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Model & Configuration</h3>
+            <h3 className="text-sm font-medium text-foreground">Models</h3>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
               <Settings2 className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
               <div>
-                <p className="text-sm font-medium text-foreground">Default Model</p>
-                <p className="text-[11px] text-muted-foreground">Higgsfield video & image generation engine</p>
+                <p className="text-sm font-medium text-foreground">higgsfield-ai/soul/standard</p>
+                <p className="text-[11px] text-muted-foreground">Text-to-image generation</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
+              <Settings2 className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+              <div>
+                <p className="text-sm font-medium text-foreground">higgsfield-ai/dop/standard</p>
+                <p className="text-[11px] text-muted-foreground">Image-to-video generation</p>
               </div>
             </div>
           </div>

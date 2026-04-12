@@ -6,7 +6,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const HIGGSFIELD_BASE = "https://api.higgsfield.ai/v1";
+const BASE_URL = "https://platform.higgsfield.ai";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -20,7 +20,6 @@ serve(async (req) => {
     const body = await req.json();
     const { action, ...params } = body;
 
-    // For test_connection, just verify both secrets exist
     if (action === "test_connection") {
       const configured = !!HIGGSFIELD_APP_ID && !!HIGGSFIELD_API_KEY;
       return new Response(
@@ -37,45 +36,24 @@ serve(async (req) => {
     }
 
     const headers = {
-      "X-App-Id": HIGGSFIELD_APP_ID,
-      Authorization: `Bearer ${HIGGSFIELD_API_KEY}`,
+      "Authorization": `Key ${HIGGSFIELD_APP_ID}:${HIGGSFIELD_API_KEY}`,
       "Content-Type": "application/json",
+      "Accept": "application/json",
     };
 
     let result: unknown;
 
     switch (action) {
-      case "generate_video": {
-        const { prompt, model, duration, aspect_ratio, style } = params;
-        const res = await fetch(`${HIGGSFIELD_BASE}/generations`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            prompt,
-            model: model || "default",
-            duration: duration || 5,
-            aspect_ratio: aspect_ratio || "16:9",
-            style: style || "cinematic",
-          }),
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Generation failed [${res.status}]: ${errText.slice(0, 300)}`);
-        }
-        result = await res.json();
-        break;
-      }
-
       case "generate_image": {
-        const { prompt, model, aspect_ratio, style } = params;
-        const res = await fetch(`${HIGGSFIELD_BASE}/images`, {
+        const { prompt, model, aspect_ratio, resolution } = params;
+        const modelId = model || "higgsfield-ai/soul/standard";
+        const res = await fetch(`${BASE_URL}/${modelId}`, {
           method: "POST",
           headers,
           body: JSON.stringify({
             prompt,
-            model: model || "default",
-            aspect_ratio: aspect_ratio || "1:1",
-            style: style || "cinematic",
+            aspect_ratio: aspect_ratio || "16:9",
+            resolution: resolution || "720p",
           }),
         });
         if (!res.ok) {
@@ -86,10 +64,31 @@ serve(async (req) => {
         break;
       }
 
+      case "generate_video": {
+        const { image_url, prompt, model, duration } = params;
+        if (!image_url) throw new Error("image_url is required for video generation");
+        const modelId = model || "higgsfield-ai/dop/standard";
+        const res = await fetch(`${BASE_URL}/${modelId}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            image_url,
+            prompt: prompt || "",
+            duration: duration || 5,
+          }),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Video generation failed [${res.status}]: ${errText.slice(0, 300)}`);
+        }
+        result = await res.json();
+        break;
+      }
+
       case "get_job_status": {
-        const { job_id } = params;
-        if (!job_id) throw new Error("job_id is required");
-        const res = await fetch(`${HIGGSFIELD_BASE}/generations/${job_id}`, { headers });
+        const { request_id } = params;
+        if (!request_id) throw new Error("request_id is required");
+        const res = await fetch(`${BASE_URL}/requests/${request_id}/status`, { headers });
         if (!res.ok) {
           const errText = await res.text();
           throw new Error(`Status check failed [${res.status}]: ${errText.slice(0, 300)}`);
@@ -98,13 +97,19 @@ serve(async (req) => {
         break;
       }
 
-      case "list_generations": {
-        const res = await fetch(`${HIGGSFIELD_BASE}/generations`, { headers });
-        if (!res.ok) {
+      case "cancel_job": {
+        const { request_id } = params;
+        if (!request_id) throw new Error("request_id is required");
+        const res = await fetch(`${BASE_URL}/requests/${request_id}/cancel`, {
+          method: "POST",
+          headers,
+        });
+        if (res.status === 202) {
+          result = { cancelled: true };
+        } else {
           const errText = await res.text();
-          throw new Error(`List failed [${res.status}]: ${errText.slice(0, 300)}`);
+          throw new Error(`Cancel failed [${res.status}]: ${errText.slice(0, 300)}`);
         }
-        result = await res.json();
         break;
       }
 
