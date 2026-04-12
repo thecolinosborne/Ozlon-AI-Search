@@ -686,7 +686,7 @@ const Index = () => {
                 ))}
               </div>
             </div>
-          )
+          )}
 
           {/* Chat Messages */}
           {hasInteracted && (
