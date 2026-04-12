@@ -1977,10 +1977,16 @@ async function executeToolCall(
         const connId = resolved?.id;
         if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         console.log(`[trash_email] Trashing message ${args.message_id} via connection ${connId} (${resolved?.email})`);
-        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; labelIds?: string[]; error?: { message?: string } };
-        console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK, labels: ${(res.labelIds || []).join(',')}`);
-        if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
+        try {
+          const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; labelIds?: string[]; error?: { message?: string } };
+          console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK, labels: ${(res.labelIds || []).join(',')}`);
+          if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
+          return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          console.error(`[trash_email] Error trashing ${args.message_id}:`, errMsg);
+          return { success: false, result: `Failed to trash email ${args.message_id}: ${errMsg}` };
+        }
       }
 
       case 'batch_trash_emails': {
@@ -1989,21 +1995,28 @@ async function executeToolCall(
         if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
+        const failures: string[] = [];
         let successCount = 0;
-        let failCount = 0;
         const chunkSize = 10;
         for (let i = 0; i < ids.length; i += chunkSize) {
           const chunk = ids.slice(i, i + chunkSize);
-          const results = await Promise.all(chunk.map(async (id) => {
+          await Promise.all(chunk.map(async (id) => {
             try {
               const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}/trash`, connId, 'POST') as { error?: { message?: string } };
-              return !res.error;
-            } catch { return false; }
+              if (res.error) {
+                failures.push(`${id}: ${res.error.message || JSON.stringify(res.error)}`);
+              } else {
+                successCount++;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              failures.push(`${id}: ${errMsg}`);
+            }
           }));
-          successCount += results.filter(Boolean).length;
-          failCount += results.filter(r => !r).length;
         }
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash complete: ${successCount} emails trashed${failCount > 0 ? `, ${failCount} failed` : ""}.` };
+        const allFailed = successCount === 0;
+        const detail = failures.length ? ` (${failures.join(', ')})` : '';
+        return { success: !allFailed, result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash: ${successCount} trashed, ${failures.length} failed${detail}.` };
       }
 
       case 'list_email_ids': {
