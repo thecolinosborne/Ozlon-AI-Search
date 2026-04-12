@@ -24,3 +24,6 @@ verify_jwt = true
 [functions.knowledge-search]
 verify_jwt = true
 
+[functions.clickup]
+verify_jwt = false
+
