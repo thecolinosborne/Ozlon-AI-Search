@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare, Brain } from "lucide-react";
+import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
+import { supabase } from "@/integrations/supabase/client";
 
 const integrations = [
   {
@@ -46,18 +48,36 @@ const integrations = [
     icon: CheckSquare,
     path: "/integrations/clickup",
   },
-  {
-    id: "viral-creative",
-    name: "Viral Creative Intelligence",
-    description: "AI-powered creative strategy, angle discovery, and prompt optimization for Higgsfield.",
-    icon: Brain,
-    path: "/integrations/viral-creative",
-  },
 ];
 
 const Integrations = () => {
   const navigate = useNavigate();
-  const { getIntegration } = useIntegrationsStore();
+  const { getIntegration, setStatus, setApiKeyConfigured, setLastSync, setSyncDirection } = useIntegrationsStore();
+
+  // Auto-detect Higgsfield connection on hub mount
+  useEffect(() => {
+    let cancelled = false;
+    const detect = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("higgsfield", {
+          body: { action: "test_connection" },
+        });
+        if (cancelled) return;
+        if (!error && data?.success) {
+          setStatus("higgsfield", "connected");
+          setApiKeyConfigured("higgsfield", true);
+          setLastSync("higgsfield", new Date().toISOString());
+          if (getIntegration("higgsfield").syncDirection !== "two-way") {
+            setSyncDirection("higgsfield", "two-way");
+          }
+        }
+      } catch {
+        // silent
+      }
+    };
+    detect();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">

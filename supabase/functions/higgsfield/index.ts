@@ -14,18 +14,30 @@ serve(async (req) => {
   }
 
   try {
+    const HIGGSFIELD_APP_ID = Deno.env.get("HIGGSFIELD_APP_ID");
     const HIGGSFIELD_API_KEY = Deno.env.get("HIGGSFIELD_API_KEY");
-    if (!HIGGSFIELD_API_KEY) {
-      return new Response(
-        JSON.stringify({ success: false, error: "HIGGSFIELD_API_KEY not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     const body = await req.json();
     const { action, ...params } = body;
 
+    // For test_connection, just verify both secrets exist
+    if (action === "test_connection") {
+      const configured = !!HIGGSFIELD_APP_ID && !!HIGGSFIELD_API_KEY;
+      return new Response(
+        JSON.stringify({ success: configured, data: { connected: configured, note: configured ? "Dual-auth credentials configured" : "Missing credentials" } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!HIGGSFIELD_APP_ID || !HIGGSFIELD_API_KEY) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Backend credentials not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const headers = {
+      "X-App-Id": HIGGSFIELD_APP_ID,
       Authorization: `Bearer ${HIGGSFIELD_API_KEY}`,
       "Content-Type": "application/json",
     };
@@ -33,12 +45,6 @@ serve(async (req) => {
     let result: unknown;
 
     switch (action) {
-      case "test_connection": {
-        // Key existence is sufficient proof of configuration — no external call needed
-        result = { connected: true, note: "API key configured" };
-        break;
-      }
-
       case "generate_video": {
         const { prompt, model, duration, aspect_ratio, style } = params;
         const res = await fetch(`${HIGGSFIELD_BASE}/generations`, {
