@@ -3,7 +3,7 @@ import { Sparkles, Settings2, Loader2, AlertCircle, RefreshCw } from "lucide-rea
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
-import { supabase } from "@/integrations/supabase/client";
+
 import { toast } from "sonner";
 
 const HiggsFieldDetail = () => {
@@ -13,21 +13,28 @@ const HiggsFieldDetail = () => {
   const [autoDetecting, setAutoDetecting] = useState(true);
   const [testing, setTesting] = useState(false);
 
-  // Auto-detect backend API key on mount
+  // Auto-detect backend credentials on mount
   useEffect(() => {
     let cancelled = false;
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        const { data, error } = await supabase.functions.invoke("higgsfield", {
-          body: { action: "test_connection" },
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ action: "test_connection" }),
         });
+        const data = await res.json();
+        
         if (cancelled) return;
-        if (!error && data?.success) {
+        if (data?.success) {
           setStatus("higgsfield", "connected");
           setApiKeyConfigured("higgsfield", true);
           setLastSync("higgsfield", new Date().toISOString());
-          // Default to two-way sync
           if (getIntegration("higgsfield").syncDirection !== "two-way") {
             setSyncDirection("higgsfield", "two-way");
           }
@@ -35,7 +42,8 @@ const HiggsFieldDetail = () => {
           setStatus("higgsfield", "disconnected");
           setApiKeyConfigured("higgsfield", false);
         }
-      } catch {
+      } catch (e) {
+        
         if (!cancelled) {
           setStatus("higgsfield", "disconnected");
           setApiKeyConfigured("higgsfield", false);
@@ -51,10 +59,16 @@ const HiggsFieldDetail = () => {
   const handleTestConnection = async () => {
     setTesting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("higgsfield", {
-        body: { action: "test_connection" },
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ action: "test_connection" }),
       });
-      if (error) throw error;
+      const data = await res.json();
       if (data?.success) {
         toast.success("Higgsfield AI connection verified");
         setStatus("higgsfield", "connected");
