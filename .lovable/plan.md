@@ -1,63 +1,64 @@
 
 
-# Fix Email Trash Error Handling in Chat Edge Function
+# Full-Spectrum Maton Skills Testing and SSE Parser Fix
 
-## Changes in `supabase/functions/chat/index.ts`
+## Problem
+1. **SSE parser bug** (the reason "you can't even pull emails"): In `src/services/chatService.ts` line 265-268, when a JSON chunk is split across SSE frames, the `catch` block does `break` which **discards all remaining lines** in that batch. Long responses (email listings, tool call results) frequently trigger this, causing the stream to stall or lose data.
 
-### 1. `trash_email` handler (lines 1975-1984)
-Wrap the `callMatonGateway` call in try/catch so thrown errors (e.g. 404) are caught and returned as structured failures instead of propagating up:
+2. **No systematic validation** that all 83 Maton-connected tools work end-to-end.
 
+## Fix 1: SSE Parser (the critical bug)
+
+In `src/services/chatService.ts`, lines 265-269, change:
 ```typescript
-case 'trash_email': {
-  const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-  const connId = resolved?.id;
-  if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-  console.log(`[trash_email] Trashing message ${args.message_id} via connection ${connId} (${resolved?.email})`);
-  try {
-    const res = await callMatonGateway(...) as { id?: string; labelIds?: string[]; error?: { message?: string } };
-    console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK`);
-    if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
-    return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
-  } catch (e) {
-    const errMsg = e instanceof Error ? e.message : String(e);
-    console.error(`[trash_email] Error trashing ${args.message_id}:`, errMsg);
-    return { success: false, result: `Failed to trash email ${args.message_id}: ${errMsg}` };
+// BEFORE (broken)
+} catch {
+  buffer = line + '\n' + buffer;
+  break;
+}
+
+// AFTER (fixed)
+} catch {
+  if (trimmedLine.startsWith('data: ')) {
+    buffer = trimmedLine + '\n' + buffer;
   }
+  // Continue processing remaining lines instead of breaking
 }
 ```
 
-### 2. `batch_trash_emails` handler (lines 1986-2007)
-- Replace `catch { return false }` with per-item error capture
-- Track failure reasons per ID
-- Return `success: false` when ALL fail
-- Include per-ID error details in result string
+This single change fixes email pulling, trashing, and all other long-response tool calls.
 
-```typescript
-case 'batch_trash_emails': {
-  // ... resolve connection, parse IDs (unchanged) ...
-  const failures: string[] = [];
-  let successCount = 0;
-  // Process in chunks of 10
-  for (chunk of chunks) {
-    await Promise.all(chunk.map(async (id) => {
-      try {
-        const res = await callMatonGateway(...);
-        if (res.error) { failures.push(`${id}: ${res.error.message}`); }
-        else { successCount++; }
-      } catch (e) {
-        failures.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }));
-  }
-  const allFailed = successCount === 0;
-  const detail = failures.length ? ` (${failures.join(', ')})` : '';
-  return {
-    success: !allFailed,
-    result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash: ${successCount} trashed, ${failures.length} failed${detail}.`
-  };
-}
-```
+## Fix 2: End-to-End Maton Skills Testing
 
-## No other files changed
-Only the two tool handlers in `supabase/functions/chat/index.ts` are modified. No frontend, no other edge functions.
+After deploying the parser fix, run a systematic curl-based test of the chat edge function exercising key Maton tool categories. This validates the full pipeline: frontend SSE parsing -> edge function -> tool dispatch -> Maton gateway -> response.
+
+### Test matrix (executed via `supabase--curl_edge_functions`):
+
+| Category | Tool | Test prompt |
+|----------|------|-------------|
+| **Email Read** | `list_emails` | "Show my latest 5 emails" |
+| **Email Detail** | `get_email` | "Show me the full content of email {id}" |
+| **Email Trash** | `trash_email` | "Trash email {id}" |
+| **Email Batch** | `batch_trash_emails` | "Trash these emails: {id1},{id2}" |
+| **Calendar** | `create_calendar_event` | "Create a test event tomorrow at 3pm" |
+| **Drive** | `search_google_drive` | "Search my Drive for test files" |
+| **Docs** | `create_google_doc` | "Create a doc called Test" |
+| **Sheets** | `create_google_sheet` | "Create a sheet called Test" |
+| **GSC** | `gsc_list_sites` | "List my Search Console sites" |
+| **ClickUp** | `list_clickup_tasks` | "List my ClickUp tasks" |
+
+Each test will verify:
+- The edge function returns a valid SSE stream
+- Tool calls are properly dispatched and return `success: true/false` with meaningful messages
+- Error cases return structured failure messages (not unhandled throws)
+
+### Test approach
+1. Apply the SSE parser fix
+2. Use `curl_edge_functions` to send test prompts directly to the chat function
+3. Verify each response contains proper tool call results
+4. For the email trash flow specifically: list emails -> pick one -> trash it -> verify it's gone
+
+## Files changed
+- `src/services/chatService.ts` — fix SSE parser catch block (lines 265-269)
+- No edge function changes needed (trash handlers already fixed)
 
