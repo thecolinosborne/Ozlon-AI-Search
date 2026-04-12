@@ -1,40 +1,63 @@
 
 
-# Fix Persistent Chat History
+# Fix Email Trash Error Handling in Chat Edge Function
 
-## Problem
-Chat messages appear to work in the current session but may not persist reliably across page refreshes or session switches. Two root causes:
+## Changes in `supabase/functions/chat/index.ts`
 
-1. **Missing UPDATE RLS policy on `chat_messages`**: The `finalizeMessage` function uses `upsert`, which requires UPDATE permission. The table only has INSERT, SELECT, and DELETE policies — no UPDATE. This means:
-   - User messages: inserted by `saveMessage`, then the upsert in `finalizeMessage` silently fails on the update path (harmless since the row already exists with correct content)
-   - Assistant messages: the upsert acts as an INSERT (works since the row doesn't exist yet), but if there's ever a conflict, it will fail silently
+### 1. `trash_email` handler (lines 1975-1984)
+Wrap the `callMatonGateway` call in try/catch so thrown errors (e.g. 404) are caught and returned as structured failures instead of propagating up:
 
-2. **Double-insertion of user messages**: `saveMessage` inserts the user message, then `finalizeMessage` tries to upsert the same ID. Without UPDATE permission, this second call fails silently. This is wasteful but not breaking — however it should be cleaned up.
-
-## Plan
-
-### 1. Add UPDATE RLS policy on `chat_messages`
-Create a migration:
-```sql
-CREATE POLICY "Users can update own messages"
-  ON public.chat_messages FOR UPDATE
-  TO public
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+```typescript
+case 'trash_email': {
+  const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
+  const connId = resolved?.id;
+  if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
+  console.log(`[trash_email] Trashing message ${args.message_id} via connection ${connId} (${resolved?.email})`);
+  try {
+    const res = await callMatonGateway(...) as { id?: string; labelIds?: string[]; error?: { message?: string } };
+    console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK`);
+    if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
+    return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error(`[trash_email] Error trashing ${args.message_id}:`, errMsg);
+    return { success: false, result: `Failed to trash email ${args.message_id}: ${errMsg}` };
+  }
+}
 ```
-This ensures `upsert` works correctly for both user and assistant messages.
 
-### 2. Fix the double-save in `src/pages/Index.tsx`
-Currently `sendMessage` calls both `saveMessage(userMessage)` and `finalizeMessage(userMessage)` for the user message. Since `saveMessage` already inserts to DB and adds to local state, we should remove the redundant `finalizeMessage(userMessage)` call and instead just handle the session title update separately. Change:
-- Remove `finalizeMessage(userMessage)` from the user message save path
-- Keep `saveMessage(userMessage)` which does the insert + local state update
-- Move the auto-title logic: after `saveMessage`, update the session title if it's the first user message
+### 2. `batch_trash_emails` handler (lines 1986-2007)
+- Replace `catch { return false }` with per-item error capture
+- Track failure reasons per ID
+- Return `success: false` when ALL fail
+- Include per-ID error details in result string
 
-### 3. Verify with browser testing
-After implementing, navigate to the app, send several messages, refresh the page, and confirm messages persist.
+```typescript
+case 'batch_trash_emails': {
+  // ... resolve connection, parse IDs (unchanged) ...
+  const failures: string[] = [];
+  let successCount = 0;
+  // Process in chunks of 10
+  for (chunk of chunks) {
+    await Promise.all(chunk.map(async (id) => {
+      try {
+        const res = await callMatonGateway(...);
+        if (res.error) { failures.push(`${id}: ${res.error.message}`); }
+        else { successCount++; }
+      } catch (e) {
+        failures.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }));
+  }
+  const allFailed = successCount === 0;
+  const detail = failures.length ? ` (${failures.join(', ')})` : '';
+  return {
+    success: !allFailed,
+    result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash: ${successCount} trashed, ${failures.length} failed${detail}.`
+  };
+}
+```
 
-## Files changed
-- **Migration SQL** — add UPDATE policy on `chat_messages`
-- **`src/pages/Index.tsx`** — remove redundant `finalizeMessage(userMessage)` call
-- **`src/hooks/useConversations.ts`** — ensure `saveMessage` handles auto-titling so `finalizeMessage` is only used for assistant messages after streaming
+## No other files changed
+Only the two tool handlers in `supabase/functions/chat/index.ts` are modified. No frontend, no other edge functions.
 
