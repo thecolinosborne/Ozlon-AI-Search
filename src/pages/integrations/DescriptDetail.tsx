@@ -171,7 +171,19 @@ const DescriptDetail = () => {
         ) : undefined
       }
     >
-      <ApiKeyInput label="Descript API Key" configured={integration.apiKeyConfigured} onSave={handleSaveKey} />
+      {autoDetecting && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 flex items-center gap-3">
+          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Detecting backend API key…</p>
+        </div>
+      )}
+
+      {!autoDetecting && integration.status === "disconnected" && (
+        <div className="p-4 rounded-2xl border border-destructive/30 bg-destructive/5 flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 text-destructive" />
+          <p className="text-sm text-destructive">Backend API key not configured. Add <code className="font-mono text-xs">DESCRIPT_API_KEY</code> as a backend secret.</p>
+        </div>
+      )}
 
       {integration.status === "connected" && (
         <>
