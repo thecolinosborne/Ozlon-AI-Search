@@ -32,7 +32,7 @@ const Index = () => {
   // Conversation session management
   const {
     sessions, activeSessionId, messages: sessionMessages, setMessages: setSessionMessages,
-    sessionsLoaded, switchSession, startNewChat, saveMessage, updateMessageContent,
+    sessionsLoaded, switchSession, startNewChat, saveMessage,
     finalizeMessage, deleteSession,
   } = useConversations();
 
