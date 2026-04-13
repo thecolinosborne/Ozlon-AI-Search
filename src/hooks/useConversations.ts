@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
+const isDev = import.meta.env.DEV;
+
 export interface ConversationSession {
   id: string;
   title: string;
@@ -23,6 +25,7 @@ export function useConversations() {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const prevUserId = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
   // Ref mirrors activeSessionId for immediate reads in async callbacks
   const activeSessionIdRef = useRef<string | null>(null);
@@ -114,7 +117,10 @@ export function useConversations() {
 
   // Save a message to the active session
   const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
-    if (!user) return;
+    if (!user) {
+      if (isDev) console.warn("[useConversations] saveMessage called without user — skipping.");
+      return;
+    }
 
     // Add to local state immediately (optimistic)
     const newMsg: ConversationMessage = {
@@ -175,7 +181,10 @@ export function useConversations() {
 
   // Update message in DB after streaming completes
   const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
-    if (!user) return;
+    if (!user) {
+      if (isDev) console.warn("[useConversations] finalizeMessage called without user — skipping.");
+      return;
+    }
 
     const sid = await ensureSession();
     if (!sid) return;
@@ -231,6 +240,7 @@ export function useConversations() {
 
   // Initialization: load sessions, reset when user changes
   useEffect(() => {
+    mountedRef.current = true;
     if (!user) {
       setSessions([]);
       setActiveSession(null);
@@ -297,6 +307,10 @@ export function useConversations() {
     };
 
     init();
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [user, setActiveSession]);
 
   // Reload sessions helper
