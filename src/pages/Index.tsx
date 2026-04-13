@@ -285,7 +285,7 @@ const Index = () => {
           )}
 
           {hasInteracted && (
-            <ChatMessageList messages={visibleMessages} playMessage={playMessage}
+            <ChatMessageList messages={renderedMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId} />
           )}
 
