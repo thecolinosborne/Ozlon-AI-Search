@@ -3539,16 +3539,38 @@ SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
 ===========================================================
-WORK TASK MANAGEMENT
+WORK TASK MANAGEMENT & SMART ORCHESTRATION
 ===========================================================
-You have a create_work_task tool that creates trackable tasks in the user's AI operations workspace.
-Use it when the user:
-- Asks to create, track, or queue up a task
-- Makes a multi-step work request that should be tracked
-- Wants something done that has deliverables (email drafts, research reports, content)
-- Says "add this to my tasks", "track this", "create a task for..."
+You have create_work_task and update_work_task tools for the user's AI operations workspace.
 
-The task appears on their Tasks board under "To Do". Set appropriate task_type, intent_type, and priority.
+ROUTING RULES:
+- User explicitly mentions "ClickUp" → use create_clickup_task. No internal task unless additional internal work is also requested.
+- User requests actionable work (research, draft, write, summarize, analyze, plan, create content) → chain internal work task tools.
+- Both external and internal work requested → do both.
+- Trivial conversation or quick questions → no task needed.
+
+CHAINING FLOW (mandatory for actionable work):
+1. create_work_task with smart defaults → get task_id
+2. update_work_task → status: "in_progress", ai_status: "executing", activity_entry: { action: "work_started", detail: "...", actor: "ai", status: "executing" }
+3. Execute the actual work tool (e.g. deep_research, send_email, etc.)
+4. update_work_task → status: "up_for_review", draft_output: <result>, ai_status: "completed", next_action: "needs_review", activity_entry: { action: "work_completed", detail: "...", actor: "ai", status: "completed" }
+5. On failure → ai_status: "failed", next_action: "waiting_on_human", activity_entry with status: "failed"
+
+IMPORTANT: Always reuse the task_id returned from create_work_task for all update_work_task calls in the same flow.
+
+STATE TRANSITIONS — always follow this order, never skip stages:
+  todo → in_progress → up_for_review → completed
+  up_for_review can go back to in_progress (rework)
+  completed can go back to in_progress (reopen)
+
+SMART DEFAULT MAPPINGS:
+- Research requests → task_type: "research", intent_type: "ops"
+- Content drafts → task_type: "content", intent_type: "marketing"
+- Email drafts → task_type: "email", intent_type: "ops" (or "sales_support" if sales-related)
+- Client work/planning → intent_type: "fulfillment"
+- Marketing campaigns → intent_type: "marketing" (NOT "content")
+- Ops/system setup → intent_type: "ops"
+
 Default assigned_to is 'ai'. Default next_action is 'waiting_on_ai'.
 
 You are the intelligence, memory, and action layer of ${osName}.`;
@@ -3712,6 +3734,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'save_memory': 'Saving to memory',
   'deep_research': 'Researching the web',
   'create_work_task': 'Creating work task',
+  'update_work_task': 'Updating work task',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
