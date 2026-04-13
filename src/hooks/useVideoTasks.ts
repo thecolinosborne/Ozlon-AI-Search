@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -8,6 +8,14 @@ export function useVideoTasks() {
   const { session } = useAuth();
   const [videoTasks, setVideoTasks] = useState<VideoTaskWithParent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [renderingTaskId, setRenderingTaskId] = useState<string | null>(null);
+  const [simulatedProgress, setSimulatedProgress] = useState(0);
+  const renderInterval = useRef<number>();
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    if (renderInterval.current) clearInterval(renderInterval.current);
+  }, []);
 
   const fetchVideoTasks = useCallback(async () => {
     if (!session?.user?.id) {
@@ -73,7 +81,6 @@ export function useVideoTasks() {
   }) => {
     if (!session?.user?.id) return;
 
-    // Create parent work_task
     const { data: parentData, error: parentError } = await supabase
       .from('work_tasks')
       .insert({
@@ -96,7 +103,6 @@ export function useVideoTasks() {
       return;
     }
 
-    // Create linked video_task
     const { data: videoData, error: videoError } = await supabase
       .from('video_tasks')
       .insert({
@@ -140,23 +146,96 @@ export function useVideoTasks() {
     ));
   }, []);
 
-  const generateMockEditPlan = useCallback((instructions: string): EditPlanAction[] => {
-    const id = () => crypto.randomUUID();
-    return [
-      { id: id(), action_type: 'trim', label: 'Trim intro', detail: 'Remove first 3 seconds', phase: 'pre', status: 'pending' },
-      { id: id(), action_type: 'caption', label: 'Add captions', detail: 'Auto-generate subtitles', phase: 'main', status: 'pending' },
-      { id: id(), action_type: 'music', label: 'Add background music', detail: 'Trending audio overlay', phase: 'main', status: 'pending' },
-      { id: id(), action_type: 'color', label: 'Color grade', detail: 'Apply warm tone preset', phase: 'post', status: 'pending' },
-      { id: id(), action_type: 'export', label: 'Export final', detail: instructions || 'Standard export', phase: 'post', status: 'pending' },
-    ];
+  const generateEditPlan = useCallback(async (taskId: string) => {
+    toast.info('Generating edit plan...');
+
+    const { data, error } = await supabase.functions.invoke('render-video', {
+      body: { action: 'generate_plan', video_task_id: taskId },
+    });
+
+    if (error || data?.error) {
+      toast.error(data?.error || 'Failed to generate edit plan');
+      console.error('generate_plan error:', error || data?.error);
+      return;
+    }
+
+    // Update local state
+    setVideoTasks(prev => prev.map(t =>
+      t.id === taskId
+        ? { ...t, edit_plan: data.plan, edit_plan_status: 'generated' } as VideoTaskWithParent
+        : t
+    ));
+
+    toast.success('Edit plan generated');
+    return data.plan as EditPlanAction[];
   }, []);
+
+  const startRender = useCallback(async (taskId: string) => {
+    const { data, error } = await supabase.functions.invoke('render-video', {
+      body: { action: 'start_render', video_task_id: taskId },
+    });
+
+    if (error || data?.error) {
+      toast.error(data?.error || 'Failed to start render');
+      console.error('start_render error:', error || data?.error);
+      return;
+    }
+
+    // Update local state to rendering
+    setRenderingTaskId(taskId);
+    setSimulatedProgress(0);
+    setVideoTasks(prev => prev.map(t =>
+      t.id === taskId
+        ? { ...t, render_status: 'rendering', render_progress: 0 } as VideoTaskWithParent
+        : t
+    ));
+
+    toast.info('Render started');
+
+    // TEMPORARY: Frontend-driven progress simulation
+    // Backend persists only queued/rendering/completed/failed.
+    // Intermediate progress percentages are local UX only.
+    let progress = 0;
+    if (renderInterval.current) clearInterval(renderInterval.current);
+
+    renderInterval.current = window.setInterval(async () => {
+      progress += 25;
+      setSimulatedProgress(progress);
+
+      if (progress >= 100) {
+        clearInterval(renderInterval.current);
+        renderInterval.current = undefined;
+
+        // Call complete_render
+        const { data: completeData, error: completeErr } = await supabase.functions.invoke('render-video', {
+          body: { action: 'complete_render', video_task_id: taskId },
+        });
+
+        if (completeErr || completeData?.error) {
+          toast.error('Render failed');
+          setRenderingTaskId(null);
+          setSimulatedProgress(0);
+          fetchVideoTasks();
+          return;
+        }
+
+        toast.success('Render completed');
+        setRenderingTaskId(null);
+        setSimulatedProgress(0);
+        fetchVideoTasks();
+      }
+    }, 2000);
+  }, [fetchVideoTasks]);
 
   return {
     videoTasks,
     loading,
+    renderingTaskId,
+    simulatedProgress,
     fetchVideoTasks,
     createVideoTask,
     updateVideoTask,
-    generateMockEditPlan,
+    generateEditPlan,
+    startRender,
   };
 }

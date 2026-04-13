@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { Play } from 'lucide-react';
+import { Play, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { EditPlanPanel } from './EditPlanPanel';
 import type { VideoTaskWithParent, EditPlanAction } from '@/types/video';
@@ -18,11 +18,21 @@ interface VideoTaskDetailProps {
   open: boolean;
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<VideoTaskWithParent>) => void;
-  onGenerateEditPlan: (instructions: string) => EditPlanAction[];
+  onGenerateEditPlan: (taskId: string) => Promise<EditPlanAction[] | undefined>;
+  onStartRender: (taskId: string) => Promise<void>;
+  renderingTaskId: string | null;
+  simulatedProgress: number;
 }
 
-export function VideoTaskDetail({ task, open, onClose, onUpdate, onGenerateEditPlan }: VideoTaskDetailProps) {
+export function VideoTaskDetail({
+  task, open, onClose, onUpdate,
+  onGenerateEditPlan, onStartRender,
+  renderingTaskId, simulatedProgress,
+}: VideoTaskDetailProps) {
   if (!task) return null;
+
+  const isRendering = renderingTaskId === task.id;
+  const displayProgress = isRendering ? simulatedProgress : task.render_progress;
 
   const handleApprove = () => {
     onUpdate(task.id, { edit_plan_status: 'approved' });
@@ -33,8 +43,7 @@ export function VideoTaskDetail({ task, open, onClose, onUpdate, onGenerateEditP
   };
 
   const handleGenerate = () => {
-    const plan = onGenerateEditPlan(task.edit_instructions || '');
-    onUpdate(task.id, { edit_plan: plan, edit_plan_status: 'generated' });
+    onGenerateEditPlan(task.id);
   };
 
   const handleToggleAction = (actionId: string) => {
@@ -46,9 +55,28 @@ export function VideoTaskDetail({ task, open, onClose, onUpdate, onGenerateEditP
     onUpdate(task.id, { edit_plan: updated });
   };
 
+  const handleStartRender = () => {
+    onStartRender(task.id);
+  };
+
   const renderHistory = [...(task.render_history || [])].sort((a, b) =>
     new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
   );
+
+  const isRenderDisabled =
+    task.edit_plan_status !== 'approved' ||
+    isRendering ||
+    task.render_status === 'queued' ||
+    task.render_status === 'rendering' ||
+    task.render_status === 'completed';
+
+  const renderButtonLabel = () => {
+    if (isRendering) return 'Rendering...';
+    if (task.render_status === 'completed') return 'Render Complete';
+    if (task.render_status === 'rendering' || task.render_status === 'queued') return 'Render in Progress';
+    if (task.edit_plan_status !== 'approved') return 'Approve edit plan first';
+    return 'Start Render';
+  };
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -75,13 +103,13 @@ export function VideoTaskDetail({ task, open, onClose, onUpdate, onGenerateEditP
           </div>
 
           {/* Render progress */}
-          {task.render_status === 'rendering' && (
+          {(isRendering || task.render_status === 'rendering') && (
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Rendering...</span>
-                <span>{task.render_progress}%</span>
+                <span>{displayProgress}%</span>
               </div>
-              <Progress value={task.render_progress} className="h-2" />
+              <Progress value={displayProgress} className="h-2" />
             </div>
           )}
 
@@ -134,11 +162,16 @@ export function VideoTaskDetail({ task, open, onClose, onUpdate, onGenerateEditP
             ) : (
               <Button
                 size="sm"
-                disabled={task.edit_plan_status !== 'approved'}
+                disabled={isRenderDisabled}
                 className="w-full"
+                onClick={handleStartRender}
               >
-                <Play className="w-4 h-4 mr-1" />
-                {task.edit_plan_status !== 'approved' ? 'Approve edit plan first' : 'Start Render (Mock)'}
+                {isRendering ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 mr-1" />
+                )}
+                {renderButtonLabel()}
               </Button>
             )}
           </div>

@@ -11,7 +11,10 @@ import type { VideoTaskWithParent, RenderStatus } from '@/types/video';
 type FilterTab = 'all' | RenderStatus;
 
 export function VideoStudioDashboard() {
-  const { videoTasks, loading, createVideoTask, updateVideoTask, generateMockEditPlan } = useVideoTasks();
+  const {
+    videoTasks, loading, renderingTaskId, simulatedProgress,
+    createVideoTask, updateVideoTask, generateEditPlan, startRender,
+  } = useVideoTasks();
   const [filter, setFilter] = useState<FilterTab>('all');
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<VideoTaskWithParent | null>(null);
@@ -98,7 +101,10 @@ export function VideoStudioDashboard() {
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         onUpdate={handleUpdate}
-        onGenerateEditPlan={generateMockEditPlan}
+        onGenerateEditPlan={generateEditPlan}
+        onStartRender={startRender}
+        renderingTaskId={renderingTaskId}
+        simulatedProgress={simulatedProgress}
       />
     </div>
   );
