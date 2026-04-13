@@ -24,6 +24,10 @@ interface TaskActivityState {
   completeTask: (taskId: string, status?: 'done' | 'error') => void;
   setTaskSummary: (taskId: string, summary: string) => void;
   dismissTask: (taskId: string) => void;
+  /** Remove all tasks — use on session transitions to prevent cross-session leaks. */
+  clearAllTasks: () => void;
+  /** Mark all in_progress tasks as error — use when a request is aborted/abandoned. */
+  failStaleTasks: (taskIds?: Set<string>) => void;
   setPortalOpen: (open: boolean) => void;
 }
 
@@ -32,17 +36,23 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
   isPortalOpen: false,
 
   addTask: (id, title) =>
-    set((state) => ({
-      tasks: [
-        ...state.tasks,
-        { id, title, status: 'in_progress', steps: [], startedAt: Date.now() },
-      ],
-    })),
+    set((state) => {
+      // Prevent duplicate tasks
+      if (state.tasks.some((t) => t.id === id)) return state;
+      return {
+        tasks: [
+          ...state.tasks,
+          { id, title, status: 'in_progress', steps: [], startedAt: Date.now() },
+        ],
+      };
+    }),
 
   updateStep: (taskId, stepLabel, status) =>
     set((state) => ({
       tasks: state.tasks.map((t) => {
         if (t.id !== taskId) return t;
+        // Don't update steps on completed tasks
+        if (t.status === 'done' || t.status === 'error') return t;
         const existingIdx = t.steps.findIndex((s) => s.label === stepLabel);
         if (existingIdx >= 0) {
           const newSteps = [...t.steps];
@@ -55,9 +65,14 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
 
   completeTask: (taskId, status = 'done') =>
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId ? { ...t, status, completedAt: Date.now() } : t
-      ),
+      tasks: state.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        // ── State guard: never transition error → done ──
+        if (t.status === 'error' && status === 'done') return t;
+        // Don't re-complete already completed tasks
+        if (t.status === 'done' || t.status === 'error') return t;
+        return { ...t, status, completedAt: Date.now() };
+      }),
     })),
 
   setTaskSummary: (taskId, summary) =>
@@ -70,6 +85,18 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
   dismissTask: (taskId) =>
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== taskId),
+    })),
+
+  clearAllTasks: () => set({ tasks: [] }),
+
+  failStaleTasks: (taskIds) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) => {
+        if (t.status !== 'in_progress') return t;
+        // If specific IDs provided, only fail those
+        if (taskIds && !taskIds.has(t.id)) return t;
+        return { ...t, status: 'error' as const, completedAt: Date.now() };
+      }),
     })),
 
   setPortalOpen: (open) => set({ isPortalOpen: open }),

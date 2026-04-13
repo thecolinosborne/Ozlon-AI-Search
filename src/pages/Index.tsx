@@ -7,6 +7,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
+import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { toast } from "sonner";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
@@ -80,6 +81,7 @@ const Index = () => {
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
+  const { clearAllTasks } = useTaskActivityStore();
 
   // ── Single source of truth for rendered messages ─────────────────────
   // Three layers merged: persisted > inflight > ephemeral.
@@ -159,23 +161,28 @@ const Index = () => {
   }, [sendMessage]);
 
   // ── Session transition handlers ──────────────────────────────────────
+  // All transitions: abort stream (which fails stale tasks), reset ephemeral,
+  // and clear completed task UI to prevent cross-session leaks.
   const handleNewChat = useCallback(async () => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await startNewChat();
-  }, [abortStream, resetEphemeralState, startNewChat]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, startNewChat]);
 
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await switchSession(sessionId);
-  }, [abortStream, resetEphemeralState, switchSession]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, switchSession]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await deleteSession(sessionId);
-  }, [abortStream, resetEphemeralState, deleteSession]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, deleteSession]);
 
   // Shared composer props
   const composerProps = {
