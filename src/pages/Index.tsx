@@ -79,6 +79,7 @@ const Index = () => {
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
+  const hasInteracted = messages.length > 0 || isLoading;
 
   // Reset store on user change
   useEffect(() => {
