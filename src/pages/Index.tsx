@@ -46,8 +46,8 @@ const Index = () => {
   const [ephemeralMessages, setEphemeralMessages] = useState<ChatMessage[]>([]);
   const [welcomeShown, setWelcomeShown] = useState(false);
 
-  // Build user settings
-  const userSettings: UserSettings = {
+  // Build user settings — memoized to avoid re-creating on every render
+  const userSettings: UserSettings = useMemo(() => ({
     communicationMode: storeUser?.communicationMode || "both",
     integrations: {
       calendar: connections.find((c) => c.id === "calendar")?.connected || false,
@@ -63,7 +63,7 @@ const Index = () => {
       summary: agents.find((a) => a.id === "summary")?.enabled || false,
     },
     osName: systemName,
-  };
+  }), [storeUser?.communicationMode, connections, agents, systemName]);
 
   // Convert persisted session messages to ChatMessage type
   const persistedMessages: ChatMessage[] = useMemo(
@@ -184,13 +184,13 @@ const Index = () => {
     await deleteSession(sessionId);
   }, [abortStream, resetEphemeralState, clearAllTasks, deleteSession]);
 
-  // Shared composer props
-  const composerProps = {
+  // Shared composer props — memoized to stabilize child renders
+  const composerProps = useMemo(() => ({
     input, onInputChange: setInput, onSubmit: () => sendMessage(input),
     onMicClick: handleMicClick, isRecording, isTranscribing, isLoading,
     placeholder: `Ask ${systemName} anything...`,
     attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload,
-  };
+  }), [input, setInput, sendMessage, handleMicClick, isRecording, isTranscribing, isLoading, systemName, attachedFiles, removeFile, triggerFileUpload]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
