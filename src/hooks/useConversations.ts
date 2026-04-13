@@ -324,16 +324,19 @@ export function useConversations() {
     if (data) setSessions(data);
   }, [user]);
 
+  /**
+   * Public contract — consumed by Index.tsx and session UI.
+   * Internal mutation helpers (setMessages, updateMessageContent) are NOT
+   * exposed. All message mutations flow through saveMessage / finalizeMessage.
+   */
   return {
     sessions,
     activeSessionId,
     messages,
-    setMessages,
     sessionsLoaded,
     switchSession,
     startNewChat,
     saveMessage,
-    updateMessageContent,
     finalizeMessage,
     deleteSession,
     loadSessions,
