@@ -1935,8 +1935,53 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Work Task Update Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'update_work_task',
+      description: 'Update an existing work task status, deliverable, or activity log. Use after completing work to move a task through stages. Always follow the chain: todo → in_progress → up_for_review → completed. Never skip stages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'The work task ID to update' },
+          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed'], description: 'New status — must follow valid transitions' },
+          draft_output: { type: 'string', description: 'Markdown deliverable content to save' },
+          ai_status: { type: 'string', enum: ['thinking', 'executing', 'completed', 'failed'], description: 'Current AI processing status' },
+          next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state' },
+          activity_entry: {
+            type: 'object',
+            description: 'Structured activity log entry to append',
+            properties: {
+              action: { type: 'string', description: 'Action identifier e.g. research_started, draft_completed' },
+              detail: { type: 'string', description: 'Human-readable description of what happened' },
+              status: { type: 'string', enum: ['thinking', 'executing', 'completed', 'failed'], description: 'Status of this activity' },
+              actor: { type: 'string', description: 'Who performed this — ai or user' },
+            },
+            required: ['action', 'detail', 'actor'],
+            additionalProperties: false,
+          },
+        },
+        required: ['task_id'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 // ============================================================================
+
+// --- State transition validator for work tasks ---
+const VALID_TASK_TRANSITIONS: Record<string, string[]> = {
+  todo: ['in_progress'],
+  in_progress: ['up_for_review'],
+  up_for_review: ['in_progress', 'completed'],
+  completed: ['in_progress'],
+};
+
+function isValidTaskTransition(from: string, to: string): boolean {
+  if (from === to) return true; // no-op is always safe
+  return VALID_TASK_TRANSITIONS[from]?.includes(to) ?? false;
+}
 
 async function executeToolCall(
   toolName: string,
@@ -3271,6 +3316,75 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
         }
       }
 
+      // ============ Update Work Task Handler ============
+      case 'update_work_task': {
+        try {
+          const taskId = args.task_id as string;
+          if (!taskId) return { success: false, result: 'task_id is required' };
+
+          const adminClient = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          );
+
+          // Fetch existing task
+          const { data: existing, error: fetchErr } = await adminClient
+            .from('work_tasks')
+            .select('*')
+            .eq('id', taskId)
+            .single();
+
+          if (fetchErr || !existing) {
+            return { success: false, result: `Task not found: ${fetchErr?.message || 'no rows'}` };
+          }
+
+          // Validate status transition if status provided
+          const newStatus = args.status as string | undefined;
+          if (newStatus && newStatus !== existing.status) {
+            if (!isValidTaskTransition(existing.status, newStatus)) {
+              return { success: false, result: `Invalid transition: ${existing.status} → ${newStatus}. Allowed: ${VALID_TASK_TRANSITIONS[existing.status]?.join(', ') || 'none'}` };
+            }
+          }
+
+          // Build update — only include provided fields
+          const updateObj: Record<string, unknown> = {
+            last_activity_at: new Date().toISOString(),
+          };
+
+          if (newStatus) updateObj.status = newStatus;
+          if (args.ai_status) updateObj.ai_status = args.ai_status;
+          if (args.next_action) updateObj.next_action = args.next_action;
+          // Only update draft_output if explicitly provided (never null-overwrite)
+          if (typeof args.draft_output === 'string') updateObj.draft_output = args.draft_output;
+
+          // Append structured activity entry if provided
+          if (args.activity_entry && typeof args.activity_entry === 'object') {
+            const existingLog = Array.isArray(existing.ai_activity_log) ? existing.ai_activity_log : [];
+            const entry = {
+              ...(args.activity_entry as Record<string, unknown>),
+              timestamp: new Date().toISOString(),
+            };
+            updateObj.ai_activity_log = [...existingLog, entry];
+          }
+
+          const { error: updateErr } = await adminClient
+            .from('work_tasks')
+            .update(updateObj)
+            .eq('id', taskId);
+
+          if (updateErr) {
+            console.error('[update_work_task] Error:', updateErr);
+            return { success: false, result: `Failed to update task: ${updateErr.message}` };
+          }
+
+          const statusMsg = newStatus ? ` Status: ${existing.status} → ${newStatus}.` : '';
+          return { success: true, result: `Task "${existing.title}" updated.${statusMsg}` };
+        } catch (e) {
+          console.error('[update_work_task] Error:', e);
+          return { success: false, result: `Task update error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -3425,16 +3539,38 @@ SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
 ===========================================================
-WORK TASK MANAGEMENT
+WORK TASK MANAGEMENT & SMART ORCHESTRATION
 ===========================================================
-You have a create_work_task tool that creates trackable tasks in the user's AI operations workspace.
-Use it when the user:
-- Asks to create, track, or queue up a task
-- Makes a multi-step work request that should be tracked
-- Wants something done that has deliverables (email drafts, research reports, content)
-- Says "add this to my tasks", "track this", "create a task for..."
+You have create_work_task and update_work_task tools for the user's AI operations workspace.
 
-The task appears on their Tasks board under "To Do". Set appropriate task_type, intent_type, and priority.
+ROUTING RULES:
+- User explicitly mentions "ClickUp" → use create_clickup_task. No internal task unless additional internal work is also requested.
+- User requests actionable work (research, draft, write, summarize, analyze, plan, create content) → chain internal work task tools.
+- Both external and internal work requested → do both.
+- Trivial conversation or quick questions → no task needed.
+
+CHAINING FLOW (mandatory for actionable work):
+1. create_work_task with smart defaults → get task_id
+2. update_work_task → status: "in_progress", ai_status: "executing", activity_entry: { action: "work_started", detail: "...", actor: "ai", status: "executing" }
+3. Execute the actual work tool (e.g. deep_research, send_email, etc.)
+4. update_work_task → status: "up_for_review", draft_output: <result>, ai_status: "completed", next_action: "needs_review", activity_entry: { action: "work_completed", detail: "...", actor: "ai", status: "completed" }
+5. On failure → ai_status: "failed", next_action: "waiting_on_human", activity_entry with status: "failed"
+
+IMPORTANT: Always reuse the task_id returned from create_work_task for all update_work_task calls in the same flow.
+
+STATE TRANSITIONS — always follow this order, never skip stages:
+  todo → in_progress → up_for_review → completed
+  up_for_review can go back to in_progress (rework)
+  completed can go back to in_progress (reopen)
+
+SMART DEFAULT MAPPINGS:
+- Research requests → task_type: "research", intent_type: "ops"
+- Content drafts → task_type: "content", intent_type: "marketing"
+- Email drafts → task_type: "email", intent_type: "ops" (or "sales_support" if sales-related)
+- Client work/planning → intent_type: "fulfillment"
+- Marketing campaigns → intent_type: "marketing" (NOT "content")
+- Ops/system setup → intent_type: "ops"
+
 Default assigned_to is 'ai'. Default next_action is 'waiting_on_ai'.
 
 You are the intelligence, memory, and action layer of ${osName}.`;
@@ -3545,6 +3681,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'save_memory': '_always_',
     'deep_research': '_always_',
     'create_work_task': '_always_',
+    'update_work_task': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3597,6 +3734,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'save_memory': 'Saving to memory',
   'deep_research': 'Researching the web',
   'create_work_task': 'Creating work task',
+  'update_work_task': 'Updating work task',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
