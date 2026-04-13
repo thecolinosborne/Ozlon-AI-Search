@@ -3424,6 +3424,19 @@ SEO ANALYSIS BEST PRACTICES:
 SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
+===========================================================
+WORK TASK MANAGEMENT
+===========================================================
+You have a create_work_task tool that creates trackable tasks in the user's AI operations workspace.
+Use it when the user:
+- Asks to create, track, or queue up a task
+- Makes a multi-step work request that should be tracked
+- Wants something done that has deliverables (email drafts, research reports, content)
+- Says "add this to my tasks", "track this", "create a task for..."
+
+The task appears on their Tasks board under "To Do". Set appropriate task_type, intent_type, and priority.
+Default assigned_to is 'ai'. Default next_action is 'waiting_on_ai'.
+
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
