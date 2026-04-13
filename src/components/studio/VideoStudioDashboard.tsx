@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Plus, Film } from 'lucide-react';
+import { Plus, Film, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { VideoTaskCard } from './VideoTaskCard';
@@ -12,8 +12,8 @@ type FilterTab = 'all' | RenderStatus;
 
 export function VideoStudioDashboard() {
   const {
-    videoTasks, loading, renderingTaskId, simulatedProgress,
-    createVideoTask, updateVideoTask, generateEditPlan, startRender,
+    videoTasks, loading, error, renderingTaskId, simulatedProgress,
+    fetchVideoTasks, createVideoTask, updateVideoTask, generateEditPlan, startRender,
   } = useVideoTasks();
   const [filter, setFilter] = useState<FilterTab>('all');
   const [createOpen, setCreateOpen] = useState(false);
@@ -47,6 +47,17 @@ export function VideoStudioDashboard() {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" onClick={fetchVideoTasks} className="gap-1.5">
+          <RefreshCw className="w-4 h-4" /> Retry
+        </Button>
       </div>
     );
   }

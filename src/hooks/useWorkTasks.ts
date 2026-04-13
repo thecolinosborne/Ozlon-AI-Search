@@ -86,20 +86,32 @@ export function useWorkTasks() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
-      .from('work_tasks')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .is('archived_at', null)
-      .order('last_activity_at', { ascending: false });
 
-    if (error) {
-      console.error('Failed to fetch tasks:', error);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+
+      const { data, error } = await supabase
+        .from('work_tasks')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .is('archived_at', null)
+        .order('last_activity_at', { ascending: false })
+        .abortSignal(controller.signal);
+
+      clearTimeout(timeout);
+
+      if (error) {
+        console.error('Failed to fetch tasks:', error);
+        setLoading(false);
+        return;
+      }
+      setTasks((data || []) as unknown as WorkTask[]);
       setLoading(false);
-      return;
+    } catch (e) {
+      console.error('useWorkTasks fetch exception:', e);
+      setLoading(false);
     }
-    setTasks((data || []) as unknown as WorkTask[]);
-    setLoading(false);
   }, [session?.user?.id]);
 
   useEffect(() => {

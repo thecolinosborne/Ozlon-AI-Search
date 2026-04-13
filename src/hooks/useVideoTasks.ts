@@ -4,66 +4,102 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import type { VideoTask, VideoTaskWithParent, EditPlanAction } from '@/types/video';
 
+const isDev = import.meta.env.DEV;
+
 export function useVideoTasks() {
   const { session } = useAuth();
   const [videoTasks, setVideoTasks] = useState<VideoTaskWithParent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [renderingTaskId, setRenderingTaskId] = useState<string | null>(null);
   const [simulatedProgress, setSimulatedProgress] = useState(0);
   const renderInterval = useRef<number>();
+  const mountedRef = useRef(true);
 
-  // Cleanup on unmount
-  useEffect(() => () => {
-    if (renderInterval.current) clearInterval(renderInterval.current);
+  // Lifecycle: track mounted state, clean up render interval
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (renderInterval.current) {
+        clearInterval(renderInterval.current);
+        renderInterval.current = undefined;
+      }
+    };
   }, []);
 
   const fetchVideoTasks = useCallback(async () => {
     if (!session?.user?.id) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from('video_tasks')
-      .select('*, work_tasks!inner(title, status, ai_status, ai_activity_log)')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Failed to fetch video tasks:', error);
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setError(null);
+      }
       return;
     }
 
-    const mapped: VideoTaskWithParent[] = (data || []).map((row: any) => ({
-      id: row.id,
-      work_task_id: row.work_task_id,
-      user_id: row.user_id,
-      source_type: row.source_type,
-      source_content: row.source_content,
-      source_asset_url: row.source_asset_url,
-      requested_output: row.requested_output,
-      edit_instructions: row.edit_instructions,
-      edit_plan: row.edit_plan as EditPlanAction[],
-      edit_plan_status: row.edit_plan_status,
-      aspect_ratio: row.aspect_ratio,
-      target_duration: row.target_duration,
-      render_status: row.render_status,
-      render_progress: row.render_progress,
-      output_url: row.output_url,
-      thumbnail_url: row.thumbnail_url,
-      render_history: row.render_history as any[],
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      parent_title: row.work_tasks.title,
-      parent_status: row.work_tasks.status,
-      parent_ai_status: row.work_tasks.ai_status,
-      parent_ai_activity_log: row.work_tasks.ai_activity_log as unknown[],
-    }));
+    if (mountedRef.current) {
+      setLoading(true);
+      setError(null);
+    }
 
-    setVideoTasks(mapped);
-    setLoading(false);
+    try {
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+
+      const { data, error: queryError } = await supabase
+        .from('video_tasks')
+        .select('*, work_tasks!inner(title, status, ai_status, ai_activity_log)')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .abortSignal(controller.signal);
+
+      clearTimeout(timeout);
+
+      if (!mountedRef.current) return;
+
+      if (queryError) {
+        console.error('Failed to fetch video tasks:', queryError);
+        setError('Failed to load video tasks');
+        setLoading(false);
+        return;
+      }
+
+      const mapped: VideoTaskWithParent[] = (data || []).map((row: any) => ({
+        id: row.id,
+        work_task_id: row.work_task_id,
+        user_id: row.user_id,
+        source_type: row.source_type,
+        source_content: row.source_content,
+        source_asset_url: row.source_asset_url,
+        requested_output: row.requested_output,
+        edit_instructions: row.edit_instructions,
+        edit_plan: row.edit_plan as EditPlanAction[],
+        edit_plan_status: row.edit_plan_status,
+        aspect_ratio: row.aspect_ratio,
+        target_duration: row.target_duration,
+        render_status: row.render_status,
+        render_progress: row.render_progress,
+        output_url: row.output_url,
+        thumbnail_url: row.thumbnail_url,
+        render_history: row.render_history as any[],
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        parent_title: row.work_tasks?.title ?? 'Untitled',
+        parent_status: row.work_tasks?.status ?? 'todo',
+        parent_ai_status: row.work_tasks?.ai_status ?? 'idle',
+        parent_ai_activity_log: (row.work_tasks?.ai_activity_log as unknown[]) ?? [],
+      }));
+
+      setVideoTasks(mapped);
+      setLoading(false);
+    } catch (e) {
+      console.error('useVideoTasks fetch exception:', e);
+      if (mountedRef.current) {
+        setError('Failed to load video tasks');
+        setLoading(false);
+      }
+    }
   }, [session?.user?.id]);
 
   useEffect(() => {
@@ -142,9 +178,11 @@ export function useVideoTasks() {
       return;
     }
 
-    setVideoTasks(prev => prev.map(t =>
-      t.id === id ? { ...t, ...updates } as VideoTaskWithParent : t
-    ));
+    if (mountedRef.current) {
+      setVideoTasks(prev => prev.map(t =>
+        t.id === id ? { ...t, ...updates } as VideoTaskWithParent : t
+      ));
+    }
   }, []);
 
   const generateEditPlan = useCallback(async (taskId: string) => {
@@ -160,12 +198,13 @@ export function useVideoTasks() {
       return;
     }
 
-    // Update local state
-    setVideoTasks(prev => prev.map(t =>
-      t.id === taskId
-        ? { ...t, edit_plan: data.plan, edit_plan_status: 'generated' } as VideoTaskWithParent
-        : t
-    ));
+    if (mountedRef.current) {
+      setVideoTasks(prev => prev.map(t =>
+        t.id === taskId
+          ? { ...t, edit_plan: data.plan, edit_plan_status: 'generated' } as VideoTaskWithParent
+          : t
+      ));
+    }
 
     toast.success('Edit plan generated');
     return data.plan as EditPlanAction[];
@@ -182,7 +221,8 @@ export function useVideoTasks() {
       return;
     }
 
-    // Update local state to rendering
+    if (!mountedRef.current) return;
+
     setRenderingTaskId(taskId);
     setSimulatedProgress(0);
     setVideoTasks(prev => prev.map(t =>
@@ -193,13 +233,16 @@ export function useVideoTasks() {
 
     toast.info('Render started');
 
-    // TEMPORARY: Frontend-driven progress simulation
-    // Backend persists only queued/rendering/completed/failed.
-    // Intermediate progress percentages are local UX only.
     let progress = 0;
     if (renderInterval.current) clearInterval(renderInterval.current);
 
     renderInterval.current = window.setInterval(async () => {
+      if (!mountedRef.current) {
+        clearInterval(renderInterval.current);
+        renderInterval.current = undefined;
+        return;
+      }
+
       progress += 25;
       setSimulatedProgress(progress);
 
@@ -207,10 +250,11 @@ export function useVideoTasks() {
         clearInterval(renderInterval.current);
         renderInterval.current = undefined;
 
-        // Call complete_render
         const { data: completeData, error: completeErr } = await supabase.functions.invoke('render-video', {
           body: { action: 'complete_render', video_task_id: taskId },
         });
+
+        if (!mountedRef.current) return;
 
         if (completeErr || completeData?.error) {
           toast.error('Render failed');
@@ -231,6 +275,7 @@ export function useVideoTasks() {
   return {
     videoTasks,
     loading,
+    error,
     renderingTaskId,
     simulatedProgress,
     fetchVideoTasks,

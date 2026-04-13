@@ -1,10 +1,19 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { voiceService } from "@/services/voiceService";
 import { toast } from "sonner";
 
 export function useVoicePlayback() {
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      voiceService.stop();
+    };
+  }, []);
 
   const playMessage = useCallback(async (messageId: string, text: string) => {
     if (playingMessageId === messageId) {
@@ -21,8 +30,10 @@ export function useVoicePlayback() {
       console.error("Playback error:", error);
       toast.error("Could not play voice");
     } finally {
-      setPlayingMessageId(null);
-      setLoadingAudioId(null);
+      if (mountedRef.current) {
+        setPlayingMessageId(null);
+        setLoadingAudioId(null);
+      }
     }
   }, [playingMessageId]);
 
