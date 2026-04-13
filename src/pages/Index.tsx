@@ -185,13 +185,14 @@ const Index = () => {
     setInput("");
     setIsLoading(true);
 
-    // Save user message to session — don't block on this; if it hangs, continue to stream
-    const savePromise = Promise.race([
+    // Save user message to session with timeout protection — don't let it block forever
+    await Promise.race([
       saveMessage(userMessage),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('saveMessage timeout')), 10_000)),
-    ]).catch((err) => {
-      console.warn("[sendMessage] saveMessage failed or timed out:", err);
-    });
+      new Promise<void>((resolve) => setTimeout(() => {
+        console.warn("[sendMessage] saveMessage timed out after 10s, continuing...");
+        resolve();
+      }, 10_000)),
+    ]);
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
