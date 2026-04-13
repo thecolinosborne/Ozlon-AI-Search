@@ -9,30 +9,45 @@ export type ChatMessage = {
 };
 
 interface UseChatStreamOptions {
-  messages: ChatMessage[];
+  /** Persisted messages — used to build the prompt context sent to the model. */
+  persistedMessages: ChatMessage[];
   systemName: string;
   userSettings: UserSettings;
   autoPlayEnabled: boolean;
-  saveMessage: (msg: { id: string; role: string; content: string }) => Promise<void>;
-  updateMessageContent: (id: string, content: string) => void;
-  finalizeMessage: (msg: { id: string; role: string; content: string }) => void;
-  setSessionMessages: React.Dispatch<React.SetStateAction<any[]>>;
+  saveMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => Promise<void>;
+  finalizeMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => void;
   playMessage: (id: string, text: string) => void;
 }
 
+/**
+ * Owns the full lifecycle of a chat request:
+ *  – optimistic user message (inflight)
+ *  – assistant placeholder (inflight)
+ *  – streaming delta updates
+ *  – finalization & reconciliation
+ *
+ * Exposes `inflightMessages` so the page can merge them with persisted
+ * session messages to build a single `visibleMessages` array that never
+ * drops content during async saves or session creation.
+ */
 export function useChatStream({
-  messages,
+  persistedMessages,
   systemName,
   userSettings,
   autoPlayEnabled,
   saveMessage,
-  updateMessageContent,
   finalizeMessage,
-  setSessionMessages,
   playMessage,
 }: UseChatStreamOptions) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  /**
+   * Messages created during the current request that haven't been reconciled
+   * with persisted state yet. Cleared once finalizeMessage succeeds.
+   */
+  const [inflightMessages, setInflightMessages] = useState<ChatMessage[]>([]);
+
   const abortRef = useRef<AbortController | null>(null);
 
   const { addTask, updateStep, completeTask, setTaskSummary } = useTaskActivityStore();
@@ -41,6 +56,7 @@ export function useChatStream({
     abortRef.current?.abort();
     abortRef.current = null;
     setIsLoading(false);
+    setInflightMessages([]);
   }, []);
 
   const sendMessage = useCallback(async (text: string, intent?: string) => {
@@ -57,28 +73,39 @@ export function useChatStream({
       content: text,
     };
 
+    const assistantId = crypto.randomUUID();
+    const assistantPlaceholder: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+    };
+
+    // ── Synchronous optimistic update ──────────────────────────────────
+    // These state updates are batched by React and will render in the
+    // same frame, so the UI transitions to conversation mode instantly.
     setInput("");
     setIsLoading(true);
+    setInflightMessages([userMessage, assistantPlaceholder]);
 
-    // Persist user message with timeout guard
-    await Promise.race([
+    // ── Persist user message (fire-and-forget with timeout) ────────────
+    // We don't await this before showing the message — it's already
+    // visible via inflightMessages.
+    const persistPromise = Promise.race([
       saveMessage(userMessage),
-      new Promise<void>((resolve) => setTimeout(() => {
-        console.warn("[sendMessage] saveMessage timed out after 10s, continuing...");
-        resolve();
-      }, 10_000)),
+      new Promise<void>((resolve) =>
+        setTimeout(() => {
+          console.warn("[sendMessage] saveMessage timed out after 10s, continuing...");
+          resolve();
+        }, 10_000)
+      ),
     ]);
 
-    // Create assistant placeholder
+    // Wait for persistence before streaming so the session is ready,
+    // but the UI is already showing messages.
+    await persistPromise;
+
+    // ── Stream the response ────────────────────────────────────────────
     let assistantContent = "";
-    const assistantId = crypto.randomUUID();
-
-    setSessionMessages((prev: any[]) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "", created_at: new Date().toISOString() },
-    ]);
-
-    // Request-scoped state
     const requestTaskIds = new Set<string>();
     let outcome: "success" | "aborted" | "timeout" | "error" = "error";
     let timedOut = false;
@@ -90,7 +117,10 @@ export function useChatStream({
 
     try {
       await streamChat({
-        messages: [...messages, userMessage].map((m) => ({ role: m.role, content: m.content })),
+        messages: [...persistedMessages, userMessage].map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
         intent,
         systemName,
         userSettings,
@@ -101,12 +131,19 @@ export function useChatStream({
         },
         onDelta: (delta) => {
           assistantContent += delta;
-          updateMessageContent(assistantId, assistantContent);
+          // Update the assistant message in inflight state
+          setInflightMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: assistantContent } : m
+            )
+          );
         },
         onTaskUpdate: (update: TaskUpdate) => {
           requestTaskIds.add(update.taskId);
           if (update.status === "in_progress") {
-            const existing = useTaskActivityStore.getState().tasks.find((t) => t.id === update.taskId);
+            const existing = useTaskActivityStore
+              .getState()
+              .tasks.find((t) => t.id === update.taskId);
             if (!existing) addTask(update.taskId, update.title);
             updateStep(update.taskId, update.step, "in_progress");
           } else if (update.status === "done") {
@@ -125,8 +162,6 @@ export function useChatStream({
         },
       });
 
-      // If streamChat resolved without calling onDone or onError (reader exhausted),
-      // treat as success if we got content
       if (outcome !== "error") outcome = "success";
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -140,19 +175,59 @@ export function useChatStream({
       setIsLoading(false);
 
       if (outcome === "success" && assistantContent) {
-        finalizeMessage({ id: assistantId, role: "assistant", content: assistantContent });
+        // Persist the assistant message, then clear inflight.
+        // finalizeMessage will upsert into sessionMessages, so once it
+        // runs the persisted list has both user + assistant messages.
+        finalizeMessage({
+          id: assistantId,
+          role: "assistant",
+          content: assistantContent,
+        });
         requestTaskIds.forEach((id) => completeTask(id, "done"));
         if (autoPlayEnabled) playMessage(assistantId, assistantContent);
+        // Clear inflight — persisted state now has everything
+        setInflightMessages([]);
       } else if (outcome === "timeout") {
-        updateMessageContent(assistantId, assistantContent || "Response timed out. Please try again.");
+        setInflightMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content:
+                    assistantContent || "Response timed out. Please try again.",
+                }
+              : m
+          )
+        );
         requestTaskIds.forEach((id) => completeTask(id, "error"));
       } else if (outcome === "error") {
-        updateMessageContent(assistantId, "Something went wrong. Please try again.");
+        setInflightMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: "Something went wrong. Please try again." }
+              : m
+          )
+        );
         requestTaskIds.forEach((id) => completeTask(id, "error"));
+      } else {
+        // aborted — clear inflight silently
+        setInflightMessages([]);
       }
-      // 'aborted' — intentional user cancel: no error message, no task mutation
     }
-  }, [isLoading, messages, systemName, userSettings, autoPlayEnabled, saveMessage, updateMessageContent, finalizeMessage, setSessionMessages, playMessage, addTask, updateStep, completeTask, setTaskSummary]);
+  }, [
+    isLoading,
+    persistedMessages,
+    systemName,
+    userSettings,
+    autoPlayEnabled,
+    saveMessage,
+    finalizeMessage,
+    playMessage,
+    addTask,
+    updateStep,
+    completeTask,
+    setTaskSummary,
+  ]);
 
-  return { input, setInput, isLoading, sendMessage, abortStream };
+  return { input, setInput, isLoading, inflightMessages, sendMessage, abortStream };
 }
