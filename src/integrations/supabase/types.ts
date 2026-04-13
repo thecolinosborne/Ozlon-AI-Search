@@ -549,6 +549,80 @@ export type Database = {
         }
         Relationships: []
       }
+      video_tasks: {
+        Row: {
+          aspect_ratio: string
+          created_at: string
+          edit_instructions: string | null
+          edit_plan: Json
+          edit_plan_status: string
+          id: string
+          output_url: string | null
+          render_history: Json
+          render_progress: number
+          render_status: string
+          requested_output: string
+          source_asset_url: string | null
+          source_content: string | null
+          source_type: string
+          target_duration: number | null
+          thumbnail_url: string | null
+          updated_at: string
+          user_id: string
+          work_task_id: string
+        }
+        Insert: {
+          aspect_ratio?: string
+          created_at?: string
+          edit_instructions?: string | null
+          edit_plan?: Json
+          edit_plan_status?: string
+          id?: string
+          output_url?: string | null
+          render_history?: Json
+          render_progress?: number
+          render_status?: string
+          requested_output?: string
+          source_asset_url?: string | null
+          source_content?: string | null
+          source_type?: string
+          target_duration?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id: string
+          work_task_id: string
+        }
+        Update: {
+          aspect_ratio?: string
+          created_at?: string
+          edit_instructions?: string | null
+          edit_plan?: Json
+          edit_plan_status?: string
+          id?: string
+          output_url?: string | null
+          render_history?: Json
+          render_progress?: number
+          render_status?: string
+          requested_output?: string
+          source_asset_url?: string | null
+          source_content?: string | null
+          source_type?: string
+          target_duration?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          user_id?: string
+          work_task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_tasks_work_task_id_fkey"
+            columns: ["work_task_id"]
+            isOneToOne: true
+            referencedRelation: "work_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       viral_creative_sessions: {
         Row: {
           angle_outputs: Json | null
