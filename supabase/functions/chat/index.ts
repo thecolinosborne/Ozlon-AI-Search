@@ -3659,6 +3659,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'save_memory': '_always_',
     'deep_research': '_always_',
     'create_work_task': '_always_',
+    'update_work_task': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
