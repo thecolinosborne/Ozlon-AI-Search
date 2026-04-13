@@ -1,39 +1,97 @@
 
 
-# Refine ChatComposer into a Premium Reusable Component
+# Harden useChatStream — Robust Async Lifecycle
 
-The structure already exists from the prior refactor. This pass focuses on quality improvements — reliable autoresize, polished visuals, and cleaner internals.
+## Problems in current code
 
-## Changes
+1. **Loading state fragility** — `setIsLoading(false)` is called in 4 separate places (onDone, onError, catch, timeout). If `streamChat` resolves without calling onDone/onError (edge case), loading stays stuck.
+2. **Blanket task completion** — `onDone` completes ALL in-progress/error tasks globally, not just ones from the current request. A prior request's errored task gets silently converted to "done".
+3. **No error classification** — abort, timeout, network failure, and model error all get the same generic handling.
+4. **Safety timeout doesn't finalize** — if timeout fires and content exists, it's not persisted to DB.
+5. **Cleanup duplication** — timeout clearing is copy-pasted in 4 places.
 
-### 1. `ChatComposer.tsx` — Improved autoresize + design polish
+## Solution
 
-- Add `useEffect` watching `input` to trigger autoresize when text is set programmatically (voice transcription). Current code only resizes on `onChange`, so transcribed text doesn't resize the textarea.
-- Use `useCallback` for `autoResize` and call it from both `onChange` and the `useEffect`.
-- Add `bg-white` explicitly to textarea for both modes (currently inherits, can be inconsistent).
-- Improve send button: show as a filled circle when content is present (more ChatGPT-like).
-- Add subtle `ring` focus style instead of just border change.
-- Clean up the `pr` padding — hero mode also needs `pr` space for right-side buttons (currently missing, buttons can overlap text).
+Rewrite `useChatStream.ts` with these structural changes:
 
-### 2. `AttachmentChips.tsx` — Design upgrade
+### A. Request-scoped task tracking
+- Track task IDs created during the current request in a `Set<string>` scoped to `sendMessage`.
+- On completion, only complete tasks in that set.
+- On error, only mark tasks in that set as errored — never convert errored tasks to done.
 
-- Add image thumbnail preview for image files (show tiny preview instead of generic icon).
-- Use `transition-all` on chips for smooth add/remove.
-- Add `group` hover on chip to reveal the X button (less busy default state).
-- Slightly improve border radius and background color for a more premium feel.
+### B. Single cleanup path via `finally`
+- Use a `finally` block after the `try/catch` to guarantee `setIsLoading(false)` and timeout cleanup, removing the 4 duplicated cleanup sites.
+- Track request outcome with a local `outcome` variable: `'success' | 'aborted' | 'timeout' | 'error'`.
 
-### 3. `ChatComposer.tsx` — Props cleanup
+### C. Timeout as abort
+- Instead of the timeout just setting loading to false, have it set the outcome to `'timeout'` and call `abort()` on the controller. This terminates the stream cleanly and flows through the single cleanup path.
+- The catch block detects timeout via a flag on the abort reason.
 
-- Remove `getFileIcon` from props — move the icon logic into `AttachmentChips` directly (it's presentation logic that doesn't belong in the parent).
-- This simplifies the composer interface and removes one layer of prop drilling.
+### D. Finalization guarantee
+- Move finalization (persist + autoplay) into the `finally` block, gated on `outcome === 'success' && assistantContent`. This ensures it runs even if `onDone` fires but the promise resolves before the callback completes.
+
+### E. Clearer error messages
+- Abort: no error message shown (intentional user action)
+- Timeout: "Response timed out. Please try again."
+- Network/service error: "Something went wrong. Please try again."
 
 ## Files
 
 | File | Action |
 |------|--------|
-| `src/components/chat/ChatComposer.tsx` | **Rewrite** — autoresize fix, design polish, cleaner props |
-| `src/components/chat/AttachmentChips.tsx` | **Rewrite** — thumbnail previews, hover reveal, polish |
-| `src/components/chat/ChatHero.tsx` | **Edit** — remove `getFileIcon` from passed props |
-| `src/pages/Index.tsx` | **Edit** — remove `getFileIcon` from composerProps |
-| `src/hooks/useFileAttachments.ts` | **Edit** — remove `getFileIcon` (no longer needed externally) |
+| `src/hooks/useChatStream.ts` | **Rewrite** |
+
+No other files change. `chatService.ts`, `useTaskActivityStore.ts`, `Index.tsx` — all untouched.
+
+## Key code structure
+
+```typescript
+const sendMessage = useCallback(async (text: string, intent?: string) => {
+  // ... setup, user message, placeholder ...
+  
+  const requestTaskIds = new Set<string>();
+  let outcome: 'success' | 'aborted' | 'timeout' | 'error' = 'error';
+  let timedOut = false;
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    abortRef.current?.abort('timeout');
+  }, 120_000);
+
+  try {
+    await streamChat({
+      // ...
+      onTaskUpdate: (update) => {
+        requestTaskIds.add(update.taskId);
+        // ... existing step tracking ...
+      },
+      onDelta: (delta) => { /* same */ },
+      onDone: () => { outcome = 'success'; },
+      onError: (msg) => { outcome = 'error'; errorDetail = msg; },
+    });
+    // If streamChat resolves without onDone (reader exhausted), treat as success
+    if (outcome !== 'error') outcome = 'success';
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      outcome = timedOut ? 'timeout' : 'aborted';
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    setIsLoading(false);
+    
+    if (outcome === 'success' && assistantContent) {
+      finalizeMessage({ id: assistantId, role: 'assistant', content: assistantContent });
+      requestTaskIds.forEach(id => completeTask(id, 'done'));
+      if (autoPlayEnabled) playMessage(assistantId, assistantContent);
+    } else if (outcome === 'timeout') {
+      updateMessageContent(assistantId, assistantContent || 'Response timed out. Please try again.');
+      requestTaskIds.forEach(id => completeTask(id, 'error'));
+    } else if (outcome === 'error') {
+      updateMessageContent(assistantId, 'Something went wrong. Please try again.');
+      requestTaskIds.forEach(id => completeTask(id, 'error'));
+    }
+    // 'aborted' — no error message, no task mutation (user cancelled)
+  }
+}, [/* deps */]);
+```
 
