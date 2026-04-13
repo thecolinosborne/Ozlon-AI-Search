@@ -2957,6 +2957,88 @@ async function executeToolCall(
         } catch (e) { return { success: false, result: `Search error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
       }
 
+      case 'save_memory': {
+        try {
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          if (!OPENAI_KEY) return { success: false, result: 'Embedding API not configured.' };
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database not configured.' };
+
+          const memoryContent = args.content as string;
+          const memorySummary = args.summary as string;
+          const memoryType = (args.memory_type as string) || 'fact';
+          const salience = (args.salience as number) || 0.6;
+
+          // Get user ID from the request auth context (passed via closure)
+          // We'll use the wisdomUserId that was resolved earlier in the main handler
+          // For now, use service role to query — the tool is only called within authenticated sessions
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          // Generate embedding for deduplication and storage
+          const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: memoryContent }),
+          });
+          if (!embRes.ok) return { success: false, result: 'Failed to generate embedding.' };
+          const embData = await embRes.json();
+          const embedding = embData.data[0].embedding;
+
+          // Deduplication: check for highly similar existing memories
+          // We need the user_id — extract from the tool call context
+          // The wisdomUserId is captured in the outer scope of the main handler
+          // We pass it through via a closure variable set before the tool loop
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated for memory storage.' };
+
+          const { data: similar } = await adminClient.rpc('match_wisdom_memories', {
+            query_embedding: JSON.stringify(embedding),
+            match_threshold: 0.9,
+            match_count: 1,
+            filter_user_id: userId,
+            filter_memory_type: null,
+          });
+
+          if (similar && similar.length > 0) {
+            // Update existing memory: bump recurrence_count and confidence
+            const existing = similar[0];
+            await adminClient.from('wisdom_memories').update({
+              recurrence_count: (existing.recurrence_count || 1) + 1,
+              confidence: Math.min((existing.confidence || 0.8) + 0.05, 1.0),
+              content: memoryContent, // Update with latest wording
+              summary: memorySummary,
+              salience: Math.max(existing.salience || 0.5, salience),
+              updated_at: new Date().toISOString(),
+              last_accessed_at: new Date().toISOString(),
+            }).eq('id', existing.id);
+            console.log(`[save_memory] Deduplicated — updated existing memory ${existing.id} (recurrence: ${(existing.recurrence_count || 1) + 1})`);
+            return { success: true, result: `Memory updated (reinforced existing): "${memorySummary}"` };
+          }
+
+          // Insert new memory
+          const { error } = await adminClient.from('wisdom_memories').insert({
+            user_id: userId,
+            memory_type: memoryType,
+            content: memoryContent,
+            summary: memorySummary,
+            embedding: JSON.stringify(embedding),
+            salience,
+            confidence: 0.85,
+          });
+          if (error) {
+            console.error('[save_memory] Insert error:', error);
+            return { success: false, result: `Failed to save memory: ${error.message}` };
+          }
+          console.log(`[save_memory] New memory saved: "${memorySummary}" (type: ${memoryType})`);
+          return { success: true, result: `Memory saved: "${memorySummary}"` };
+        } catch (e) {
+          console.error('[save_memory] Error:', e);
+          return { success: false, result: `Memory save error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
