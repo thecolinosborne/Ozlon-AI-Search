@@ -1935,8 +1935,53 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Work Task Update Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'update_work_task',
+      description: 'Update an existing work task status, deliverable, or activity log. Use after completing work to move a task through stages. Always follow the chain: todo → in_progress → up_for_review → completed. Never skip stages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'The work task ID to update' },
+          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed'], description: 'New status — must follow valid transitions' },
+          draft_output: { type: 'string', description: 'Markdown deliverable content to save' },
+          ai_status: { type: 'string', enum: ['thinking', 'executing', 'completed', 'failed'], description: 'Current AI processing status' },
+          next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state' },
+          activity_entry: {
+            type: 'object',
+            description: 'Structured activity log entry to append',
+            properties: {
+              action: { type: 'string', description: 'Action identifier e.g. research_started, draft_completed' },
+              detail: { type: 'string', description: 'Human-readable description of what happened' },
+              status: { type: 'string', enum: ['thinking', 'executing', 'completed', 'failed'], description: 'Status of this activity' },
+              actor: { type: 'string', description: 'Who performed this — ai or user' },
+            },
+            required: ['action', 'detail', 'actor'],
+            additionalProperties: false,
+          },
+        },
+        required: ['task_id'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 // ============================================================================
+
+// --- State transition validator for work tasks ---
+const VALID_TASK_TRANSITIONS: Record<string, string[]> = {
+  todo: ['in_progress'],
+  in_progress: ['up_for_review'],
+  up_for_review: ['in_progress', 'completed'],
+  completed: ['in_progress'],
+};
+
+function isValidTaskTransition(from: string, to: string): boolean {
+  if (from === to) return true; // no-op is always safe
+  return VALID_TASK_TRANSITIONS[from]?.includes(to) ?? false;
+}
 
 async function executeToolCall(
   toolName: string,
