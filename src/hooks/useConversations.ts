@@ -62,7 +62,6 @@ export function useConversations() {
         console.log("[useConversations] Session created:", data.id);
         setSessions((prev) => [data, ...prev]);
         setActiveSession(data.id);
-        setMessages([]);
         return data.id;
       } catch (e) {
         console.error("[useConversations] createSession exception:", e);

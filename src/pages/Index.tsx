@@ -55,6 +55,8 @@ const Index = () => {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const prevUserIdRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset app store when user changes (isolation)
   useEffect(() => {
@@ -162,6 +164,17 @@ const Index = () => {
   const sendMessage = async (text: string, intent?: string) => {
     if (!text.trim() || isLoading) return;
 
+    // Abort any in-flight stream
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    const { signal } = abortRef.current;
+
+    // Clear any previous safety timeout
+    if (safetyTimeoutRef.current) {
+      clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = null;
+    }
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -181,6 +194,14 @@ const Index = () => {
     // Add empty assistant placeholder
     setSessionMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", created_at: new Date().toISOString() }]);
 
+    // Safety timeout: force-reset isLoading after 120s
+    safetyTimeoutRef.current = setTimeout(() => {
+      setIsLoading(false);
+      if (!assistantContent) {
+        updateMessageContent(assistantId, "Request timed out. Please try again.");
+      }
+    }, 120_000);
+
     try {
       await streamChat({
         messages: [...messages, userMessage].map((m) => ({ role: m.role, content: m.content })),
@@ -188,6 +209,7 @@ const Index = () => {
         systemName,
         userSettings,
         enableTools: true,
+        signal,
         onToolCall: (toolName, toolArgs) => {
           console.log(`Tool called: ${toolName}`, toolArgs);
         },
@@ -209,12 +231,14 @@ const Index = () => {
             }
           } else if (update.status === 'error') {
             updateStep(update.taskId, update.step, 'error');
-            // Don't mark the whole task as error — the AI may recover
           }
         },
         onDone: () => {
+          if (safetyTimeoutRef.current) {
+            clearTimeout(safetyTimeoutRef.current);
+            safetyTimeoutRef.current = null;
+          }
           setIsLoading(false);
-          // Mark ALL tracked tasks as done — the AI stream completed successfully
           const allTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress' || t.status === 'error');
           allTasks.forEach(t => completeTask(t.id, 'done'));
 
@@ -227,16 +251,29 @@ const Index = () => {
           }
         },
         onError: (errorMsg: string) => {
+          if (safetyTimeoutRef.current) {
+            clearTimeout(safetyTimeoutRef.current);
+            safetyTimeoutRef.current = null;
+          }
           console.error("Chat error:", errorMsg);
           updateMessageContent(assistantId, "Something went wrong. Please try again.");
           setIsLoading(false);
-          // Only mark tasks as error when the entire stream fails
           const activeTasks = useTaskActivityStore.getState().tasks.filter(t => t.status === 'in_progress');
           activeTasks.forEach(t => completeTask(t.id, 'error'));
         },
       });
     } catch (error) {
-      console.error("Chat error:", error);
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
+      // Don't show error for intentional aborts
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log("Stream aborted");
+      } else {
+        console.error("Chat error:", error);
+        updateMessageContent(assistantId, "Something went wrong. Please try again.");
+      }
       setIsLoading(false);
     }
   };
@@ -464,6 +501,14 @@ const Index = () => {
         sessions={sessions}
         activeSessionId={activeSessionId}
         onNewChat={async () => {
+          // Abort any in-flight stream
+          abortRef.current?.abort();
+          abortRef.current = null;
+          if (safetyTimeoutRef.current) {
+            clearTimeout(safetyTimeoutRef.current);
+            safetyTimeoutRef.current = null;
+          }
+          setIsLoading(false);
           await startNewChat();
           setWelcomeShown(false);
         }}
