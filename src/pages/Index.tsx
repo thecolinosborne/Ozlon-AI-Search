@@ -120,14 +120,14 @@ const Index = () => {
 
   // Welcome message for returning users
   useEffect(() => {
-    if (isReturningUser && !welcomeShown && messages.length === 0 && sessionsLoaded && activeSessionId) {
+    if (isReturningUser && !welcomeShown && persistedMessages.length === 0 && sessionsLoaded && activeSessionId) {
       setWelcomeShown(true);
       setSessionMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant" as const, content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`, created_at: new Date().toISOString() },
       ]);
     }
-  }, [isReturningUser, welcomeShown, systemName, messages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
+  }, [isReturningUser, welcomeShown, systemName, persistedMessages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
 
   const handleQuickAction = useCallback((action: QuickAction) => {
     sendMessage(action.message, action.intent);
@@ -226,7 +226,7 @@ const Index = () => {
           )}
 
           {hasInteracted && (
-            <ChatMessageList messages={messages} playMessage={playMessage}
+            <ChatMessageList messages={visibleMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId} />
           )}
 
