@@ -8,8 +8,33 @@ export type ChatMessage = {
   content: string;
 };
 
+/**
+ * Explicit lifecycle phases for a single chat request.
+ * Valid transitions:
+ *   idle → optimistic → streaming → success | error | timeout | aborted → idle
+ */
+export type StreamPhase =
+  | "idle"
+  | "optimistic"
+  | "streaming"
+  | "success"
+  | "error"
+  | "timeout"
+  | "aborted";
+
+const VALID_TRANSITIONS: Record<StreamPhase, StreamPhase[]> = {
+  idle: ["optimistic"],
+  optimistic: ["streaming", "error", "aborted"],
+  streaming: ["success", "error", "timeout", "aborted"],
+  success: ["idle"],
+  error: ["idle"],
+  timeout: ["idle"],
+  aborted: ["idle"],
+};
+
+const isDev = import.meta.env.DEV;
+
 interface UseChatStreamOptions {
-  /** Persisted messages — used to build the prompt context sent to the model. */
   persistedMessages: ChatMessage[];
   systemName: string;
   userSettings: UserSettings;
@@ -19,20 +44,6 @@ interface UseChatStreamOptions {
   playMessage: (id: string, text: string) => void;
 }
 
-/**
- * Owns the full lifecycle of a chat request:
- *  – optimistic user message (inflight)
- *  – assistant placeholder (inflight)
- *  – streaming delta updates
- *  – finalization & reconciliation
- *
- * Exposes `inflightMessages` so the page can merge them with persisted
- * session messages to build a single `visibleMessages` array that never
- * drops content during async saves or session creation.
- *
- * Task activity is scoped per-request: task IDs are tracked in a ref so
- * abort/new-request can reliably clean them up.
- */
 export function useChatStream({
   persistedMessages,
   systemName,
@@ -47,37 +58,64 @@ export function useChatStream({
   const [inflightMessages, setInflightMessages] = useState<ChatMessage[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
-
-  /** Task IDs created during the current in-flight request. Persisted in a
-   *  ref so `abortStream` can access them outside the `sendMessage` closure. */
+  const mountedRef = useRef(true);
+  const phaseRef = useRef<StreamPhase>("idle");
   const requestTaskIdsRef = useRef<Set<string>>(new Set());
 
   const { addTask, updateStep, completeTask, setTaskSummary, failStaleTasks } =
     useTaskActivityStore();
 
+  // ── Phase transition with validation ─────────────────────────────────
+  const transitionPhase = useCallback((next: StreamPhase) => {
+    const current = phaseRef.current;
+    if (isDev && !VALID_TRANSITIONS[current]?.includes(next)) {
+      console.warn(
+        `[useChatStream] Invalid phase transition: ${current} → ${next}. Allowing but this may indicate a bug.`
+      );
+    }
+    phaseRef.current = next;
+  }, []);
+
+  // ── Safe state setters (skip if unmounted) ───────────────────────────
+  const safeSetIsLoading = useCallback((v: boolean) => {
+    if (mountedRef.current) setIsLoading(v);
+  }, []);
+  const safeSetInflight = useCallback((v: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    if (mountedRef.current) setInflightMessages(v);
+  }, []);
+
   const abortStream = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setIsLoading(false);
-    setInflightMessages([]);
+    safeSetIsLoading(false);
+    safeSetInflight([]);
 
-    // Fail any tasks that belonged to the aborted request
+    if (phaseRef.current !== "idle") {
+      transitionPhase("aborted");
+      transitionPhase("idle");
+    }
+
     if (requestTaskIdsRef.current.size > 0) {
       failStaleTasks(requestTaskIdsRef.current);
       requestTaskIdsRef.current = new Set();
     }
-  }, [failStaleTasks]);
+  }, [failStaleTasks, safeSetIsLoading, safeSetInflight, transitionPhase]);
 
   const sendMessage = useCallback(
     async (text: string, intent?: string) => {
       if (!text.trim() || isLoading) return;
+
+      if (isDev && phaseRef.current !== "idle") {
+        console.warn(
+          `[useChatStream] sendMessage called during phase "${phaseRef.current}" — forcing reset.`
+        );
+      }
 
       // ── Clean up prior request ───────────────────────────────────────
       abortRef.current?.abort();
       abortRef.current = new AbortController();
       const { signal } = abortRef.current;
 
-      // Fail any leftover in_progress tasks from a prior request
       if (requestTaskIdsRef.current.size > 0) {
         failStaleTasks(requestTaskIdsRef.current);
       }
@@ -96,25 +134,27 @@ export function useChatStream({
         content: "",
       };
 
-      // ── Synchronous optimistic update ────────────────────────────────
+      // ── Phase: optimistic ────────────────────────────────────────────
+      transitionPhase("optimistic");
       setInput("");
-      setIsLoading(true);
-      setInflightMessages([userMessage, assistantPlaceholder]);
+      safeSetIsLoading(true);
+      safeSetInflight([userMessage, assistantPlaceholder]);
 
       // ── Persist user message (with timeout guard) ────────────────────
       await Promise.race([
         saveMessage(userMessage),
         new Promise<void>((resolve) =>
           setTimeout(() => {
-            console.warn(
-              "[sendMessage] saveMessage timed out after 10s, continuing..."
-            );
+            if (isDev) console.warn("[useChatStream] saveMessage timed out after 10s");
             resolve();
           }, 10_000)
         ),
       ]);
 
-      // ── Stream the response ──────────────────────────────────────────
+      if (!mountedRef.current) return;
+
+      // ── Phase: streaming ─────────────────────────────────────────────
+      transitionPhase("streaming");
       let assistantContent = "";
       let outcome: "success" | "aborted" | "timeout" | "error" = "error";
       let timedOut = false;
@@ -136,11 +176,11 @@ export function useChatStream({
           enableTools: true,
           signal,
           onToolCall: (toolName, toolArgs) => {
-            console.log(`Tool called: ${toolName}`, toolArgs);
+            if (isDev) console.log(`[useChatStream] Tool: ${toolName}`, toolArgs);
           },
           onDelta: (delta) => {
             assistantContent += delta;
-            setInflightMessages((prev) =>
+            safeSetInflight((prev) =>
               prev.map((m) =>
                 m.id === assistantId
                   ? { ...m, content: assistantContent }
@@ -149,7 +189,6 @@ export function useChatStream({
             );
           },
           onTaskUpdate: (update: TaskUpdate) => {
-            // Track this task as belonging to the current request
             requestTaskIdsRef.current.add(update.taskId);
 
             if (update.status === "in_progress") {
@@ -169,7 +208,7 @@ export function useChatStream({
             outcome = "success";
           },
           onError: (errorMsg: string) => {
-            console.error("Chat stream service error:", errorMsg);
+            console.error("[useChatStream] Stream error:", errorMsg);
             outcome = "error";
           },
         });
@@ -179,12 +218,23 @@ export function useChatStream({
         if (error instanceof DOMException && error.name === "AbortError") {
           outcome = timedOut ? "timeout" : "aborted";
         } else {
-          console.error("Chat stream exception:", error);
+          console.error("[useChatStream] Stream exception:", error);
           outcome = "error";
         }
       } finally {
         clearTimeout(timeoutId);
-        setIsLoading(false);
+
+        if (!mountedRef.current) {
+          // Component unmounted during stream — just clean up tasks
+          if (requestTaskIdsRef.current.size > 0) {
+            failStaleTasks(requestTaskIdsRef.current);
+            requestTaskIdsRef.current = new Set();
+          }
+          return;
+        }
+
+        transitionPhase(outcome);
+        safeSetIsLoading(false);
 
         const taskIds = requestTaskIdsRef.current;
 
@@ -196,44 +246,33 @@ export function useChatStream({
           });
           taskIds.forEach((id) => completeTask(id, "done"));
           if (autoPlayEnabled) playMessage(assistantId, assistantContent);
-          setInflightMessages([]);
-          requestTaskIdsRef.current = new Set();
+          safeSetInflight([]);
         } else if (outcome === "timeout") {
-          setInflightMessages((prev) =>
+          safeSetInflight((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? {
-                    ...m,
-                    content:
-                      assistantContent ||
-                      "Response timed out. Please try again.",
-                  }
+                ? { ...m, content: assistantContent || "Response timed out. Please try again." }
                 : m
             )
           );
           taskIds.forEach((id) => completeTask(id, "error"));
-          requestTaskIdsRef.current = new Set();
         } else if (outcome === "error") {
-          setInflightMessages((prev) =>
+          safeSetInflight((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? {
-                    ...m,
-                    content: "Something went wrong. Please try again.",
-                  }
+                ? { ...m, content: "Something went wrong. Please try again." }
                 : m
             )
           );
           taskIds.forEach((id) => completeTask(id, "error"));
-          requestTaskIdsRef.current = new Set();
         } else {
-          // aborted — clean up silently
-          setInflightMessages([]);
-          if (taskIds.size > 0) {
-            failStaleTasks(taskIds);
-          }
-          requestTaskIdsRef.current = new Set();
+          // aborted
+          safeSetInflight([]);
+          if (taskIds.size > 0) failStaleTasks(taskIds);
         }
+
+        requestTaskIdsRef.current = new Set();
+        transitionPhase("idle");
       }
     },
     [
@@ -250,13 +289,17 @@ export function useChatStream({
       completeTask,
       setTaskSummary,
       failStaleTasks,
+      transitionPhase,
+      safeSetIsLoading,
+      safeSetInflight,
     ]
   );
 
-  // ── Unmount cleanup: abort any in-flight stream to prevent state
-  //    updates on an unmounted component (e.g. navigating away mid-stream).
+  // ── Lifecycle: track mounted state, clean up on unmount ──────────────
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       abortRef.current?.abort();
       abortRef.current = null;
       if (requestTaskIdsRef.current.size > 0) {

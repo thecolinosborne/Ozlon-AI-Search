@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+const isDev = import.meta.env.DEV;
+
 export interface TaskStep {
   label: string;
   status: 'pending' | 'in_progress' | 'done' | 'error';
@@ -24,9 +26,7 @@ interface TaskActivityState {
   completeTask: (taskId: string, status?: 'done' | 'error') => void;
   setTaskSummary: (taskId: string, summary: string) => void;
   dismissTask: (taskId: string) => void;
-  /** Remove all tasks — use on session transitions to prevent cross-session leaks. */
   clearAllTasks: () => void;
-  /** Mark all in_progress tasks as error — use when a request is aborted/abandoned. */
   failStaleTasks: (taskIds?: Set<string>) => void;
   setPortalOpen: (open: boolean) => void;
 }
@@ -37,8 +37,10 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
 
   addTask: (id, title) =>
     set((state) => {
-      // Prevent duplicate tasks
-      if (state.tasks.some((t) => t.id === id)) return state;
+      if (state.tasks.some((t) => t.id === id)) {
+        if (isDev) console.warn(`[TaskActivity] Duplicate addTask ignored: ${id}`);
+        return state;
+      }
       return {
         tasks: [
           ...state.tasks,
@@ -51,8 +53,10 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => {
         if (t.id !== taskId) return t;
-        // Don't update steps on completed tasks
-        if (t.status === 'done' || t.status === 'error') return t;
+        if (t.status === 'done' || t.status === 'error') {
+          if (isDev) console.warn(`[TaskActivity] updateStep on completed task "${taskId}" (${t.status}) — ignored.`);
+          return t;
+        }
         const existingIdx = t.steps.findIndex((s) => s.label === stepLabel);
         if (existingIdx >= 0) {
           const newSteps = [...t.steps];
@@ -67,10 +71,16 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => {
         if (t.id !== taskId) return t;
-        // ── State guard: never transition error → done ──
-        if (t.status === 'error' && status === 'done') return t;
-        // Don't re-complete already completed tasks
-        if (t.status === 'done' || t.status === 'error') return t;
+        // Guard: never transition error → done
+        if (t.status === 'error' && status === 'done') {
+          if (isDev) console.warn(`[TaskActivity] Blocked error→done transition for task "${taskId}".`);
+          return t;
+        }
+        // Don't re-complete
+        if (t.status === 'done' || t.status === 'error') {
+          if (isDev) console.warn(`[TaskActivity] completeTask on already-completed "${taskId}" (${t.status}→${status}) — ignored.`);
+          return t;
+        }
         return { ...t, status, completedAt: Date.now() };
       }),
     })),
@@ -93,8 +103,8 @@ export const useTaskActivityStore = create<TaskActivityState>((set) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => {
         if (t.status !== 'in_progress') return t;
-        // If specific IDs provided, only fail those
         if (taskIds && !taskIds.has(t.id)) return t;
+        if (isDev) console.warn(`[TaskActivity] Failing stale task "${t.id}" (${t.title}).`);
         return { ...t, status: 'error' as const, completedAt: Date.now() };
       }),
     })),
