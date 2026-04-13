@@ -501,6 +501,14 @@ const Index = () => {
         sessions={sessions}
         activeSessionId={activeSessionId}
         onNewChat={async () => {
+          // Abort any in-flight stream
+          abortRef.current?.abort();
+          abortRef.current = null;
+          if (safetyTimeoutRef.current) {
+            clearTimeout(safetyTimeoutRef.current);
+            safetyTimeoutRef.current = null;
+          }
+          setIsLoading(false);
           await startNewChat();
           setWelcomeShown(false);
         }}
