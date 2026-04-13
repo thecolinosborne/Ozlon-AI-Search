@@ -112,6 +112,7 @@ export interface StreamChatOptions {
   agentMetadata?: AgentMetadata;
   enableTools?: boolean;
   userSettings?: UserSettings;
+  signal?: AbortSignal;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
   onTaskUpdate?: (update: TaskUpdate) => void;
@@ -133,6 +134,7 @@ export async function streamChat({
   agentMetadata,
   enableTools = false,
   userSettings,
+  signal,
   onDelta,
   onToolCall,
   onTaskUpdate,
@@ -147,6 +149,7 @@ export async function streamChat({
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
+      signal,
       body: JSON.stringify({ 
         messages, 
         intent, 
