@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ const Index = () => {
   // Conversation session management
   const {
     sessions, activeSessionId, messages: sessionMessages, setMessages: setSessionMessages,
-    sessionsLoaded, switchSession, startNewChat, saveMessage, updateMessageContent,
+    sessionsLoaded, switchSession, startNewChat, saveMessage,
     finalizeMessage, deleteSession,
   } = useConversations();
 
@@ -61,25 +61,34 @@ const Index = () => {
     osName: systemName,
   };
 
-  // Convert session messages to ChatMessage type
-  const messages: ChatMessage[] = sessionMessages.map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-  }));
-  
+  // Convert persisted session messages to ChatMessage type
+  const persistedMessages: ChatMessage[] = useMemo(
+    () => sessionMessages.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+    [sessionMessages]
+  );
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
-  const { input, setInput, isLoading, sendMessage, abortStream } = useChatStream({
-    messages, systemName, userSettings, autoPlayEnabled,
-    saveMessage, updateMessageContent, finalizeMessage, setSessionMessages, playMessage,
+  const { input, setInput, isLoading, inflightMessages, sendMessage, abortStream } = useChatStream({
+    persistedMessages, systemName, userSettings, autoPlayEnabled,
+    saveMessage, finalizeMessage, playMessage,
   });
   const { isRecording, isTranscribing, handleMicClick } = useVoiceRecorder({
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
-  const hasInteracted = messages.length > 0 || isLoading;
+
+  // ── Single source of truth for rendered messages ─────────────────────
+  // Merge persisted + inflight, deduplicate by ID (inflight wins if both
+  // exist — it has the latest streaming content).
+  const visibleMessages: ChatMessage[] = useMemo(() => {
+    if (inflightMessages.length === 0) return persistedMessages;
+    const inflightIds = new Set(inflightMessages.map((m) => m.id));
+    const base = persistedMessages.filter((m) => !inflightIds.has(m.id));
+    return [...base, ...inflightMessages];
+  }, [persistedMessages, inflightMessages]);
+
+  const hasInteracted = visibleMessages.length > 0;
 
   // Reset store on user change
   useEffect(() => {
@@ -111,14 +120,14 @@ const Index = () => {
 
   // Welcome message for returning users
   useEffect(() => {
-    if (isReturningUser && !welcomeShown && messages.length === 0 && sessionsLoaded && activeSessionId) {
+    if (isReturningUser && !welcomeShown && persistedMessages.length === 0 && sessionsLoaded && activeSessionId) {
       setWelcomeShown(true);
       setSessionMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant" as const, content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`, created_at: new Date().toISOString() },
       ]);
     }
-  }, [isReturningUser, welcomeShown, systemName, messages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
+  }, [isReturningUser, welcomeShown, systemName, persistedMessages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
 
   const handleQuickAction = useCallback((action: QuickAction) => {
     sendMessage(action.message, action.intent);
@@ -217,7 +226,7 @@ const Index = () => {
           )}
 
           {hasInteracted && (
-            <ChatMessageList messages={messages} playMessage={playMessage}
+            <ChatMessageList messages={visibleMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId} />
           )}
 
