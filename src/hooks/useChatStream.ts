@@ -316,18 +316,14 @@ export function useChatStream({
             playMessage(assistantId, assistantContent);
           }
 
-          if (finalAssistantMessage) {
-            if (isPersistedMessage(userMessage) && isPersistedMessage(finalAssistantMessage)) {
-              safeSetInflight([]);
-            } else if (isDev) {
-              console.warn(
-                "[useChatStream] Retaining inflight messages until persisted state catches up."
-              );
-            }
-          } else if (isPersistedMessage(userMessage)) {
-            safeSetInflight([]);
-          } else {
-            safeSetInflight((prev) => prev.filter((m) => m.id === userMessage.id));
+          // Do NOT eagerly clear inflightMessages here.
+          // The reconciliation effect will clear them once persistedMessages
+          // contains both the user and assistant messages, preventing any
+          // empty-state gap in visibleMessages.
+          if (isDev) {
+            console.log(
+              "[useChatStream] Success — deferring inflight cleanup to reconciliation effect."
+            );
           }
         } else if (resolvedOutcome === "timeout") {
           safeSetInflight((prev) =>

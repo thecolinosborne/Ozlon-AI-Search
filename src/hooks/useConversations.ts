@@ -263,6 +263,8 @@ export function useConversations() {
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
 
+      if (!mountedRef.current) return;
+
       if (error) {
         console.error("[useConversations] loadSessions error:", error);
         setSessionsLoaded(true);
@@ -281,6 +283,8 @@ export function useConversations() {
           .select("id, title, created_at, updated_at")
           .single();
 
+        if (!mountedRef.current) return;
+
         if (createError || !newSession) {
           console.error("[useConversations] Auto-create session failed:", createError);
         } else {
@@ -297,6 +301,8 @@ export function useConversations() {
           .eq("session_id", loadedSessions[0].id)
           .eq("user_id", user.id)
           .order("created_at", { ascending: true });
+
+        if (!mountedRef.current) return;
 
         if (msgs) {
           setMessages(msgs.map((m) => ({ ...m, role: m.role as "user" | "assistant" })));
