@@ -284,7 +284,16 @@ export function useChatStream({
           return;
         }
 
-        transitionPhase(outcome);
+        const resolvedOutcome: Exclude<RequestOutcome, "pending"> =
+          outcome === "pending"
+            ? signal.aborted
+              ? timedOut
+                ? "timeout"
+                : "aborted"
+              : "error"
+            : outcome;
+
+        transitionPhase(resolvedOutcome);
         safeSetIsLoading(false);
 
         const taskIds = requestTaskIdsRef.current;
@@ -296,7 +305,7 @@ export function useChatStream({
             }
           : null;
 
-        if (outcome === "success") {
+        if (resolvedOutcome === "success") {
           if (finalAssistantMessage) {
             await persistAssistantMessage(finalAssistantMessage);
           }
@@ -320,7 +329,7 @@ export function useChatStream({
           } else {
             safeSetInflight((prev) => prev.filter((m) => m.id === userMessage.id));
           }
-        } else if (outcome === "timeout") {
+        } else if (resolvedOutcome === "timeout") {
           safeSetInflight((prev) =>
             prev.map((m) =>
               m.id === assistantId
@@ -329,7 +338,7 @@ export function useChatStream({
             )
           );
           taskIds.forEach((id) => completeTask(id, "error"));
-        } else if (outcome === "error") {
+        } else if (resolvedOutcome === "error") {
           safeSetInflight((prev) =>
             prev.map((m) =>
               m.id === assistantId
