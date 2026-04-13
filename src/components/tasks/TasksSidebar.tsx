@@ -13,6 +13,12 @@ const views: { id: TaskView; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'studio', label: 'Studio', icon: Film },
 ];
 
+interface TasksSidebarProps {
+  activeView: TaskView;
+  onViewChange: (view: TaskView) => void;
+  counts: Record<string, number>;
+}
+
 export function TasksSidebar({ activeView, onViewChange, counts }: TasksSidebarProps) {
   return (
     <nav className="space-y-1">
