@@ -1914,6 +1914,27 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Work Task Creation Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'create_work_task',
+      description: 'Create a new work task in the AI operations workspace. Use when the user asks to create a task, track something, start a project, or when a multi-step work request should be turned into a trackable task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Task title — concise and actionable' },
+          description: { type: 'string', description: 'Task description with context and requirements' },
+          task_type: { type: 'string', enum: ['general', 'email', 'research', 'content', 'outreach', 'ops', 'creative'], description: 'Type of task (default: general)' },
+          intent_type: { type: 'string', enum: ['ops', 'lead_gen', 'fulfillment', 'content', 'research', 'outreach', 'admin'], description: 'Business intent (default: ops)' },
+          priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Priority level (default: medium)' },
+          assigned_to: { type: 'string', description: 'Who should handle this (default: ai)' },
+          next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state (default: waiting_on_ai)' },
+        },
+        required: ['title', 'description'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
