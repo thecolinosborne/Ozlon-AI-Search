@@ -81,6 +81,7 @@ const Index = () => {
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
+  const { clearAllTasks } = useTaskActivityStore();
 
   // ── Single source of truth for rendered messages ─────────────────────
   // Three layers merged: persisted > inflight > ephemeral.
