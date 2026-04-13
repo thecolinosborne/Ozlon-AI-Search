@@ -61,25 +61,34 @@ const Index = () => {
     osName: systemName,
   };
 
-  // Convert session messages to ChatMessage type
-  const messages: ChatMessage[] = sessionMessages.map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-  }));
-  
+  // Convert persisted session messages to ChatMessage type
+  const persistedMessages: ChatMessage[] = useMemo(
+    () => sessionMessages.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+    [sessionMessages]
+  );
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
-  const { input, setInput, isLoading, sendMessage, abortStream } = useChatStream({
-    messages, systemName, userSettings, autoPlayEnabled,
-    saveMessage, updateMessageContent, finalizeMessage, setSessionMessages, playMessage,
+  const { input, setInput, isLoading, inflightMessages, sendMessage, abortStream } = useChatStream({
+    persistedMessages, systemName, userSettings, autoPlayEnabled,
+    saveMessage, finalizeMessage, playMessage,
   });
   const { isRecording, isTranscribing, handleMicClick } = useVoiceRecorder({
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
-  const hasInteracted = messages.length > 0 || isLoading;
+
+  // ── Single source of truth for rendered messages ─────────────────────
+  // Merge persisted + inflight, deduplicate by ID (inflight wins if both
+  // exist — it has the latest streaming content).
+  const visibleMessages: ChatMessage[] = useMemo(() => {
+    if (inflightMessages.length === 0) return persistedMessages;
+    const inflightIds = new Set(inflightMessages.map((m) => m.id));
+    const base = persistedMessages.filter((m) => !inflightIds.has(m.id));
+    return [...base, ...inflightMessages];
+  }, [persistedMessages, inflightMessages]);
+
+  const hasInteracted = visibleMessages.length > 0;
 
   // Reset store on user change
   useEffect(() => {
