@@ -3316,6 +3316,75 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
         }
       }
 
+      // ============ Update Work Task Handler ============
+      case 'update_work_task': {
+        try {
+          const taskId = args.task_id as string;
+          if (!taskId) return { success: false, result: 'task_id is required' };
+
+          const adminClient = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          );
+
+          // Fetch existing task
+          const { data: existing, error: fetchErr } = await adminClient
+            .from('work_tasks')
+            .select('*')
+            .eq('id', taskId)
+            .single();
+
+          if (fetchErr || !existing) {
+            return { success: false, result: `Task not found: ${fetchErr?.message || 'no rows'}` };
+          }
+
+          // Validate status transition if status provided
+          const newStatus = args.status as string | undefined;
+          if (newStatus && newStatus !== existing.status) {
+            if (!isValidTaskTransition(existing.status, newStatus)) {
+              return { success: false, result: `Invalid transition: ${existing.status} → ${newStatus}. Allowed: ${VALID_TASK_TRANSITIONS[existing.status]?.join(', ') || 'none'}` };
+            }
+          }
+
+          // Build update — only include provided fields
+          const updateObj: Record<string, unknown> = {
+            last_activity_at: new Date().toISOString(),
+          };
+
+          if (newStatus) updateObj.status = newStatus;
+          if (args.ai_status) updateObj.ai_status = args.ai_status;
+          if (args.next_action) updateObj.next_action = args.next_action;
+          // Only update draft_output if explicitly provided (never null-overwrite)
+          if (typeof args.draft_output === 'string') updateObj.draft_output = args.draft_output;
+
+          // Append structured activity entry if provided
+          if (args.activity_entry && typeof args.activity_entry === 'object') {
+            const existingLog = Array.isArray(existing.ai_activity_log) ? existing.ai_activity_log : [];
+            const entry = {
+              ...(args.activity_entry as Record<string, unknown>),
+              timestamp: new Date().toISOString(),
+            };
+            updateObj.ai_activity_log = [...existingLog, entry];
+          }
+
+          const { error: updateErr } = await adminClient
+            .from('work_tasks')
+            .update(updateObj)
+            .eq('id', taskId);
+
+          if (updateErr) {
+            console.error('[update_work_task] Error:', updateErr);
+            return { success: false, result: `Failed to update task: ${updateErr.message}` };
+          }
+
+          const statusMsg = newStatus ? ` Status: ${existing.status} → ${newStatus}.` : '';
+          return { success: true, result: `Task "${existing.title}" updated.${statusMsg}` };
+        } catch (e) {
+          console.error('[update_work_task] Error:', e);
+          return { success: false, result: `Task update error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
