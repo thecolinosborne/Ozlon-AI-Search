@@ -25,6 +25,7 @@ export function useConversations() {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const prevUserId = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
   // Ref mirrors activeSessionId for immediate reads in async callbacks
   const activeSessionIdRef = useRef<string | null>(null);
