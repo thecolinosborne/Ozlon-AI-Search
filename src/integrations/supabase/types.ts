@@ -441,6 +441,39 @@ export type Database = {
         }
         Relationships: []
       }
+      research_tasks: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          query: string
+          report: string | null
+          sources: Json | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          query: string
+          report?: string | null
+          sources?: Json | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          query?: string
+          report?: string | null
+          sources?: Json | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       seo_snapshots: {
         Row: {
           created_at: string

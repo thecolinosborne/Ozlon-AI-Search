@@ -1898,6 +1898,22 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'deep_research',
+      description: 'Perform real-time web research on any topic using Tavily search. Searches the internet, reads multiple sources, and synthesizes a structured research report with citations. Use when the user asks to research, investigate, deep dive, look into, or find information about any topic.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The research question or topic to investigate' },
+          search_depth: { type: 'string', enum: ['basic', 'advanced'], description: 'Search depth — use advanced for thorough research (default)' },
+          max_results: { type: 'number', description: 'Number of sources to retrieve (default 8, max 20)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -3039,6 +3055,142 @@ async function executeToolCall(
         }
       }
 
+      case 'deep_research': {
+        try {
+          const TAVILY_KEY = Deno.env.get('TAVILY_API_KEY');
+          if (!TAVILY_KEY) return { success: false, result: 'Research capability not configured (TAVILY_API_KEY missing).' };
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          if (!OPENAI_KEY) return { success: false, result: 'AI synthesis not configured.' };
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+
+          const query = args.query as string;
+          const searchDepth = (args.search_depth as string) || 'advanced';
+          const maxResults = Math.min((args.max_results as number) || 8, 20);
+          const userId = (args as Record<string, unknown>).__user_id as string;
+
+          // Save task to database if possible
+          let taskRowId: string | null = null;
+          let adminClient: ReturnType<typeof import("https://esm.sh/@supabase/supabase-js@2.49.1").createClient> | null = null;
+          if (serviceRoleKey && supabaseUrl && userId) {
+            const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+            adminClient = createClient(supabaseUrl, serviceRoleKey);
+            const { data: taskRow } = await adminClient.from('research_tasks').insert({
+              user_id: userId,
+              query,
+              status: 'running',
+            }).select('id').single();
+            taskRowId = taskRow?.id || null;
+          }
+
+          // Step 1: Tavily search
+          console.log(`[deep_research] Searching: "${query}" (depth: ${searchDepth}, max: ${maxResults})`);
+          const tavilyRes = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              api_key: TAVILY_KEY,
+              query,
+              search_depth: searchDepth,
+              max_results: maxResults,
+              include_answer: true,
+              include_raw_content: false,
+            }),
+          });
+
+          if (!tavilyRes.ok) {
+            const errText = await tavilyRes.text();
+            console.error('[deep_research] Tavily error:', errText);
+            if (adminClient && taskRowId) {
+              await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
+            }
+            return { success: false, result: `Research search failed: ${tavilyRes.status}` };
+          }
+
+          const tavilyData = await tavilyRes.json();
+          const results = tavilyData.results || [];
+          const tavilyAnswer = tavilyData.answer || '';
+          console.log(`[deep_research] Found ${results.length} sources`);
+
+          // Build source context for GPT synthesis
+          const sourcesForPrompt = results.map((r: { title: string; url: string; content: string }, i: number) =>
+            `[Source ${i + 1}] ${r.title}\nURL: ${r.url}\n${r.content}`
+          ).join('\n\n---\n\n');
+
+          const sourcesJson = results.map((r: { title: string; url: string; content: string }) => ({
+            url: r.url,
+            title: r.title,
+            snippet: (r.content || '').slice(0, 300),
+          }));
+
+          // Step 2: GPT synthesis
+          const synthesisPrompt = `You are a research analyst. Based on these search results, write a comprehensive research report answering: "${query}"
+
+${tavilyAnswer ? `Quick answer from search: ${tavilyAnswer}\n` : ''}
+SEARCH RESULTS:
+${sourcesForPrompt}
+
+Structure your report as:
+## Executive Summary
+3-4 sentences summarizing the key findings.
+
+## Key Findings
+5-8 bullet points with the most important discoveries. Cite sources with [Source N] notation.
+
+## Detailed Analysis
+3-4 paragraphs providing deeper context and analysis. Reference sources.
+
+## Conflicting Information
+Note if any sources disagree or provide contradictory information. If none, say "No significant conflicts found."
+
+## Sources & Confidence
+Rate the overall quality of available information (High/Medium/Low) and briefly explain why.
+List all sources with their URLs.
+
+Be specific, factual, and cite findings with [Source N] notation throughout.`;
+
+          const synthRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4.1-2025-04-14',
+              messages: [
+                { role: 'system', content: 'You are a thorough research analyst. Produce well-structured, citation-rich reports.' },
+                { role: 'user', content: synthesisPrompt },
+              ],
+              max_tokens: 4096,
+            }),
+          });
+
+          if (!synthRes.ok) {
+            console.error('[deep_research] Synthesis error:', await synthRes.text());
+            if (adminClient && taskRowId) {
+              await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
+            }
+            return { success: false, result: 'Research synthesis failed.' };
+          }
+
+          const synthData = await synthRes.json();
+          const report = synthData.choices?.[0]?.message?.content || 'No report generated.';
+
+          // Save completed research to database
+          if (adminClient && taskRowId) {
+            await adminClient.from('research_tasks').update({
+              status: 'complete',
+              report,
+              sources: sourcesJson,
+              completed_at: new Date().toISOString(),
+            }).eq('id', taskRowId);
+          }
+
+          console.log(`[deep_research] Report generated (${report.length} chars, ${results.length} sources)`);
+          return { success: true, result: report };
+        } catch (e) {
+          console.error('[deep_research] Error:', e);
+          return { success: false, result: `Research error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -3298,6 +3450,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'gsc_compare_snapshots': 'google-search-console',
     'web_search_google': '_always_',
     'save_memory': '_always_',
+    'deep_research': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3348,6 +3501,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_compare_snapshots': 'Loading SEO snapshots',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
+  'deep_research': 'Researching the web',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -3429,8 +3583,8 @@ async function runToolLoop(
           } catch {
             args = {};
           }
-          // Inject user ID for save_memory tool
-          if (tc.function.name === 'save_memory' && userId) {
+          // Inject user ID for save_memory and deep_research tools
+          if ((tc.function.name === 'save_memory' || tc.function.name === 'deep_research') && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -4086,7 +4240,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that', 'research', 'investigate', 'deep dive', 'look into', 'find out about', 'what\'s the latest on', 'analyze the market', 'competitor analysis', 'market research'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
