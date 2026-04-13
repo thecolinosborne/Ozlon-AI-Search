@@ -1,8 +1,12 @@
 // TEMPORARY: simulated render pipeline. Replace with real Remotion Lambda/Cloud worker in Phase 2.
 // Progress: backend persists only queued/rendering/completed/failed. Frontend simulates intermediate % locally.
 
-import { corsHeaders } from "@supabase/supabase-js/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
