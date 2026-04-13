@@ -1,108 +1,120 @@
 
 
-# Remotion Integration: AI Edit Plans + Simulated Render Pipeline (Final)
+# Refactor Index.tsx into Production Chat Architecture
 
-All feedback incorporated. Key additions: state guards on start/complete, double-start protection, explicit progress ownership, full history entries.
+The current `Index.tsx` is 918 lines containing chat streaming, voice recording, file attachments, message rendering, voice playback, quick actions, hero layout, docked input, sidebar management, and onboarding — all in one file. This refactor extracts each concern into focused hooks and components without changing any visual behavior.
 
-## Architecture
+## Target structure
 
 ```text
-generate_plan:
-  AI → EditPlanAction[] → UPDATE video_tasks SET edit_plan, edit_plan_status='generated'
-
-start_render:
-  Guard: reject if render_status IN (queued, rendering, completed)
-  SET queued → SET rendering (progress=0) → return immediately
-
-complete_render:
-  Guard: reject if render_status !== 'rendering'
-  SET completed, progress=100, deterministic output_url
-  Append full success render_history entry
-
-Progress ownership:
-  Backend persists: queued, rendering, completed, failed
-  Frontend simulates: intermediate progress (25, 50, 75) locally for UX only
-  DB never stores intermediate percentages — only 0 and 100
+src/
+  hooks/
+    useChatStream.ts          — message sending, streaming, abort, safety timeout
+    useVoiceRecorder.ts       — mic recording + transcription
+    useVoicePlayback.ts       — TTS play/stop per message
+    useFileAttachments.ts     — file selection, validation, removal
+  components/chat/
+    ChatComposer.tsx          — single composer: hero mode + docked mode
+    ChatMessageList.tsx        — scrollable message list with markdown + play buttons
+    ChatHero.tsx              — hero section (title, subtitle, composer, quick actions)
+    QuickActionsBar.tsx        — (already exists, replace with shared version)
+    AttachmentChips.tsx        — file chip list with remove buttons
 ```
 
-## Edge function: `render-video`
+## Hook extractions
 
-Three actions, all stateless single-transition.
+### `useChatStream`
+Extracted from Index.tsx lines 164-285. Owns:
+- `input` / `setInput` state
+- `isLoading` state
+- `sendMessage(text, intent?)` — builds user message, calls `saveMessage`, creates assistant placeholder, streams via `streamChat`, handles `onDelta`/`onDone`/`onError`/`onTaskUpdate`, manages abort controller and safety timeout
+- `abortStream()` — for sidebar new-chat and unmount cleanup
+- Accepts deps: `messages`, conversation helpers (`saveMessage`, `updateMessageContent`, `finalizeMessage`), `userSettings`, `systemName`, `autoPlayEnabled`, `playMessage`
 
-### `action: generate_plan`
-- Reads video_task from DB
-- Calls Lovable AI Gateway to produce `EditPlanAction[]`
-- Writes back: `UPDATE video_tasks SET edit_plan = $plan, edit_plan_status = 'generated'`
-- On AI failure: returns 500, no DB mutation
+### `useVoiceRecorder`
+Extracted from lines 309-404. Returns:
+- `isRecording`, `isTranscribing`
+- `handleMicClick()` — toggles recording, on stop transcribes via edge function, sets result into a provided callback (`onTranscribed: (text: string) => void`)
+- No dependency on input state — just calls back with transcribed text
 
-### `action: start_render`
-- **Guards** (return 400, no mutation):
-  - Task not found → 404
-  - `edit_plan_status !== 'approved'`
-  - `edit_plan` is empty array
-  - `render_status` is `queued`, `rendering`, or `completed` (double-start protection)
-- On pass: SET `render_status = 'queued'`, then `'rendering'`, `render_progress = 0`
-- Returns immediately
+### `useVoicePlayback`
+Extracted from lines 288-306. Returns:
+- `playingMessageId`, `loadingAudioId`
+- `playMessage(id, text)` — toggle play/stop via `voiceService`
 
-### `action: complete_render`
-- **Guards** (return 400, no mutation):
-  - Task not found → 404
-  - `render_status !== 'rendering'` — rejects stray/repeated calls
-- On pass:
-  - SET `render_status = 'completed'`, `render_progress = 100`
-  - SET `output_url = 'https://mock-renders.lovable.app/${video_task_id}.mp4'`
-  - Append **full** render_history entry: `{ id, started_at, completed_at, status: 'completed', output_url, error: null }`
-- On any DB error during update:
-  - SET `render_status = 'failed'`
-  - Append error entry: `{ id, started_at, completed_at: now(), status: 'failed', output_url: null, error: '<message>' }`
+### `useFileAttachments`
+Extracted from lines 429-462. Returns:
+- `attachedFiles`, `fileInputRef`
+- `handleFileSelect`, `removeFile`, `triggerFileUpload`, `getFileIcon`
 
-### Design notes
-- `// TEMPORARY: simulated render. Replace with real Remotion Lambda/Cloud worker.`
-- `// Progress: backend persists only queued/rendering/completed/failed. Frontend simulates intermediate % locally.`
-- Uses `SUPABASE_SERVICE_ROLE_KEY` for DB writes, `LOVABLE_API_KEY` for AI
+## Component extractions
 
-## Frontend: `useVideoTasks.ts`
+### `ChatComposer`
+One component, two rendering modes via a `mode: 'hero' | 'docked'` prop.
+- Hero mode: larger padding, `rounded-3xl`, `pl-14`, centered layout
+- Docked mode: smaller padding, `rounded-2xl`, `pl-12 pr-20`, fixed bottom styling
+- Contains: auto-resizing textarea, paperclip button, send button, mic button (using `useVoiceRecorder` internally or via props), `AttachmentChips` above the textarea
+- Accepts: `input`, `onInputChange`, `onSubmit`, `onMicClick`, `isRecording`, `isTranscribing`, `isLoading`, `placeholder`, `attachedFiles`, `onRemoveFile`, `onAttach`, `fileInputRef`, `mode`
+- This eliminates the duplicated textarea + button markup currently at lines 664-713 and 836-886
 
-### `generateEditPlan(taskId)`
-- Calls edge function `generate_plan`
-- Updates local state from response
+### `ChatMessageList`
+Extracted from lines 742-802. Renders the scrollable message list.
+- Accepts: `messages`, `playMessage`, `playingMessageId`, `loadingAudioId`
+- Handles: markdown rendering for assistant, `whitespace-pre-wrap` for user, typing indicator, play button, auto-scroll via `messagesEndRef`
 
-### `startRender(taskId)`
-- Calls edge function `start_render`
-- On success: starts client-side visual simulation via `setInterval` (2s ticks: 25→50→75→100)
-- At 100%: calls `complete_render`, refreshes task
-- **These percentages are local only — never written to DB**
-- Cleanup: interval cleared on complete, fail, or unmount via ref
+### `ChatHero`
+Extracted from lines 654-738. The pre-interaction landing.
+- Renders: system name title, subtitle, `ChatComposer` in hero mode, `QuickActionsBar`
+- Accepts: `systemName`, composer props, quick action handler, `userSettings`
 
-### Polling cleanup
+### `AttachmentChips`
+Small presentational component for the file chip list with remove buttons.
+- Accepts: `files`, `onRemove`, `getFileIcon`, `size?: 'normal' | 'small'`
+
+### `QuickActionsBar` (replace existing)
+Replace the duplicated inline quick action rendering (hero version lines 717-737, floating version lines 806-831) with one shared component.
+- Accepts: `actions`, `onAction`, `disabled`, `variant: 'hero' | 'floating'`
+
+## Resulting Index.tsx (~150 lines)
+
 ```text
-const renderInterval = useRef<number>();
-useEffect(() => () => clearInterval(renderInterval.current), []);
+Index.tsx will:
+  1. Call auth hooks (useAuth, useAppStore)
+  2. Call useConversations()
+  3. Call useChatStream(...)
+  4. Call useVoiceRecorder(...)
+  5. Call useVoicePlayback()
+  6. Call useFileAttachments()
+  7. Build userSettings object
+  8. Render layout shell:
+     - ConversationSidebar
+     - Header with chat/voice toggle + UserMenu
+     - Voice mode overlay (RealtimeVoiceChat)
+     - Chat mode: ChatHero or (ChatMessageList + floating QuickActionsBar + docked ChatComposer)
+     - SystemNamingModal
+     - TaskActivityBubble
 ```
-
-## UI: `VideoTaskDetail.tsx`
-- "Generate Edit Plan" → `generateEditPlan`
-- "Start Render" → `startRender`, disabled while `queued` or `rendering`
-- Progress bar driven by local simulated value
-- Success state on complete
-
-## Remotion scaffold
-- `remotion/` directory with template compositions (ShortForm, Promo, Square)
-- Code-only — not installed, ready for Phase 2
 
 ## Files
 
 | File | Action |
 |------|--------|
-| `supabase/functions/render-video/index.ts` | **Create** |
-| `remotion/package.json` | **Create** |
-| `remotion/tsconfig.json` | **Create** |
-| `remotion/src/index.ts` | **Create** |
-| `remotion/src/Root.tsx` | **Create** |
-| `remotion/src/templates/ShortFormTemplate.tsx` | **Create** |
-| `remotion/src/templates/PromoTemplate.tsx` | **Create** |
-| `remotion/src/templates/SquareTemplate.tsx` | **Create** |
-| `src/hooks/useVideoTasks.ts` | **Edit** |
-| `src/components/studio/VideoStudioDashboard.tsx` | **Edit** |
-| `src/components/studio/VideoTaskDetail.tsx` | **Edit** |
+| `src/hooks/useChatStream.ts` | **Create** |
+| `src/hooks/useVoiceRecorder.ts` | **Create** |
+| `src/hooks/useVoicePlayback.ts` | **Create** |
+| `src/hooks/useFileAttachments.ts` | **Create** |
+| `src/components/chat/ChatComposer.tsx` | **Create** |
+| `src/components/chat/ChatMessageList.tsx` | **Create** |
+| `src/components/chat/ChatHero.tsx` | **Create** |
+| `src/components/chat/AttachmentChips.tsx` | **Create** |
+| `src/components/chat/QuickActionsBar.tsx` | **Replace** existing with shared version |
+| `src/pages/Index.tsx` | **Rewrite** — thin orchestrator, ~150 lines |
+
+## What stays unchanged
+- `ConversationSidebar`, `RealtimeVoiceChat`, `TaskActivityBubble`, `SystemNamingModal`, `UserMenu` — untouched
+- `useConversations` hook — untouched
+- `chatService`, `voiceService` — untouched
+- All visual styling preserved exactly
+- Auth flow, onboarding redirect, welcome message logic — preserved
+- Chat/Voice mode toggle — preserved in Index.tsx header
 
