@@ -22,6 +22,7 @@ export function useVideoTasks() {
       setLoading(false);
       return;
     }
+    setLoading(true);
 
     const { data, error } = await supabase
       .from('video_tasks')

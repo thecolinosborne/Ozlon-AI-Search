@@ -85,6 +85,7 @@ export function useWorkTasks() {
       setLoading(false);
       return;
     }
+    setLoading(true);
     const { data, error } = await supabase
       .from('work_tasks')
       .select('*')
