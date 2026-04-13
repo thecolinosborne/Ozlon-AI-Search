@@ -1,64 +1,55 @@
 
 
-# Full-Spectrum Maton Skills Testing and SSE Parser Fix
+# Full Stability Scan: Chat Continuity, API Sync, and Reliability
 
-## Problem
-1. **SSE parser bug** (the reason "you can't even pull emails"): In `src/services/chatService.ts` line 265-268, when a JSON chunk is split across SSE frames, the `catch` block does `break` which **discards all remaining lines** in that batch. Long responses (email listings, tool call results) frequently trigger this, causing the stream to stall or lose data.
+## Issues Found
 
-2. **No systematic validation** that all 83 Maton-connected tools work end-to-end.
+### 1. Chat gets stuck after a few messages (CRITICAL)
+**File**: `src/services/chatService.ts` and `src/pages/Index.tsx`
 
-## Fix 1: SSE Parser (the critical bug)
+`streamChat` has no `AbortController` or timeout. If the edge function hangs or the network drops, `reader.read()` blocks forever — `onDone` and `onError` never fire, so `isLoading` stays `true` permanently. Every subsequent send is blocked by `if (!text.trim() || isLoading) return;` on line 163.
 
-In `src/services/chatService.ts`, lines 265-269, change:
-```typescript
-// BEFORE (broken)
-} catch {
-  buffer = line + '\n' + buffer;
-  break;
-}
+Additionally, clicking "New Chat" while a stream is in-flight does not cancel the old stream. The old `onDone` callback later fires `finalizeMessage` → `ensureSession`, which can create a ghost session or write to the wrong one.
 
-// AFTER (fixed)
-} catch {
-  if (trimmedLine.startsWith('data: ')) {
-    buffer = trimmedLine + '\n' + buffer;
-  }
-  // Continue processing remaining lines instead of breaking
-}
-```
+**Fix**:
+- Add `signal?: AbortSignal` to `StreamChatOptions`
+- Pass `signal` to the `fetch()` call
+- In `Index.tsx`, store an `AbortController` ref; abort it on every new `sendMessage` and on `startNewChat`
+- Add a 120-second safety timeout that force-resets `isLoading` if the stream hasn't completed
 
-This single change fixes email pulling, trashing, and all other long-response tool calls.
+### 2. `createSession` wipes messages mid-flight (RACE CONDITION)
+**File**: `src/hooks/useConversations.ts`, line 65
 
-## Fix 2: End-to-End Maton Skills Testing
+`createSession` calls `setMessages([])`. When `saveMessage` calls `ensureSession` → `createSession` after already adding the user message optimistically (line 125), this `setMessages([])` erases it. The user's message disappears.
 
-After deploying the parser fix, run a systematic curl-based test of the chat edge function exercising key Maton tool categories. This validates the full pipeline: frontend SSE parsing -> edge function -> tool dispatch -> Maton gateway -> response.
+**Fix**: Remove `setMessages([])` from `createSession`. Callers that need a clean slate (`startNewChat`, `init`) already clear messages before calling it.
 
-### Test matrix (executed via `supabase--curl_edge_functions`):
+### 3. Trash email handlers (ALREADY FIXED - verified)
+The `trash_email` and `batch_trash_emails` handlers in `supabase/functions/chat/index.ts` (lines 1975-2020) are correctly wrapped in try/catch with per-ID error capture and structured failure responses. No changes needed.
 
-| Category | Tool | Test prompt |
-|----------|------|-------------|
-| **Email Read** | `list_emails` | "Show my latest 5 emails" |
-| **Email Detail** | `get_email` | "Show me the full content of email {id}" |
-| **Email Trash** | `trash_email` | "Trash email {id}" |
-| **Email Batch** | `batch_trash_emails` | "Trash these emails: {id1},{id2}" |
-| **Calendar** | `create_calendar_event` | "Create a test event tomorrow at 3pm" |
-| **Drive** | `search_google_drive` | "Search my Drive for test files" |
-| **Docs** | `create_google_doc` | "Create a doc called Test" |
-| **Sheets** | `create_google_sheet` | "Create a sheet called Test" |
-| **GSC** | `gsc_list_sites` | "List my Search Console sites" |
-| **ClickUp** | `list_clickup_tasks` | "List my ClickUp tasks" |
+### 4. SSE parser (ALREADY FIXED - verified)
+The `catch` block in `chatService.ts` (lines 265-271) correctly re-buffers incomplete `data:` lines and continues processing without breaking. No changes needed.
 
-Each test will verify:
-- The edge function returns a valid SSE stream
-- Tool calls are properly dispatched and return `success: true/false` with meaningful messages
-- Error cases return structured failure messages (not unhandled throws)
+## Implementation
 
-### Test approach
-1. Apply the SSE parser fix
-2. Use `curl_edge_functions` to send test prompts directly to the chat function
-3. Verify each response contains proper tool call results
-4. For the email trash flow specifically: list emails -> pick one -> trash it -> verify it's gone
+### File 1: `src/services/chatService.ts`
+- Add `signal?: AbortSignal` to `StreamChatOptions` interface
+- Pass `signal` to the `fetch()` call on line 144
 
-## Files changed
-- `src/services/chatService.ts` — fix SSE parser catch block (lines 265-269)
-- No edge function changes needed (trash handlers already fixed)
+### File 2: `src/pages/Index.tsx`
+- Add an `AbortController` ref (`abortRef`)
+- In `sendMessage`: abort previous controller, create new one, pass `signal` to `streamChat`
+- In `startNewChat` handler: abort current stream, force `setIsLoading(false)`
+- Add 120-second safety timeout after `streamChat` starts; clear on completion
+
+### File 3: `src/hooks/useConversations.ts`
+- Remove `setMessages([])` on line 65 inside `createSession`
+
+## Files Changed
+- `src/services/chatService.ts` — add AbortSignal support
+- `src/pages/Index.tsx` — abort management + safety timeout
+- `src/hooks/useConversations.ts` — remove race-causing setMessages call
+
+## No backend/edge function changes needed
+Trash handlers and SSE parser are verified working correctly.
 
