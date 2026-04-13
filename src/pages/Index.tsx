@@ -190,7 +190,7 @@ const Index = () => {
       <ConversationSidebar
         open={sidebarOpen} onClose={() => setSidebarOpen(false)}
         sessions={sessions} activeSessionId={activeSessionId}
-        onNewChat={handleNewChat} onSelectSession={switchSession} onDeleteSession={deleteSession}
+        onNewChat={handleNewChat} onSelectSession={handleSwitchSession} onDeleteSession={handleDeleteSession}
       />
 
       {/* Global File Input */}
