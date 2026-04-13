@@ -134,7 +134,7 @@ const Index = () => {
     input, onInputChange: setInput, onSubmit: () => sendMessage(input),
     onMicClick: handleMicClick, isRecording, isTranscribing, isLoading,
     placeholder: `Ask ${systemName} anything...`,
-    attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload, getFileIcon,
+    attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload,
   };
 
   return (
