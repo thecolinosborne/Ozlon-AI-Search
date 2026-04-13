@@ -1,48 +1,28 @@
 
 
-# Smart Task Routing & Multi-Action Orchestration (Final)
+# Phase 1: Video Studio — Implementation Ready
 
-Single file: `supabase/functions/chat/index.ts`
+Final polish incorporated. No structural changes, just three explicit decisions locked in.
 
-## Changes in order
+## Polish items added
 
-### 1. Tool definition (after `create_work_task` ~line 1937)
-Add `update_work_task` with `additionalProperties: false` on both top-level params and `activity_entry`. Enum-constrain `activity_entry.status` to `["thinking", "executing", "completed", "failed"]`.
+1. **Migration comment on 1:1 intent**: Add `COMMENT ON COLUMN public.video_tasks.work_task_id IS 'Strict 1:1 extension of a parent work_task. Each work_task has at most one video_task.';` in migration.
 
-### 2. Transition validator helper (before `executeToolCall`)
-```typescript
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  todo: ['in_progress'],
-  in_progress: ['up_for_review'],
-  up_for_review: ['in_progress', 'completed'],
-  completed: ['in_progress'],
-};
+2. **Default sorting in useVideoTasks**:
+   - Dashboard listing: `ORDER BY created_at DESC` (newest first)
+   - Render history within detail: sorted by `started_at DESC` (most recent attempt first)
 
-function isValidTransition(from: string, to: string): boolean {
-  if (from === to) return true; // no-op is always safe
-  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
-}
-```
+3. **Parent delete in UI**: The `useWorkTasks` hook's `archiveTask` removes the task from local state via `.filter()`. Since video tasks are fetched by joining on `work_task_id`, a deleted/archived parent naturally disappears from the Studio dashboard. No extra handling needed — the cascade + re-fetch covers it.
 
-### 3. Handler case (before `default:` ~line 3274)
-- Fetch existing task by `task_id`
-- If `status` provided and differs from current, validate transition — reject if invalid
-- If `status === existing.status`, skip validation (no-op)
-- Build update with only provided fields; never null-overwrite `draft_output`
-- Always set `last_activity_at = now()`
-- If `activity_entry` provided, append `{ ...activity_entry, timestamp: now() }` to `ai_activity_log`
+## Implementation sequence (unchanged)
 
-### 4. Registry
-- `toolToService`: `'update_work_task': '_always_'`
-- `TOOL_DISPLAY_NAMES`: `'update_work_task': 'Updating work task'`
+1. **Migration** — `video_tasks` table with UNIQUE on `work_task_id`, all CHECKs, NOT NULL JSONB defaults, indexes, RLS, trigger, SQL comment
+2. **Types** — `src/types/video.ts`
+3. **Hook** — `src/hooks/useVideoTasks.ts` with explicit sort orders
+4. **Components** — 5 files in `src/components/studio/`
+5. **Navigation** — Update `TasksSidebar.tsx` + `Tasks.tsx`
 
-### 5. System prompt (replace lines 3427-3439)
+All previous decisions (task_type: `'creative'`, intent_type: `'content'`, approve/reject behavior, CHECK constraints, render_progress bounds, edit_plan shape) remain locked.
 
-**Routing:** ClickUp mention → `create_clickup_task`. Actionable work → chain internal tools. Both → both. Trivial → no task.
-
-**Chain:** `create_work_task` → `update_work_task`(in_progress) → work tool → `update_work_task`(up_for_review + draft_output). Failure → `ai_status: failed`, `next_action: waiting_on_human`.
-
-**Smart defaults:** research→`task_type:"research"`,`intent_type:"ops"` | content→`task_type:"content"`,`intent_type:"marketing"` | email→`task_type:"email"`,`intent_type:"ops"` | client work→`intent_type:"fulfillment"` | marketing→`intent_type:"marketing"` | ops→`intent_type:"ops"`
-
-**Transition rule in prompt:** Always follow `todo→in_progress→up_for_review→completed`. Never skip stages.
+Ready to build.
 
