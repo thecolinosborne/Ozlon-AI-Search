@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User as UserIcon, Settings, CreditCard, LogOut, ClipboardList } from "lucide-react";
+import { User as UserIcon, Settings, CreditCard, LogOut, ClipboardList, Film } from "lucide-react";
 
 export const UserMenu = () => {
   const navigate = useNavigate();
@@ -108,6 +108,12 @@ export const UserMenu = () => {
           <Link to="/tasks" className="cursor-pointer">
             <ClipboardList className="w-4 h-4 mr-2" />
             Tasks
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/studio" className="cursor-pointer">
+            <Film className="w-4 h-4 mr-2" />
+            Video Studio
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

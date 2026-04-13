@@ -3,9 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { BottomNav } from "@/components/navigation/BottomNav";
 
 // Pages
 import Index from "@/pages/Index";
@@ -23,6 +24,7 @@ import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
 import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
 import ClickUpDetail from "@/pages/integrations/ClickUpDetail";
 import Tasks from "@/pages/Tasks";
+import Studio from "@/pages/Studio";
 
 import NotFound from "@/pages/NotFound";
 
@@ -44,6 +46,38 @@ const OfflineDetector = () => {
   return null;
 };
 
+const AppRoutes = () => {
+  const { pathname } = useLocation();
+  const hideNav = pathname.startsWith('/auth') || pathname.startsWith('/onboarding');
+
+  return (
+    <>
+      <OfflineDetector />
+      <Routes>
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/billing" element={<Billing />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/developer" element={<Developer />} />
+        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/integrations/maton" element={<MatonDetail />} />
+        <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
+        <Route path="/integrations/descript" element={<DescriptDetail />} />
+        <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
+        <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
+        <Route path="/integrations/clickup" element={<ClickUpDetail />} />
+        <Route path="/tasks" element={<Tasks />} />
+        <Route path="/studio" element={<Studio />} />
+
+        <Route path="/" element={<Index />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+      {!hideNav && <BottomNav />}
+    </>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
@@ -51,26 +85,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <OfflineDetector />
-          <Routes>
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/billing" element={<Billing />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/developer" element={<Developer />} />
-            <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/integrations" element={<Integrations />} />
-            <Route path="/integrations/maton" element={<MatonDetail />} />
-            <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
-            <Route path="/integrations/descript" element={<DescriptDetail />} />
-            <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
-            <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
-            <Route path="/integrations/clickup" element={<ClickUpDetail />} />
-            <Route path="/tasks" element={<Tasks />} />
-            
-            <Route path="/" element={<Index />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <AppRoutes />
         </BrowserRouter>
       </TooltipProvider>
     </AuthProvider>
