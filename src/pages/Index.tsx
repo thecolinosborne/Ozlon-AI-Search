@@ -159,23 +159,30 @@ const Index = () => {
   }, [sendMessage]);
 
   // ── Session transition handlers ──────────────────────────────────────
+  // All transitions: abort stream (which fails stale tasks), reset ephemeral,
+  // and clear completed task UI to prevent cross-session leaks.
+  const { clearAllTasks } = useTaskActivityStore();
+
   const handleNewChat = useCallback(async () => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await startNewChat();
-  }, [abortStream, resetEphemeralState, startNewChat]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, startNewChat]);
 
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await switchSession(sessionId);
-  }, [abortStream, resetEphemeralState, switchSession]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, switchSession]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
+    clearAllTasks();
     await deleteSession(sessionId);
-  }, [abortStream, resetEphemeralState, deleteSession]);
+  }, [abortStream, resetEphemeralState, clearAllTasks, deleteSession]);
 
   // Shared composer props
   const composerProps = {
