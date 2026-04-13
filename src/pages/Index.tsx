@@ -67,7 +67,7 @@ const Index = () => {
     role: m.role,
     content: m.content,
   }));
-  const hasInteracted = messages.length > 0;
+  
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
@@ -79,6 +79,7 @@ const Index = () => {
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
+  const hasInteracted = messages.length > 0 || isLoading;
 
   // Reset store on user change
   useEffect(() => {
