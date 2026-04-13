@@ -1,0 +1,21 @@
+{
+  "name": "remotion-video-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion compositions for Video Studio — Phase 2 scaffold",
+  "scripts": {
+    "render": "bunx remotion render src/index.ts main output.mp4",
+    "preview": "bunx remotion studio"
+  },
+  "dependencies": {
+    "remotion": "^4.0.0",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/transitions": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/react": "^18.3.0"
+  }
+}
