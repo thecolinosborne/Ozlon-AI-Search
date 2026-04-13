@@ -651,6 +651,87 @@ export type Database = {
         }
         Relationships: []
       }
+      work_tasks: {
+        Row: {
+          ai_activity_log: Json
+          ai_status: string
+          archived_at: string | null
+          assigned_to: string | null
+          attachments: Json
+          board_position: number
+          comments: Json
+          completed_at: string | null
+          created_at: string
+          description: string | null
+          draft_output: string | null
+          final_deliverable: string | null
+          id: string
+          intent_type: string
+          last_activity_at: string
+          next_action: string
+          priority: string
+          revision_notes: string | null
+          source_chat_session_id: string | null
+          status: string
+          task_type: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_activity_log?: Json
+          ai_status?: string
+          archived_at?: string | null
+          assigned_to?: string | null
+          attachments?: Json
+          board_position?: number
+          comments?: Json
+          completed_at?: string | null
+          created_at?: string
+          description?: string | null
+          draft_output?: string | null
+          final_deliverable?: string | null
+          id?: string
+          intent_type?: string
+          last_activity_at?: string
+          next_action?: string
+          priority?: string
+          revision_notes?: string | null
+          source_chat_session_id?: string | null
+          status?: string
+          task_type?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_activity_log?: Json
+          ai_status?: string
+          archived_at?: string | null
+          assigned_to?: string | null
+          attachments?: Json
+          board_position?: number
+          comments?: Json
+          completed_at?: string | null
+          created_at?: string
+          description?: string | null
+          draft_output?: string | null
+          final_deliverable?: string | null
+          id?: string
+          intent_type?: string
+          last_activity_at?: string
+          next_action?: string
+          priority?: string
+          revision_notes?: string | null
+          source_chat_session_id?: string | null
+          status?: string
+          task_type?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -1914,6 +1914,27 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Work Task Creation Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'create_work_task',
+      description: 'Create a new work task in the AI operations workspace. Use when the user asks to create a task, track something, start a project, or when a multi-step work request should be turned into a trackable task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Task title — concise and actionable' },
+          description: { type: 'string', description: 'Task description with context and requirements' },
+          task_type: { type: 'string', enum: ['general', 'email', 'research', 'content', 'outreach', 'ops', 'creative'], description: 'Type of task (default: general)' },
+          intent_type: { type: 'string', enum: ['ops', 'lead_gen', 'fulfillment', 'content', 'research', 'outreach', 'admin'], description: 'Business intent (default: ops)' },
+          priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Priority level (default: medium)' },
+          assigned_to: { type: 'string', description: 'Who should handle this (default: ai)' },
+          next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state (default: waiting_on_ai)' },
+        },
+        required: ['title', 'description'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -3191,6 +3212,65 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
         }
       }
 
+      case 'create_work_task': {
+        try {
+          const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+          const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+          // Get user from auth header
+          const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+          let userId: string | null = null;
+          if (authHeader) {
+            const supabaseClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!);
+            const { data: { user } } = await supabaseClient.auth.getUser(authHeader.replace('Bearer ', ''));
+            userId = user?.id || null;
+          }
+          if (!userId) return { success: false, result: 'Could not identify user for task creation.' };
+
+          // Get max board_position for todo column
+          const { data: existingTasks } = await adminClient
+            .from('work_tasks')
+            .select('board_position')
+            .eq('user_id', userId)
+            .eq('status', 'todo')
+            .order('board_position', { ascending: false })
+            .limit(1);
+          const maxPos = existingTasks?.[0]?.board_position ?? -1;
+
+          const sessionId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+
+          const { data, error } = await adminClient
+            .from('work_tasks')
+            .insert({
+              user_id: userId,
+              title: args.title as string,
+              description: (args.description as string) || null,
+              task_type: (args.task_type as string) || 'general',
+              intent_type: (args.intent_type as string) || 'ops',
+              priority: (args.priority as string) || 'medium',
+              assigned_to: (args.assigned_to as string) || 'ai',
+              next_action: (args.next_action as string) || 'waiting_on_ai',
+              board_position: maxPos + 1,
+              source_chat_session_id: sessionId || null,
+              ai_activity_log: [{ timestamp: new Date().toISOString(), action: 'Task created', detail: `Created via chat: ${args.title}`, actor: 'system' }],
+            })
+            .select('id')
+            .single();
+
+          if (error) {
+            console.error('[create_work_task] Error:', error);
+            return { success: false, result: `Failed to create task: ${error.message}` };
+          }
+
+          return { success: true, result: `Task created successfully: "${args.title}" (ID: ${data.id}). It's now in the Tasks board under "To Do".` };
+        } catch (e) {
+          console.error('[create_work_task] Error:', e);
+          return { success: false, result: `Task creation error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -3344,6 +3424,19 @@ SEO ANALYSIS BEST PRACTICES:
 SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
+===========================================================
+WORK TASK MANAGEMENT
+===========================================================
+You have a create_work_task tool that creates trackable tasks in the user's AI operations workspace.
+Use it when the user:
+- Asks to create, track, or queue up a task
+- Makes a multi-step work request that should be tracked
+- Wants something done that has deliverables (email drafts, research reports, content)
+- Says "add this to my tasks", "track this", "create a task for..."
+
+The task appears on their Tasks board under "To Do". Set appropriate task_type, intent_type, and priority.
+Default assigned_to is 'ai'. Default next_action is 'waiting_on_ai'.
+
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
@@ -3451,6 +3544,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'web_search_google': '_always_',
     'save_memory': '_always_',
     'deep_research': '_always_',
+    'create_work_task': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3502,6 +3596,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'deep_research': 'Researching the web',
+  'create_work_task': 'Creating work task',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -3949,6 +4044,10 @@ serve(async (req) => {
       userSettings,
     } = body;
 
+    // Store auth context for tool handlers (create_work_task needs user ID)
+    (globalThis as Record<string, unknown>).__currentAuthHeader = req.headers.get('Authorization') || undefined;
+    (globalThis as Record<string, unknown>).__currentSessionId = body.sessionId || undefined;
+
     const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
     const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
     if (!apiKey) throw new Error(`${modelConfig.apiKeyEnvVar} is not configured`);
@@ -4240,7 +4339,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that', 'research', 'investigate', 'deep dive', 'look into', 'find out about', 'what\'s the latest on', 'analyze the market', 'competitor analysis', 'market research'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that', 'research', 'investigate', 'deep dive', 'look into', 'find out about', 'what\'s the latest on', 'analyze the market', 'competitor analysis', 'market research', 'track this', 'add to my tasks', 'queue up', 'work task', 'new task'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
