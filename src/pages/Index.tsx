@@ -185,8 +185,13 @@ const Index = () => {
     setInput("");
     setIsLoading(true);
 
-    // Save user message to session — await to ensure session is created before proceeding
-    await saveMessage(userMessage);
+    // Save user message to session — don't block on this; if it hangs, continue to stream
+    const savePromise = Promise.race([
+      saveMessage(userMessage),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('saveMessage timeout')), 10_000)),
+    ]).catch((err) => {
+      console.warn("[sendMessage] saveMessage failed or timed out:", err);
+    });
 
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
