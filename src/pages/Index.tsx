@@ -29,18 +29,21 @@ const Index = () => {
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
 
-  // Conversation session management
+  // ── Persisted conversation state ─────────────────────────────────────
   const {
-    sessions, activeSessionId, messages: sessionMessages, setMessages: setSessionMessages,
+    sessions, activeSessionId, messages: sessionMessages,
     sessionsLoaded, switchSession, startNewChat, saveMessage,
     finalizeMessage, deleteSession,
   } = useConversations();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeMode, setActiveMode] = useState<"chat" | "voice">("chat");
-  const [welcomeShown, setWelcomeShown] = useState(false);
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
   const prevUserIdRef = useRef<string | null>(null);
+
+  // ── Ephemeral UI-only messages (welcome, tips — never persisted) ────
+  const [ephemeralMessages, setEphemeralMessages] = useState<ChatMessage[]>([]);
+  const [welcomeShown, setWelcomeShown] = useState(false);
 
   // Build user settings
   const userSettings: UserSettings = {
@@ -79,25 +82,46 @@ const Index = () => {
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
 
   // ── Single source of truth for rendered messages ─────────────────────
-  // Merge persisted + inflight, deduplicate by ID (inflight wins if both
-  // exist — it has the latest streaming content).
+  // Three layers merged: persisted > inflight > ephemeral.
+  // Inflight wins over persisted (latest streaming content).
+  // Ephemeral is appended only when no real messages exist.
   const visibleMessages: ChatMessage[] = useMemo(() => {
-    if (inflightMessages.length === 0) return persistedMessages;
-    const inflightIds = new Set(inflightMessages.map((m) => m.id));
-    const base = persistedMessages.filter((m) => !inflightIds.has(m.id));
-    return [...base, ...inflightMessages];
-  }, [persistedMessages, inflightMessages]);
+    // Merge persisted + inflight (deduplicate by ID, inflight wins)
+    let merged: ChatMessage[];
+    if (inflightMessages.length === 0) {
+      merged = persistedMessages;
+    } else {
+      const inflightIds = new Set(inflightMessages.map((m) => m.id));
+      const base = persistedMessages.filter((m) => !inflightIds.has(m.id));
+      merged = [...base, ...inflightMessages];
+    }
+    // Append ephemeral messages (they have unique IDs, no dedup needed)
+    if (ephemeralMessages.length > 0) {
+      // Only show ephemeral if there are no real persisted or inflight messages
+      if (merged.length === 0) return ephemeralMessages;
+      // If real messages exist, drop ephemeral (welcome msg no longer relevant)
+      return merged;
+    }
+    return merged;
+  }, [persistedMessages, inflightMessages, ephemeralMessages]);
 
   const hasInteracted = visibleMessages.length > 0;
+
+  // ── Ephemeral state reset helper ─────────────────────────────────────
+  const resetEphemeralState = useCallback(() => {
+    setEphemeralMessages([]);
+    setWelcomeShown(false);
+  }, []);
 
   // Reset store on user change
   useEffect(() => {
     if (!user) { prevUserIdRef.current = null; return; }
     if (prevUserIdRef.current && prevUserIdRef.current !== user.id) {
       useAppStore.getState().reset();
+      resetEphemeralState();
     }
     prevUserIdRef.current = user.id;
-  }, [user]);
+  }, [user, resetEphemeralState]);
 
   // Redirect to onboarding
   useEffect(() => {
@@ -118,26 +142,40 @@ const Index = () => {
     load();
   }, []);
 
-  // Welcome message for returning users
+  // Welcome message for returning users — ephemeral only, never persisted
   useEffect(() => {
-    if (isReturningUser && !welcomeShown && persistedMessages.length === 0 && sessionsLoaded && activeSessionId) {
+    if (isReturningUser && !welcomeShown && persistedMessages.length === 0 && inflightMessages.length === 0 && sessionsLoaded && activeSessionId) {
       setWelcomeShown(true);
-      setSessionMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant" as const, content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`, created_at: new Date().toISOString() },
-      ]);
+      setEphemeralMessages([{
+        id: `ephemeral-welcome-${activeSessionId}`,
+        role: "assistant",
+        content: `Welcome back! ${systemName} is ready to help. What would you like to do today?`,
+      }]);
     }
-  }, [isReturningUser, welcomeShown, systemName, persistedMessages.length, sessionsLoaded, activeSessionId, setSessionMessages]);
+  }, [isReturningUser, welcomeShown, systemName, persistedMessages.length, inflightMessages.length, sessionsLoaded, activeSessionId]);
 
   const handleQuickAction = useCallback((action: QuickAction) => {
     sendMessage(action.message, action.intent);
   }, [sendMessage]);
 
+  // ── Session transition handlers ──────────────────────────────────────
   const handleNewChat = useCallback(async () => {
     abortStream();
+    resetEphemeralState();
     await startNewChat();
-    setWelcomeShown(false);
-  }, [abortStream, startNewChat]);
+  }, [abortStream, resetEphemeralState, startNewChat]);
+
+  const handleSwitchSession = useCallback(async (sessionId: string) => {
+    abortStream();
+    resetEphemeralState();
+    await switchSession(sessionId);
+  }, [abortStream, resetEphemeralState, switchSession]);
+
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    abortStream();
+    resetEphemeralState();
+    await deleteSession(sessionId);
+  }, [abortStream, resetEphemeralState, deleteSession]);
 
   // Shared composer props
   const composerProps = {
