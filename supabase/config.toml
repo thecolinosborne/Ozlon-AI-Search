@@ -36,3 +36,6 @@ verify_jwt = false
 [functions.higgsfield]
 verify_jwt = false
 
+[functions.render-video]
+verify_jwt = false
+
