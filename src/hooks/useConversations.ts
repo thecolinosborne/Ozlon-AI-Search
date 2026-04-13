@@ -240,6 +240,7 @@ export function useConversations() {
 
   // Initialization: load sessions, reset when user changes
   useEffect(() => {
+    mountedRef.current = true;
     if (!user) {
       setSessions([]);
       setActiveSession(null);
