@@ -253,5 +253,18 @@ export function useChatStream({
     ]
   );
 
+  // ── Unmount cleanup: abort any in-flight stream to prevent state
+  //    updates on an unmounted component (e.g. navigating away mid-stream).
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      if (requestTaskIdsRef.current.size > 0) {
+        failStaleTasks(requestTaskIdsRef.current);
+        requestTaskIdsRef.current = new Set();
+      }
+    };
+  }, [failStaleTasks]);
+
   return { input, setInput, isLoading, inflightMessages, sendMessage, abortStream };
 }
