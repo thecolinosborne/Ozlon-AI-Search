@@ -1880,6 +1880,24 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Memory / Learning Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: 'Save a durable memory about the user — a preference, correction, workflow pattern, fact, goal, or value. Call this whenever the user states a reusable preference (e.g. "always convert Drive links"), corrects you, reveals a personal fact, or establishes a workflow pattern. This persists across all future conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          memory_type: { type: 'string', description: 'One of: fact, preference, pattern, context, goal, value', enum: ['fact', 'preference', 'pattern', 'context', 'goal', 'value'] },
+          content: { type: 'string', description: 'The memory content (1-3 sentences, specific and actionable)' },
+          summary: { type: 'string', description: 'Brief one-line summary for quick reference' },
+          salience: { type: 'number', description: 'How important this is to remember, 0.0-1.0 (default 0.6)' },
+        },
+        required: ['memory_type', 'content', 'summary'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -2939,6 +2957,88 @@ async function executeToolCall(
         } catch (e) { return { success: false, result: `Search error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
       }
 
+      case 'save_memory': {
+        try {
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          if (!OPENAI_KEY) return { success: false, result: 'Embedding API not configured.' };
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database not configured.' };
+
+          const memoryContent = args.content as string;
+          const memorySummary = args.summary as string;
+          const memoryType = (args.memory_type as string) || 'fact';
+          const salience = (args.salience as number) || 0.6;
+
+          // Get user ID from the request auth context (passed via closure)
+          // We'll use the wisdomUserId that was resolved earlier in the main handler
+          // For now, use service role to query — the tool is only called within authenticated sessions
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          // Generate embedding for deduplication and storage
+          const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: memoryContent }),
+          });
+          if (!embRes.ok) return { success: false, result: 'Failed to generate embedding.' };
+          const embData = await embRes.json();
+          const embedding = embData.data[0].embedding;
+
+          // Deduplication: check for highly similar existing memories
+          // We need the user_id — extract from the tool call context
+          // The wisdomUserId is captured in the outer scope of the main handler
+          // We pass it through via a closure variable set before the tool loop
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated for memory storage.' };
+
+          const { data: similar } = await adminClient.rpc('match_wisdom_memories', {
+            query_embedding: JSON.stringify(embedding),
+            match_threshold: 0.9,
+            match_count: 1,
+            filter_user_id: userId,
+            filter_memory_type: null,
+          });
+
+          if (similar && similar.length > 0) {
+            // Update existing memory: bump recurrence_count and confidence
+            const existing = similar[0];
+            await adminClient.from('wisdom_memories').update({
+              recurrence_count: (existing.recurrence_count || 1) + 1,
+              confidence: Math.min((existing.confidence || 0.8) + 0.05, 1.0),
+              content: memoryContent, // Update with latest wording
+              summary: memorySummary,
+              salience: Math.max(existing.salience || 0.5, salience),
+              updated_at: new Date().toISOString(),
+              last_accessed_at: new Date().toISOString(),
+            }).eq('id', existing.id);
+            console.log(`[save_memory] Deduplicated — updated existing memory ${existing.id} (recurrence: ${(existing.recurrence_count || 1) + 1})`);
+            return { success: true, result: `Memory updated (reinforced existing): "${memorySummary}"` };
+          }
+
+          // Insert new memory
+          const { error } = await adminClient.from('wisdom_memories').insert({
+            user_id: userId,
+            memory_type: memoryType,
+            content: memoryContent,
+            summary: memorySummary,
+            embedding: JSON.stringify(embedding),
+            salience,
+            confidence: 0.85,
+          });
+          if (error) {
+            console.error('[save_memory] Insert error:', error);
+            return { success: false, result: `Failed to save memory: ${error.message}` };
+          }
+          console.log(`[save_memory] New memory saved: "${memorySummary}" (type: ${memoryType})`);
+          return { success: true, result: `Memory saved: "${memorySummary}"` };
+        } catch (e) {
+          console.error('[save_memory] Error:', e);
+          return { success: false, result: `Memory save error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -3007,6 +3107,29 @@ MEMORY & WISDOM BEHAVIOR
 - Never claim to be sentient, conscious, alive, or autonomous
 - You emulate continuity and adaptive reasoning through architecture, not false claims
 - Ask for confirmation before storing highly personal durable memory when appropriate
+
+===========================================================
+ACTIVE SKILL LEARNING (CRITICAL)
+===========================================================
+You have the ability to LEARN and REMEMBER things permanently using the save_memory tool.
+
+WHEN TO CALL save_memory:
+- User states a reusable preference ("always do X", "I prefer Y", "from now on...")
+- User corrects you about something (save the correction so you don't repeat the mistake)
+- User reveals a durable fact about themselves, their business, or their workflow
+- User establishes a workflow pattern that should be followed in the future
+- You notice a recurring behavior or pattern worth tracking
+
+HOW TO USE save_memory:
+- memory_type: fact (personal info), preference (how they want things done), pattern (behavioral), context (situational), goal (objectives), value (principles)
+- content: Be specific and actionable (1-3 sentences)
+- summary: One-line for quick reference
+- salience: 0.3 for minor preferences, 0.6 for standard, 0.9 for critical corrections
+
+IMPORTANT:
+- Reference your LIVING MEMORY section BEFORE answering — if you already know a preference, apply it without asking
+- Do NOT announce "I'll save this to memory" — just save it silently and confirm briefly at the end
+- Deduplication is automatic — saving the same thing twice just reinforces it
 
 ===========================================================
 TONE & RESPONSE STYLE
@@ -3174,6 +3297,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'gsc_save_snapshot': 'google-search-console',
     'gsc_compare_snapshots': 'google-search-console',
     'web_search_google': '_always_',
+    'save_memory': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3223,6 +3347,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_save_snapshot': 'Saving SEO snapshot',
   'gsc_compare_snapshots': 'Loading SEO snapshots',
   'web_search_google': 'Searching Google',
+  'save_memory': 'Saving to memory',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -3248,6 +3373,7 @@ async function runToolLoop(
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
   userMessage?: string,
   aliasMap?: AliasEntry[],
+  userId?: string | null,
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
@@ -3302,6 +3428,10 @@ async function runToolLoop(
             args = JSON.parse(tc.function.arguments);
           } catch {
             args = {};
+          }
+          // Inject user ID for save_memory tool
+          if (tc.function.name === 'save_memory' && userId) {
+            args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
@@ -3511,6 +3641,125 @@ async function runInfinityRouter(
   } catch (e) {
     console.error('[InfinityRouter] Error, falling back:', e);
     return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0 }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null };
+  }
+}
+
+// ============================================================================
+// POST-TURN MEMORY EXTRACTION — Background learning from conversations
+// ============================================================================
+
+async function extractPostTurnMemories(
+  messages: { role: string; content: string }[],
+  assistantResponse: string,
+  userId: string,
+): Promise<void> {
+  const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  if (!OPENAI_KEY || !serviceRoleKey || !supabaseUrl) return;
+
+  // Only extract from the last few messages to keep it lightweight
+  const recentMessages = messages.slice(-4);
+  const lastUserMsg = [...recentMessages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg || lastUserMsg.content.length < 20) return;
+
+  // Skip if the conversation is purely transactional (email listing, etc.)
+  const transactionalKeywords = ['list my', 'show me', 'what are my', 'how many'];
+  if (transactionalKeywords.some(k => lastUserMsg.content.toLowerCase().startsWith(k))) return;
+
+  try {
+    const extractionPrompt = `Analyze this conversation excerpt and extract any durable, reusable learnings about the user. Focus on:
+- Stated preferences ("I always want...", "Don't ever...", "I prefer...")
+- Corrections the user made to the AI
+- Workflow patterns the user established
+- Personal facts (business name, role, goals)
+- Values or principles they expressed
+
+Return a JSON array of memories to save. Each: { memory_type: "fact"|"preference"|"pattern"|"context"|"goal"|"value", content: string (1-2 sentences), summary: string (one line), salience: 0.3-0.9 }
+Return an EMPTY array [] if nothing qualifies as a durable memory.
+Return ONLY the JSON array, no commentary.`;
+
+    const conversationText = recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4.1-nano-2025-04-14',
+        messages: [
+          { role: 'system', content: extractionPrompt },
+          { role: 'user', content: conversationText },
+        ],
+        max_tokens: 1024,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!res.ok) { console.error('[PostTurnMemory] AI call failed:', res.status); return; }
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || '[]';
+
+    let memories: Array<{ memory_type: string; content: string; summary: string; salience: number }>;
+    try {
+      const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      memories = JSON.parse(cleaned);
+    } catch { return; }
+
+    if (!Array.isArray(memories) || memories.length === 0) return;
+
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+    for (const mem of memories.slice(0, 3)) { // Max 3 per turn
+      try {
+        // Generate embedding
+        const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'text-embedding-3-small', input: mem.content }),
+        });
+        if (!embRes.ok) continue;
+        const embData = await embRes.json();
+        const embedding = embData.data[0].embedding;
+
+        // Dedup check
+        const { data: similar } = await adminClient.rpc('match_wisdom_memories', {
+          query_embedding: JSON.stringify(embedding),
+          match_threshold: 0.9,
+          match_count: 1,
+          filter_user_id: userId,
+          filter_memory_type: null,
+        });
+
+        if (similar && similar.length > 0) {
+          // Reinforce existing
+          const existing = similar[0];
+          await adminClient.from('wisdom_memories').update({
+            recurrence_count: (existing.recurrence_count || 1) + 1,
+            confidence: Math.min((existing.confidence || 0.8) + 0.03, 1.0),
+            salience: Math.max(existing.salience || 0.5, mem.salience || 0.5),
+            updated_at: new Date().toISOString(),
+          }).eq('id', existing.id);
+          console.log(`[PostTurnMemory] Reinforced: "${existing.summary || existing.content.substring(0, 50)}"`);
+        } else {
+          // Insert new
+          await adminClient.from('wisdom_memories').insert({
+            user_id: userId,
+            memory_type: mem.memory_type || 'fact',
+            content: mem.content,
+            summary: mem.summary,
+            embedding: JSON.stringify(embedding),
+            salience: mem.salience || 0.5,
+            confidence: 0.7, // Lower confidence for auto-extracted
+          });
+          console.log(`[PostTurnMemory] Saved: "${mem.summary}"`);
+        }
+      } catch (e) {
+        console.error('[PostTurnMemory] Memory save error:', e);
+      }
+    }
+  } catch (e) {
+    console.error('[PostTurnMemory] Extraction error:', e);
   }
 }
 
@@ -3837,7 +4086,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     // Detect if user is requesting an action (heuristic)
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText = (lastUserMsg?.content || '').toLowerCase();
-    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research'];
+    const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
@@ -3867,6 +4116,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
               },
               userText,
               aliasMap,
+              wisdomUserId,
             );
 
             // Write final content as SSE
@@ -3874,6 +4124,13 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
+
+            // Fire-and-forget: post-turn memory extraction
+            if (wisdomUserId) {
+              extractPostTurnMemories(messages, result.content, wisdomUserId).catch(e =>
+                console.error('[PostTurnMemory] Error:', e)
+              );
+            }
           } catch (e) {
             console.error('Tool loop error:', e);
             await writer.write(encoder.encode(`data: ${JSON.stringify({
