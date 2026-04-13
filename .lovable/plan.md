@@ -1,28 +1,34 @@
 
 
-# Phase 1: Video Studio — Implementation Ready
+# Video Studio Navigation & Global BottomNav
 
-Final polish incorporated. No structural changes, just three explicit decisions locked in.
+## Files to change
 
-## Polish items added
+### 1. Create `src/pages/Studio.tsx`
+Standalone page matching Tasks.tsx layout: auth guard via `useEffect`, `min-h-screen bg-background pb-20`, sticky header with `backdrop-blur-xl`, `max-w-6xl mx-auto px-4 py-4` content area, loading spinner. Wraps `VideoStudioDashboard`.
 
-1. **Migration comment on 1:1 intent**: Add `COMMENT ON COLUMN public.video_tasks.work_task_id IS 'Strict 1:1 extension of a parent work_task. Each work_task has at most one video_task.';` in migration.
+### 2. Edit `src/App.tsx`
+- Extract routes into an inner `AppRoutes` component that uses `useLocation()` inside router context
+- Add `<Route path="/studio" element={<Studio />} />`
+- Render `<BottomNav />` conditionally: hide when `pathname.startsWith('/auth')` or `pathname.startsWith('/onboarding')` — uses `startsWith` to cover sub-paths
+- Import Studio page
 
-2. **Default sorting in useVideoTasks**:
-   - Dashboard listing: `ORDER BY created_at DESC` (newest first)
-   - Render history within detail: sorted by `started_at DESC` (most recent attempt first)
+### 3. Edit `src/components/UserMenu.tsx`
+- Add `Film` to lucide imports
+- Add "Video Studio" `DropdownMenuItem` linking to `/studio`, placed after the Tasks item (line 112)
 
-3. **Parent delete in UI**: The `useWorkTasks` hook's `archiveTask` removes the task from local state via `.filter()`. Since video tasks are fetched by joining on `work_task_id`, a deleted/archived parent naturally disappears from the Studio dashboard. No extra handling needed — the cascade + re-fetch covers it.
+### 4. Edit `src/components/tasks/TasksSidebar.tsx`
+- Remove `'studio'` from `TaskView` type → becomes `'overview' | 'board' | 'active' | 'review' | 'completed' | 'activity'`
+- Remove `Film` from imports
+- Remove the studio entry from the `views` array
 
-## Implementation sequence (unchanged)
+### 5. Edit `src/pages/Tasks.tsx`
+- Remove `VideoStudioDashboard` import
+- Remove `BottomNav` import and `<BottomNav />` usage (line 168)
+- Remove the `activeView === 'studio'` rendering block (lines 147-149)
 
-1. **Migration** — `video_tasks` table with UNIQUE on `work_task_id`, all CHECKs, NOT NULL JSONB defaults, indexes, RLS, trigger, SQL comment
-2. **Types** — `src/types/video.ts`
-3. **Hook** — `src/hooks/useVideoTasks.ts` with explicit sort orders
-4. **Components** — 5 files in `src/components/studio/`
-5. **Navigation** — Update `TasksSidebar.tsx` + `Tasks.tsx`
-
-All previous decisions (task_type: `'creative'`, intent_type: `'content'`, approve/reject behavior, CHECK constraints, render_progress bounds, edit_plan shape) remain locked.
-
-Ready to build.
+### Sanity checks incorporated
+- **A. Hidden nav routes**: `startsWith('/auth')` and `startsWith('/onboarding')` covers all sub-paths
+- **B. Bottom padding**: Studio.tsx gets `pb-20`; Tasks.tsx already has it; Index.tsx will be checked — if missing, add it
+- **C. Type cleanup**: Removing `'studio'` from TaskView removes it from the type, the views array, and the switch/render logic. The `counts` object never had a `studio` key, so no dead references remain.
 
