@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
+const isDev = import.meta.env.DEV;
+
 export interface ConversationSession {
   id: string;
   title: string;
