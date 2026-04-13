@@ -3645,6 +3645,125 @@ async function runInfinityRouter(
 }
 
 // ============================================================================
+// POST-TURN MEMORY EXTRACTION — Background learning from conversations
+// ============================================================================
+
+async function extractPostTurnMemories(
+  messages: { role: string; content: string }[],
+  assistantResponse: string,
+  userId: string,
+): Promise<void> {
+  const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  if (!OPENAI_KEY || !serviceRoleKey || !supabaseUrl) return;
+
+  // Only extract from the last few messages to keep it lightweight
+  const recentMessages = messages.slice(-4);
+  const lastUserMsg = [...recentMessages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg || lastUserMsg.content.length < 20) return;
+
+  // Skip if the conversation is purely transactional (email listing, etc.)
+  const transactionalKeywords = ['list my', 'show me', 'what are my', 'how many'];
+  if (transactionalKeywords.some(k => lastUserMsg.content.toLowerCase().startsWith(k))) return;
+
+  try {
+    const extractionPrompt = `Analyze this conversation excerpt and extract any durable, reusable learnings about the user. Focus on:
+- Stated preferences ("I always want...", "Don't ever...", "I prefer...")
+- Corrections the user made to the AI
+- Workflow patterns the user established
+- Personal facts (business name, role, goals)
+- Values or principles they expressed
+
+Return a JSON array of memories to save. Each: { memory_type: "fact"|"preference"|"pattern"|"context"|"goal"|"value", content: string (1-2 sentences), summary: string (one line), salience: 0.3-0.9 }
+Return an EMPTY array [] if nothing qualifies as a durable memory.
+Return ONLY the JSON array, no commentary.`;
+
+    const conversationText = recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4.1-nano-2025-04-14',
+        messages: [
+          { role: 'system', content: extractionPrompt },
+          { role: 'user', content: conversationText },
+        ],
+        max_tokens: 1024,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!res.ok) { console.error('[PostTurnMemory] AI call failed:', res.status); return; }
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || '[]';
+
+    let memories: Array<{ memory_type: string; content: string; summary: string; salience: number }>;
+    try {
+      const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      memories = JSON.parse(cleaned);
+    } catch { return; }
+
+    if (!Array.isArray(memories) || memories.length === 0) return;
+
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+    for (const mem of memories.slice(0, 3)) { // Max 3 per turn
+      try {
+        // Generate embedding
+        const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'text-embedding-3-small', input: mem.content }),
+        });
+        if (!embRes.ok) continue;
+        const embData = await embRes.json();
+        const embedding = embData.data[0].embedding;
+
+        // Dedup check
+        const { data: similar } = await adminClient.rpc('match_wisdom_memories', {
+          query_embedding: JSON.stringify(embedding),
+          match_threshold: 0.9,
+          match_count: 1,
+          filter_user_id: userId,
+          filter_memory_type: null,
+        });
+
+        if (similar && similar.length > 0) {
+          // Reinforce existing
+          const existing = similar[0];
+          await adminClient.from('wisdom_memories').update({
+            recurrence_count: (existing.recurrence_count || 1) + 1,
+            confidence: Math.min((existing.confidence || 0.8) + 0.03, 1.0),
+            salience: Math.max(existing.salience || 0.5, mem.salience || 0.5),
+            updated_at: new Date().toISOString(),
+          }).eq('id', existing.id);
+          console.log(`[PostTurnMemory] Reinforced: "${existing.summary || existing.content.substring(0, 50)}"`);
+        } else {
+          // Insert new
+          await adminClient.from('wisdom_memories').insert({
+            user_id: userId,
+            memory_type: mem.memory_type || 'fact',
+            content: mem.content,
+            summary: mem.summary,
+            embedding: JSON.stringify(embedding),
+            salience: mem.salience || 0.5,
+            confidence: 0.7, // Lower confidence for auto-extracted
+          });
+          console.log(`[PostTurnMemory] Saved: "${mem.summary}"`);
+        }
+      } catch (e) {
+        console.error('[PostTurnMemory] Memory save error:', e);
+      }
+    }
+  } catch (e) {
+    console.error('[PostTurnMemory] Extraction error:', e);
+  }
+}
+
+// ============================================================================
 // MAIN REQUEST HANDLER
 // ============================================================================
 
