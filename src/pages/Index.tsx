@@ -163,8 +163,6 @@ const Index = () => {
   // ── Session transition handlers ──────────────────────────────────────
   // All transitions: abort stream (which fails stale tasks), reset ephemeral,
   // and clear completed task UI to prevent cross-session leaks.
-  const { clearAllTasks } = useTaskActivityStore();
-
   const handleNewChat = useCallback(async () => {
     abortStream();
     resetEphemeralState();
