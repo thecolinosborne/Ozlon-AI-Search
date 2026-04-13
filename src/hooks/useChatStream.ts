@@ -34,31 +34,22 @@ export function useChatStream({
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { addTask, updateStep, completeTask, setTaskSummary } = useTaskActivityStore();
 
   const abortStream = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
-    if (safetyTimeoutRef.current) {
-      clearTimeout(safetyTimeoutRef.current);
-      safetyTimeoutRef.current = null;
-    }
     setIsLoading(false);
   }, []);
 
   const sendMessage = useCallback(async (text: string, intent?: string) => {
     if (!text.trim() || isLoading) return;
 
+    // Abort any prior in-flight stream
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const { signal } = abortRef.current;
-
-    if (safetyTimeoutRef.current) {
-      clearTimeout(safetyTimeoutRef.current);
-      safetyTimeoutRef.current = null;
-    }
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -69,6 +60,7 @@ export function useChatStream({
     setInput("");
     setIsLoading(true);
 
+    // Persist user message with timeout guard
     await Promise.race([
       saveMessage(userMessage),
       new Promise<void>((resolve) => setTimeout(() => {
@@ -77,6 +69,7 @@ export function useChatStream({
       }, 10_000)),
     ]);
 
+    // Create assistant placeholder
     let assistantContent = "";
     const assistantId = crypto.randomUUID();
 
@@ -85,11 +78,14 @@ export function useChatStream({
       { id: assistantId, role: "assistant", content: "", created_at: new Date().toISOString() },
     ]);
 
-    safetyTimeoutRef.current = setTimeout(() => {
-      setIsLoading(false);
-      if (!assistantContent) {
-        updateMessageContent(assistantId, "Request timed out. Please try again.");
-      }
+    // Request-scoped state
+    const requestTaskIds = new Set<string>();
+    let outcome: "success" | "aborted" | "timeout" | "error" = "error";
+    let timedOut = false;
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      abortRef.current?.abort("timeout");
     }, 120_000);
 
     try {
@@ -108,6 +104,7 @@ export function useChatStream({
           updateMessageContent(assistantId, assistantContent);
         },
         onTaskUpdate: (update: TaskUpdate) => {
+          requestTaskIds.add(update.taskId);
           if (update.status === "in_progress") {
             const existing = useTaskActivityStore.getState().tasks.find((t) => t.id === update.taskId);
             if (!existing) addTask(update.taskId, update.title);
@@ -120,45 +117,40 @@ export function useChatStream({
           }
         },
         onDone: () => {
-          if (safetyTimeoutRef.current) {
-            clearTimeout(safetyTimeoutRef.current);
-            safetyTimeoutRef.current = null;
-          }
-          setIsLoading(false);
-          const allTasks = useTaskActivityStore.getState().tasks.filter(
-            (t) => t.status === "in_progress" || t.status === "error"
-          );
-          allTasks.forEach((t) => completeTask(t.id, "done"));
-
-          if (assistantContent) {
-            finalizeMessage({ id: assistantId, role: "assistant", content: assistantContent });
-            if (autoPlayEnabled) playMessage(assistantId, assistantContent);
-          }
+          outcome = "success";
         },
         onError: (errorMsg: string) => {
-          if (safetyTimeoutRef.current) {
-            clearTimeout(safetyTimeoutRef.current);
-            safetyTimeoutRef.current = null;
-          }
-          console.error("Chat error:", errorMsg);
-          updateMessageContent(assistantId, "Something went wrong. Please try again.");
-          setIsLoading(false);
-          const activeTasks = useTaskActivityStore.getState().tasks.filter((t) => t.status === "in_progress");
-          activeTasks.forEach((t) => completeTask(t.id, "error"));
+          console.error("Chat stream service error:", errorMsg);
+          outcome = "error";
         },
       });
+
+      // If streamChat resolved without calling onDone or onError (reader exhausted),
+      // treat as success if we got content
+      if (outcome !== "error") outcome = "success";
     } catch (error) {
-      if (safetyTimeoutRef.current) {
-        clearTimeout(safetyTimeoutRef.current);
-        safetyTimeoutRef.current = null;
-      }
       if (error instanceof DOMException && error.name === "AbortError") {
-        console.log("Stream aborted");
+        outcome = timedOut ? "timeout" : "aborted";
       } else {
-        console.error("Chat error:", error);
-        updateMessageContent(assistantId, "Something went wrong. Please try again.");
+        console.error("Chat stream exception:", error);
+        outcome = "error";
       }
+    } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
+
+      if (outcome === "success" && assistantContent) {
+        finalizeMessage({ id: assistantId, role: "assistant", content: assistantContent });
+        requestTaskIds.forEach((id) => completeTask(id, "done"));
+        if (autoPlayEnabled) playMessage(assistantId, assistantContent);
+      } else if (outcome === "timeout") {
+        updateMessageContent(assistantId, assistantContent || "Response timed out. Please try again.");
+        requestTaskIds.forEach((id) => completeTask(id, "error"));
+      } else if (outcome === "error") {
+        updateMessageContent(assistantId, "Something went wrong. Please try again.");
+        requestTaskIds.forEach((id) => completeTask(id, "error"));
+      }
+      // 'aborted' — intentional user cancel: no error message, no task mutation
     }
   }, [isLoading, messages, systemName, userSettings, autoPlayEnabled, saveMessage, updateMessageContent, finalizeMessage, setSessionMessages, playMessage, addTask, updateStep, completeTask, setTaskSummary]);
 
