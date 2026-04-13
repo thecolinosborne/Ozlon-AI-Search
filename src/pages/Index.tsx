@@ -7,6 +7,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
+import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { toast } from "sonner";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
