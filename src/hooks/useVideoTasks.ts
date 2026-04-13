@@ -43,11 +43,18 @@ export function useVideoTasks() {
     }
 
     try {
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+
       const { data, error: queryError } = await supabase
         .from('video_tasks')
         .select('*, work_tasks!inner(title, status, ai_status, ai_activity_log)')
         .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(controller.signal);
+
+      clearTimeout(timeout);
 
       if (!mountedRef.current) return;
 
