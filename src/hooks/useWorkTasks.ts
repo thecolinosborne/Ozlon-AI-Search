@@ -81,7 +81,10 @@ export function useWorkTasks() {
   const [loading, setLoading] = useState(true);
 
   const fetchTasks = useCallback(async () => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from('work_tasks')
       .select('*')
@@ -91,6 +94,7 @@ export function useWorkTasks() {
 
     if (error) {
       console.error('Failed to fetch tasks:', error);
+      setLoading(false);
       return;
     }
     setTasks((data || []) as unknown as WorkTask[]);
