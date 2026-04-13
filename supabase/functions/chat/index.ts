@@ -3429,6 +3429,10 @@ async function runToolLoop(
           } catch {
             args = {};
           }
+          // Inject user ID for save_memory tool
+          if (tc.function.name === 'save_memory' && userId) {
+            args.__user_id = userId;
+          }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
