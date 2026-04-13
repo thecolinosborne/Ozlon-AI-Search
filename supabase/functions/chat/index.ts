@@ -4005,6 +4005,13 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
+
+            // Fire-and-forget: post-turn memory extraction
+            if (wisdomUserId) {
+              extractPostTurnMemories(messages, result.content, wisdomUserId).catch(e =>
+                console.error('[PostTurnMemory] Error:', e)
+              );
+            }
           } catch (e) {
             console.error('Tool loop error:', e);
             await writer.write(encoder.encode(`data: ${JSON.stringify({
