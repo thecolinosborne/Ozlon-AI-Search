@@ -1880,6 +1880,24 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Memory / Learning Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: 'Save a durable memory about the user — a preference, correction, workflow pattern, fact, goal, or value. Call this whenever the user states a reusable preference (e.g. "always convert Drive links"), corrects you, reveals a personal fact, or establishes a workflow pattern. This persists across all future conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          memory_type: { type: 'string', description: 'One of: fact, preference, pattern, context, goal, value', enum: ['fact', 'preference', 'pattern', 'context', 'goal', 'value'] },
+          content: { type: 'string', description: 'The memory content (1-3 sentences, specific and actionable)' },
+          summary: { type: 'string', description: 'Brief one-line summary for quick reference' },
+          salience: { type: 'number', description: 'How important this is to remember, 0.0-1.0 (default 0.6)' },
+        },
+        required: ['memory_type', 'content', 'summary'],
+      },
+    },
+  },
 ];
 // ============================================================================
 
