@@ -3997,6 +3997,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
               },
               userText,
               aliasMap,
+              wisdomUserId,
             );
 
             // Write final content as SSE
