@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
@@ -252,6 +252,19 @@ export function useChatStream({
       failStaleTasks,
     ]
   );
+
+  // ── Unmount cleanup: abort any in-flight stream to prevent state
+  //    updates on an unmounted component (e.g. navigating away mid-stream).
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      if (requestTaskIdsRef.current.size > 0) {
+        failStaleTasks(requestTaskIdsRef.current);
+        requestTaskIdsRef.current = new Set();
+      }
+    };
+  }, [failStaleTasks]);
 
   return { input, setInput, isLoading, inflightMessages, sendMessage, abortStream };
 }
