@@ -1,120 +1,39 @@
 
 
-# Refactor Index.tsx into Production Chat Architecture
+# Refine ChatComposer into a Premium Reusable Component
 
-The current `Index.tsx` is 918 lines containing chat streaming, voice recording, file attachments, message rendering, voice playback, quick actions, hero layout, docked input, sidebar management, and onboarding — all in one file. This refactor extracts each concern into focused hooks and components without changing any visual behavior.
+The structure already exists from the prior refactor. This pass focuses on quality improvements — reliable autoresize, polished visuals, and cleaner internals.
 
-## Target structure
+## Changes
 
-```text
-src/
-  hooks/
-    useChatStream.ts          — message sending, streaming, abort, safety timeout
-    useVoiceRecorder.ts       — mic recording + transcription
-    useVoicePlayback.ts       — TTS play/stop per message
-    useFileAttachments.ts     — file selection, validation, removal
-  components/chat/
-    ChatComposer.tsx          — single composer: hero mode + docked mode
-    ChatMessageList.tsx        — scrollable message list with markdown + play buttons
-    ChatHero.tsx              — hero section (title, subtitle, composer, quick actions)
-    QuickActionsBar.tsx        — (already exists, replace with shared version)
-    AttachmentChips.tsx        — file chip list with remove buttons
-```
+### 1. `ChatComposer.tsx` — Improved autoresize + design polish
 
-## Hook extractions
+- Add `useEffect` watching `input` to trigger autoresize when text is set programmatically (voice transcription). Current code only resizes on `onChange`, so transcribed text doesn't resize the textarea.
+- Use `useCallback` for `autoResize` and call it from both `onChange` and the `useEffect`.
+- Add `bg-white` explicitly to textarea for both modes (currently inherits, can be inconsistent).
+- Improve send button: show as a filled circle when content is present (more ChatGPT-like).
+- Add subtle `ring` focus style instead of just border change.
+- Clean up the `pr` padding — hero mode also needs `pr` space for right-side buttons (currently missing, buttons can overlap text).
 
-### `useChatStream`
-Extracted from Index.tsx lines 164-285. Owns:
-- `input` / `setInput` state
-- `isLoading` state
-- `sendMessage(text, intent?)` — builds user message, calls `saveMessage`, creates assistant placeholder, streams via `streamChat`, handles `onDelta`/`onDone`/`onError`/`onTaskUpdate`, manages abort controller and safety timeout
-- `abortStream()` — for sidebar new-chat and unmount cleanup
-- Accepts deps: `messages`, conversation helpers (`saveMessage`, `updateMessageContent`, `finalizeMessage`), `userSettings`, `systemName`, `autoPlayEnabled`, `playMessage`
+### 2. `AttachmentChips.tsx` — Design upgrade
 
-### `useVoiceRecorder`
-Extracted from lines 309-404. Returns:
-- `isRecording`, `isTranscribing`
-- `handleMicClick()` — toggles recording, on stop transcribes via edge function, sets result into a provided callback (`onTranscribed: (text: string) => void`)
-- No dependency on input state — just calls back with transcribed text
+- Add image thumbnail preview for image files (show tiny preview instead of generic icon).
+- Use `transition-all` on chips for smooth add/remove.
+- Add `group` hover on chip to reveal the X button (less busy default state).
+- Slightly improve border radius and background color for a more premium feel.
 
-### `useVoicePlayback`
-Extracted from lines 288-306. Returns:
-- `playingMessageId`, `loadingAudioId`
-- `playMessage(id, text)` — toggle play/stop via `voiceService`
+### 3. `ChatComposer.tsx` — Props cleanup
 
-### `useFileAttachments`
-Extracted from lines 429-462. Returns:
-- `attachedFiles`, `fileInputRef`
-- `handleFileSelect`, `removeFile`, `triggerFileUpload`, `getFileIcon`
-
-## Component extractions
-
-### `ChatComposer`
-One component, two rendering modes via a `mode: 'hero' | 'docked'` prop.
-- Hero mode: larger padding, `rounded-3xl`, `pl-14`, centered layout
-- Docked mode: smaller padding, `rounded-2xl`, `pl-12 pr-20`, fixed bottom styling
-- Contains: auto-resizing textarea, paperclip button, send button, mic button (using `useVoiceRecorder` internally or via props), `AttachmentChips` above the textarea
-- Accepts: `input`, `onInputChange`, `onSubmit`, `onMicClick`, `isRecording`, `isTranscribing`, `isLoading`, `placeholder`, `attachedFiles`, `onRemoveFile`, `onAttach`, `fileInputRef`, `mode`
-- This eliminates the duplicated textarea + button markup currently at lines 664-713 and 836-886
-
-### `ChatMessageList`
-Extracted from lines 742-802. Renders the scrollable message list.
-- Accepts: `messages`, `playMessage`, `playingMessageId`, `loadingAudioId`
-- Handles: markdown rendering for assistant, `whitespace-pre-wrap` for user, typing indicator, play button, auto-scroll via `messagesEndRef`
-
-### `ChatHero`
-Extracted from lines 654-738. The pre-interaction landing.
-- Renders: system name title, subtitle, `ChatComposer` in hero mode, `QuickActionsBar`
-- Accepts: `systemName`, composer props, quick action handler, `userSettings`
-
-### `AttachmentChips`
-Small presentational component for the file chip list with remove buttons.
-- Accepts: `files`, `onRemove`, `getFileIcon`, `size?: 'normal' | 'small'`
-
-### `QuickActionsBar` (replace existing)
-Replace the duplicated inline quick action rendering (hero version lines 717-737, floating version lines 806-831) with one shared component.
-- Accepts: `actions`, `onAction`, `disabled`, `variant: 'hero' | 'floating'`
-
-## Resulting Index.tsx (~150 lines)
-
-```text
-Index.tsx will:
-  1. Call auth hooks (useAuth, useAppStore)
-  2. Call useConversations()
-  3. Call useChatStream(...)
-  4. Call useVoiceRecorder(...)
-  5. Call useVoicePlayback()
-  6. Call useFileAttachments()
-  7. Build userSettings object
-  8. Render layout shell:
-     - ConversationSidebar
-     - Header with chat/voice toggle + UserMenu
-     - Voice mode overlay (RealtimeVoiceChat)
-     - Chat mode: ChatHero or (ChatMessageList + floating QuickActionsBar + docked ChatComposer)
-     - SystemNamingModal
-     - TaskActivityBubble
-```
+- Remove `getFileIcon` from props — move the icon logic into `AttachmentChips` directly (it's presentation logic that doesn't belong in the parent).
+- This simplifies the composer interface and removes one layer of prop drilling.
 
 ## Files
 
 | File | Action |
 |------|--------|
-| `src/hooks/useChatStream.ts` | **Create** |
-| `src/hooks/useVoiceRecorder.ts` | **Create** |
-| `src/hooks/useVoicePlayback.ts` | **Create** |
-| `src/hooks/useFileAttachments.ts` | **Create** |
-| `src/components/chat/ChatComposer.tsx` | **Create** |
-| `src/components/chat/ChatMessageList.tsx` | **Create** |
-| `src/components/chat/ChatHero.tsx` | **Create** |
-| `src/components/chat/AttachmentChips.tsx` | **Create** |
-| `src/components/chat/QuickActionsBar.tsx` | **Replace** existing with shared version |
-| `src/pages/Index.tsx` | **Rewrite** — thin orchestrator, ~150 lines |
-
-## What stays unchanged
-- `ConversationSidebar`, `RealtimeVoiceChat`, `TaskActivityBubble`, `SystemNamingModal`, `UserMenu` — untouched
-- `useConversations` hook — untouched
-- `chatService`, `voiceService` — untouched
-- All visual styling preserved exactly
-- Auth flow, onboarding redirect, welcome message logic — preserved
-- Chat/Voice mode toggle — preserved in Index.tsx header
+| `src/components/chat/ChatComposer.tsx` | **Rewrite** — autoresize fix, design polish, cleaner props |
+| `src/components/chat/AttachmentChips.tsx` | **Rewrite** — thumbnail previews, hover reveal, polish |
+| `src/components/chat/ChatHero.tsx` | **Edit** — remove `getFileIcon` from passed props |
+| `src/pages/Index.tsx` | **Edit** — remove `getFileIcon` from composerProps |
+| `src/hooks/useFileAttachments.ts` | **Edit** — remove `getFileIcon` (no longer needed externally) |
 
