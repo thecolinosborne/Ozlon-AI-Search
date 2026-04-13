@@ -67,7 +67,7 @@ const Index = () => {
     role: m.role,
     content: m.content,
   }));
-  // hasInteracted is computed below after useChatStream provides isLoading
+  
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
