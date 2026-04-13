@@ -117,7 +117,10 @@ export function useConversations() {
 
   // Save a message to the active session
   const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
-    if (!user) return;
+    if (!user) {
+      if (isDev) console.warn("[useConversations] saveMessage called without user — skipping.");
+      return;
+    }
 
     // Add to local state immediately (optimistic)
     const newMsg: ConversationMessage = {
