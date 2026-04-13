@@ -8,6 +8,7 @@ import { TaskBoard } from '@/components/tasks/TaskBoard';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetail } from '@/components/tasks/TaskDetail';
 import { TaskCreateForm } from '@/components/tasks/TaskCreateForm';
+import { VideoStudioDashboard } from '@/components/studio/VideoStudioDashboard';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { Plus, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -142,6 +143,9 @@ const Tasks = () => {
                 ))
               }
             </div>
+          )}
+          {activeView === 'studio' && (
+            <VideoStudioDashboard />
           )}
         </div>
       </div>

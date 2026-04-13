@@ -1,13 +1,7 @@
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Columns3, Zap, Eye, CheckCircle2, Activity } from 'lucide-react';
+import { LayoutDashboard, Columns3, Zap, Eye, CheckCircle2, Activity, Film } from 'lucide-react';
 
-export type TaskView = 'overview' | 'board' | 'active' | 'review' | 'completed' | 'activity';
-
-interface TasksSidebarProps {
-  activeView: TaskView;
-  onViewChange: (view: TaskView) => void;
-  counts: Record<string, number>;
-}
+export type TaskView = 'overview' | 'board' | 'active' | 'review' | 'completed' | 'activity' | 'studio';
 
 const views: { id: TaskView; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -16,6 +10,7 @@ const views: { id: TaskView; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'review', label: 'Review', icon: Eye },
   { id: 'completed', label: 'Completed', icon: CheckCircle2 },
   { id: 'activity', label: 'Activity', icon: Activity },
+  { id: 'studio', label: 'Studio', icon: Film },
 ];
 
 export function TasksSidebar({ activeView, onViewChange, counts }: TasksSidebarProps) {
