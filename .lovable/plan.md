@@ -1,57 +1,70 @@
 
 
-# Ozlon Research Agent — Backend Tool + Database
+# AI Operations Platform — Final Build (All Polish Applied)
 
-## Concept
-The Research Agent is a new tool inside the existing chat edge function — an "infinity stone" that Ozlon can invoke from any conversation. When you say "research competitor analysis for X" or "deep dive on Y," Ozlon calls Tavily for real web search results, then synthesizes them into a structured report using the AI, saves it to a `research_tasks` table, and can cross-reference with other tools (email, SEO, memory).
+Every refinement from the full conversation is now locked in. This is the implementation-ready spec.
 
-## Architecture
+## Step 1: Database Migration
+
+Create `work_tasks` table with all columns, triggers, indexes, RLS, and seed data (8 tasks including 1 archived).
+
+Key decisions locked:
+- `assigned_to`: unconstrained text, no CHECK (future-proof for new agents)
+- All other enum-like fields: CHECK-constrained
+- `completed_at` trigger: auto-set on status → completed, auto-clear on status leaving completed
+- `updated_at` trigger: reuses existing `update_updated_at_column()`
+- Indexes on `(user_id, status)`, `(user_id, archived_at, status)`, `(user_id, last_activity_at DESC)`, `(source_chat_session_id)`
+- RLS: SELECT/INSERT/UPDATE/DELETE on `auth.uid() = user_id` + service_role full access
+
+## Step 2: Frontend — Tasks Page + 8 Components
+
+- `src/pages/Tasks.tsx` — layout with sidebar + content area
+- `TasksSidebar.tsx` — Overview, Board, Active, Review, Completed, Activity
+- `TasksOverview.tsx` — status counts, "AI Working Now", "Needs Review", recent completions, activity feed
+- `TaskBoard.tsx` — 4-column Kanban using explicit order `['todo', 'in_progress', 'up_for_review', 'completed']`, drag-and-drop persists `board_position` + `status`
+- `TaskCard.tsx` — title, type badge, priority dot, ai_status pulse
+- `TaskDetail.tsx` — slide-out panel, full edit, AI timeline, markdown draft, comments, archive toggle, "Refine with AI"
+- `TaskCreateForm.tsx` — new task dialog
+- `TaskActivityLog.tsx` — timeline renderer
+
+**New task `board_position`**: appends to bottom of column (SELECT MAX(board_position) + 1 for that status).
+
+**"Refine with AI"**: same task — appends to `ai_activity_log`, updates `draft_output`, sets status to `in_progress`, `ai_status` to `executing`.
+
+**Archive UX**: archive button in detail view only. Completed tasks can be unarchived. Archived tasks remain read/write.
+
+## Step 3: Navigation + Routing
+
+- Add "Tasks" with `ClipboardList` icon to `BottomNav.tsx`
+- Add `/tasks` route to `App.tsx`
+
+## Step 4: Chat Edge Function — `create_work_task` Tool
+
+Parameters and defaults:
+- `title` (required), `description` (required)
+- `task_type` = `'general'`, `intent_type` = `'ops'`, `priority` = `'medium'`
+- `assigned_to` = `'ai'`, `next_action` = `'waiting_on_ai'`
+
+Mapped as `'_always_'` in TOOL_APP_MAP. Display name: `'Creating work task'`.
+
+Identity rule: always creates new tasks by UUID. `source_chat_session_id` is a reference link, not a sync key. Updates only by known task ID.
+
+## JSONB Shape Standards
 
 ```text
-User: "Research the latest trends in AI agents"
-  → Chat Edge Function detects research intent
-  → Calls `deep_research` tool
-  → Tavily API (real web search, 8 sources)
-  → GPT synthesizes structured report
-  → Saves to research_tasks table
-  → Returns formatted report in chat
-  → Optional: "Save to Memory" extracts key findings
+ai_activity_log: { timestamp, action, detail, actor, status? }
+comments:        { id, timestamp, author, content }
+attachments:     { id, name, url, type }
 ```
 
-## Implementation
+## Files
 
-### Step 1: Add TAVILY_API_KEY secret
-You provide the API key from tavily.com when prompted.
-
-### Step 2: Create `research_tasks` table
-- id, user_id, query, status (queued/running/complete/failed), report (markdown text), sources (jsonb array of {url, title, snippet}), created_at, completed_at
-- RLS: users can only access their own research tasks
-
-### Step 3: Add `deep_research` tool to chat edge function
-- New tool definition with parameters: `query` (what to research), `search_depth` (basic/advanced), `max_results` (default 8)
-- Tool handler:
-  1. Creates a `research_tasks` row with status `running`
-  2. Calls Tavily API: `POST https://api.tavily.com/search` with `{query, search_depth: 'advanced', max_results: 8, include_answer: true, include_raw_content: false}`
-  3. Takes results (titles, URLs, content snippets)
-  4. Calls GPT with a research analyst prompt to synthesize: Executive Summary, Key Findings (5-8 bullets with [source N] citations), Detailed Analysis, Conflicting Information, Sources & Confidence rating
-  5. Updates `research_tasks` with the report, sources, status `complete`
-  6. Returns the formatted report to the chat
-- Mapped as `'_always_'` in TOOL_APP_MAP (no Maton connection needed)
-- Display name: `'Researching the web'`
-
-### Step 4: Update system prompt
-- Add research instructions: "You have a `deep_research` tool that performs real web searches using Tavily and synthesizes findings into structured reports. Use it when users ask you to research, investigate, analyze a topic, find information about something, or do a deep dive. Always offer to save key findings to memory after delivering a report."
-
-### Step 5: Add research intent keywords
-- Add to `actionKeywords`: research, investigate, deep dive, look into, find out about, what's the latest on, analyze the market, competitor analysis
-
-### No separate UI page
-The research tool lives inside the chat — Ozlon invokes it naturally. Research history is stored in the database and can be recalled. The existing quick actions bar could get a "Research" chip added.
-
-## Files Changed
-- `supabase/functions/chat/index.ts` — add `deep_research` tool definition, handler, display name, app map entry, system prompt update, action keywords
-- Database migration — create `research_tasks` table with RLS
-
-## What You Need
-- TAVILY_API_KEY from tavily.com (I'll prompt you for it)
+| File | Action |
+|------|--------|
+| `supabase/migrations/...` | New — table, triggers, indexes, RLS, seed |
+| `supabase/functions/chat/index.ts` | Add `create_work_task` tool + handler |
+| `src/pages/Tasks.tsx` | New |
+| `src/components/tasks/*.tsx` | New (8 components) |
+| `src/App.tsx` | Add `/tasks` route |
+| `src/components/navigation/BottomNav.tsx` | Add Tasks tab |
 
