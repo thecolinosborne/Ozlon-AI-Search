@@ -1,5 +1,5 @@
-import React, { useRef } from "react";
-import { Mic, Square, Send, Paperclip } from "lucide-react";
+import React, { useRef, useEffect, useCallback } from "react";
+import { Mic, Square, Send, Paperclip, ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AttachmentChips } from "./AttachmentChips";
 
@@ -16,7 +16,6 @@ interface ChatComposerProps {
   attachedFiles: File[];
   onRemoveFile: (index: number) => void;
   onAttach: () => void;
-  getFileIcon: (file: File) => React.ReactNode;
 }
 
 export const ChatComposer = ({
@@ -32,7 +31,6 @@ export const ChatComposer = ({
   attachedFiles,
   onRemoveFile,
   onAttach,
-  getFileIcon,
 }: ChatComposerProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -40,10 +38,17 @@ export const ChatComposer = ({
   const isProcessing = isTranscribing;
   const hasContent = input.trim() || attachedFiles.length > 0;
 
-  const autoResize = (el: HTMLTextAreaElement) => {
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 150) + "px";
-  };
+  }, []);
+
+  // Resize on programmatic input changes (e.g. voice transcription)
+  useEffect(() => {
+    autoResize();
+  }, [input, autoResize]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
@@ -62,7 +67,6 @@ export const ChatComposer = ({
       <AttachmentChips
         files={attachedFiles}
         onRemove={onRemoveFile}
-        getFileIcon={getFileIcon}
         size={isHero ? "normal" : "small"}
       />
 
@@ -72,20 +76,19 @@ export const ChatComposer = ({
           value={input}
           onChange={(e) => {
             onInputChange(e.target.value);
-            autoResize(e.target);
           }}
           onKeyDown={handleKeyDown}
           placeholder={isRecording ? "Recording..." : placeholder}
           disabled={isLoading || isRecording}
           rows={1}
           className={cn(
-            "w-full resize-none border border-neutral-200 shadow-sm",
-            "focus:outline-none focus:border-neutral-300 focus:shadow-md",
+            "w-full resize-none bg-white border border-neutral-200 shadow-sm",
+            "focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-neutral-300",
             "transition-all duration-200",
             "placeholder:text-neutral-400",
             "disabled:opacity-50",
             isHero
-              ? "px-6 py-4 pl-14 text-base rounded-3xl"
+              ? "px-6 py-4 pl-14 pr-24 text-base rounded-3xl"
               : "px-5 py-3 pl-12 pr-20 text-sm rounded-2xl",
             isRecording && "border-red-300 bg-red-50/30"
           )}
@@ -107,21 +110,8 @@ export const ChatComposer = ({
         {/* Right actions */}
         <div className={cn(
           "absolute flex items-center",
-          isHero ? "right-4 top-4 gap-2" : "right-3 top-3 gap-1"
+          isHero ? "right-4 top-3.5 gap-1.5" : "right-3 top-2.5 gap-1"
         )}>
-          {hasContent && !isRecording && (
-            <button
-              type="submit"
-              disabled={isLoading}
-              className={cn(
-                "text-neutral-400 hover:text-neutral-600 transition-colors",
-                isHero ? "p-2" : "p-1.5"
-              )}
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          )}
-
           {/* Mic button */}
           <button
             type="button"
@@ -129,7 +119,7 @@ export const ChatComposer = ({
             disabled={isProcessing || isLoading}
             className={cn(
               "relative rounded-full flex items-center justify-center transition-all duration-300",
-              isHero ? "p-2" : "w-8 h-8",
+              isHero ? "w-9 h-9" : "w-8 h-8",
               isRecording
                 ? "bg-red-500 text-white"
                 : "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
@@ -150,6 +140,21 @@ export const ChatComposer = ({
             {isRecording && (
               <span className="absolute inset-0 rounded-full bg-red-500/30 animate-ping" />
             )}
+          </button>
+
+          {/* Send button */}
+          <button
+            type="submit"
+            disabled={isLoading || !hasContent || isRecording}
+            className={cn(
+              "rounded-full flex items-center justify-center transition-all duration-200",
+              isHero ? "w-9 h-9" : "w-8 h-8",
+              hasContent && !isRecording
+                ? "bg-neutral-900 text-white hover:bg-neutral-800"
+                : "bg-neutral-100 text-neutral-300 cursor-default"
+            )}
+          >
+            <ArrowUp className={isHero ? "w-4 h-4" : "w-3.5 h-3.5"} />
           </button>
         </div>
       </div>

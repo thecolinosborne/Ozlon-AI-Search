@@ -1,7 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { FileText, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
-import React from "react";
 
 export function useFileAttachments() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -39,12 +37,5 @@ export function useFileAttachments() {
     fileInputRef.current?.click();
   }, []);
 
-  const getFileIcon = useCallback((file: File): React.ReactNode => {
-    if (file.type.startsWith("image/")) {
-      return React.createElement(ImageIcon, { className: "w-4 h-4" });
-    }
-    return React.createElement(FileText, { className: "w-4 h-4" });
-  }, []);
-
-  return { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload, getFileIcon };
+  return { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload };
 }

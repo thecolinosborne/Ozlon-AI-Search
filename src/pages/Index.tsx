@@ -78,7 +78,7 @@ const Index = () => {
   const { isRecording, isTranscribing, handleMicClick } = useVoiceRecorder({
     onTranscribed: (text) => setInput(text),
   });
-  const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload, getFileIcon } = useFileAttachments();
+  const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
 
   // Reset store on user change
   useEffect(() => {
@@ -134,7 +134,7 @@ const Index = () => {
     input, onInputChange: setInput, onSubmit: () => sendMessage(input),
     onMicClick: handleMicClick, isRecording, isTranscribing, isLoading,
     placeholder: `Ask ${systemName} anything...`,
-    attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload, getFileIcon,
+    attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload,
   };
 
   return (

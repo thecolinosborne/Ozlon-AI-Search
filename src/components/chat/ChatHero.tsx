@@ -11,6 +11,7 @@ interface ChatHeroProps {
   disabled: boolean;
 }
 
+
 export const ChatHero = ({
   systemName,
   composerProps,
