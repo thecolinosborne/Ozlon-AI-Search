@@ -5,7 +5,7 @@ import { UserSettings } from "@/services/chatService";
 
 interface ChatHeroProps {
   systemName: string;
-  composerProps: React.ComponentProps<typeof ChatComposer>;
+  composerProps: Omit<React.ComponentProps<typeof ChatComposer>, "mode">;
   onQuickAction: (action: QuickAction) => void;
   userSettings: UserSettings;
   disabled: boolean;
