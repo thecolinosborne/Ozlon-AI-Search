@@ -3274,6 +3274,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'gsc_save_snapshot': 'google-search-console',
     'gsc_compare_snapshots': 'google-search-console',
     'web_search_google': '_always_',
+    'save_memory': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3323,6 +3324,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_save_snapshot': 'Saving SEO snapshot',
   'gsc_compare_snapshots': 'Loading SEO snapshots',
   'web_search_google': 'Searching Google',
+  'save_memory': 'Saving to memory',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
