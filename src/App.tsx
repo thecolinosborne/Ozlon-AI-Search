@@ -22,7 +22,7 @@ import DescriptDetail from "@/pages/integrations/DescriptDetail";
 import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
 import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
 import ClickUpDetail from "@/pages/integrations/ClickUpDetail";
-
+import Tasks from "@/pages/Tasks";
 
 import NotFound from "@/pages/NotFound";
 
@@ -66,7 +66,7 @@ const App = () => (
             <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
             <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
             <Route path="/integrations/clickup" element={<ClickUpDetail />} />
-            
+            <Route path="/tasks" element={<Tasks />} />
             
             <Route path="/" element={<Index />} />
             <Route path="*" element={<NotFound />} />

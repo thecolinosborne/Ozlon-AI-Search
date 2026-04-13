@@ -110,20 +110,22 @@ export function useWorkTasks() {
       .filter(t => t.status === targetStatus)
       .reduce((max, t) => Math.max(max, t.board_position), -1);
 
+    const insertData = {
+      user_id: session.user.id,
+      title: task.title || 'Untitled Task',
+      description: task.description || null,
+      status: targetStatus,
+      priority: task.priority || 'medium',
+      task_type: task.task_type || 'general',
+      intent_type: task.intent_type || 'ops',
+      assigned_to: task.assigned_to || 'ai',
+      next_action: task.next_action || 'waiting_on_ai',
+      board_position: maxPos + 1,
+    };
+
     const { data, error } = await supabase
       .from('work_tasks')
-      .insert({
-        user_id: session.user.id,
-        title: task.title || 'Untitled Task',
-        description: task.description || null,
-        status: targetStatus,
-        priority: task.priority || 'medium',
-        task_type: task.task_type || 'general',
-        intent_type: task.intent_type || 'ops',
-        assigned_to: task.assigned_to || 'ai',
-        next_action: task.next_action || 'waiting_on_ai',
-        board_position: maxPos + 1,
-      } as Record<string, unknown>)
+      .insert(insertData)
       .select()
       .single();
 
