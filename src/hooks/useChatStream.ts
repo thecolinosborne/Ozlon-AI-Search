@@ -40,9 +40,16 @@ interface UseChatStreamOptions {
   userSettings: UserSettings;
   autoPlayEnabled: boolean;
   saveMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => Promise<void>;
-  finalizeMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => void;
+  finalizeMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => Promise<void> | void;
   playMessage: (id: string, text: string) => void;
 }
+
+type RequestOutcome =
+  | "pending"
+  | "success"
+  | "error"
+  | "timeout"
+  | "aborted";
 
 export function useChatStream({
   persistedMessages,
@@ -60,7 +67,9 @@ export function useChatStream({
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const phaseRef = useRef<StreamPhase>("idle");
+  const persistedMessagesRef = useRef(persistedMessages);
   const requestTaskIdsRef = useRef<Set<string>>(new Set());
+  const requestIdRef = useRef(0);
 
   const { addTask, updateStep, completeTask, setTaskSummary, failStaleTasks } =
     useTaskActivityStore();
@@ -84,22 +93,52 @@ export function useChatStream({
     if (mountedRef.current) setInflightMessages(v);
   }, []);
 
+  const isPersistedMessage = useCallback((message: ChatMessage) => {
+    return persistedMessagesRef.current.some(
+      (persisted) =>
+        persisted.id === message.id &&
+        persisted.role === message.role &&
+        persisted.content === message.content
+    );
+  }, []);
+
+  const persistAssistantMessage = useCallback(
+    async (message: ChatMessage) => {
+      const alreadyExists = persistedMessagesRef.current.some(
+        (persisted) => persisted.id === message.id
+      );
+
+      if (alreadyExists) {
+        await Promise.resolve(finalizeMessage(message));
+        return;
+      }
+
+      await saveMessage(message);
+    },
+    [finalizeMessage, saveMessage]
+  );
+
   const abortStream = useCallback(() => {
-    abortRef.current?.abort();
+    if (!abortRef.current) return;
+
+    abortRef.current.abort();
     abortRef.current = null;
     safeSetIsLoading(false);
-    safeSetInflight([]);
+  }, [safeSetIsLoading]);
 
-    if (phaseRef.current !== "idle") {
-      transitionPhase("aborted");
-      transitionPhase("idle");
-    }
+  useEffect(() => {
+    persistedMessagesRef.current = persistedMessages;
+  }, [persistedMessages]);
 
-    if (requestTaskIdsRef.current.size > 0) {
-      failStaleTasks(requestTaskIdsRef.current);
-      requestTaskIdsRef.current = new Set();
-    }
-  }, [failStaleTasks, safeSetIsLoading, safeSetInflight, transitionPhase]);
+  useEffect(() => {
+    if (!mountedRef.current || inflightMessages.length === 0) return;
+    if (phaseRef.current !== "idle") return;
+
+    const allReconciled = inflightMessages.every(isPersistedMessage);
+    if (!allReconciled) return;
+
+    safeSetInflight((prev) => (prev.every(isPersistedMessage) ? [] : prev));
+  }, [inflightMessages, isPersistedMessage, persistedMessages, safeSetInflight]);
 
   const sendMessage = useCallback(
     async (text: string, intent?: string) => {
@@ -115,6 +154,10 @@ export function useChatStream({
       abortRef.current?.abort();
       abortRef.current = new AbortController();
       const { signal } = abortRef.current;
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+
+      const isCurrentRequest = () => requestIdRef.current === requestId;
 
       if (requestTaskIdsRef.current.size > 0) {
         failStaleTasks(requestTaskIdsRef.current);
@@ -156,7 +199,7 @@ export function useChatStream({
       // ── Phase: streaming ─────────────────────────────────────────────
       transitionPhase("streaming");
       let assistantContent = "";
-      let outcome: "success" | "aborted" | "timeout" | "error" = "error";
+      let outcome: RequestOutcome = "pending";
       let timedOut = false;
 
       const timeoutId = setTimeout(() => {
@@ -176,9 +219,11 @@ export function useChatStream({
           enableTools: true,
           signal,
           onToolCall: (toolName, toolArgs) => {
+            if (!isCurrentRequest()) return;
             if (isDev) console.log(`[useChatStream] Tool: ${toolName}`, toolArgs);
           },
           onDelta: (delta) => {
+            if (!isCurrentRequest()) return;
             assistantContent += delta;
             safeSetInflight((prev) =>
               prev.map((m) =>
@@ -189,6 +234,7 @@ export function useChatStream({
             );
           },
           onTaskUpdate: (update: TaskUpdate) => {
+            if (!isCurrentRequest()) return;
             requestTaskIdsRef.current.add(update.taskId);
 
             if (update.status === "in_progress") {
@@ -205,15 +251,25 @@ export function useChatStream({
             }
           },
           onDone: () => {
+            if (!isCurrentRequest()) return;
             outcome = "success";
           },
           onError: (errorMsg: string) => {
+            if (!isCurrentRequest()) return;
+
+            if (signal.aborted || /abort/i.test(errorMsg)) {
+              outcome = timedOut ? "timeout" : "aborted";
+              return;
+            }
+
             console.error("[useChatStream] Stream error:", errorMsg);
             outcome = "error";
           },
         });
 
-        if (outcome !== "error") outcome = "success";
+        if (outcome === "pending") {
+          outcome = signal.aborted ? (timedOut ? "timeout" : "aborted") : "success";
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           outcome = timedOut ? "timeout" : "aborted";
@@ -224,12 +280,7 @@ export function useChatStream({
       } finally {
         clearTimeout(timeoutId);
 
-        if (!mountedRef.current) {
-          // Component unmounted during stream — just clean up tasks
-          if (requestTaskIdsRef.current.size > 0) {
-            failStaleTasks(requestTaskIdsRef.current);
-            requestTaskIdsRef.current = new Set();
-          }
+        if (!mountedRef.current || !isCurrentRequest()) {
           return;
         }
 
@@ -237,16 +288,38 @@ export function useChatStream({
         safeSetIsLoading(false);
 
         const taskIds = requestTaskIdsRef.current;
+        const finalAssistantMessage: ChatMessage | null = assistantContent
+          ? {
+              id: assistantId,
+              role: "assistant",
+              content: assistantContent,
+            }
+          : null;
 
-        if (outcome === "success" && assistantContent) {
-          finalizeMessage({
-            id: assistantId,
-            role: "assistant",
-            content: assistantContent,
-          });
+        if (outcome === "success") {
+          if (finalAssistantMessage) {
+            await persistAssistantMessage(finalAssistantMessage);
+          }
+
           taskIds.forEach((id) => completeTask(id, "done"));
-          if (autoPlayEnabled) playMessage(assistantId, assistantContent);
-          safeSetInflight([]);
+
+          if (finalAssistantMessage && autoPlayEnabled) {
+            playMessage(assistantId, assistantContent);
+          }
+
+          if (finalAssistantMessage) {
+            if (isPersistedMessage(userMessage) && isPersistedMessage(finalAssistantMessage)) {
+              safeSetInflight([]);
+            } else if (isDev) {
+              console.warn(
+                "[useChatStream] Retaining inflight messages until persisted state catches up."
+              );
+            }
+          } else if (isPersistedMessage(userMessage)) {
+            safeSetInflight([]);
+          } else {
+            safeSetInflight((prev) => prev.filter((m) => m.id === userMessage.id));
+          }
         } else if (outcome === "timeout") {
           safeSetInflight((prev) =>
             prev.map((m) =>
@@ -266,8 +339,13 @@ export function useChatStream({
           );
           taskIds.forEach((id) => completeTask(id, "error"));
         } else {
-          // aborted
-          safeSetInflight([]);
+          safeSetInflight((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: assistantContent || "Response stopped." }
+                : m
+            )
+          );
           if (taskIds.size > 0) failStaleTasks(taskIds);
         }
 
@@ -284,6 +362,8 @@ export function useChatStream({
       saveMessage,
       finalizeMessage,
       playMessage,
+      persistAssistantMessage,
+      isPersistedMessage,
       addTask,
       updateStep,
       completeTask,
