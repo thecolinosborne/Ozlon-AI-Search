@@ -181,7 +181,10 @@ export function useConversations() {
 
   // Update message in DB after streaming completes
   const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
-    if (!user) return;
+    if (!user) {
+      if (isDev) console.warn("[useConversations] finalizeMessage called without user — skipping.");
+      return;
+    }
 
     const sid = await ensureSession();
     if (!sid) return;
@@ -303,6 +306,10 @@ export function useConversations() {
     };
 
     init();
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [user, setActiveSession]);
 
   // Reload sessions helper
