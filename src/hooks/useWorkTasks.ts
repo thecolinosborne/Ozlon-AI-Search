@@ -140,12 +140,13 @@ export function useWorkTasks() {
   }, [session?.user?.id, tasks]);
 
   const updateTask = useCallback(async (id: string, updates: Partial<WorkTask>) => {
+    const updateData = {
+      ...updates,
+      last_activity_at: new Date().toISOString(),
+    };
     const { error } = await supabase
       .from('work_tasks')
-      .update({
-        ...updates,
-        last_activity_at: new Date().toISOString(),
-      } as Record<string, unknown>)
+      .update(updateData as never)
       .eq('id', id);
 
     if (error) {
@@ -159,7 +160,7 @@ export function useWorkTasks() {
   const archiveTask = useCallback(async (id: string) => {
     const { error } = await supabase
       .from('work_tasks')
-      .update({ archived_at: new Date().toISOString() } as Record<string, unknown>)
+      .update({ archived_at: new Date().toISOString() } as never)
       .eq('id', id);
 
     if (error) {
@@ -173,7 +174,7 @@ export function useWorkTasks() {
   const unarchiveTask = useCallback(async (id: string) => {
     const { error } = await supabase
       .from('work_tasks')
-      .update({ archived_at: null } as Record<string, unknown>)
+      .update({ archived_at: null } as never)
       .eq('id', id);
 
     if (error) {
