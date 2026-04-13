@@ -3212,6 +3212,65 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
         }
       }
 
+      case 'create_work_task': {
+        try {
+          const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+          const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+          // Get user from auth header
+          const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+          let userId: string | null = null;
+          if (authHeader) {
+            const supabaseClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!);
+            const { data: { user } } = await supabaseClient.auth.getUser(authHeader.replace('Bearer ', ''));
+            userId = user?.id || null;
+          }
+          if (!userId) return { success: false, result: 'Could not identify user for task creation.' };
+
+          // Get max board_position for todo column
+          const { data: existingTasks } = await adminClient
+            .from('work_tasks')
+            .select('board_position')
+            .eq('user_id', userId)
+            .eq('status', 'todo')
+            .order('board_position', { ascending: false })
+            .limit(1);
+          const maxPos = existingTasks?.[0]?.board_position ?? -1;
+
+          const sessionId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+
+          const { data, error } = await adminClient
+            .from('work_tasks')
+            .insert({
+              user_id: userId,
+              title: args.title as string,
+              description: (args.description as string) || null,
+              task_type: (args.task_type as string) || 'general',
+              intent_type: (args.intent_type as string) || 'ops',
+              priority: (args.priority as string) || 'medium',
+              assigned_to: (args.assigned_to as string) || 'ai',
+              next_action: (args.next_action as string) || 'waiting_on_ai',
+              board_position: maxPos + 1,
+              source_chat_session_id: sessionId || null,
+              ai_activity_log: [{ timestamp: new Date().toISOString(), action: 'Task created', detail: `Created via chat: ${args.title}`, actor: 'system' }],
+            })
+            .select('id')
+            .single();
+
+          if (error) {
+            console.error('[create_work_task] Error:', error);
+            return { success: false, result: `Failed to create task: ${error.message}` };
+          }
+
+          return { success: true, result: `Task created successfully: "${args.title}" (ID: ${data.id}). It's now in the Tasks board under "To Do".` };
+        } catch (e) {
+          console.error('[create_work_task] Error:', e);
+          return { success: false, result: `Task creation error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -3472,6 +3531,7 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'web_search_google': '_always_',
     'save_memory': '_always_',
     'deep_research': '_always_',
+    'create_work_task': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -3523,6 +3583,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'deep_research': 'Researching the web',
+  'create_work_task': 'Creating work task',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
