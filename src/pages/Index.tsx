@@ -45,6 +45,8 @@ const Index = () => {
   // ── Ephemeral UI-only messages (welcome, tips — never persisted) ────
   const [ephemeralMessages, setEphemeralMessages] = useState<ChatMessage[]>([]);
   const [welcomeShown, setWelcomeShown] = useState(false);
+  const [chatViewLatched, setChatViewLatched] = useState(false);
+  const [lastStableVisibleMessages, setLastStableVisibleMessages] = useState<ChatMessage[]>([]);
 
   // Build user settings — memoized to avoid re-creating on every render
   const userSettings: UserSettings = useMemo(() => ({
@@ -88,7 +90,6 @@ const Index = () => {
   // Inflight wins over persisted (latest streaming content).
   // Ephemeral is appended only when no real messages exist.
   const visibleMessages: ChatMessage[] = useMemo(() => {
-    // Merge persisted + inflight (deduplicate by ID, inflight wins)
     let merged: ChatMessage[];
     if (inflightMessages.length === 0) {
       merged = persistedMessages;
@@ -97,22 +98,35 @@ const Index = () => {
       const base = persistedMessages.filter((m) => !inflightIds.has(m.id));
       merged = [...base, ...inflightMessages];
     }
-    // Append ephemeral messages (they have unique IDs, no dedup needed)
+
     if (ephemeralMessages.length > 0) {
-      // Only show ephemeral if there are no real persisted or inflight messages
       if (merged.length === 0) return ephemeralMessages;
-      // If real messages exist, drop ephemeral (welcome msg no longer relevant)
       return merged;
     }
+
     return merged;
   }, [persistedMessages, inflightMessages, ephemeralMessages]);
 
-  const hasInteracted = visibleMessages.length > 0;
+  useEffect(() => {
+    if (visibleMessages.length === 0) return;
+    setChatViewLatched(true);
+    setLastStableVisibleMessages(visibleMessages);
+  }, [visibleMessages]);
+
+  const renderedMessages = visibleMessages.length > 0
+    ? visibleMessages
+    : chatViewLatched
+      ? lastStableVisibleMessages
+      : visibleMessages;
+
+  const hasInteracted = chatViewLatched || renderedMessages.length > 0;
 
   // ── Ephemeral state reset helper ─────────────────────────────────────
   const resetEphemeralState = useCallback(() => {
     setEphemeralMessages([]);
     setWelcomeShown(false);
+    setChatViewLatched(false);
+    setLastStableVisibleMessages([]);
   }, []);
 
   // Reset store on user change
@@ -271,7 +285,7 @@ const Index = () => {
           )}
 
           {hasInteracted && (
-            <ChatMessageList messages={visibleMessages} playMessage={playMessage}
+            <ChatMessageList messages={renderedMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId} />
           )}
 
