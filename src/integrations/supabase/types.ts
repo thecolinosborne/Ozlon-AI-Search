@@ -253,6 +253,54 @@ export type Database = {
         }
         Relationships: []
       }
+      discovered_events: {
+        Row: {
+          category: string | null
+          created_at: string
+          description: string | null
+          end_date: string | null
+          event_date: string | null
+          id: string
+          location: string | null
+          metadata: Json | null
+          source: string | null
+          title: string
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          end_date?: string | null
+          event_date?: string | null
+          id?: string
+          location?: string | null
+          metadata?: Json | null
+          source?: string | null
+          title: string
+          updated_at?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          end_date?: string | null
+          event_date?: string | null
+          id?: string
+          location?: string | null
+          metadata?: Json | null
+          source?: string | null
+          title?: string
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       knowledge_entries: {
         Row: {
           category: string

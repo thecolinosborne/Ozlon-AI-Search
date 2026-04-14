@@ -23,6 +23,7 @@ import DescriptDetail from "@/pages/integrations/DescriptDetail";
 import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
 import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
 import ClickUpDetail from "@/pages/integrations/ClickUpDetail";
+import Events from "@/pages/Events";
 
 import NotFound from "@/pages/NotFound";
 
@@ -62,6 +63,7 @@ const AppRoutes = () => {
         <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
         <Route path="/integrations/ai-processor" element={<AIProcessorDetail />} />
         <Route path="/integrations/clickup" element={<ClickUpDetail />} />
+        <Route path="/events" element={<Events />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

@@ -1922,6 +1922,40 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Scrape Events Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'scrape_events',
+      description: 'Search the web for events (networking, conferences, meetups, etc.) and extract structured event data including dates, locations, and URLs. Stores discovered events for the user. Use when asked to find events, conferences, meetups, networking opportunities, or upcoming dates.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query for events, e.g. "networking events in LA June 2026"' },
+          category: { type: 'string', enum: ['networking', 'conference', 'meetup', 'workshop', 'webinar', 'other'], description: 'Event category (default: networking)' },
+          max_results: { type: 'number', description: 'Max events to find (default 10, max 20)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  // ============ List Events Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'list_events',
+      description: 'List the user\'s previously discovered events, optionally filtered by category or date range. Use when the user asks to see their events, upcoming dates, or saved events.',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Filter by category (networking, conference, meetup, etc.)' },
+          from_date: { type: 'string', description: 'Start date filter (ISO format)' },
+          to_date: { type: 'string', description: 'End date filter (ISO format)' },
+          limit: { type: 'number', description: 'Max results (default 20)' },
+        },
+      },
+    },
+  },
   // ============ Work Task Creation Tool ============
   {
     type: 'function',
@@ -3279,6 +3313,182 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
         }
       }
 
+      case 'scrape_events': {
+        try {
+          const TAVILY_KEY = Deno.env.get('TAVILY_API_KEY');
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          const FIRECRAWL_KEY = Deno.env.get('FIRECRAWL_API_KEY');
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const userId = (args as Record<string, unknown>).__user_id as string;
+
+          if (!TAVILY_KEY) return { success: false, result: 'Event search not configured (TAVILY_API_KEY missing).' };
+          if (!OPENAI_KEY) return { success: false, result: 'AI extraction not configured.' };
+          if (!serviceRoleKey || !supabaseUrl || !userId) return { success: false, result: 'Authentication required to save events.' };
+
+          const query = args.query as string;
+          const category = (args.category as string) || 'networking';
+          const maxResults = Math.min((args.max_results as number) || 10, 20);
+
+          // Step 1: Search for events via Tavily
+          console.log(`[scrape_events] Searching: "${query}"`);
+          const tavilyRes = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              api_key: TAVILY_KEY,
+              query: `${query} events dates 2025 2026`,
+              search_depth: 'advanced',
+              max_results: maxResults,
+              include_answer: true,
+              include_raw_content: false,
+            }),
+          });
+
+          if (!tavilyRes.ok) {
+            return { success: false, result: `Event search failed: ${tavilyRes.status}` };
+          }
+
+          const tavilyData = await tavilyRes.json();
+          const results = tavilyData.results || [];
+
+          // Step 2: For each result, try Firecrawl for richer data, then AI-extract events
+          let pageContents = results.map((r: { title: string; url: string; content: string }) =>
+            `[${r.title}]\nURL: ${r.url}\n${r.content}`
+          ).join('\n\n---\n\n');
+
+          // Optionally enhance with Firecrawl scraping of top URLs
+          if (FIRECRAWL_KEY && results.length > 0) {
+            const topUrls = results.slice(0, 3);
+            for (const r of topUrls) {
+              try {
+                const scrapeRes = await fetch('https://api.firecrawl.dev/v2/scrape', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: r.url, formats: ['markdown'], onlyMainContent: true }),
+                });
+                if (scrapeRes.ok) {
+                  const scrapeData = await scrapeRes.json();
+                  if (scrapeData.data?.markdown) {
+                    pageContents += `\n\n---\n\n[DETAILED: ${r.title}]\nURL: ${r.url}\n${scrapeData.data.markdown.slice(0, 3000)}`;
+                  }
+                }
+              } catch (e) {
+                console.warn(`[scrape_events] Firecrawl failed for ${r.url}:`, e);
+              }
+            }
+          }
+
+          // Step 3: AI extraction of structured events
+          const extractionPrompt = `Extract all events from the following web content. For each event, provide:
+- title: Event name
+- description: 1-2 sentence description
+- event_date: ISO 8601 date/datetime (best guess if only month given, use first of month)
+- end_date: ISO 8601 end date if available, null otherwise
+- location: City/venue or "Online"
+- url: Source URL
+- source: Website name
+
+Return ONLY a JSON array. If no events found, return [].
+
+CONTENT:
+${pageContents.slice(0, 12000)}`;
+
+          const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-5.4',
+              messages: [
+                { role: 'system', content: 'You extract structured event data from web content. Return only valid JSON arrays.' },
+                { role: 'user', content: extractionPrompt },
+              ],
+              max_tokens: 4096,
+              response_format: { type: 'json_object' },
+            }),
+          });
+
+          if (!extractRes.ok) {
+            return { success: false, result: 'Failed to extract event data from search results.' };
+          }
+
+          const extractData = await extractRes.json();
+          const extractedText = extractData.choices?.[0]?.message?.content || '{}';
+          let events: Array<Record<string, unknown>> = [];
+          try {
+            const parsed = JSON.parse(extractedText);
+            events = Array.isArray(parsed) ? parsed : (parsed.events || []);
+          } catch { events = []; }
+
+          if (events.length === 0) {
+            return { success: true, result: 'No events found for that search. Try a different query or be more specific about dates and location.' };
+          }
+
+          // Step 4: Save to database
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          let savedCount = 0;
+          for (const evt of events) {
+            const { error } = await adminClient.from('discovered_events').insert({
+              user_id: userId,
+              title: evt.title as string || 'Untitled Event',
+              description: evt.description as string || null,
+              event_date: evt.event_date || null,
+              end_date: evt.end_date || null,
+              location: evt.location as string || null,
+              url: evt.url as string || null,
+              source: evt.source as string || null,
+              category,
+              metadata: { search_query: query },
+            });
+            if (!error) savedCount++;
+          }
+
+          console.log(`[scrape_events] Found ${events.length} events, saved ${savedCount}`);
+          const eventList = events.map((e, i) => `${i + 1}. **${e.title}** — ${e.event_date || 'Date TBD'} | ${e.location || 'Location TBD'} | ${e.url || ''}`).join('\n');
+          return { success: true, result: `Found and saved ${savedCount} events:\n\n${eventList}` };
+        } catch (e) {
+          console.error('[scrape_events] Error:', e);
+          return { success: false, result: `Event scraping error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'list_events': {
+        try {
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const userId = (args as Record<string, unknown>).__user_id as string;
+
+          if (!serviceRoleKey || !supabaseUrl || !userId) return { success: false, result: 'Authentication required.' };
+
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          let query = adminClient.from('discovered_events').select('*').eq('user_id', userId).order('event_date', { ascending: true });
+
+          if (args.category) query = query.eq('category', args.category as string);
+          if (args.from_date) query = query.gte('event_date', args.from_date as string);
+          if (args.to_date) query = query.lte('event_date', args.to_date as string);
+          const limit = Math.min((args.limit as number) || 20, 50);
+          query = query.limit(limit);
+
+          const { data: events, error } = await query;
+          if (error) return { success: false, result: `Failed to fetch events: ${error.message}` };
+          if (!events || events.length === 0) return { success: true, result: 'No events found. Try asking me to search for events first.' };
+
+          const eventList = events.map((e: Record<string, unknown>, i: number) => {
+            const date = e.event_date ? new Date(e.event_date as string).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Date TBD';
+            return `${i + 1}. **${e.title}** — ${date} | ${e.location || 'Location TBD'} | ${e.category || ''}\n   ${e.url || ''}`;
+          }).join('\n');
+
+          return { success: true, result: `Found ${events.length} events:\n\n${eventList}` };
+        } catch (e) {
+          console.error('[list_events] Error:', e);
+          return { success: false, result: `Error listing events: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       case 'create_work_task': {
         try {
           const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -3702,6 +3912,8 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'web_search_google': '_always_',
     'save_memory': '_always_',
     'deep_research': '_always_',
+    'scrape_events': '_always_',
+    'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
   };
@@ -3755,6 +3967,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'deep_research': 'Researching the web',
+  'scrape_events': 'Searching for events',
+  'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
 };
@@ -3768,6 +3982,7 @@ function inferTaskTitle(toolNames: string[]): string {
   if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
   if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
   if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
+  if (toolNames.some(n => n.includes('event'))) return 'Finding events';
   return 'Executing task';
 }
 
@@ -3838,8 +4053,8 @@ async function runToolLoop(
           } catch {
             args = {};
           }
-          // Inject user ID for save_memory and deep_research tools
-          if ((tc.function.name === 'save_memory' || tc.function.name === 'deep_research') && userId) {
+          // Inject user ID for tools that need it
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
