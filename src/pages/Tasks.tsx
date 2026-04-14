@@ -114,7 +114,20 @@ const Tasks = () => {
         {/* Main content */}
         <div className="flex-1 min-w-0">
           {activeView === 'overview' && (
-            <TasksOverview tasks={tasks} onTaskClick={handleTaskClick} />
+            tasks.length === 0 ? (
+              <div className="text-center py-16 space-y-3">
+                <p className="text-lg font-medium text-foreground">No tasks yet</p>
+                <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                  Tasks created from chat or manually will appear here. This is your persistent task board — not live activity.
+                </p>
+                <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 mt-4">
+                  <Plus className="w-4 h-4" />
+                  Create your first task
+                </Button>
+              </div>
+            ) : (
+              <TasksOverview tasks={tasks} onTaskClick={handleTaskClick} />
+            )
           )}
           {activeView === 'board' && (
             <TaskBoard tasks={tasks} onTaskClick={handleTaskClick} onMoveTask={handleMoveTask} />
