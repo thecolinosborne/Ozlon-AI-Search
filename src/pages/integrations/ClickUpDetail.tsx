@@ -165,6 +165,88 @@ const ClickUpDetail = () => {
     }
   };
 
+  // ===== List Picker Handlers =====
+  const fetchSpaces = async () => {
+    setLoadingSpaces(true);
+    try {
+      const data = await callClickUp("list_spaces");
+      setSpaces((data.spaces || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingSpaces(false);
+    }
+  };
+
+  const handleSpaceChange = async (spaceId: string) => {
+    setSelectedSpace(spaceId);
+    setSelectedFolder("");
+    setSelectedList("");
+    setFolders([]);
+    setLists([]);
+    setLoadingFolders(true);
+    try {
+      const data = await callClickUp("list_folders", { spaceId });
+      const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
+      setFolders(f);
+      // Also fetch folderless lists
+      const folderless = await callClickUp("list_lists", { spaceId });
+      const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
+      if (fl.length > 0 && f.length === 0) {
+        // Only folderless lists exist — show them directly
+        setLists(fl);
+      } else if (fl.length > 0) {
+        // Add a virtual "No Folder" entry
+        setFolders([{ id: "__folderless__", name: "Lists (no folder)" }, ...f]);
+        setLists(fl);
+        setSelectedFolder("__folderless__");
+      }
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingFolders(false);
+    }
+  };
+
+  const handleFolderChange = async (folderId: string) => {
+    setSelectedFolder(folderId);
+    setSelectedList("");
+    setLists([]);
+    if (folderId === "__folderless__") {
+      // Re-fetch folderless lists
+      setLoadingLists(true);
+      try {
+        const data = await callClickUp("list_lists", { spaceId: selectedSpace });
+        setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
+      } catch (err) {
+        toast.error((err as Error).message);
+      } finally {
+        setLoadingLists(false);
+      }
+      return;
+    }
+    setLoadingLists(true);
+    try {
+      const data = await callClickUp("list_lists", { folderId });
+      setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingLists(false);
+    }
+  };
+
+  const handleListSelect = async (listId: string) => {
+    setSelectedList(listId);
+    try {
+      await callClickUp("update_config", { default_list_id: listId });
+      setConfig((c) => ({ ...c }));
+      toast.success("Default list updated");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const handleRegisterWebhook = async () => {
     try {
       const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
