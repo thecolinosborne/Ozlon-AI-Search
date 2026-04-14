@@ -8,29 +8,27 @@ import { TaskBoard } from '@/components/tasks/TaskBoard';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetail } from '@/components/tasks/TaskDetail';
 import { TaskCreateForm } from '@/components/tasks/TaskCreateForm';
-import { Plus, Menu } from 'lucide-react';
+import { Plus, Menu, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const Tasks = () => {
   const navigate = useNavigate();
   const { authLoading, session } = useAuth();
-  const { tasks, loading, createTask, updateTask, archiveTask, unarchiveTask } = useWorkTasks();
+  const { tasks, loading, error, fetchTasks, createTask, updateTask, archiveTask, unarchiveTask } = useWorkTasks();
 
   const [activeView, setActiveView] = useState<TaskView>('overview');
-  // Single source of truth: store only the ID, derive the object from tasks array
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Derive selectedTask from the live tasks array — always fresh
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) return null;
     return tasks.find(t => t.id === selectedTaskId) ?? null;
   }, [selectedTaskId, tasks]);
 
-  // If the selected task was archived/deleted (no longer in tasks), close the sheet
+  // Close detail if task was archived/removed
   useEffect(() => {
     if (detailOpen && selectedTaskId && !selectedTask) {
       setDetailOpen(false);
@@ -38,6 +36,7 @@ const Tasks = () => {
     }
   }, [detailOpen, selectedTaskId, selectedTask]);
 
+  // Redirect if unauthenticated (after auth resolves)
   useEffect(() => {
     if (!authLoading && !session) navigate('/auth');
   }, [authLoading, session, navigate]);
@@ -49,7 +48,6 @@ const Tasks = () => {
 
   const handleDetailClose = useCallback(() => {
     setDetailOpen(false);
-    // Clear selection after sheet animation completes to avoid stale state on reopen
     setTimeout(() => setSelectedTaskId(null), 200);
   }, []);
 
@@ -59,12 +57,10 @@ const Tasks = () => {
 
   const handleUpdate = useCallback((id: string, updates: Partial<WorkTask>) => {
     updateTask(id, updates);
-    // No manual selectedTask patching needed — derived from tasks array
   }, [updateTask]);
 
   const handleArchive = useCallback((id: string) => {
     archiveTask(id);
-    // The useEffect above will auto-close the sheet when the task leaves the array
   }, [archiveTask]);
 
   const handleCreateClose = useCallback(() => {
@@ -87,7 +83,10 @@ const Tasks = () => {
     }
   })();
 
-  if (authLoading || loading) {
+  // --- Deterministic route state resolution ---
+
+  // 1. Auth loading
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -95,6 +94,35 @@ const Tasks = () => {
     );
   }
 
+  // 2. Unauthenticated — redirect effect handles navigation, render nothing
+  if (!session) return null;
+
+  // 3. Fetch error
+  if (error && tasks.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-4 max-w-sm">
+          <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => fetchTasks()} className="gap-1.5">
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Loading (only when we have no tasks yet — background refetches won't flash spinner)
+  if (loading && tasks.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // 5 & 6. Empty or Loaded — render the full page shell; empty state is handled inline
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* Header */}
@@ -177,7 +205,7 @@ const Tasks = () => {
           )}
           {activeView === 'activity' && (
             <div className="space-y-2">
-              {tasks
+              {[...tasks]
                 .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
                 .map(task => (
                   <TaskCard key={task.id} task={task} onClick={handleTaskClick} />
