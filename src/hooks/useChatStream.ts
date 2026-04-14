@@ -305,21 +305,25 @@ export function useChatStream({
             }
           : null;
 
-        if (resolvedOutcome === "success") {
-          if (finalAssistantMessage) {
-            await persistAssistantMessage(finalAssistantMessage);
-          }
+        // Always transition to idle FIRST to unblock new messages,
+        // then do async cleanup (persist, play, etc.) without blocking the phase.
+        requestTaskIdsRef.current = new Set();
+        transitionPhase("idle");
 
+        if (resolvedOutcome === "success") {
           taskIds.forEach((id) => completeTask(id, "done"));
 
           if (finalAssistantMessage && autoPlayEnabled) {
             playMessage(assistantId, assistantContent);
           }
 
-          // Do NOT eagerly clear inflightMessages here.
-          // The reconciliation effect will clear them once persistedMessages
-          // contains both the user and assistant messages, preventing any
-          // empty-state gap in visibleMessages.
+          // Persist asynchronously — do NOT block the phase machine
+          if (finalAssistantMessage) {
+            persistAssistantMessage(finalAssistantMessage).catch((err) => {
+              console.error("[useChatStream] Failed to persist assistant message:", err);
+            });
+          }
+
           if (isDev) {
             console.log(
               "[useChatStream] Success — deferring inflight cleanup to reconciliation effect."
@@ -353,9 +357,6 @@ export function useChatStream({
           );
           if (taskIds.size > 0) failStaleTasks(taskIds);
         }
-
-        requestTaskIdsRef.current = new Set();
-        transitionPhase("idle");
       }
     },
     [
