@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 
 export type MemoryType = 'fact' | 'preference' | 'context' | 'pattern' | 'goal' | 'value';
 
@@ -26,9 +27,7 @@ export interface CreateMemoryInput {
   metadata?: Record<string, unknown>;
 }
 
-// Using any until types regenerate with wisdom_memories table
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const memoriesTable = () => (supabase as any).from('wisdom_memories');
+const memoriesTable = () => supabase.from('wisdom_memories');
 
 class MemoryService {
   async createMemory(input: CreateMemoryInput): Promise<WisdomMemory | null> {
@@ -43,7 +42,7 @@ class MemoryService {
         summary: input.summary || null,
         salience: input.salience ?? 0.5,
         confidence: input.confidence ?? 0.8,
-        metadata: input.metadata ?? {},
+        metadata: (input.metadata ?? {}) as Json,
       })
       .select()
       .single();

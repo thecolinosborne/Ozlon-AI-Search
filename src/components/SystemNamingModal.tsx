@@ -34,7 +34,7 @@ export const SystemNamingModal = ({ isOpen, onComplete, userId }: SystemNamingMo
       if (error) throw error;
       toast.success(`Welcome to ${systemName}!`);
       onComplete(systemName);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error("Failed to save name");
       onComplete("Ozlon");
     } finally {

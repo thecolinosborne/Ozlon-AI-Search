@@ -81,8 +81,8 @@ const AuthPage = () => {
         if (error) throw error;
         toast.success("Check your email to confirm your account");
       }
-    } catch (error: any) {
-      const message = error.message || "Authentication failed";
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Authentication failed";
       if (message.includes("User already registered")) {
         toast.error("This email is already registered. Please sign in instead.");
       } else if (message.includes("Invalid login credentials")) {
@@ -105,8 +105,8 @@ const AuthPage = () => {
         },
       });
       if (error) throw error;
-    } catch (error: any) {
-      toast.error(error.message || "Google sign in failed");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Google sign in failed");
       setIsLoading(false);
     }
   };

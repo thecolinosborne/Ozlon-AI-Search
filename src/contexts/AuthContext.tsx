@@ -161,9 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       toast.success(enabled ? "Custom voice enabled" : "Custom voice disabled");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error updating voice setting:", error);
-      toast.error(error?.message || "Failed to update voice setting");
+      toast.error(error instanceof Error ? error.message : "Failed to update voice setting");
     }
   }, [user]);
 
@@ -178,9 +178,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Sign out API error:", error);
       }
       toast.success("Signed out successfully");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Sign out error:", error);
-      toast.error(error.message || "Failed to sign out");
+      toast.error(error instanceof Error ? error.message : "Failed to sign out");
     }
   }, [clearAuthState]);
 
