@@ -3,6 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
+// ── Types ──────────────────────────────────────────────────────────
+
 export type TaskStatus = 'todo' | 'in_progress' | 'up_for_review' | 'completed';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskType = 'general' | 'email' | 'research' | 'content' | 'outreach' | 'ops' | 'creative';
@@ -52,6 +54,8 @@ export interface WorkTask {
   archived_at: string | null;
 }
 
+// ── Constants ──────────────────────────────────────────────────────
+
 export const STATUS_ORDER: TaskStatus[] = ['todo', 'in_progress', 'up_for_review', 'completed'];
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -75,57 +79,47 @@ export const PRIORITY_COLORS: Record<TaskPriority, string> = {
   urgent: 'bg-destructive/20',
 };
 
+// ── Hook ───────────────────────────────────────────────────────────
+
 export function useWorkTasks() {
   const { session, authLoading } = useAuth();
+  const userId = session?.user?.id ?? null;
+
   const [tasks, setTasks] = useState<WorkTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Refs for safe async handling
   const mountedRef = useRef(true);
-  const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
-
-  // Abort controller ref for cancelling in-flight fetches
-  const abortRef = useRef<AbortController | null>(null);
-  // Fetch ID to discard stale responses
   const fetchIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Abort any in-flight fetch on unmount
       abortRef.current?.abort();
     };
   }, []);
 
-  const fetchTasks = useCallback(async () => {
-    const userId = session?.user?.id;
-    if (!userId) {
-      if (mountedRef.current) {
-        setTasks([]);
-        setLoading(false);
-        setError(null);
-      }
-      return;
-    }
+  // ── Fetch ──
 
-    // Abort previous in-flight request
+  const fetchTasks = useCallback(async () => {
+    if (!userId) return;
+
+    // Cancel any in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-
     const thisId = ++fetchIdRef.current;
 
-    if (mountedRef.current) {
-      setLoading(true);
-      setError(null);
-    }
+    setLoading(true);
+    setError(null);
 
     const timeout = setTimeout(() => controller.abort(), 15_000);
 
     try {
-      const { data, error: queryError } = await supabase
+      const { data, error: qErr } = await supabase
         .from('work_tasks')
         .select('*')
         .eq('user_id', userId)
@@ -134,27 +128,19 @@ export function useWorkTasks() {
         .abortSignal(controller.signal);
 
       clearTimeout(timeout);
-
-      // Discard if unmounted or a newer fetch has started
       if (!mountedRef.current || thisId !== fetchIdRef.current) return;
 
-      if (queryError) {
+      if (qErr) {
         setError('Failed to load tasks. Please try again.');
-        console.error('Failed to fetch tasks:', queryError);
+        console.error('useWorkTasks query error:', qErr);
       } else {
-        setTasks((data || []) as unknown as WorkTask[]);
+        setTasks((data ?? []) as unknown as WorkTask[]);
         setError(null);
       }
     } catch (e: unknown) {
       clearTimeout(timeout);
       if (!mountedRef.current || thisId !== fetchIdRef.current) return;
-
-      // Don't treat intentional aborts as errors
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        // Aborted by timeout or cleanup — not a user-facing error
-        return;
-      }
-
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setError('Failed to load tasks. Please try again.');
       console.error('useWorkTasks fetch exception:', e);
     } finally {
@@ -162,30 +148,29 @@ export function useWorkTasks() {
         setLoading(false);
       }
     }
-  }, [session?.user?.id]);
+  }, [userId]);
 
-  // Gate fetching: only fetch after auth is resolved and user exists
+  // ── Auto-fetch effect: gated on auth readiness ──
+
   useEffect(() => {
-    if (authLoading) return; // Wait for auth to settle
-
-    if (!session?.user?.id) {
-      // Auth resolved, no user — clear state
+    if (authLoading) return; // wait for auth to resolve
+    if (!userId) {
+      // Auth resolved, no user — clear and settle
       setTasks([]);
       setLoading(false);
       setError(null);
       return;
     }
-
     fetchTasks();
-  }, [authLoading, session?.user?.id, fetchTasks]);
+  }, [authLoading, userId, fetchTasks]);
+
+  // ── Create ──
 
   const createTask = useCallback(async (task: Partial<WorkTask>) => {
-    const userId = session?.user?.id;
     if (!userId) return;
 
-    const currentTasks = tasksRef.current;
     const targetStatus = task.status || 'todo';
-    const maxPos = currentTasks
+    const maxPos = tasks
       .filter(t => t.status === targetStatus)
       .reduce((max, t) => Math.max(max, t.board_position), -1);
 
@@ -220,16 +205,15 @@ export function useWorkTasks() {
     }
     toast.success('Task created');
     return newTask;
-  }, [session?.user?.id]);
+  }, [userId, tasks]);
+
+  // ── Update (optimistic) ──
 
   const updateTask = useCallback(async (id: string, updates: Partial<WorkTask>) => {
-    const previousTasks = tasksRef.current;
+    const snapshot = tasks;
     const now = new Date().toISOString();
-    const optimisticUpdates = { ...updates, last_activity_at: now };
 
-    if (mountedRef.current) {
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...optimisticUpdates } : t));
-    }
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates, last_activity_at: now } : t));
 
     const { error: updateError } = await supabase
       .from('work_tasks')
@@ -239,17 +223,15 @@ export function useWorkTasks() {
     if (updateError) {
       toast.error('Failed to update task');
       console.error(updateError);
-      if (mountedRef.current) {
-        setTasks(previousTasks);
-      }
+      if (mountedRef.current) setTasks(snapshot);
     }
-  }, []);
+  }, [tasks]);
+
+  // ── Archive (optimistic) ──
 
   const archiveTask = useCallback(async (id: string) => {
-    const previousTasks = tasksRef.current;
-    if (mountedRef.current) {
-      setTasks(prev => prev.filter(t => t.id !== id));
-    }
+    const snapshot = tasks;
+    setTasks(prev => prev.filter(t => t.id !== id));
 
     const { error: archiveError } = await supabase
       .from('work_tasks')
@@ -258,13 +240,13 @@ export function useWorkTasks() {
 
     if (archiveError) {
       toast.error('Failed to archive task');
-      if (mountedRef.current) {
-        setTasks(previousTasks);
-      }
+      if (mountedRef.current) setTasks(snapshot);
       return;
     }
     toast.success('Task archived');
-  }, []);
+  }, [tasks]);
+
+  // ── Unarchive ──
 
   const unarchiveTask = useCallback(async (id: string) => {
     const { error: unarchiveError } = await supabase
@@ -280,11 +262,13 @@ export function useWorkTasks() {
     toast.success('Task restored');
   }, [fetchTasks]);
 
+  // ── Derived helper ──
+
   const getTasksByStatus = useCallback((status: TaskStatus) => {
-    return tasksRef.current
+    return tasks
       .filter(t => t.status === status)
       .sort((a, b) => a.board_position - b.board_position);
-  }, []);
+  }, [tasks]);
 
   return {
     tasks,
