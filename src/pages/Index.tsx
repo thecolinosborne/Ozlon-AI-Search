@@ -12,7 +12,6 @@ import { toast } from "sonner";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
-import { TaskActivityBubble } from "@/components/TaskActivityBubble";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
 import { useConversations } from "@/hooks/useConversations";
 import { useChatStream, ChatMessage } from "@/hooks/useChatStream";
@@ -297,7 +296,6 @@ const Index = () => {
       {user && needsOnboarding && (
         <SystemNamingModal isOpen={needsOnboarding} onComplete={completeOnboarding} userId={user.id} />
       )}
-      <TaskActivityBubble />
     </div>
   );
 };
