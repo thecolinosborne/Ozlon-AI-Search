@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { VideoTask, VideoTaskWithParent, EditPlanAction } from '@/types/video';
+import type { VideoTask, VideoTaskWithParent, EditPlanAction, RenderHistoryEntry } from '@/types/video';
+import type { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+
+/** Shape returned by the joined query: video_tasks + nested work_tasks fields */
+type VideoTaskRow = Tables<'video_tasks'> & {
+  work_tasks: Pick<Tables<'work_tasks'>, 'title' | 'status' | 'ai_status' | 'ai_activity_log'> | null;
+};
 
 const isDev = import.meta.env.DEV;
 
