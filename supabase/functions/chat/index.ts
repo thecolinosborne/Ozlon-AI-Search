@@ -20,6 +20,14 @@ interface ModelConfig {
 }
 
 const MODEL_REGISTRY: Record<string, ModelConfig> = {
+  'gpt-5.4': {
+    name: 'gpt-5.4',
+    apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    maxTokens: 16384,
+    supportsStreaming: true,
+    supportsTools: true,
+  },
   'gpt-4.1': {
     name: 'gpt-4.1-2025-04-14',
     apiEndpoint: 'https://api.openai.com/v1/chat/completions',
@@ -46,7 +54,7 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
   },
 };
 
-const DEFAULT_MODEL = 'gpt-5';
+const DEFAULT_MODEL = 'gpt-5.4';
 
 // ============================================================================
 // MATON GATEWAY
