@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { handleError } from "@/lib/handleError";
 import { toast } from "sonner";
 import { ArrowLeft, Save, LogOut } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";

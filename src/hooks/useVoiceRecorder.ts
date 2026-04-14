@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { handleError } from "@/lib/handleError";
 import { toast } from "sonner";
 
 function blobToBase64(blob: Blob): Promise<string> {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { voiceService } from "@/services/voiceService";
-import { toast } from "sonner";
+import { handleError } from "@/lib/handleError";
 
 interface MessagePlayButtonProps {
   text: string;

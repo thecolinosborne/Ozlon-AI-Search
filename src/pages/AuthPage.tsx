@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { handleError, getErrorMessage } from "@/lib/handleError";
 import { z } from "zod";
 
 const emailSchema = z.string().email("Please enter a valid email address");

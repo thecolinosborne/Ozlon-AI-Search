@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { voiceService } from "@/services/voiceService";
-import { toast } from "sonner";
+import { handleError } from "@/lib/handleError";
 
 export function useVoicePlayback() {
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
