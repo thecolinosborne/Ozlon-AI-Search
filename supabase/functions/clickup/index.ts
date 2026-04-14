@@ -227,7 +227,7 @@ ${(taskCtx.recent_comments as { text: string; user: string }[])?.length ? `Recen
       { role: 'system', content: `${PM_SYSTEM_PROMPT}\n\n${modeInstruction}\n\n${intentHint[intent] || intentHint.general}\n\n${contextBlock}` },
       { role: 'user', content: commentText },
     ],
-    model: 'gpt-5',
+    model: 'gpt-5.4',
     stream: false,
   };
 }
