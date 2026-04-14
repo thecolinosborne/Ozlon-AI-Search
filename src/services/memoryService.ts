@@ -26,9 +26,7 @@ export interface CreateMemoryInput {
   metadata?: Record<string, unknown>;
 }
 
-// Using any until types regenerate with wisdom_memories table
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const memoriesTable = () => (supabase as any).from('wisdom_memories');
+const memoriesTable = () => supabase.from('wisdom_memories');
 
 class MemoryService {
   async createMemory(input: CreateMemoryInput): Promise<WisdomMemory | null> {
