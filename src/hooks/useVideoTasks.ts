@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { VideoTask, VideoTaskWithParent, EditPlanAction } from '@/types/video';
+import type { VideoTask, VideoTaskWithParent, EditPlanAction, RenderHistoryEntry } from '@/types/video';
+import type { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+
+/** Shape returned by the joined query: video_tasks + nested work_tasks fields */
+type VideoTaskRow = Tables<'video_tasks'> & {
+  work_tasks: Pick<Tables<'work_tasks'>, 'title' | 'status' | 'ai_status' | 'ai_activity_log'> | null;
+};
 
 const isDev = import.meta.env.DEV;
 
@@ -65,24 +71,24 @@ export function useVideoTasks() {
         return;
       }
 
-      const mapped: VideoTaskWithParent[] = (data || []).map((row: any) => ({
+      const mapped: VideoTaskWithParent[] = (data as VideoTaskRow[] || []).map((row) => ({
         id: row.id,
         work_task_id: row.work_task_id,
         user_id: row.user_id,
-        source_type: row.source_type,
+        source_type: row.source_type as VideoTask['source_type'],
         source_content: row.source_content,
         source_asset_url: row.source_asset_url,
-        requested_output: row.requested_output,
+        requested_output: row.requested_output as VideoTask['requested_output'],
         edit_instructions: row.edit_instructions,
-        edit_plan: row.edit_plan as EditPlanAction[],
-        edit_plan_status: row.edit_plan_status,
-        aspect_ratio: row.aspect_ratio,
+        edit_plan: row.edit_plan as unknown as EditPlanAction[],
+        edit_plan_status: row.edit_plan_status as VideoTask['edit_plan_status'],
+        aspect_ratio: row.aspect_ratio as VideoTask['aspect_ratio'],
         target_duration: row.target_duration,
-        render_status: row.render_status,
+        render_status: row.render_status as VideoTask['render_status'],
         render_progress: row.render_progress,
         output_url: row.output_url,
         thumbnail_url: row.thumbnail_url,
-        render_history: row.render_history as any[],
+        render_history: row.render_history as unknown as RenderHistoryEntry[],
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_title: row.work_tasks?.title ?? 'Untitled',
@@ -151,7 +157,7 @@ export function useVideoTasks() {
         edit_instructions: input.edit_instructions || null,
         aspect_ratio: input.aspect_ratio,
         target_duration: input.target_duration || null,
-      } as any)
+      } satisfies TablesInsert<'video_tasks'>)
       .select()
       .single();
 
@@ -167,9 +173,15 @@ export function useVideoTasks() {
   }, [session?.user?.id, fetchVideoTasks]);
 
   const updateVideoTask = useCallback(async (id: string, updates: Partial<VideoTask>) => {
+    const { edit_plan, render_history, ...rest } = updates;
+    const dbUpdates: TablesUpdate<'video_tasks'> = {
+      ...rest,
+      ...(edit_plan !== undefined && { edit_plan: edit_plan as unknown as TablesUpdate<'video_tasks'>['edit_plan'] }),
+      ...(render_history !== undefined && { render_history: render_history as unknown as TablesUpdate<'video_tasks'>['render_history'] }),
+    };
     const { error } = await supabase
       .from('video_tasks')
-      .update(updates as any)
+      .update(dbUpdates)
       .eq('id', id);
 
     if (error) {
