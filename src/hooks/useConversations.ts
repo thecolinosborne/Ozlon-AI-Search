@@ -206,9 +206,18 @@ export function useConversations() {
       console.error("[useConversations] finalizeMessage DB error:", error);
     }
 
+    // Update local messages state so persisted store reflects finalized content
+    setMessages((prev) => {
+      const exists = prev.some((m) => m.id === msg.id);
+      if (exists) {
+        return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content } : m);
+      }
+      return [...prev, { ...msg, created_at: new Date().toISOString() }];
+    });
+
     // Auto-title: if this is the first user message, update the session title
     if (msg.role === "user") {
-      const userMessages = messages.filter((m) => m.role === "user");
+      const userMessages = messagesRef.current.filter((m) => m.role === "user");
       if (userMessages.length === 0) {
         const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
         await supabase
@@ -225,7 +234,7 @@ export function useConversations() {
           .eq("id", sid);
       }
     }
-  }, [user, messages, ensureSession]);
+  }, [user, ensureSession]);
 
   // Delete a session
   const deleteSession = useCallback(async (sessionId: string) => {
