@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw } from "lucide-react";
+import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
 const HEADERS = {
