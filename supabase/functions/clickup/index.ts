@@ -621,6 +621,33 @@ serve(async (req) => {
         });
       }
 
+      // ============ DISCOVERY ============
+      case 'list_spaces': {
+        const teamId = getTeamId();
+        const data = await clickupFetch(`/team/${teamId}/space?archived=false`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_folders': {
+        if (!params?.spaceId) throw new Error('spaceId required');
+        const data = await clickupFetch(`/space/${params.spaceId}/folder?archived=false`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_lists': {
+        // Lists in a folder
+        if (params?.folderId) {
+          const data = await clickupFetch(`/folder/${params.folderId}/list?archived=false`);
+          return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        // Folderless lists in a space
+        if (params?.spaceId) {
+          const data = await clickupFetch(`/space/${params.spaceId}/list?archived=false`);
+          return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        throw new Error('folderId or spaceId required');
+      }
+
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
           status: 400,
