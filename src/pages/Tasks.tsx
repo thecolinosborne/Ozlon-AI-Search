@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWorkTasks, WorkTask, TaskStatus } from '@/hooks/useWorkTasks';
@@ -18,18 +18,39 @@ const Tasks = () => {
   const { tasks, loading, createTask, updateTask, archiveTask, unarchiveTask } = useWorkTasks();
 
   const [activeView, setActiveView] = useState<TaskView>('overview');
-  const [selectedTask, setSelectedTask] = useState<WorkTask | null>(null);
+  // Single source of truth: store only the ID, derive the object from tasks array
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Derive selectedTask from the live tasks array — always fresh
+  const selectedTask = useMemo(() => {
+    if (!selectedTaskId) return null;
+    return tasks.find(t => t.id === selectedTaskId) ?? null;
+  }, [selectedTaskId, tasks]);
+
+  // If the selected task was archived/deleted (no longer in tasks), close the sheet
+  useEffect(() => {
+    if (detailOpen && selectedTaskId && !selectedTask) {
+      setDetailOpen(false);
+      setSelectedTaskId(null);
+    }
+  }, [detailOpen, selectedTaskId, selectedTask]);
 
   useEffect(() => {
     if (!authLoading && !session) navigate('/auth');
   }, [authLoading, session, navigate]);
 
   const handleTaskClick = useCallback((task: WorkTask) => {
-    setSelectedTask(task);
+    setSelectedTaskId(task.id);
     setDetailOpen(true);
+  }, []);
+
+  const handleDetailClose = useCallback(() => {
+    setDetailOpen(false);
+    // Clear selection after sheet animation completes to avoid stale state on reopen
+    setTimeout(() => setSelectedTaskId(null), 200);
   }, []);
 
   const handleMoveTask = useCallback((taskId: string, newStatus: TaskStatus, newPosition: number) => {
@@ -38,8 +59,17 @@ const Tasks = () => {
 
   const handleUpdate = useCallback((id: string, updates: Partial<WorkTask>) => {
     updateTask(id, updates);
-    setSelectedTask(prev => prev?.id === id ? { ...prev, ...updates } as WorkTask : prev);
+    // No manual selectedTask patching needed — derived from tasks array
   }, [updateTask]);
+
+  const handleArchive = useCallback((id: string) => {
+    archiveTask(id);
+    // The useEffect above will auto-close the sheet when the task leaves the array
+  }, [archiveTask]);
+
+  const handleCreateClose = useCallback(() => {
+    setCreateOpen(false);
+  }, []);
 
   const counts: Record<string, number> = {
     active: tasks.filter(t => t.status === 'in_progress').length,
@@ -161,19 +191,17 @@ const Tasks = () => {
       <TaskDetail
         task={selectedTask}
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={handleDetailClose}
         onUpdate={handleUpdate}
-        onArchive={(id) => { archiveTask(id); setDetailOpen(false); }}
+        onArchive={handleArchive}
         onUnarchive={unarchiveTask}
       />
 
       <TaskCreateForm
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={handleCreateClose}
         onCreate={(data) => createTask(data)}
       />
-
-      
     </div>
   );
 };
