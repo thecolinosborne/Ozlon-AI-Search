@@ -24,13 +24,17 @@ export interface AgentMetadata {
  * Model Router - Available models
  */
 export const AVAILABLE_MODELS = {
+  'gpt-5.4': {
+    name: 'GPT-5.4',
+    description: 'Latest flagship model - 1M context, best reasoning',
+  },
   'gpt-4.1': {
     name: 'GPT-4.1',
     description: 'Flagship GPT-4 model - reliable and powerful',
   },
   'gpt-5': {
     name: 'GPT-5',
-    description: 'Latest flagship model - most capable',
+    description: 'Previous flagship model - capable',
   },
   'gpt-5-mini': {
     name: 'GPT-5 Mini',
@@ -129,7 +133,7 @@ export async function streamChat({
   messages,
   intent,
   systemName = 'Ozlon',
-  model = 'gpt-4.1',
+  model = 'gpt-5.4',
   agentId,
   agentMetadata,
   enableTools = false,
