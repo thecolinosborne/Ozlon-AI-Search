@@ -110,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setProfileLoaded(true);
     } catch (error) {
-      console.error("Error loading user profile:", error);
+      handleError(error, "Error loading user profile", { silent: true });
       setProfileLoaded(true);
     }
   }, []);
@@ -128,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setVoiceEnabledState(profile?.voice_enabled ?? false);
     } catch (error) {
-      console.error("Error refreshing voice settings:", error);
+      handleError(error, "Error refreshing voice settings", { silent: true });
     }
   }, [user]);
 
@@ -163,8 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       toast.success(enabled ? "Custom voice enabled" : "Custom voice disabled");
     } catch (error: unknown) {
-      console.error("Error updating voice setting:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to update voice setting");
+      handleError(error, "Failed to update voice setting");
     }
   }, [user]);
 
@@ -180,8 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       toast.success("Signed out successfully");
     } catch (error: unknown) {
-      console.error("Sign out error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to sign out");
+      handleError(error, "Failed to sign out");
     }
   }, [clearAuthState]);
 
@@ -199,7 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .update({ system_name: name })
           .eq("user_id", user.id);
       } catch (error) {
-        console.error("Error saving system name:", error);
+        handleError(error, "Error saving system name", { silent: true });
       }
     }
   }, [user]);
@@ -225,7 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearAuthState();
         }
       } catch (error) {
-        console.error("Error initializing auth:", error);
+        handleError(error, "Error initializing auth", { silent: true });
         if (mounted) clearAuthState();
       } finally {
         if (mounted) setAuthLoading(false);

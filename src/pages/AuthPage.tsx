@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { handleError, getErrorMessage } from "@/lib/handleError";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/handleError";
 import { z } from "zod";
 
 const emailSchema = z.string().email("Please enter a valid email address");
@@ -82,7 +83,7 @@ const AuthPage = () => {
         toast.success("Check your email to confirm your account");
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Authentication failed";
+      const message = getErrorMessage(error, "Authentication failed");
       if (message.includes("User already registered")) {
         toast.error("This email is already registered. Please sign in instead.");
       } else if (message.includes("Invalid login credentials")) {
@@ -106,7 +107,7 @@ const AuthPage = () => {
       });
       if (error) throw error;
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Google sign in failed");
+      toast.error(getErrorMessage(error, "Google sign in failed"));
       setIsLoading(false);
     }
   };

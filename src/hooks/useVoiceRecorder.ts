@@ -83,8 +83,7 @@ export function useVoiceRecorder({ onTranscribed }: UseVoiceRecorderOptions) {
             toast.error("I couldn't understand that clearly, can you please try again?");
           }
         } catch (error) {
-          console.error("Transcription error:", error);
-          toast.error("I couldn't understand that clearly, can you please try again?");
+          handleError(error, "I couldn't understand that clearly, can you please try again?");
         } finally {
           setIsTranscribing(false);
         }
@@ -93,8 +92,7 @@ export function useVoiceRecorder({ onTranscribed }: UseVoiceRecorderOptions) {
       mediaRecorder.start();
       setIsRecording(true);
     } catch (error) {
-      console.error("Microphone access error:", error);
-      toast.error("Could not access microphone");
+      handleError(error, "Could not access microphone");
       setIsRecording(false);
     }
   }, [onTranscribed]);

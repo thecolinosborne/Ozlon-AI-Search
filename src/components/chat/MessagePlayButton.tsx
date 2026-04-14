@@ -25,8 +25,7 @@ export const MessagePlayButton = ({ text, className }: MessagePlayButtonProps) =
       setIsPlaying(true);
       await voiceService.speak(text);
     } catch (error) {
-      console.error('Playback error:', error);
-      toast.error("Could not play voice, please try again");
+      handleError(error, "Could not play voice, please try again");
     } finally {
       setIsPlaying(false);
       setIsLoading(false);
