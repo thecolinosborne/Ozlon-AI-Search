@@ -3,10 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { BottomNav } from "@/components/navigation/BottomNav";
+
 
 // Pages
 import Index from "@/pages/Index";
@@ -47,9 +47,6 @@ const OfflineDetector = () => {
 };
 
 const AppRoutes = () => {
-  const { pathname } = useLocation();
-  const hideNav = pathname.startsWith('/auth') || pathname.startsWith('/onboarding');
-
   return (
     <>
       <OfflineDetector />
@@ -73,7 +70,6 @@ const AppRoutes = () => {
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      {!hideNav && <BottomNav />}
     </>
   );
 };

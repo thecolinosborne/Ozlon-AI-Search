@@ -7,7 +7,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
-import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
+
 import { toast } from "sonner";
 import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
@@ -83,7 +83,7 @@ const Index = () => {
     onTranscribed: (text) => setInput(text),
   });
   const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
-  const { clearAllTasks } = useTaskActivityStore();
+  
 
   // ── Single source of truth for rendered messages ─────────────────────
   // Three layers merged: persisted > inflight > ephemeral.
@@ -180,23 +180,20 @@ const Index = () => {
   const handleNewChat = useCallback(async () => {
     abortStream();
     resetEphemeralState();
-    clearAllTasks();
     await startNewChat();
-  }, [abortStream, resetEphemeralState, clearAllTasks, startNewChat]);
+  }, [abortStream, resetEphemeralState, startNewChat]);
 
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
-    clearAllTasks();
     await switchSession(sessionId);
-  }, [abortStream, resetEphemeralState, clearAllTasks, switchSession]);
+  }, [abortStream, resetEphemeralState, switchSession]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
-    clearAllTasks();
     await deleteSession(sessionId);
-  }, [abortStream, resetEphemeralState, clearAllTasks, deleteSession]);
+  }, [abortStream, resetEphemeralState, deleteSession]);
 
   // Shared composer props — memoized to stabilize child renders
   const composerProps = useMemo(() => ({
@@ -287,11 +284,6 @@ const Index = () => {
           {hasInteracted && (
             <ChatMessageList messages={renderedMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId} />
-          )}
-
-          {hasInteracted && (
-            <QuickActionsBar onAction={handleQuickAction} disabled={isLoading || isRecording}
-              variant="floating" userSettings={userSettings} />
           )}
 
           {hasInteracted && (
