@@ -69,6 +69,17 @@ const ClickUpDetail = () => {
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
 
+  // List picker state
+  const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSpace, setSelectedSpace] = useState<string>("");
+  const [selectedFolder, setSelectedFolder] = useState<string>("");
+  const [selectedList, setSelectedList] = useState<string>("");
+  const [loadingSpaces, setLoadingSpaces] = useState(false);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [loadingLists, setLoadingLists] = useState(false);
+
   // Check connection on mount
   useEffect(() => {
     const check = async () => {
