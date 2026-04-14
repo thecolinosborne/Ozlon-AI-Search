@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw } from "lucide-react";
+import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
 const HEADERS = {
@@ -67,6 +68,17 @@ const ClickUpDetail = () => {
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
+
+  // List picker state
+  const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSpace, setSelectedSpace] = useState<string>("");
+  const [selectedFolder, setSelectedFolder] = useState<string>("");
+  const [selectedList, setSelectedList] = useState<string>("");
+  const [loadingSpaces, setLoadingSpaces] = useState(false);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [loadingLists, setLoadingLists] = useState(false);
 
   // Check connection on mount
   useEffect(() => {
@@ -153,6 +165,88 @@ const ClickUpDetail = () => {
     }
   };
 
+  // ===== List Picker Handlers =====
+  const fetchSpaces = async () => {
+    setLoadingSpaces(true);
+    try {
+      const data = await callClickUp("list_spaces");
+      setSpaces((data.spaces || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingSpaces(false);
+    }
+  };
+
+  const handleSpaceChange = async (spaceId: string) => {
+    setSelectedSpace(spaceId);
+    setSelectedFolder("");
+    setSelectedList("");
+    setFolders([]);
+    setLists([]);
+    setLoadingFolders(true);
+    try {
+      const data = await callClickUp("list_folders", { spaceId });
+      const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
+      setFolders(f);
+      // Also fetch folderless lists
+      const folderless = await callClickUp("list_lists", { spaceId });
+      const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
+      if (fl.length > 0 && f.length === 0) {
+        // Only folderless lists exist — show them directly
+        setLists(fl);
+      } else if (fl.length > 0) {
+        // Add a virtual "No Folder" entry
+        setFolders([{ id: "__folderless__", name: "Lists (no folder)" }, ...f]);
+        setLists(fl);
+        setSelectedFolder("__folderless__");
+      }
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingFolders(false);
+    }
+  };
+
+  const handleFolderChange = async (folderId: string) => {
+    setSelectedFolder(folderId);
+    setSelectedList("");
+    setLists([]);
+    if (folderId === "__folderless__") {
+      // Re-fetch folderless lists
+      setLoadingLists(true);
+      try {
+        const data = await callClickUp("list_lists", { spaceId: selectedSpace });
+        setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
+      } catch (err) {
+        toast.error((err as Error).message);
+      } finally {
+        setLoadingLists(false);
+      }
+      return;
+    }
+    setLoadingLists(true);
+    try {
+      const data = await callClickUp("list_lists", { folderId });
+      setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoadingLists(false);
+    }
+  };
+
+  const handleListSelect = async (listId: string) => {
+    setSelectedList(listId);
+    try {
+      await callClickUp("update_config", { default_list_id: listId });
+      setConfig((c) => ({ ...c }));
+      toast.success("Default list updated");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const handleRegisterWebhook = async () => {
     try {
       const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
@@ -210,6 +304,76 @@ const ClickUpDetail = () => {
 
       {isConnected && (
         <>
+          {/* List Picker */}
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <ListTodo className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Default List
+              </h3>
+              {spaces.length === 0 && (
+                <button
+                  onClick={fetchSpaces}
+                  disabled={loadingSpaces}
+                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  {loadingSpaces ? "Loading…" : "Browse Workspace"}
+                </button>
+              )}
+            </div>
+
+            {selectedList && (
+              <p className="text-xs text-muted-foreground">
+                Selected: <span className="font-medium text-foreground">{lists.find(l => l.id === selectedList)?.name || selectedList}</span>
+              </p>
+            )}
+
+            {spaces.length > 0 && (
+              <div className="space-y-2">
+                <Select value={selectedSpace} onValueChange={handleSpaceChange}>
+                  <SelectTrigger className="h-9 text-xs rounded-xl">
+                    <SelectValue placeholder="Select Space" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {spaces.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {folders.length > 0 && (
+                  <Select value={selectedFolder} onValueChange={handleFolderChange}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue placeholder="Select Folder" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {folders.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {lists.length > 0 && (
+                  <Select value={selectedList} onValueChange={handleListSelect}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue placeholder="Select List" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lists.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {(loadingFolders || loadingLists) && (
+                  <p className="text-[11px] text-muted-foreground/60">Loading…</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Webhook Status */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center justify-between">
