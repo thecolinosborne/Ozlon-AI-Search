@@ -1,41 +1,37 @@
 
 
-# Stability Pass: Concrete Issues and Fixes
+# Fix: Deterministic Route State for /tasks
 
-## Issue 1: `finalizeMessage` does not update local messages state
+## Problem
+`useWorkTasks` starts with `loading = true` but has no `error` state. The page combines `authLoading || loading` into one spinner. If a fetch fails, `loading` becomes `false` but there's no error UI — and critically, the hook fires `fetchTasks` during auth bootstrap when `session` may not be ready yet, causing ambiguous timing. The activity view also mutates `tasks` in-place with `.sort()`.
 
-**Root cause**: When `useChatStream` calls `persistAssistantMessage` for an already-existing message ID, it calls `finalizeMessage`. This function upserts to the DB but does NOT update the local `messages` array in `useConversations`. The reconciliation effect in `useChatStream` checks whether inflight messages exist in `persistedMessages` — but since `finalizeMessage` never updates local state with the final content, the reconciliation may fail or be delayed.
+## Changes
 
-**Fix** (in `src/hooks/useConversations.ts`):
-- In `finalizeMessage`, after the DB upsert, update local `messages` state with the finalized content. Add:
-  ```typescript
-  setMessages((prev) => {
-    const exists = prev.some((m) => m.id === msg.id);
-    if (exists) {
-      return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content } : m);
-    }
-    return [...prev, { ...msg, created_at: new Date().toISOString() }];
-  });
-  ```
+### 1. `src/hooks/useWorkTasks.ts`
 
-## Issue 2: `saveMessage` has stale `messages` closure for auto-titling
+- Add `authLoading` from `useAuth()` and gate the fetch effect: skip fetch while `authLoading` is true
+- Start with `loading = false` instead of `true` — let the effect set it to `true` only when it actually starts fetching
+- Add `error: string | null` state, exposed in the return value
+- In `fetchTasks`: clear `error` at start; on query error or exception, set `error` to a user-facing message; always reset `loading` in `finally`
+- Store `AbortController` in a ref so cleanup can abort in-flight requests on unmount or re-fetch, preventing stale responses
+- Add `fetchIdRef` (incrementing counter) so that when a new fetch starts, completed responses from earlier fetches are discarded
+- Return `error` and `fetchTasks` (already returned) so the page can render error UI with retry
 
-**Root cause**: Both `saveMessage` and `finalizeMessage` depend on `messages` in their dependency array for the auto-title logic (`messages.filter(m => m.role === "user")`). But `messages` is state that changes during the same request cycle, creating stale closure bugs. The first user message check may fire incorrectly.
+### 2. `src/pages/Tasks.tsx`
 
-**Fix** (in `src/hooks/useConversations.ts`):
-- Use a `messagesRef` to read current messages count for auto-title logic instead of the stale closure value. Add `const messagesRef = useRef(messages)` and keep it in sync, then read `messagesRef.current` inside `saveMessage` and `finalizeMessage`.
+- Destructure `error` and `fetchTasks` from `useWorkTasks()`
+- Replace the single `authLoading || loading` guard with a sequential resolution:
+  1. `authLoading` → spinner
+  2. `!session` → redirect (already exists, keep as-is)
+  3. `error` → inline error card with "Retry" button calling `fetchTasks()`
+  4. `loading` → spinner (only when tasks array is empty, so a background refetch doesn't flash spinner over existing data)
+  5. `tasks.length === 0` → empty state
+  6. else → loaded content
+- Fix activity view: `[...tasks].sort(...)` instead of `tasks.sort(...)`
 
-## Issue 3: No back navigation from Tasks and Studio pages
-
-**Observation**: Both `/tasks` and `/studio` pages have headers but no way to navigate back to the home page. The `UserMenu` dropdown works but there's no home/back link in headers.
-
-**Fix**: Not a stability issue — skip for now per the rules.
-
-## Summary of changes
-
-| File | Change |
-|------|--------|
-| `src/hooks/useConversations.ts` | `finalizeMessage`: update local messages state after upsert. Use `messagesRef` for auto-title checks in both `saveMessage` and `finalizeMessage` to avoid stale closures. |
-
-This is two surgical fixes in one file, both addressing the same message handoff reliability problem.
+### Files modified
+| File | What changes |
+|------|-------------|
+| `src/hooks/useWorkTasks.ts` | Add `error` state, gate fetch on `authLoading`, abort controller cleanup, fetch ID staleness guard |
+| `src/pages/Tasks.tsx` | Deterministic state resolution, error UI with retry, fix sort mutation |
 
