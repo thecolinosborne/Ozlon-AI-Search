@@ -157,7 +157,7 @@ export function useVideoTasks() {
         edit_instructions: input.edit_instructions || null,
         aspect_ratio: input.aspect_ratio,
         target_duration: input.target_duration || null,
-      } as any)
+      } satisfies TablesInsert<'video_tasks'>)
       .select()
       .single();
 
@@ -173,9 +173,15 @@ export function useVideoTasks() {
   }, [session?.user?.id, fetchVideoTasks]);
 
   const updateVideoTask = useCallback(async (id: string, updates: Partial<VideoTask>) => {
+    const { edit_plan, render_history, ...rest } = updates;
+    const dbUpdates: TablesUpdate<'video_tasks'> = {
+      ...rest,
+      ...(edit_plan !== undefined && { edit_plan: edit_plan as unknown as TablesUpdate<'video_tasks'>['edit_plan'] }),
+      ...(render_history !== undefined && { render_history: render_history as unknown as TablesUpdate<'video_tasks'>['render_history'] }),
+    };
     const { error } = await supabase
       .from('video_tasks')
-      .update(updates as any)
+      .update(dbUpdates)
       .eq('id', id);
 
     if (error) {
