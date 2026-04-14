@@ -183,16 +183,10 @@ export function useChatStream({
       safeSetIsLoading(true);
       safeSetInflight([userMessage, assistantPlaceholder]);
 
-      // ── Persist user message (with timeout guard) ────────────────────
-      await Promise.race([
-        saveMessage(userMessage),
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            if (isDev) console.warn("[useChatStream] saveMessage timed out after 10s");
-            resolve();
-          }, 10_000)
-        ),
-      ]);
+      // ── Persist user message (fire-and-forget, don't block stream) ──
+      saveMessage(userMessage).catch((err) => {
+        if (isDev) console.warn("[useChatStream] saveMessage failed:", err);
+      });
 
       if (!mountedRef.current) return;
 
