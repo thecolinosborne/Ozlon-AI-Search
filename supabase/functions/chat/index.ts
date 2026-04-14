@@ -3157,28 +3157,42 @@ async function executeToolCall(
             taskRowId = taskRow?.id || null;
           }
 
-          // Step 1: Tavily search
+          // Step 1: Tavily search (with 1 retry for transient failures)
           console.log(`[deep_research] Searching: "${query}" (depth: ${searchDepth}, max: ${maxResults})`);
-          const tavilyRes = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: TAVILY_KEY,
-              query,
-              search_depth: searchDepth,
-              max_results: maxResults,
-              include_answer: true,
-              include_raw_content: false,
-            }),
-          });
+          let tavilyRes: Response | null = null;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              tavilyRes = await fetch('https://api.tavily.com/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  api_key: TAVILY_KEY,
+                  query,
+                  search_depth: searchDepth,
+                  max_results: maxResults,
+                  include_answer: true,
+                  include_raw_content: false,
+                }),
+              });
+              // Don't retry on success or non-transient client errors
+              if (tavilyRes.ok || (tavilyRes.status < 500 && tavilyRes.status !== 429)) break;
+              const retryBody = await tavilyRes.text().catch(() => '(unreadable)');
+              console.warn(`[deep_research] Tavily returned ${tavilyRes.status}, attempt ${attempt + 1}/2: ${retryBody.slice(0, 500)}`);
+              tavilyRes = null; // mark as failed for retry
+            } catch (netErr) {
+              console.warn(`[deep_research] Tavily network error, attempt ${attempt + 1}/2:`, netErr);
+              tavilyRes = null;
+            }
+            if (attempt === 0) await new Promise(r => setTimeout(r, 2000));
+          }
 
-          if (!tavilyRes.ok) {
-            const errText = await tavilyRes.text();
-            console.error('[deep_research] Tavily error:', errText);
+          if (!tavilyRes || !tavilyRes.ok) {
+            const errText = tavilyRes ? await tavilyRes.text().catch(() => '') : 'All attempts failed';
+            console.error('[deep_research] Tavily error after retries:', errText);
             if (adminClient && taskRowId) {
               await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
             }
-            return { success: false, result: `Research search failed: ${tavilyRes.status}` };
+            return { success: false, result: `Research search failed: ${tavilyRes?.status ?? 'network error'}` };
           }
 
           const tavilyData = await tavilyRes.json();
