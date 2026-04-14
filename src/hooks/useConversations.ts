@@ -27,6 +27,10 @@ export function useConversations() {
   const prevUserId = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
+  // Ref mirror of messages for stale-closure-safe reads (auto-title logic)
+  const messagesRef = useRef<ConversationMessage[]>(messages);
+  messagesRef.current = messages;
+
   // Ref mirrors activeSessionId for immediate reads in async callbacks
   const activeSessionIdRef = useRef<string | null>(null);
 
