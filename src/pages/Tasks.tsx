@@ -12,6 +12,24 @@ import { Plus, Menu, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+// ── Deterministic route states ──
+type RouteState = 'auth-loading' | 'unauthenticated' | 'error' | 'loading' | 'empty' | 'loaded';
+
+function resolveRouteState(
+  authLoading: boolean,
+  session: unknown,
+  error: string | null,
+  loading: boolean,
+  taskCount: number,
+): RouteState {
+  if (authLoading) return 'auth-loading';
+  if (!session) return 'unauthenticated';
+  if (error && taskCount === 0) return 'error';
+  if (loading && taskCount === 0) return 'loading';
+  if (taskCount === 0) return 'empty';
+  return 'loaded';
+}
+
 const Tasks = () => {
   const navigate = useNavigate();
   const { authLoading, session } = useAuth();
@@ -23,12 +41,14 @@ const Tasks = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const routeState = resolveRouteState(authLoading, session, error, loading, tasks.length);
+
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) return null;
     return tasks.find(t => t.id === selectedTaskId) ?? null;
   }, [selectedTaskId, tasks]);
 
-  // Close detail if task was archived/removed
+  // Close detail if task was removed
   useEffect(() => {
     if (detailOpen && selectedTaskId && !selectedTask) {
       setDetailOpen(false);
@@ -36,10 +56,10 @@ const Tasks = () => {
     }
   }, [detailOpen, selectedTaskId, selectedTask]);
 
-  // Redirect if unauthenticated (after auth resolves)
+  // Redirect if unauthenticated
   useEffect(() => {
-    if (!authLoading && !session) navigate('/auth');
-  }, [authLoading, session, navigate]);
+    if (routeState === 'unauthenticated') navigate('/auth');
+  }, [routeState, navigate]);
 
   const handleTaskClick = useCallback((task: WorkTask) => {
     setSelectedTaskId(task.id);
@@ -63,9 +83,34 @@ const Tasks = () => {
     archiveTask(id);
   }, [archiveTask]);
 
-  const handleCreateClose = useCallback(() => {
-    setCreateOpen(false);
-  }, []);
+  // ── Terminal route states ──
+
+  if (routeState === 'auth-loading' || routeState === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (routeState === 'unauthenticated') return null;
+
+  if (routeState === 'error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-4 max-w-sm">
+          <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => fetchTasks()} className="gap-1.5">
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Loaded or Empty — render page shell ──
 
   const counts: Record<string, number> = {
     active: tasks.filter(t => t.status === 'in_progress').length,
@@ -83,46 +128,6 @@ const Tasks = () => {
     }
   })();
 
-  // --- Deterministic route state resolution ---
-
-  // 1. Auth loading
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  // 2. Unauthenticated — redirect effect handles navigation, render nothing
-  if (!session) return null;
-
-  // 3. Fetch error
-  if (error && tasks.length === 0) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="text-center space-y-4 max-w-sm">
-          <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
-          <p className="text-sm text-muted-foreground">{error}</p>
-          <Button size="sm" variant="outline" onClick={() => fetchTasks()} className="gap-1.5">
-            <RefreshCw className="w-4 h-4" />
-            Retry
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // 4. Loading (only when we have no tasks yet — background refetches won't flash spinner)
-  if (loading && tasks.length === 0) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  // 5 & 6. Empty or Loaded — render the full page shell; empty state is handled inline
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* Header */}
@@ -161,10 +166,7 @@ const Tasks = () => {
           )}
           <TasksSidebar
             activeView={activeView}
-            onViewChange={(v) => {
-              setActiveView(v);
-              setSidebarOpen(false);
-            }}
+            onViewChange={(v) => { setActiveView(v); setSidebarOpen(false); }}
             counts={counts}
           />
         </div>
@@ -172,11 +174,11 @@ const Tasks = () => {
         {/* Main content */}
         <div className="flex-1 min-w-0">
           {activeView === 'overview' && (
-            tasks.length === 0 ? (
+            routeState === 'empty' ? (
               <div className="text-center py-16 space-y-3">
                 <p className="text-lg font-medium text-foreground">No tasks yet</p>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                  Tasks created from chat or manually will appear here. This is your persistent task board — not live activity.
+                  Tasks created from chat or manually will appear here.
                 </p>
                 <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 mt-4">
                   <Plus className="w-4 h-4" />
@@ -227,7 +229,7 @@ const Tasks = () => {
 
       <TaskCreateForm
         open={createOpen}
-        onClose={handleCreateClose}
+        onClose={() => setCreateOpen(false)}
         onCreate={(data) => createTask(data)}
       />
     </div>
