@@ -151,8 +151,20 @@ export async function streamChat({
   try {
     // Use the user's session JWT so edge functions can identify the caller.
     // Falls back to the anon key for unauthenticated / guest flows.
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    // Timeout getSession to prevent hanging when Supabase is slow/unreachable.
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    let token = anonKey;
+    try {
+      const sessionResult = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
+      ]);
+      if (sessionResult && 'data' in sessionResult) {
+        token = sessionResult.data.session?.access_token ?? anonKey;
+      }
+    } catch {
+      console.warn('[streamChat] getSession failed, using anon key');
+    }
 
     const response = await fetch(CHAT_URL, {
       method: 'POST',
