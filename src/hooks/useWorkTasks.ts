@@ -76,17 +76,27 @@ export const PRIORITY_COLORS: Record<TaskPriority, string> = {
 };
 
 export function useWorkTasks() {
-  const { session } = useAuth();
+  const { session, authLoading } = useAuth();
   const [tasks, setTasks] = useState<WorkTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const mountedRef = useRef(true);
-  // Ref mirror for stale-closure-safe reads in mutations
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
 
+  // Abort controller ref for cancelling in-flight fetches
+  const abortRef = useRef<AbortController | null>(null);
+  // Fetch ID to discard stale responses
+  const fetchIdRef = useRef(0);
+
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      // Abort any in-flight fetch on unmount
+      abortRef.current?.abort();
+    };
   }, []);
 
   const fetchTasks = useCallback(async () => {
@@ -95,17 +105,27 @@ export function useWorkTasks() {
       if (mountedRef.current) {
         setTasks([]);
         setLoading(false);
+        setError(null);
       }
       return;
     }
 
-    if (mountedRef.current) setLoading(true);
+    // Abort previous in-flight request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const thisId = ++fetchIdRef.current;
+
+    if (mountedRef.current) {
+      setLoading(true);
+      setError(null);
+    }
+
+    const timeout = setTimeout(() => controller.abort(), 15_000);
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15_000);
-
-      const { data, error } = await supabase
+      const { data, error: queryError } = await supabase
         .from('work_tasks')
         .select('*')
         .eq('user_id', userId)
@@ -115,31 +135,54 @@ export function useWorkTasks() {
 
       clearTimeout(timeout);
 
-      if (!mountedRef.current) return;
+      // Discard if unmounted or a newer fetch has started
+      if (!mountedRef.current || thisId !== fetchIdRef.current) return;
 
-      if (error) {
-        console.error('Failed to fetch tasks:', error);
+      if (queryError) {
+        setError('Failed to load tasks. Please try again.');
+        console.error('Failed to fetch tasks:', queryError);
       } else {
         setTasks((data || []) as unknown as WorkTask[]);
+        setError(null);
       }
-    } catch (e) {
-      if (!mountedRef.current) return;
+    } catch (e: unknown) {
+      clearTimeout(timeout);
+      if (!mountedRef.current || thisId !== fetchIdRef.current) return;
+
+      // Don't treat intentional aborts as errors
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        // Aborted by timeout or cleanup — not a user-facing error
+        return;
+      }
+
+      setError('Failed to load tasks. Please try again.');
       console.error('useWorkTasks fetch exception:', e);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && thisId === fetchIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [session?.user?.id]);
 
-  // Fetch on mount and when user changes
+  // Gate fetching: only fetch after auth is resolved and user exists
   useEffect(() => {
+    if (authLoading) return; // Wait for auth to settle
+
+    if (!session?.user?.id) {
+      // Auth resolved, no user — clear state
+      setTasks([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     fetchTasks();
-  }, [fetchTasks]);
+  }, [authLoading, session?.user?.id, fetchTasks]);
 
   const createTask = useCallback(async (task: Partial<WorkTask>) => {
     const userId = session?.user?.id;
     if (!userId) return;
 
-    // Read from ref to avoid stale closure on tasks
     const currentTasks = tasksRef.current;
     const targetStatus = task.status || 'todo';
     const maxPos = currentTasks
@@ -159,15 +202,15 @@ export function useWorkTasks() {
       board_position: maxPos + 1,
     };
 
-    const { data, error } = await supabase
+    const { data, error: insertError } = await supabase
       .from('work_tasks')
       .insert(insertData)
       .select()
       .single();
 
-    if (error) {
+    if (insertError) {
       toast.error('Failed to create task');
-      console.error(error);
+      console.error(insertError);
       return;
     }
 
@@ -180,7 +223,6 @@ export function useWorkTasks() {
   }, [session?.user?.id]);
 
   const updateTask = useCallback(async (id: string, updates: Partial<WorkTask>) => {
-    // Optimistic update
     const previousTasks = tasksRef.current;
     const now = new Date().toISOString();
     const optimisticUpdates = { ...updates, last_activity_at: now };
@@ -189,15 +231,14 @@ export function useWorkTasks() {
       setTasks(prev => prev.map(t => t.id === id ? { ...t, ...optimisticUpdates } : t));
     }
 
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from('work_tasks')
       .update({ ...updates, last_activity_at: now } as never)
       .eq('id', id);
 
-    if (error) {
+    if (updateError) {
       toast.error('Failed to update task');
-      console.error(error);
-      // Rollback optimistic update
+      console.error(updateError);
       if (mountedRef.current) {
         setTasks(previousTasks);
       }
@@ -205,20 +246,18 @@ export function useWorkTasks() {
   }, []);
 
   const archiveTask = useCallback(async (id: string) => {
-    // Optimistic: remove from list
     const previousTasks = tasksRef.current;
     if (mountedRef.current) {
       setTasks(prev => prev.filter(t => t.id !== id));
     }
 
-    const { error } = await supabase
+    const { error: archiveError } = await supabase
       .from('work_tasks')
       .update({ archived_at: new Date().toISOString() } as never)
       .eq('id', id);
 
-    if (error) {
+    if (archiveError) {
       toast.error('Failed to archive task');
-      // Rollback
       if (mountedRef.current) {
         setTasks(previousTasks);
       }
@@ -228,16 +267,15 @@ export function useWorkTasks() {
   }, []);
 
   const unarchiveTask = useCallback(async (id: string) => {
-    const { error } = await supabase
+    const { error: unarchiveError } = await supabase
       .from('work_tasks')
       .update({ archived_at: null } as never)
       .eq('id', id);
 
-    if (error) {
+    if (unarchiveError) {
       toast.error('Failed to unarchive task');
       return;
     }
-    // Refetch to get the restored task with full data
     await fetchTasks();
     toast.success('Task restored');
   }, [fetchTasks]);
@@ -251,6 +289,7 @@ export function useWorkTasks() {
   return {
     tasks,
     loading,
+    error,
     fetchTasks,
     createTask,
     updateTask,
