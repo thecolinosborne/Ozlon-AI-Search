@@ -482,7 +482,7 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'list_tasks': {
-        const listId = getListId(params);
+        const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
         const data = await clickupFetch(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -495,7 +495,7 @@ serve(async (req) => {
       }
 
       case 'create_task': {
-        const listId = getListId(params);
+        const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
         const { name, description, assignees, priority, due_date, parent, ...rest } = params || {};
         const taskBody: Record<string, unknown> = { name: name || 'New Task', ...rest };
@@ -516,7 +516,7 @@ serve(async (req) => {
       }
 
       case 'create_subtask': {
-        const listId = getListId(params);
+        const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
         if (!params?.parent) throw new Error('parent taskId required');
         const { name, description, parent, ...rest } = params;
