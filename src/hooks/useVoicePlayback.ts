@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { voiceService } from "@/services/voiceService";
-import { toast } from "sonner";
+import { handleError } from "@/lib/handleError";
 
 export function useVoicePlayback() {
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
@@ -27,8 +27,7 @@ export function useVoicePlayback() {
       setPlayingMessageId(messageId);
       await voiceService.speak(text);
     } catch (error) {
-      console.error("Playback error:", error);
-      toast.error("Could not play voice");
+      handleError(error, "Could not play voice");
     } finally {
       if (mountedRef.current) {
         setPlayingMessageId(null);

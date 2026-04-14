@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { handleError } from "@/lib/handleError";
 import { toast } from "sonner";
 import { ArrowLeft, Save, LogOut } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
@@ -55,7 +56,7 @@ const Profile = () => {
           setUsername(profile.username || "");
         }
       } catch (error) {
-        console.error("Profile load error:", error);
+        handleError(error, "Profile load error", { silent: true });
       } finally {
         if (mounted) {
           setProfileLoaded(true);
@@ -88,8 +89,7 @@ const Profile = () => {
       if (error) throw error;
       toast.success("Profile updated");
     } catch (error: unknown) {
-      console.error("Save error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to update profile");
+      handleError(error, "Failed to update profile");
     } finally {
       setIsSaving(false);
     }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { voiceService } from "@/services/voiceService";
-import { toast } from "sonner";
+import { handleError } from "@/lib/handleError";
 
 interface MessagePlayButtonProps {
   text: string;
@@ -25,8 +25,7 @@ export const MessagePlayButton = ({ text, className }: MessagePlayButtonProps) =
       setIsPlaying(true);
       await voiceService.speak(text);
     } catch (error) {
-      console.error('Playback error:', error);
-      toast.error("Could not play voice, please try again");
+      handleError(error, "Could not play voice, please try again");
     } finally {
       setIsPlaying(false);
       setIsLoading(false);
