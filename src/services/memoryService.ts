@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { TablesInsert } from "@/integrations/supabase/types";
 
 export type MemoryType = 'fact' | 'preference' | 'context' | 'pattern' | 'goal' | 'value';
 
@@ -42,7 +43,7 @@ class MemoryService {
         salience: input.salience ?? 0.5,
         confidence: input.confidence ?? 0.8,
         metadata: input.metadata ?? {},
-      })
+      } satisfies TablesInsert<'wisdom_memories'>)
       .select()
       .single();
 
