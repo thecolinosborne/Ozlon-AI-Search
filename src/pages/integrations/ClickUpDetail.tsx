@@ -304,6 +304,76 @@ const ClickUpDetail = () => {
 
       {isConnected && (
         <>
+          {/* List Picker */}
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <ListTodo className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Default List
+              </h3>
+              {spaces.length === 0 && (
+                <button
+                  onClick={fetchSpaces}
+                  disabled={loadingSpaces}
+                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  {loadingSpaces ? "Loading…" : "Browse Workspace"}
+                </button>
+              )}
+            </div>
+
+            {selectedList && (
+              <p className="text-xs text-muted-foreground">
+                Selected: <span className="font-medium text-foreground">{lists.find(l => l.id === selectedList)?.name || selectedList}</span>
+              </p>
+            )}
+
+            {spaces.length > 0 && (
+              <div className="space-y-2">
+                <Select value={selectedSpace} onValueChange={handleSpaceChange}>
+                  <SelectTrigger className="h-9 text-xs rounded-xl">
+                    <SelectValue placeholder="Select Space" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {spaces.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {folders.length > 0 && (
+                  <Select value={selectedFolder} onValueChange={handleFolderChange}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue placeholder="Select Folder" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {folders.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {lists.length > 0 && (
+                  <Select value={selectedList} onValueChange={handleListSelect}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue placeholder="Select List" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lists.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {(loadingFolders || loadingLists) && (
+                  <p className="text-[11px] text-muted-foreground/60">Loading…</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Webhook Status */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center justify-between">
