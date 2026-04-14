@@ -43,10 +43,23 @@ function getTeamId(): string {
   return id;
 }
 
-function getListId(params?: Record<string, unknown>): string {
-  const raw = (params?.listId as string) || Deno.env.get('CLICKUP_DEFAULT_LIST_ID') || '';
-  // Strip ClickUp folder prefix (e.g. "6-901710746417" → "901710746417")
-  return raw.replace(/^\d+-/, '');
+async function getListId(params?: Record<string, unknown>): Promise<string> {
+  // Priority: explicit param → DB config → env var
+  if (params?.listId) return String(params.listId);
+  
+  // Check DB for saved default_list_id
+  try {
+    const supabase = getSupabase();
+    const teamId = Deno.env.get('CLICKUP_TEAM_ID') || '';
+    const { data } = await supabase
+      .from('clickup_integration_state')
+      .select('default_list_id')
+      .eq('team_id', teamId)
+      .maybeSingle();
+    if (data?.default_list_id) return data.default_list_id;
+  } catch { /* fall through */ }
+  
+  return Deno.env.get('CLICKUP_DEFAULT_LIST_ID') || '';
 }
 
 function getSupabase() {
