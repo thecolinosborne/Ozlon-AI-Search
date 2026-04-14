@@ -1,10 +1,9 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Home, MessageCircle, ClipboardList, Plug, Settings } from "lucide-react";
+import { Home, Plug, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", icon: Home, label: "Home" },
-  { path: "/tasks", icon: ClipboardList, label: "Tasks" },
   { path: "/integrations", icon: Plug, label: "Integrations" },
   { path: "/settings", icon: Settings, label: "Settings" },
 ];
