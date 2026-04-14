@@ -1,60 +1,40 @@
 
 
-## Event Research & Calendar Scraping Feature
+## Fix: ClickUp Invalid List ID
 
-### What You Get
-A new "Events" capability where you can ask the AI to find networking events, conferences, and meetups from the web — and see them in a clean upcoming-dates list. The AI will scrape event pages, extract dates/details, and store them for reference.
+### Problem
+Your `CLICKUP_DEFAULT_LIST_ID` secret is set to `6-901710746417`, but ClickUp's API rejects it — `list_accessible: false`. The `getListId()` helper also strips the `6-` prefix, making it `901710746417`, which is equally invalid. No task creation can work until this is fixed.
 
-### Architecture
+Additionally, the edge function has no way to browse your ClickUp workspace to discover valid list IDs — you'd have to manually look them up.
 
-```text
-User asks: "Find networking events in LA for June 2026"
-  → Chat AI triggers deep_research + new scrape_events tool
-  → Tavily finds relevant event pages
-  → Firecrawl scrapes full event details (dates, venues, links)
-  → Events stored in `discovered_events` table
-  → UI shows upcoming events list on dashboard or dedicated page
-```
+### Fix
 
-### Implementation Steps
+**1. Add a `list_spaces` and `list_lists` action to the ClickUp edge function**
 
-**1. Connect Firecrawl for website scraping**
-- Link the Firecrawl connector to the project (it's available in the connector catalog)
-- This gives the edge function the ability to scrape full web pages for structured event data
+This lets you (and the settings UI) browse your workspace to find the correct list ID:
+- `list_spaces` → calls `GET /team/{teamId}/space` → returns all spaces
+- `list_folders` → calls `GET /space/{spaceId}/folder` → returns folders in a space  
+- `list_lists` → calls `GET /folder/{folderId}/list` → returns lists in a folder
+- Also: `GET /space/{spaceId}/list` for folderless lists
 
-**2. Create `discovered_events` database table**
-- Columns: `id`, `user_id`, `title`, `description`, `event_date`, `end_date`, `location`, `url`, `source`, `category` (networking/conference/meetup), `metadata`, `created_at`
-- RLS: users see only their own events
+**2. Add a List Picker to the ClickUp integration detail page**
 
-**3. Add `scrape_events` tool to the chat edge function**
-- New tool definition alongside `deep_research`
-- Flow: takes a URL or search query → uses Firecrawl to scrape the page → uses AI to extract structured event data (title, date, location, URL) → inserts into `discovered_events`
-- Falls back to Tavily + AI extraction if Firecrawl isn't available
+Replace the blind "list ID from env" approach with a dropdown that:
+- Fetches spaces → folders → lists from the API
+- Lets you select the correct list
+- Saves it via `update_config` (stores in `clickup_integration_state` table)
 
-**4. Add `list_events` tool to the chat edge function**
-- Queries `discovered_events` for upcoming dates, filterable by category and date range
-- AI can present them conversationally
+**3. Fix `getListId()` to prefer DB-stored list over env var**
 
-**5. Build Events UI component**
-- New `/events` page or dashboard card showing upcoming discovered events
-- Sorted by date, with category filters
-- Each event shows: title, date, location, source link
-- Calendar-style view option using the existing Calendar component
+Update priority: `params.listId` → config row `default_list_id` → env `CLICKUP_DEFAULT_LIST_ID`. This way the UI-selected list takes precedence.
 
-**6. Calendar integration (future-ready)**
-- The `fetchCalendar` stub in `src/core/hooks/integrations.ts` is already defined
-- Wire it to Google Calendar via the Maton API gateway (already connected) to pull personal calendar events alongside discovered web events
+**4. Update the `CLICKUP_DEFAULT_LIST_ID` secret**
 
-### Changed Files
+Once we discover the correct list ID from the picker, update the secret to the valid value.
+
+### Files Changed
 | File | Change |
 |---|---|
-| `supabase/functions/chat/index.ts` | Add `scrape_events` and `list_events` tool definitions + handlers |
-| New migration | Create `discovered_events` table with RLS |
-| `src/pages/Events.tsx` | New events listing page |
-| `src/App.tsx` | Add `/events` route |
-| `src/components/navigation/BottomNav.tsx` | Add Events nav item |
-
-### Dependencies
-- Firecrawl connector must be linked first (I'll prompt you to connect it)
-- Tavily is already configured as fallback
+| `supabase/functions/clickup/index.ts` | Add `list_spaces`, `list_folders`, `list_lists` actions; fix `getListId` to check DB config first |
+| `src/pages/integrations/ClickUpDetail.tsx` | Add list picker UI that browses spaces/folders/lists |
 
