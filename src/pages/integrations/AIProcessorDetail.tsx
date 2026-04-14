@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 const providers = [
-  { id: "openai", name: "OpenAI", description: "GPT-4.1, GPT-5, GPT-5 Mini" },
+  { id: "openai", name: "OpenAI", description: "GPT-5.4, GPT-5, GPT-5 Mini" },
   { id: "gemini", name: "Gemini", description: "Gemini 2.5 Flash, Gemini 2.5 Pro" },
 ];
 
@@ -40,7 +40,7 @@ const AIProcessorDetail = () => {
   const verifyProvider = useCallback(async (providerId: string) => {
     setVerifiedProviders((prev) => ({ ...prev, [providerId]: null }));
     try {
-      const testModel = providerId === "gemini" ? "google/gemini-2.5-flash" : "gpt-5-mini";
+      const testModel = providerId === "gemini" ? "google/gemini-2.5-flash" : "gpt-5.4";
       const response = await fetch(CHAT_URL, {
         method: "POST",
         headers: {

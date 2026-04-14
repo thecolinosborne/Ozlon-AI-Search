@@ -3227,7 +3227,7 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
             method: 'POST',
             headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'gpt-4.1-2025-04-14',
+              model: 'gpt-5.4',
               messages: [
                 { role: 'system', content: 'You are a thorough research analyst. Produce well-structured, citation-rich reports.' },
                 { role: 'user', content: synthesisPrompt },
@@ -4080,7 +4080,7 @@ Return ONLY the JSON array, no commentary.`;
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4.1-nano-2025-04-14',
+        model: 'gpt-5.4',
         messages: [
           { role: 'system', content: extractionPrompt },
           { role: 'user', content: conversationText },
