@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -81,33 +80,15 @@ export const PRIORITY_COLORS: Record<TaskPriority, string> = {
 
 // ── Hook ───────────────────────────────────────────────────────────
 
-/**
- * Reliable data hook for work_tasks.
- *
- * Contract:
- *  - Does NOT fetch until authLoading is false and a userId is present.
- *  - If auth resolves with no user, settles immediately (tasks=[], loading=false, error=null).
- *  - loading starts false; set true only when an actual fetch begins.
- *  - loading always resets in finally, even on abort/error.
- *  - error is set on failure and cleared on success or new fetch start.
- *  - Stale responses (from prior fetches or unmounted components) are discarded.
- *  - Optimistic mutations roll back on failure.
- *  - fetchTasks is stable and safe to call as a retry at any time.
- */
 export function useWorkTasks() {
-  const { session, authLoading } = useAuth();
-  const userId = session?.user?.id ?? null;
-
   const [tasks, setTasks] = useState<WorkTask[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Async safety refs ──
   const mountedRef = useRef(true);
   const fetchIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Track mount/unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -116,11 +97,7 @@ export function useWorkTasks() {
     };
   }, []);
 
-  // ── Fetch ──
   const fetchTasks = useCallback(async () => {
-    if (!userId) return;
-
-    // Cancel previous in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -137,14 +114,11 @@ export function useWorkTasks() {
       const { data, error: queryError } = await supabase
         .from('work_tasks')
         .select('*')
-        .eq('user_id', userId)
         .is('archived_at', null)
         .order('last_activity_at', { ascending: false })
         .abortSignal(controller.signal);
 
       clearTimeout(timeout);
-
-      // Discard stale response
       if (!mountedRef.current || thisId !== fetchIdRef.current) return;
 
       if (queryError) {
@@ -157,10 +131,7 @@ export function useWorkTasks() {
     } catch (e: unknown) {
       clearTimeout(timeout);
       if (!mountedRef.current || thisId !== fetchIdRef.current) return;
-
-      // Aborts are not user-facing errors
       if (e instanceof DOMException && e.name === 'AbortError') return;
-
       setError('Failed to load tasks. Please try again.');
       console.error('[useWorkTasks] fetch exception:', e);
     } finally {
@@ -168,26 +139,17 @@ export function useWorkTasks() {
         setLoading(false);
       }
     }
-  }, [userId]);
+  }, []);
 
-  // ── Auto-fetch, gated on auth ──
+  // Auto-fetch on mount
   useEffect(() => {
-    if (authLoading) return;
-
-    if (!userId) {
-      // Auth resolved, no user — settle immediately
-      setTasks([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     fetchTasks();
-  }, [authLoading, userId, fetchTasks]);
+  }, [fetchTasks]);
 
-  // ── Create ──
   const createTask = useCallback(async (input: Partial<WorkTask>) => {
-    if (!userId) return undefined;
+    // Get current user id if available, otherwise use a placeholder
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id ?? '00000000-0000-0000-0000-000000000000';
 
     const insertData = {
       user_id: userId,
@@ -220,11 +182,9 @@ export function useWorkTasks() {
     }
     toast.success('Task created');
     return created;
-  }, [userId]);
+  }, []);
 
-  // ── Update (optimistic) ──
   const updateTask = useCallback(async (id: string, updates: Partial<WorkTask>) => {
-    // Capture snapshot via functional setter to avoid stale closure
     let snapshot: WorkTask[] = [];
     setTasks(prev => {
       snapshot = prev;
@@ -245,7 +205,6 @@ export function useWorkTasks() {
     }
   }, []);
 
-  // ── Delete ──
   const deleteTask = useCallback(async (id: string) => {
     let snapshot: WorkTask[] = [];
     setTasks(prev => {
@@ -267,7 +226,6 @@ export function useWorkTasks() {
     toast.success('Task deleted');
   }, []);
 
-  // ── Archive (optimistic) ──
   const archiveTask = useCallback(async (id: string) => {
     let snapshot: WorkTask[] = [];
     setTasks(prev => {
@@ -288,7 +246,6 @@ export function useWorkTasks() {
     toast.success('Task archived');
   }, []);
 
-  // ── Unarchive ──
   const unarchiveTask = useCallback(async (id: string) => {
     const { error: err } = await supabase
       .from('work_tasks')

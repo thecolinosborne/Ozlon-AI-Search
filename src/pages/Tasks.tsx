@@ -1,6 +1,4 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import {
   useWorkTasks,
   WorkTask,
@@ -36,25 +34,20 @@ import {
   Circle,
   Clock,
   Eye,
-  GripVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ══════════════════════════════════════════════════════════════════
-// Route state machine
+// Route state machine (no auth)
 // ══════════════════════════════════════════════════════════════════
 
-type RouteState = 'auth-loading' | 'unauthenticated' | 'error' | 'loading' | 'empty' | 'loaded';
+type RouteState = 'error' | 'loading' | 'empty' | 'loaded';
 
 function resolveRouteState(
-  authLoading: boolean,
-  hasSession: boolean,
   error: string | null,
   loading: boolean,
   taskCount: number,
 ): RouteState {
-  if (authLoading) return 'auth-loading';
-  if (!hasSession) return 'unauthenticated';
   if (error && taskCount === 0) return 'error';
   if (loading && taskCount === 0) return 'loading';
   if (taskCount === 0 && !loading) return 'empty';
@@ -98,7 +91,7 @@ const STATUS_ICONS: Record<TaskStatus, typeof Circle> = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// Board Card (compact Trello card)
+// Board Card
 // ══════════════════════════════════════════════════════════════════
 
 function BoardCard({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => void }) {
@@ -116,21 +109,14 @@ function BoardCard({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) =
         <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{task.description}</p>
       )}
       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-        <span
-          className={cn(
-            'inline-block w-2 h-2 rounded-full shrink-0',
-            PRIORITY_COLORS[task.priority],
-          )}
-        />
+        <span className={cn('inline-block w-2 h-2 rounded-full shrink-0', PRIORITY_COLORS[task.priority])} />
         <span className="text-[10px] text-muted-foreground">{PRIORITY_LABELS[task.priority]}</span>
         {task.assigned_to && (
           <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 ml-auto">
             {task.assigned_to}
           </Badge>
         )}
-        {isAI && (
-          <Sparkles className="w-3 h-3 text-primary shrink-0" />
-        )}
+        {isAI && <Sparkles className="w-3 h-3 text-primary shrink-0" />}
       </div>
     </button>
   );
@@ -178,7 +164,6 @@ function BoardColumn({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Column header */}
       <div className="px-3 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -196,7 +181,6 @@ function BoardColumn({
         </button>
       </div>
 
-      {/* Cards */}
       <div className="flex-1 px-2 pb-2 space-y-2 overflow-y-auto">
         {tasks.map(task => (
           <div
@@ -232,12 +216,7 @@ function ListRow({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => 
       className="w-full text-left px-4 py-3 rounded-xl border border-border/40 bg-card hover:bg-accent/30 transition-all duration-150"
     >
       <div className="flex items-center gap-3">
-        <StatusIcon
-          className={cn(
-            'w-4 h-4 shrink-0',
-            isCompleted ? 'text-green-500' : 'text-muted-foreground',
-          )}
-        />
+        <StatusIcon className={cn('w-4 h-4 shrink-0', isCompleted ? 'text-green-500' : 'text-muted-foreground')} />
         <div className="flex-1 min-w-0">
           <p className={cn('text-sm font-medium', isCompleted && 'line-through text-muted-foreground')}>
             {task.title}
@@ -250,9 +229,6 @@ function ListRow({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => 
         {task.assigned_to && (
           <span className="text-[10px] text-muted-foreground shrink-0">{task.assigned_to}</span>
         )}
-        <span className="text-[10px] text-muted-foreground shrink-0">
-          {new Date(task.last_activity_at).toLocaleDateString()}
-        </span>
       </div>
     </button>
   );
@@ -305,18 +281,8 @@ function CreateTaskDialog({
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            placeholder="What needs to be done?"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            autoFocus
-          />
-          <Textarea
-            placeholder="Add details or context (optional)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-          />
+          <Input placeholder="What needs to be done?" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+          <Textarea placeholder="Add details or context (optional)" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
@@ -332,11 +298,7 @@ function CreateTaskDialog({
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Assignee</label>
-              <Input
-                placeholder="ai"
-                value={assignee}
-                onChange={(e) => setAssignee(e.target.value)}
-              />
+              <Input placeholder="ai" value={assignee} onChange={(e) => setAssignee(e.target.value)} />
             </div>
           </div>
           <div className="flex justify-end gap-2">
@@ -370,7 +332,6 @@ function TaskDetailSheet({
   const [titleDraft, setTitleDraft] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
 
-  // Sync notes draft when task changes
   useEffect(() => {
     setNotesDraft(task?.revision_notes || '');
   }, [task?.id, task?.revision_notes]);
@@ -416,14 +377,10 @@ function TaskDetailSheet({
         </SheetHeader>
 
         <div className="mt-6 space-y-5">
-          {/* Status / Priority / Assignee */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Status</label>
-              <Select
-                value={task.status}
-                onValueChange={(v) => onUpdate(task.id, { status: v as TaskStatus })}
-              >
+              <Select value={task.status} onValueChange={(v) => onUpdate(task.id, { status: v as TaskStatus })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {STATUS_ORDER.map(s => (
@@ -434,10 +391,7 @@ function TaskDetailSheet({
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
-              <Select
-                value={task.priority}
-                onValueChange={(v) => onUpdate(task.id, { priority: v as TaskPriority })}
-              >
+              <Select value={task.priority} onValueChange={(v) => onUpdate(task.id, { priority: v as TaskPriority })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="low">Low</SelectItem>
@@ -458,7 +412,6 @@ function TaskDetailSheet({
             </div>
           </div>
 
-          {/* Description */}
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Description</label>
             <Textarea
@@ -471,7 +424,6 @@ function TaskDetailSheet({
 
           <Separator />
 
-          {/* Notes */}
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
             <Textarea
@@ -483,7 +435,6 @@ function TaskDetailSheet({
             />
           </div>
 
-          {/* AI section */}
           {task.ai_status !== 'idle' && (
             <div className="flex items-center gap-2 text-sm text-primary bg-primary/5 rounded-lg px-3 py-2">
               <Sparkles className="w-4 h-4" />
@@ -502,7 +453,6 @@ function TaskDetailSheet({
 
           <Separator />
 
-          {/* Activity log */}
           {aiLog.length > 0 && (
             <div>
               <label className="text-xs text-muted-foreground mb-2 block">Activity</label>
@@ -523,7 +473,6 @@ function TaskDetailSheet({
             </div>
           )}
 
-          {/* Metadata */}
           <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
             <div>Type: {task.task_type}</div>
             <div>Intent: {task.intent_type}</div>
@@ -535,7 +484,6 @@ function TaskDetailSheet({
 
           <Separator />
 
-          {/* Delete */}
           <Button
             variant="outline"
             onClick={() => { onDelete(task.id); onClose(); }}
@@ -571,7 +519,6 @@ function TasksHeader({
           <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
         </div>
         <div className="flex items-center gap-2">
-          {/* View toggle */}
           <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
             <button
               onClick={() => onViewChange('board')}
@@ -609,8 +556,6 @@ function TasksHeader({
 // ══════════════════════════════════════════════════════════════════
 
 const Tasks = () => {
-  const navigate = useNavigate();
-  const { authLoading, session } = useAuth();
   const {
     tasks,
     loading,
@@ -627,14 +572,13 @@ const Tasks = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [createDefaultStatus, setCreateDefaultStatus] = useState<TaskStatus>('todo');
 
-  const routeState = resolveRouteState(authLoading, !!session, error, loading, tasks.length);
+  const routeState = resolveRouteState(error, loading, tasks.length);
 
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) return null;
     return tasks.find(t => t.id === selectedTaskId) ?? null;
   }, [selectedTaskId, tasks]);
 
-  // Close detail if task was removed
   useEffect(() => {
     if (detailOpen && selectedTaskId && !selectedTask) {
       setDetailOpen(false);
@@ -642,12 +586,6 @@ const Tasks = () => {
     }
   }, [detailOpen, selectedTaskId, selectedTask]);
 
-  // Redirect if unauthenticated
-  useEffect(() => {
-    if (routeState === 'unauthenticated') navigate('/auth');
-  }, [routeState, navigate]);
-
-  // Group tasks by status for board view
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, WorkTask[]> = {
       todo: [],
@@ -658,7 +596,6 @@ const Tasks = () => {
     for (const t of tasks) {
       grouped[t.status]?.push(t);
     }
-    // Sort within each column by board_position
     for (const key of BOARD_COLUMNS) {
       grouped[key].sort((a, b) => a.board_position - b.board_position);
     }
@@ -686,15 +623,13 @@ const Tasks = () => {
 
   // ── Terminal route states ──────────────────────────────────────
 
-  if (routeState === 'auth-loading' || routeState === 'loading') {
+  if (routeState === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
-
-  if (routeState === 'unauthenticated') return null;
 
   if (routeState === 'error') {
     return (
@@ -721,25 +656,19 @@ const Tasks = () => {
           </div>
           <h2 className="text-xl font-semibold text-foreground">No tasks yet</h2>
           <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-            Create your first task to get started. Your AI workspace will help you organize,
-            prioritize, and execute.
+            Create your first task to get started. Your AI workspace will help you organize, prioritize, and execute.
           </p>
           <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
             <Plus className="w-4 h-4" />
             Create your first task
           </Button>
         </div>
-        <CreateTaskDialog
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          onCreate={createTask}
-          defaultStatus={createDefaultStatus}
-        />
+        <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
       </div>
     );
   }
 
-  // ── Loaded state ───────────────────────────────────────────────
+  // ── Loaded ─────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -747,7 +676,6 @@ const Tasks = () => {
 
       <div className={cn('mx-auto px-4 py-4', view === 'board' ? 'max-w-7xl' : 'max-w-3xl')}>
         {view === 'board' ? (
-          /* ── Board View ── */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {BOARD_COLUMNS.map(status => (
               <BoardColumn
@@ -761,7 +689,6 @@ const Tasks = () => {
             ))}
           </div>
         ) : (
-          /* ── List View ── */
           <div className="space-y-2">
             {[...tasks]
               .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
@@ -773,20 +700,8 @@ const Tasks = () => {
         )}
       </div>
 
-      <TaskDetailSheet
-        task={selectedTask}
-        open={detailOpen}
-        onClose={handleDetailClose}
-        onUpdate={updateTask}
-        onDelete={deleteTask}
-      />
-
-      <CreateTaskDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreate={createTask}
-        defaultStatus={createDefaultStatus}
-      />
+      <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} />
+      <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
     </div>
   );
 };
