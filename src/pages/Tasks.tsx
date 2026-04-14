@@ -15,7 +15,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -24,15 +30,19 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  LayoutGrid,
+  List,
   CheckCircle2,
   Circle,
   Clock,
   Eye,
-  ListTodo,
+  GripVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// ── Route state machine ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// Route state machine
+// ══════════════════════════════════════════════════════════════════
 
 type RouteState = 'auth-loading' | 'unauthenticated' | 'error' | 'loading' | 'empty' | 'loaded';
 
@@ -51,17 +61,27 @@ function resolveRouteState(
   return 'loaded';
 }
 
-// ── Filter types ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// Display helpers
+// ══════════════════════════════════════════════════════════════════
 
-type TaskFilter = 'all' | 'active' | 'completed';
+type ViewMode = 'board' | 'list';
 
-const FILTER_OPTIONS: { value: TaskFilter; label: string; icon: typeof ListTodo }[] = [
-  { value: 'all', label: 'All Tasks', icon: ListTodo },
-  { value: 'active', label: 'Active', icon: Clock },
-  { value: 'completed', label: 'Completed', icon: CheckCircle2 },
-];
+const BOARD_COLUMNS: TaskStatus[] = ['todo', 'in_progress', 'up_for_review', 'completed'];
 
-// ── Priority display ─────────────────────────────────────────────
+const BOARD_COLUMN_LABELS: Record<TaskStatus, string> = {
+  todo: 'Backlog',
+  in_progress: 'In Progress',
+  up_for_review: 'Review',
+  completed: 'Done',
+};
+
+const BOARD_COLUMN_COLORS: Record<TaskStatus, string> = {
+  todo: 'border-t-muted-foreground/40',
+  in_progress: 'border-t-primary',
+  up_for_review: 'border-t-yellow-500',
+  completed: 'border-t-green-500',
+};
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   low: 'Low',
@@ -78,54 +98,159 @@ const STATUS_ICONS: Record<TaskStatus, typeof Circle> = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// Task List Item
+// Board Card (compact Trello card)
 // ══════════════════════════════════════════════════════════════════
 
-function TaskListItem({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => void }) {
+function BoardCard({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => void }) {
+  const isAI = task.ai_status === 'thinking' || task.ai_status === 'executing';
+
+  return (
+    <button
+      onClick={() => onClick(task)}
+      className="w-full text-left p-3 rounded-lg border border-border/50 bg-card hover:bg-accent/30 hover:shadow-sm transition-all duration-150 group"
+    >
+      <p className="text-sm font-medium text-foreground leading-snug line-clamp-2">
+        {task.title}
+      </p>
+      {task.description && (
+        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{task.description}</p>
+      )}
+      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+        <span
+          className={cn(
+            'inline-block w-2 h-2 rounded-full shrink-0',
+            PRIORITY_COLORS[task.priority],
+          )}
+        />
+        <span className="text-[10px] text-muted-foreground">{PRIORITY_LABELS[task.priority]}</span>
+        {task.assigned_to && (
+          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 ml-auto">
+            {task.assigned_to}
+          </Badge>
+        )}
+        {isAI && (
+          <Sparkles className="w-3 h-3 text-primary shrink-0" />
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Board Column
+// ══════════════════════════════════════════════════════════════════
+
+function BoardColumn({
+  status,
+  tasks,
+  onTaskClick,
+  onMoveTask,
+  onCreateInColumn,
+}: {
+  status: TaskStatus;
+  tasks: WorkTask[];
+  onTaskClick: (t: WorkTask) => void;
+  onMoveTask: (taskId: string, newStatus: TaskStatus) => void;
+  onCreateInColumn: (status: TaskStatus) => void;
+}) {
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const taskId = e.dataTransfer.getData('text/plain');
+    if (taskId) onMoveTask(taskId, status);
+  };
+
+  const handleDragStart = (e: React.DragEvent, taskId: string) => {
+    e.dataTransfer.setData('text/plain', taskId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col rounded-xl border border-border/40 bg-muted/20 min-h-[300px] border-t-2',
+        BOARD_COLUMN_COLORS[status],
+      )}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Column header */}
+      <div className="px-3 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            {BOARD_COLUMN_LABELS[status]}
+          </h3>
+          <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5 min-w-[18px] text-center font-medium">
+            {tasks.length}
+          </span>
+        </div>
+        <button
+          onClick={() => onCreateInColumn(status)}
+          className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Cards */}
+      <div className="flex-1 px-2 pb-2 space-y-2 overflow-y-auto">
+        {tasks.map(task => (
+          <div
+            key={task.id}
+            draggable
+            onDragStart={(e) => handleDragStart(e, task.id)}
+            className="cursor-grab active:cursor-grabbing"
+          >
+            <BoardCard task={task} onClick={onTaskClick} />
+          </div>
+        ))}
+        {tasks.length === 0 && (
+          <div className="flex items-center justify-center h-20 text-xs text-muted-foreground italic">
+            Drop tasks here
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// List Row
+// ══════════════════════════════════════════════════════════════════
+
+function ListRow({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => void }) {
   const StatusIcon = STATUS_ICONS[task.status] ?? Circle;
   const isCompleted = task.status === 'completed';
 
   return (
     <button
       onClick={() => onClick(task)}
-      className="w-full text-left px-4 py-3 rounded-xl border border-border/40 bg-card hover:bg-accent/40 transition-all duration-150 group"
+      className="w-full text-left px-4 py-3 rounded-xl border border-border/40 bg-card hover:bg-accent/30 transition-all duration-150"
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-center gap-3">
         <StatusIcon
           className={cn(
-            'w-4 h-4 mt-0.5 shrink-0',
+            'w-4 h-4 shrink-0',
             isCompleted ? 'text-green-500' : 'text-muted-foreground',
           )}
         />
         <div className="flex-1 min-w-0">
-          <p className={cn(
-            'text-sm font-medium leading-tight',
-            isCompleted && 'line-through text-muted-foreground',
-          )}>
+          <p className={cn('text-sm font-medium', isCompleted && 'line-through text-muted-foreground')}>
             {task.title}
           </p>
-          {task.description && (
-            <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-              {task.description}
-            </p>
-          )}
-          <div className="flex items-center gap-2 mt-2">
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-              {STATUS_LABELS[task.status]}
-            </Badge>
-            <span className={cn('w-1.5 h-1.5 rounded-full', PRIORITY_COLORS[task.priority])} />
-            <span className="text-[10px] text-muted-foreground">
-              {PRIORITY_LABELS[task.priority]}
-            </span>
-            {(task.ai_status === 'thinking' || task.ai_status === 'executing') && (
-              <span className="flex items-center gap-1 text-[10px] text-primary">
-                <Sparkles className="w-3 h-3" />
-                AI working
-              </span>
-            )}
-          </div>
         </div>
-        <span className="text-[10px] text-muted-foreground mt-0.5 shrink-0">
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+          {STATUS_LABELS[task.status]}
+        </Badge>
+        <span className={cn('w-2 h-2 rounded-full shrink-0', PRIORITY_COLORS[task.priority])} />
+        {task.assigned_to && (
+          <span className="text-[10px] text-muted-foreground shrink-0">{task.assigned_to}</span>
+        )}
+        <span className="text-[10px] text-muted-foreground shrink-0">
           {new Date(task.last_activity_at).toLocaleDateString()}
         </span>
       </div>
@@ -141,22 +266,32 @@ function CreateTaskDialog({
   open,
   onClose,
   onCreate,
+  defaultStatus,
 }: {
   open: boolean;
   onClose: () => void;
   onCreate: (data: Partial<WorkTask>) => void;
+  defaultStatus?: TaskStatus;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [assignee, setAssignee] = useState('ai');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    onCreate({ title: title.trim(), description: description || null, priority });
+    onCreate({
+      title: title.trim(),
+      description: description || null,
+      priority,
+      assigned_to: assignee || 'ai',
+      status: defaultStatus || 'todo',
+    });
     setTitle('');
     setDescription('');
     setPriority('medium');
+    setAssignee('ai');
     onClose();
   };
 
@@ -182,24 +317,31 @@ function CreateTaskDialog({
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
-          <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Priority" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="urgent">Urgent</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Priority</label>
+              <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Assignee</label>
+              <Input
+                placeholder="ai"
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+              />
+            </div>
+          </div>
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!title.trim()}>
-              Create
-            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={!title.trim()}>Create</Button>
           </div>
         </form>
       </DialogContent>
@@ -224,18 +366,58 @@ function TaskDetailSheet({
   onUpdate: (id: string, updates: Partial<WorkTask>) => void;
   onDelete: (id: string) => void;
 }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
+
+  // Sync notes draft when task changes
+  useEffect(() => {
+    setNotesDraft(task?.revision_notes || '');
+  }, [task?.id, task?.revision_notes]);
+
   if (!task) return null;
+
+  const handleTitleSave = () => {
+    if (titleDraft.trim() && titleDraft !== task.title) {
+      onUpdate(task.id, { title: titleDraft.trim() });
+    }
+    setEditingTitle(false);
+  };
+
+  const handleNotesSave = () => {
+    if (notesDraft !== (task.revision_notes || '')) {
+      onUpdate(task.id, { revision_notes: notesDraft || null });
+    }
+  };
+
+  const aiLog = task.ai_activity_log || [];
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="text-left">{task.title}</SheetTitle>
+          {editingTitle ? (
+            <Input
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={handleTitleSave}
+              onKeyDown={(e) => e.key === 'Enter' && handleTitleSave()}
+              autoFocus
+              className="text-lg font-semibold"
+            />
+          ) : (
+            <SheetTitle
+              className="text-left cursor-pointer hover:text-primary transition-colors"
+              onClick={() => { setTitleDraft(task.title); setEditingTitle(true); }}
+            >
+              {task.title}
+            </SheetTitle>
+          )}
         </SheetHeader>
 
         <div className="mt-6 space-y-5">
-          {/* Status & Priority */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Status / Priority / Assignee */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Status</label>
               <Select
@@ -265,6 +447,15 @@ function TaskDetailSheet({
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Assignee</label>
+              <Input
+                value={task.assigned_to || ''}
+                onChange={(e) => onUpdate(task.id, { assigned_to: e.target.value || null })}
+                placeholder="ai"
+                className="h-9"
+              />
+            </div>
           </div>
 
           {/* Description */}
@@ -273,27 +464,61 @@ function TaskDetailSheet({
             <Textarea
               value={task.description || ''}
               onChange={(e) => onUpdate(task.id, { description: e.target.value })}
-              placeholder="Add a description..."
+              placeholder="Describe this task..."
               rows={4}
             />
           </div>
 
           <Separator />
 
-          {/* AI Status */}
+          {/* Notes */}
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Notes</label>
+            <Textarea
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              onBlur={handleNotesSave}
+              placeholder="Add working notes, context, or follow-ups..."
+              rows={3}
+            />
+          </div>
+
+          {/* AI section */}
           {task.ai_status !== 'idle' && (
-            <div className="flex items-center gap-2 text-sm text-primary">
+            <div className="flex items-center gap-2 text-sm text-primary bg-primary/5 rounded-lg px-3 py-2">
               <Sparkles className="w-4 h-4" />
-              AI Status: {task.ai_status}
+              <span>AI: {task.ai_status}</span>
             </div>
           )}
 
-          {/* Draft output */}
           {task.draft_output && (
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">AI Draft</label>
-              <div className="p-3 rounded-lg bg-muted/30 border border-border/30 text-sm whitespace-pre-wrap">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border/30 text-sm whitespace-pre-wrap max-h-48 overflow-y-auto">
                 {task.draft_output}
+              </div>
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Activity log */}
+          {aiLog.length > 0 && (
+            <div>
+              <label className="text-xs text-muted-foreground mb-2 block">Activity</label>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {aiLog.map((entry, i) => (
+                  <div key={i} className="flex gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-foreground">{entry.action}</p>
+                      <p className="text-[10px] text-muted-foreground">{entry.detail}</p>
+                      <p className="text-[10px] text-muted-foreground/60">
+                        {entry.actor} · {new Date(entry.timestamp).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -301,7 +526,7 @@ function TaskDetailSheet({
           {/* Metadata */}
           <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
             <div>Type: {task.task_type}</div>
-            <div>Assigned: {task.assigned_to || 'ai'}</div>
+            <div>Intent: {task.intent_type}</div>
             <div>Created: {new Date(task.created_at).toLocaleDateString()}</div>
             {task.completed_at && (
               <div>Completed: {new Date(task.completed_at).toLocaleDateString()}</div>
@@ -313,10 +538,7 @@ function TaskDetailSheet({
           {/* Delete */}
           <Button
             variant="outline"
-            onClick={() => {
-              onDelete(task.id);
-              onClose();
-            }}
+            onClick={() => { onDelete(task.id); onClose(); }}
             className="w-full gap-2 text-destructive hover:text-destructive"
           >
             <Trash2 className="w-4 h-4" />
@@ -325,6 +547,60 @@ function TaskDetailSheet({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Page Header
+// ══════════════════════════════════════════════════════════════════
+
+function TasksHeader({
+  view,
+  onViewChange,
+  onCreateClick,
+}: {
+  view: ViewMode;
+  onViewChange: (v: ViewMode) => void;
+  onCreateClick: () => void;
+}) {
+  return (
+    <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
+      <div className="flex items-center justify-between max-w-7xl mx-auto">
+        <div className="flex items-center gap-3">
+          <Sparkles className="w-5 h-5 text-primary" />
+          <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
+            <button
+              onClick={() => onViewChange('board')}
+              className={cn(
+                'p-1.5 transition-colors',
+                view === 'board' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+              )}
+              title="Board view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onViewChange('list')}
+              className={cn(
+                'p-1.5 transition-colors',
+                view === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+              )}
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+          <Button size="sm" onClick={onCreateClick} className="gap-1.5">
+            <Plus className="w-4 h-4" />
+            New Task
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -345,14 +621,14 @@ const Tasks = () => {
     deleteTask,
   } = useWorkTasks();
 
-  const [filter, setFilter] = useState<TaskFilter>('all');
+  const [view, setView] = useState<ViewMode>('board');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createDefaultStatus, setCreateDefaultStatus] = useState<TaskStatus>('todo');
 
   const routeState = resolveRouteState(authLoading, !!session, error, loading, tasks.length);
 
-  // Derive selected task from live data
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) return null;
     return tasks.find(t => t.id === selectedTaskId) ?? null;
@@ -371,17 +647,23 @@ const Tasks = () => {
     if (routeState === 'unauthenticated') navigate('/auth');
   }, [routeState, navigate]);
 
-  // Filter tasks
-  const filteredTasks = useMemo(() => {
-    switch (filter) {
-      case 'active':
-        return tasks.filter(t => t.status !== 'completed');
-      case 'completed':
-        return tasks.filter(t => t.status === 'completed');
-      default:
-        return tasks;
+  // Group tasks by status for board view
+  const tasksByStatus = useMemo(() => {
+    const grouped: Record<TaskStatus, WorkTask[]> = {
+      todo: [],
+      in_progress: [],
+      up_for_review: [],
+      completed: [],
+    };
+    for (const t of tasks) {
+      grouped[t.status]?.push(t);
     }
-  }, [tasks, filter]);
+    // Sort within each column by board_position
+    for (const key of BOARD_COLUMNS) {
+      grouped[key].sort((a, b) => a.board_position - b.board_position);
+    }
+    return grouped;
+  }, [tasks]);
 
   const handleTaskClick = useCallback((task: WorkTask) => {
     setSelectedTaskId(task.id);
@@ -391,6 +673,15 @@ const Tasks = () => {
   const handleDetailClose = useCallback(() => {
     setDetailOpen(false);
     setTimeout(() => setSelectedTaskId(null), 200);
+  }, []);
+
+  const handleMoveTask = useCallback((taskId: string, newStatus: TaskStatus) => {
+    updateTask(taskId, { status: newStatus });
+  }, [updateTask]);
+
+  const handleCreateInColumn = useCallback((status: TaskStatus) => {
+    setCreateDefaultStatus(status);
+    setCreateOpen(true);
   }, []);
 
   // ── Terminal route states ──────────────────────────────────────
@@ -423,14 +714,15 @@ const Tasks = () => {
   if (routeState === 'empty') {
     return (
       <div className="min-h-screen bg-background">
-        <TasksHeader onCreateClick={() => setCreateOpen(true)} />
+        <TasksHeader view={view} onViewChange={setView} onCreateClick={() => setCreateOpen(true)} />
         <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
             <Sparkles className="w-8 h-8 text-primary" />
           </div>
           <h2 className="text-xl font-semibold text-foreground">No tasks yet</h2>
           <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-            Create your first task to get started. AI can help you break down work, draft content, and manage priorities.
+            Create your first task to get started. Your AI workspace will help you organize,
+            prioritize, and execute.
           </p>
           <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
             <Plus className="w-4 h-4" />
@@ -441,6 +733,7 @@ const Tasks = () => {
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           onCreate={createTask}
+          defaultStatus={createDefaultStatus}
         />
       </div>
     );
@@ -448,51 +741,36 @@ const Tasks = () => {
 
   // ── Loaded state ───────────────────────────────────────────────
 
-  const counts = {
-    all: tasks.length,
-    active: tasks.filter(t => t.status !== 'completed').length,
-    completed: tasks.filter(t => t.status === 'completed').length,
-  };
-
   return (
     <div className="min-h-screen bg-background pb-20">
-      <TasksHeader onCreateClick={() => setCreateOpen(true)} />
+      <TasksHeader view={view} onViewChange={setView} onCreateClick={() => { setCreateDefaultStatus('todo'); setCreateOpen(true); }} />
 
-      <div className="max-w-3xl mx-auto px-4 py-4">
-        {/* Filter bar */}
-        <div className="flex items-center gap-1 mb-4 p-1 bg-muted/50 rounded-lg w-fit">
-          {FILTER_OPTIONS.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              onClick={() => setFilter(value)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors',
-                filter === value
-                  ? 'bg-background text-foreground shadow-sm font-medium'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-              <span className="text-xs ml-0.5 opacity-60">
-                {counts[value]}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Task list */}
-        <div className="space-y-2">
-          {filteredTasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-12 italic">
-              No tasks match this filter.
-            </p>
-          ) : (
-            filteredTasks.map(task => (
-              <TaskListItem key={task.id} task={task} onClick={handleTaskClick} />
-            ))
-          )}
-        </div>
+      <div className={cn('mx-auto px-4 py-4', view === 'board' ? 'max-w-7xl' : 'max-w-3xl')}>
+        {view === 'board' ? (
+          /* ── Board View ── */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {BOARD_COLUMNS.map(status => (
+              <BoardColumn
+                key={status}
+                status={status}
+                tasks={tasksByStatus[status]}
+                onTaskClick={handleTaskClick}
+                onMoveTask={handleMoveTask}
+                onCreateInColumn={handleCreateInColumn}
+              />
+            ))}
+          </div>
+        ) : (
+          /* ── List View ── */
+          <div className="space-y-2">
+            {[...tasks]
+              .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
+              .map(task => (
+                <ListRow key={task.id} task={task} onClick={handleTaskClick} />
+              ))
+            }
+          </div>
+        )}
       </div>
 
       <TaskDetailSheet
@@ -507,28 +785,10 @@ const Tasks = () => {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreate={createTask}
+        defaultStatus={createDefaultStatus}
       />
     </div>
   );
 };
-
-// ── Shared header ────────────────────────────────────────────────
-
-function TasksHeader({ onCreateClick }: { onCreateClick: () => void }) {
-  return (
-    <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
-      <div className="flex items-center justify-between max-w-3xl mx-auto">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
-        </div>
-        <Button size="sm" onClick={onCreateClick} className="gap-1.5">
-          <Plus className="w-4 h-4" />
-          New Task
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export default Tasks;
