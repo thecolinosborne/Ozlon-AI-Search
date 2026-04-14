@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Loader2, AlertCircle, X } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTaskActivityStore, type TaskStep, type ActiveTask } from "@/stores/useTaskActivityStore";
 import {
@@ -65,19 +65,17 @@ const TaskCard = ({ task }: { task: ActiveTask }) => (
   </div>
 );
 
-interface TaskActivityPortalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
+/**
+ * TaskActivityPortal — reads open state directly from the Zustand store.
+ * This is the single source of truth for portal visibility.
+ */
+export const TaskActivityPortal = () => {
+  const { tasks, isPortalOpen, setPortalOpen } = useTaskActivityStore();
 
-export const TaskActivityPortal = ({ open, onOpenChange }: TaskActivityPortalProps) => {
-  const { tasks } = useTaskActivityStore();
-
-  // Show most recent first
   const sortedTasks = [...tasks].reverse();
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={isPortalOpen} onOpenChange={setPortalOpen}>
       <SheetContent side="bottom" className="max-h-[60vh] rounded-t-2xl pb-safe">
         <SheetHeader className="pb-3">
           <SheetTitle className="text-base">Task Activity</SheetTitle>
