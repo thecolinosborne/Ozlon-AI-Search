@@ -1,5 +1,13 @@
 import { create } from 'zustand';
 
+/**
+ * Transient live task activity store.
+ * This is UI-only ephemeral state for showing real-time AI work progress
+ * in the TaskActivityBubble / TaskActivityPortal overlay.
+ *
+ * It is NOT the data model for the /tasks page, which is backed by
+ * the work_tasks table via useWorkTasks hook.
+ */
 const isDev = import.meta.env.DEV;
 
 export interface TaskStep {
