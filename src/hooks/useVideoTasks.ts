@@ -71,24 +71,24 @@ export function useVideoTasks() {
         return;
       }
 
-      const mapped: VideoTaskWithParent[] = (data || []).map((row: any) => ({
+      const mapped: VideoTaskWithParent[] = (data as VideoTaskRow[] || []).map((row) => ({
         id: row.id,
         work_task_id: row.work_task_id,
         user_id: row.user_id,
-        source_type: row.source_type,
+        source_type: row.source_type as VideoTask['source_type'],
         source_content: row.source_content,
         source_asset_url: row.source_asset_url,
-        requested_output: row.requested_output,
+        requested_output: row.requested_output as VideoTask['requested_output'],
         edit_instructions: row.edit_instructions,
-        edit_plan: row.edit_plan as EditPlanAction[],
-        edit_plan_status: row.edit_plan_status,
-        aspect_ratio: row.aspect_ratio,
+        edit_plan: row.edit_plan as unknown as EditPlanAction[],
+        edit_plan_status: row.edit_plan_status as VideoTask['edit_plan_status'],
+        aspect_ratio: row.aspect_ratio as VideoTask['aspect_ratio'],
         target_duration: row.target_duration,
-        render_status: row.render_status,
+        render_status: row.render_status as VideoTask['render_status'],
         render_progress: row.render_progress,
         output_url: row.output_url,
         thumbnail_url: row.thumbnail_url,
-        render_history: row.render_history as any[],
+        render_history: row.render_history as unknown as RenderHistoryEntry[],
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_title: row.work_tasks?.title ?? 'Untitled',
