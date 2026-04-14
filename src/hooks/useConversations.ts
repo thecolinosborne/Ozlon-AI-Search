@@ -157,7 +157,7 @@ export function useConversations() {
 
     // Auto-title: if this is the first user message, update the session title
     if (msg.role === "user") {
-      const existingUserMessages = messages.filter((m) => m.role === "user");
+      const existingUserMessages = messagesRef.current.filter((m) => m.role === "user");
       if (existingUserMessages.length === 0) {
         const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
         await supabase
@@ -174,7 +174,7 @@ export function useConversations() {
           .eq("id", sid);
       }
     }
-  }, [user, messages, ensureSession]);
+  }, [user, ensureSession]);
 
   // Update a message content (for streaming)
   const updateMessageContent = useCallback((id: string, content: string) => {
