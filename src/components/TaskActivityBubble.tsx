@@ -5,7 +5,7 @@ import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 import { TaskActivityPortal } from "./TaskActivityPortal";
 
 export const TaskActivityBubble = () => {
-  const { tasks, isPortalOpen, setPortalOpen, dismissTask } = useTaskActivityStore();
+  const { tasks, setPortalOpen, dismissTask } = useTaskActivityStore();
 
   const activeTasks = tasks.filter((t) => t.status === 'in_progress');
   const recentDone = tasks.filter(
@@ -17,7 +17,7 @@ export const TaskActivityBubble = () => {
 
   const visibleTasks = [...activeTasks, ...recentDone, ...recentError];
 
-  // Auto-dismiss completed tasks after 5s
+  // Auto-dismiss completed tasks after threshold
   useEffect(() => {
     const completedTasks = tasks.filter(
       (t) => (t.status === 'done' || t.status === 'error') && t.completedAt
@@ -82,7 +82,8 @@ export const TaskActivityBubble = () => {
         )}
       </button>
 
-      <TaskActivityPortal open={isPortalOpen} onOpenChange={setPortalOpen} />
+      {/* Portal reads its own open state from the store — single source of truth */}
+      <TaskActivityPortal />
     </>
   );
 };
