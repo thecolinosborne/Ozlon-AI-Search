@@ -61,7 +61,7 @@ async function resolveTeamId(
 }
 
 async function getListId(params?: Record<string, unknown>): Promise<string> {
-  // Priority: explicit param → defaultListId param → DB config → env var
+  // Priority: explicit param → defaultListId param → DB config → env var → auto-discover
   if (params?.listId) return String(params.listId);
   if (params?.defaultListId) return String(params.defaultListId);
   
@@ -80,7 +80,41 @@ async function getListId(params?: Record<string, unknown>): Promise<string> {
     if (data?.default_list_id) return data.default_list_id;
   } catch { /* fall through */ }
   
-  return Deno.env.get('CLICKUP_DEFAULT_LIST_ID') || '';
+  const envList = Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
+  if (envList) return envList;
+
+  // Auto-discover: get first list from first space
+  try {
+    const token = getToken(params?.apiToken as string | undefined);
+    const { teamId } = await resolveTeamId(token, params?.teamId as string | undefined);
+    const spacesRes = await fetch(`${CLICKUP_BASE}/team/${teamId}/space?archived=false`, {
+      headers: { 'Authorization': token },
+    });
+    if (spacesRes.ok) {
+      const spacesData = await spacesRes.json();
+      const spaces = spacesData?.spaces || [];
+      for (const space of spaces) {
+        const listsRes = await fetch(`${CLICKUP_BASE}/space/${space.id}/list`, {
+          headers: { 'Authorization': token },
+        });
+        if (listsRes.ok) {
+          const listsData = await listsRes.json();
+          const lists = listsData?.lists || [];
+          if (lists.length > 0) {
+            // Save for future use
+            const supabase = getSupabase();
+            await supabase.from('clickup_integration_state').upsert({
+              team_id: teamId,
+              default_list_id: lists[0].id,
+            }, { onConflict: 'team_id' });
+            return lists[0].id;
+          }
+        }
+      }
+    }
+  } catch { /* fall through */ }
+
+  return '';
 }
 
 function getSupabase() {

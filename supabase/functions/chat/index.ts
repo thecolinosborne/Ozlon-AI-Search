@@ -752,7 +752,25 @@ async function injectMatonData(
     'google-meet': ['google-calendar'],
   };
 
+  // Services that use their own edge function, not Maton
+  const SELF_MANAGED_SERVICES = new Set(['clickup']);
+
   await Promise.all(detectedApps.map(async (app) => {
+    // Self-managed services bypass Maton connection check
+    if (SELF_MANAGED_SERVICES.has(app)) {
+      const fetcher = SERVICE_FETCHERS[app];
+      if (!fetcher) return;
+      try {
+        const data = await fetcher('', '');
+        sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
+        console.log(`${app} data injected (self-managed)`);
+      } catch (e) {
+        console.error(`Error fetching ${app}:`, e);
+        sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
+      }
+      return;
+    }
+
     let connId = connMap.get(app);
     // Try fallback connections if primary isn't found
     if (!connId && CONNECTION_FALLBACKS[app]) {
@@ -807,7 +825,7 @@ The following is REAL data pulled from the user's connected accounts. Use this d
     }
   }
   if (notConnected.length) {
-    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
+    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Integrations.`;
   }
   return injection;
 }
@@ -3864,8 +3882,8 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'read_sheet_data': 'google-drive',
     'append_sheet_rows': 'google-drive',
     'create_google_presentation': 'google-drive',
-    'create_clickup_task': 'clickup',
-    'list_clickup_tasks': 'clickup',
+    'create_clickup_task': '_always_',
+    'list_clickup_tasks': '_always_',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
     // GHL tools
