@@ -31,6 +31,7 @@ interface SavedConnection {
 type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "expired_no_refresh" | "disconnected" | "unknown";
 
 export default function YouTubeDetail() {
+  const { session, authLoading } = useAuth();
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("youtube");
