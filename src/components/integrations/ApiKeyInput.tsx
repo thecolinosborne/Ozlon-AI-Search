@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Eye, EyeOff, Check, Key, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -6,7 +6,7 @@ interface ApiKeyInputProps {
   label: string;
   placeholder?: string;
   configured: boolean;
-  onSave: (key: string) => void;
+  onSave: (key: string) => void | Promise<void>;
   saving?: boolean;
   maskedHint?: string;
 }
@@ -15,13 +15,15 @@ export const ApiKeyInput = ({ label, placeholder = "Enter API key…", configure
   const [value, setValue] = useState("");
   const [visible, setVisible] = useState(false);
   const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSave = () => {
-    if (value.trim()) {
-      onSave(value.trim());
-      setValue("");
-      setEditing(false);
-    }
+  const handleSave = async () => {
+    const nextValue = (inputRef.current?.value ?? value).trim();
+    if (!nextValue || saving) return;
+
+    await onSave(nextValue);
+    setValue("");
+    setEditing(false);
   };
 
   const showInput = !configured || editing;
@@ -44,6 +46,7 @@ export const ApiKeyInput = ({ label, placeholder = "Enter API key…", configure
             {maskedHint || "••••••••••••"}
           </span>
           <button
+            type="button"
             onClick={() => setEditing(true)}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
           >
@@ -57,9 +60,11 @@ export const ApiKeyInput = ({ label, placeholder = "Enter API key…", configure
         <div className="flex gap-2">
           <div className="relative flex-1">
             <input
+               ref={inputRef}
               type={visible ? "text" : "password"}
               value={value}
               onChange={(e) => setValue(e.target.value)}
+               onInput={(e) => setValue((e.target as HTMLInputElement).value)}
               placeholder={configured ? "Enter new value…" : placeholder}
               className={cn(
                 "w-full px-3 py-2 pr-9 rounded-xl border border-border bg-background text-sm",
@@ -75,18 +80,20 @@ export const ApiKeyInput = ({ label, placeholder = "Enter API key…", configure
             </button>
           </div>
           <button
+             type="button"
             onClick={handleSave}
-            disabled={!value.trim() || saving}
+             disabled={!!saving}
             className={cn(
               "px-4 py-2 rounded-xl text-sm font-medium transition-colors",
               "bg-primary text-primary-foreground hover:bg-primary/90",
-              (!value.trim() || saving) && "opacity-50 cursor-not-allowed"
+               saving && "opacity-50 cursor-not-allowed"
             )}
           >
             {saving ? "Saving…" : "Save"}
           </button>
           {configured && editing && (
             <button
+               type="button"
               onClick={() => { setEditing(false); setValue(""); }}
               className="px-3 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
