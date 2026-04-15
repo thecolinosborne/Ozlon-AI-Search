@@ -1,38 +1,27 @@
 
 
-## Add Webhook Trigger Controls to ClickUp Integration
+## Fix Webhook Registration & Enable Trigger Configuration
 
-### What this does
-Adds a "Webhook & Triggers" section to the ClickUp integration page so you can:
-- Register the ClickUp webhook with one click (tells ClickUp to send comment events to your edge function)
-- See webhook status (registered / not registered)
-- Configure trigger words — defaults are `@ai`, `@pm`, `@wisdom`, and you can add your system name (e.g. `@ozlon`)
-- Toggle auto-reply on/off
-- Set reply mode (brief / standard / detailed)
-
-Once the webhook is registered, typing `@ai` (or any configured trigger) in a ClickUp task comment will trigger the AI to respond in that same thread.
+### Problem
+The ClickUp API returns error `OAUTH_171: "Webhook configuration already exists"` when trying to register a webhook that's already set up. The edge function treats this as a failure, so the UI stays stuck on "Not Registered" even though the webhook is actually active.
 
 ### Changes
 
-**1. `src/pages/integrations/ClickUpDetail.tsx`** — Add webhook config UI section
-- "Register Webhook" button that calls `register_webhook` with the edge function URL as the endpoint
-- Webhook status indicator (green dot = registered)
-- Trigger word chips showing active patterns, with option to add custom ones
-- Toggle for auto-reply enabled/disabled
-- Reply mode selector (brief / standard / detailed)
-- All changes persist via `update_config` action to the database
+**1. `supabase/functions/clickup/index.ts`** — Handle "already exists" gracefully in `register_webhook`
+- Wrap the `clickupCall` in a try/catch
+- If the error contains `OAUTH_171` or "already exists", fetch the existing webhooks via `GET /team/{teamId}/webhook` to get the webhook ID
+- Update `clickup_integration_state` with `webhook_status: 'registered'` either way
+- Return success response in both cases
 
-**2. `supabase/functions/clickup/index.ts`** — Add custom trigger patterns support
-- Currently `TRIGGER_PATTERNS` is hardcoded as `[@ai, @pm, @wisdom]`
-- Update `handleWebhook` to load custom trigger patterns from the `clickup_integration_state` config (new `custom_triggers` column)
-- Fall back to defaults if none configured
+**2. `supabase/functions/clickup/index.ts`** — Also update `get_config` to check existing webhooks
+- When loading config, if `webhook_status` is null/empty but a webhook exists on the ClickUp side, auto-correct the status
 
-**3. Database migration** — Add `custom_triggers` column
-- `ALTER TABLE clickup_integration_state ADD COLUMN custom_triggers text[] DEFAULT '{}'`
-- Add `custom_triggers` to the `update_config` valid columns list
+### No frontend changes needed
+The UI already handles the "registered" state correctly — it shows the trigger word chips, auto-reply toggle, and reply mode selector. The problem is purely that the edge function throws instead of returning success.
 
-### No new pages or routes — this is a new section within the existing ClickUp detail page.
-
-### Technical detail
-The webhook endpoint URL will be: `${VITE_SUPABASE_URL}/functions/v1/clickup` — this is already handled by the edge function's `body.event` detection at line 495.
+### After deploying
+- Re-click "Register Webhook" — it should succeed and reveal the trigger controls
+- Add `@ozlon` as a custom trigger word
+- Toggle auto-reply and reply mode
+- Then you can test from ClickUp by commenting `@ozlon` on a task
 
