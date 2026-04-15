@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { Sparkles, Settings2, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 
 const HiggsFieldDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("higgsfield");
   const settings = integration.settings as { apiKey?: string; appId?: string };
 
@@ -122,6 +122,7 @@ const HiggsFieldDetail = () => {
         configured={!!settings.apiKey}
         onSave={handleSaveApiKey}
         saving={savingApiKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
       />
       <ApiKeyInput
         label="Higgsfield App ID"
@@ -129,6 +130,7 @@ const HiggsFieldDetail = () => {
         configured={!!settings.appId}
         onSave={handleSaveAppId}
         saving={savingAppId}
+        maskedHint={settings.appId ? "••••" + settings.appId.slice(-4) : undefined}
       />
 
       {autoDetecting && (
@@ -160,12 +162,6 @@ const HiggsFieldDetail = () => {
               </button>
             </div>
           </div>
-
-          <SyncControl
-            direction={integration.syncDirection}
-            onDirectionChange={(d) => setSyncDirection("higgsfield", d)}
-            lastSync={integration.lastSync}
-          />
 
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Models</h3>

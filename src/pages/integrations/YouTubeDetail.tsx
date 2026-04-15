@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Youtube, Link as LinkIcon, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,7 @@ interface SyncRun {
 }
 
 export default function YouTubeDetail() {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured, updateSettings } =
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("youtube");
   const settings = integration.settings as { connectionId?: string; channelId?: string };
@@ -328,8 +328,6 @@ export default function YouTubeDetail() {
           </button>
         </div>
       )}
-
-      <SyncControl direction={integration.syncDirection} onDirectionChange={(d) => setSyncDirection("youtube", d)} lastSync={integration.lastSync} />
 
       {/* Manual Sync */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">

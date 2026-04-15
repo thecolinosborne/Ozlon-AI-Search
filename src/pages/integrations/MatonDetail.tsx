@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Zap, ExternalLink } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { IntegrationStatusBadge } from "@/components/integrations/IntegrationStatusBadge";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const MatonDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("maton");
   const settings = integration.settings as { apiKey?: string };
   const [connections, setConnections] = useState<MatonConnection[]>([]);
@@ -99,14 +99,7 @@ const MatonDetail = () => {
         configured={!!settings.apiKey}
         onSave={handleSaveApiKey}
         saving={savingKey}
-      />
-
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("maton", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
       />
 
       {/* Connected Services */}
