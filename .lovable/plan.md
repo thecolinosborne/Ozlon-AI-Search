@@ -1,40 +1,19 @@
 
 
-## Polish Integration Detail Pages
+## Remove "Workspace Inputs" from ClickUp Detail
+
+### Why
+The backend (`resolveTeamId`) auto-discovers the team from the API token, and `getListId` reads `default_list_id` from the `clickup_integration_state` table (set by the Browse Workspace picker). The manual Team ID and Default List ID text inputs serve no purpose — they don't persist to the database and only get passed as request params that the backend ignores when it already has better sources.
 
 ### Changes
 
-**1. ApiKeyInput — show masked value when configured**
+**File: `src/pages/integrations/ClickUpDetail.tsx`**
 
-Update `ApiKeyInput` to accept an optional `currentValue` prop. When `configured` is true and no new value is being entered, display `••••••••••••` with a "Configured" badge (already exists) and show a masked representation. The existing input already shows `••••••••••••` as placeholder — this is fine, but we'll also add an optional `description` prop so each page can show what's stored (e.g. the last 4 chars).
+1. Remove the `teamIdInput` and `defaultListIdInput` state variables
+2. Remove the entire "Workspace Inputs" card (Team ID / Default List ID text inputs)
+3. Simplify `getAuthParams()` to only pass `apiToken` (the backend resolves team/list automatically)
+4. In `handleCreateTestTask`, rely on the backend's `getListId()` DB lookup instead of passing `listId` from local state
+5. When `test_connection` or `connect` returns `team_id`/`list_id`, store them in integration settings for display only — don't use them as required inputs
 
-Add a new optional prop `maskedHint` (e.g. `"••••dk4f"`) so integrations can display a recognizable hint of the stored key.
-
-**2. Remove SyncControl from all integration pages**
-
-Remove all `<SyncControl>` usage from:
-- `ClickUpDetail.tsx` (line 335-341)
-- `GoHighLevelDetail.tsx` (line 192-198)
-- `DescriptDetail.tsx` (line 249-253)
-- `HiggsFieldDetail.tsx` (line ~SyncControl usage)
-- `MatonDetail.tsx` (line ~SyncControl usage)
-- `YouTubeDetail.tsx` (line 332)
-
-Also remove the `setSyncDirection` calls/imports where no longer used. The `SyncControl` component and store fields can remain (no breaking changes) but won't render.
-
-**3. Show stored credentials when connected**
-
-For each integration, when a key is already saved in `settings`, pass `maskedHint` to `ApiKeyInput` showing `"••••" + last4chars` so the user can see something is there.
-
-### Files Changed
-
-| File | Change |
-|---|---|
-| `src/components/integrations/ApiKeyInput.tsx` | Add `maskedHint` prop, display it when configured |
-| `src/pages/integrations/ClickUpDetail.tsx` | Remove SyncControl, pass maskedHint |
-| `src/pages/integrations/GoHighLevelDetail.tsx` | Remove SyncControl, pass maskedHint |
-| `src/pages/integrations/DescriptDetail.tsx` | Remove SyncControl, pass maskedHint |
-| `src/pages/integrations/HiggsFieldDetail.tsx` | Remove SyncControl, pass maskedHint |
-| `src/pages/integrations/MatonDetail.tsx` | Remove SyncControl, pass maskedHint |
-| `src/pages/integrations/YouTubeDetail.tsx` | Remove SyncControl |
+This is a removal-only change. The Browse Workspace picker remains as the proper way to select a default list.
 
