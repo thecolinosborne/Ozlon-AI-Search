@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare } from "lucide-react";
+import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 
@@ -47,6 +47,13 @@ const integrations = [
     description: "Task management with AI-powered project manager replies inside task comments.",
     icon: CheckSquare,
     path: "/integrations/clickup",
+  },
+  {
+    id: "youtube",
+    name: "YouTube",
+    description: "Connect by API key and sync channels/videos into your workspace.",
+    icon: Youtube,
+    path: "/integrations/youtube",
   },
 ];
 
