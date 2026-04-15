@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { Youtube, Link as LinkIcon, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Youtube, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -16,21 +16,35 @@ interface SyncRun {
   error_message: string | null;
 }
 
+interface SavedConnection {
+  id: string;
+  status: string;
+  channelId: string;
+  accountLabel: string;
+  apiKeyMasked: string;
+  apiKeyConfigured: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
 export default function YouTubeDetail() {
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("youtube");
   const settings = integration.settings as { connectionId?: string; channelId?: string };
 
-  const [apiKey, setApiKey] = useState("");
   const [channelId, setChannelId] = useState(settings.channelId || "");
   const [accountLabel, setAccountLabel] = useState("Primary YouTube");
   const [connecting, setConnecting] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [syncingChannels, setSyncingChannels] = useState(false);
   const [syncingVideos, setSyncingVideos] = useState(false);
   const [runs, setRuns] = useState<SyncRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
+  const [loadingConnection, setLoadingConnection] = useState(true);
+
+  // Saved connection state
+  const [savedConn, setSavedConn] = useState<SavedConnection | null>(null);
+  const [savingKey, setSavingKey] = useState(false);
 
   // OAuth state
   const [oauthConnected, setOauthConnected] = useState(false);
@@ -49,6 +63,27 @@ export default function YouTubeDetail() {
     if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
     return data;
   };
+
+  const loadConnection = useCallback(async () => {
+    setLoadingConnection(true);
+    try {
+      const result = await callYouTube("get_connection");
+      const conn = result.connection as SavedConnection | null;
+      if (conn) {
+        setSavedConn(conn);
+        setChannelId(conn.channelId || "");
+        setAccountLabel(conn.accountLabel || "Primary YouTube");
+        updateSettings("youtube", { connectionId: conn.id, channelId: conn.channelId });
+        setStatus("youtube", conn.status === "connected" ? "connected" : "disconnected");
+        setApiKeyConfigured("youtube", conn.apiKeyConfigured);
+      }
+    } catch {
+      // No connection yet
+    } finally {
+      setLoadingConnection(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadRuns = async (connectionId = settings.connectionId) => {
     if (!connectionId) return;
@@ -73,7 +108,7 @@ export default function YouTubeDetail() {
   };
 
   useEffect(() => {
-    loadRuns();
+    loadConnection();
     checkOAuthStatus();
 
     // Handle OAuth callback code in URL
@@ -87,7 +122,13 @@ export default function YouTubeDetail() {
       handleOAuthCallback(code);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.connectionId]);
+  }, []);
+
+  // Load runs when connectionId becomes available
+  useEffect(() => {
+    if (savedConn?.id) loadRuns(savedConn.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedConn?.id]);
 
   const handleOAuthCallback = async (code: string) => {
     try {
@@ -102,19 +143,16 @@ export default function YouTubeDetail() {
     }
   };
 
-  const handleConnect = async () => {
-    if (!apiKey.trim()) {
-      toast.error("YouTube API key is required");
-      return;
-    }
-    setConnecting(true);
+  const handleSaveApiKey = async (apiKey: string) => {
+    setSavingKey(true);
     try {
       const result = await callYouTube("connect", {
-        apiKey: apiKey.trim(),
+        apiKey,
         channelId: channelId.trim() || null,
         accountLabel: accountLabel.trim() || "Primary YouTube",
       });
       const connection = result.connection as { id: string; external_account_id?: string | null };
+      const masked = result.apiKeyMasked as string;
       updateSettings("youtube", {
         connectionId: connection.id,
         channelId: connection.external_account_id || channelId || "",
@@ -122,29 +160,22 @@ export default function YouTubeDetail() {
       setStatus("youtube", "connected");
       setApiKeyConfigured("youtube", true);
       setLastSync("youtube", new Date().toISOString());
-      toast.success("YouTube connected");
+      setSavedConn((prev) => ({
+        ...(prev || { lastSyncAt: null, lastError: null }),
+        id: connection.id,
+        status: "connected",
+        channelId: connection.external_account_id || channelId || "",
+        accountLabel: accountLabel.trim() || "Primary YouTube",
+        apiKeyMasked: masked,
+        apiKeyConfigured: true,
+      }));
+      toast.success("YouTube API key saved and validated");
       await loadRuns(connection.id);
     } catch (e) {
       setStatus("youtube", "error");
       toast.error(`Connect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
-      setConnecting(false);
-    }
-  };
-
-  const handleTestConnection = async () => {
-    if (!apiKey.trim()) {
-      toast.error("Enter API key to test");
-      return;
-    }
-    setTesting(true);
-    try {
-      await callYouTube("test_connection", { apiKey: apiKey.trim() });
-      toast.success("Connection verified");
-    } catch (e) {
-      toast.error(`Connection failed: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setTesting(false);
+      setSavingKey(false);
     }
   };
 
@@ -186,9 +217,8 @@ export default function YouTubeDetail() {
   };
 
   const runSync = async (action: "sync_channels" | "sync_videos") => {
-    const connectionId = (integration.settings as { connectionId?: string }).connectionId;
+    const connectionId = savedConn?.id || settings.connectionId;
     if (!connectionId) { toast.error("Connect YouTube first"); return; }
-    if (!apiKey.trim()) { toast.error("Enter API key to sync"); return; }
     if (!channelId.trim()) { toast.error("Channel ID is required"); return; }
 
     if (action === "sync_channels") setSyncingChannels(true);
@@ -196,7 +226,6 @@ export default function YouTubeDetail() {
     setStatus("youtube", "syncing");
     try {
       const result = await callYouTube(action, {
-        apiKey: apiKey.trim(),
         connectionId,
         channelId: channelId.trim(),
       });
@@ -215,10 +244,11 @@ export default function YouTubeDetail() {
   };
 
   const handleDisconnect = async () => {
-    const connectionId = (integration.settings as { connectionId?: string }).connectionId;
+    const connectionId = savedConn?.id || settings.connectionId;
     if (!connectionId) {
       setStatus("youtube", "disconnected");
       setApiKeyConfigured("youtube", false);
+      setSavedConn(null);
       return;
     }
     try {
@@ -226,11 +256,14 @@ export default function YouTubeDetail() {
       setStatus("youtube", "disconnected");
       setApiKeyConfigured("youtube", false);
       updateSettings("youtube", { connectionId: null });
+      setSavedConn(null);
       toast.success("YouTube disconnected");
     } catch (e) {
       toast.error(`Disconnect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
   };
+
+  const isConnected = savedConn?.status === "connected" || integration.status === "connected";
 
   const inputClass = cn(
     "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
@@ -246,6 +279,21 @@ export default function YouTubeDetail() {
     "border border-border hover:bg-muted/60 text-foreground",
   );
 
+  if (loadingConnection) {
+    return (
+      <IntegrationDetailLayout
+        name="YouTube"
+        description="Connect by API key, sync channels/videos, authorize OAuth for uploads"
+        icon={Youtube}
+        status={integration.status}
+      >
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        </div>
+      </IntegrationDetailLayout>
+    );
+  }
+
   return (
     <IntegrationDetailLayout
       name="YouTube"
@@ -253,7 +301,7 @@ export default function YouTubeDetail() {
       icon={Youtube}
       status={integration.status}
       actions={
-        integration.status === "connected" ? (
+        isConnected ? (
           <button
             onClick={handleDisconnect}
             className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
@@ -263,24 +311,42 @@ export default function YouTubeDetail() {
         ) : undefined
       }
     >
-      {/* Connect Section */}
+      {/* API Key */}
+      <ApiKeyInput
+        label="YouTube Data API Key"
+        placeholder="Enter YouTube API key…"
+        configured={!!savedConn?.apiKeyConfigured}
+        onSave={handleSaveApiKey}
+        saving={savingKey}
+        maskedHint={savedConn?.apiKeyMasked}
+      />
+
+      {/* Channel ID + Label */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <div className="flex items-center gap-2">
-          <LinkIcon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-          <h3 className="text-sm font-medium text-foreground">Connect YouTube</h3>
-        </div>
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="YouTube Data API key" className={inputClass} />
-        <input type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="Channel ID (UC...)" className={inputClass} />
-        <input type="text" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} placeholder="Account label" className={inputClass} />
-        <div className="flex flex-wrap gap-2">
-          <button onClick={handleConnect} disabled={connecting} className={actionBtnClass}>
-            {connecting ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Connect
+        <h3 className="text-sm font-medium text-foreground">Channel Settings</h3>
+        <input
+          type="text"
+          value={channelId}
+          onChange={(e) => setChannelId(e.target.value)}
+          placeholder="Channel ID (UC...)"
+          className={inputClass}
+        />
+        <input
+          type="text"
+          value={accountLabel}
+          onChange={(e) => setAccountLabel(e.target.value)}
+          placeholder="Account label"
+          className={inputClass}
+        />
+        {isConnected && channelId !== (savedConn?.channelId || "") && (
+          <button
+            onClick={() => handleSaveApiKey("")}
+            disabled={connecting}
+            className={secondaryBtnClass}
+          >
+            Update Channel
           </button>
-          <button onClick={handleTestConnection} disabled={testing} className={secondaryBtnClass}>
-            {testing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Test
-          </button>
-        </div>
-        <p className="text-[11px] text-muted-foreground">API key is used for read-only sync. OAuth below is needed for uploads.</p>
+        )}
       </div>
 
       {/* OAuth Section */}
@@ -297,7 +363,7 @@ export default function YouTubeDetail() {
         ) : (
           <>
             <p className="text-xs text-muted-foreground">
-              Authorize with Google to enable video uploads. Requires <code className="text-foreground">YOUTUBE_CLIENT_ID</code> and <code className="text-foreground">YOUTUBE_CLIENT_SECRET</code> configured as backend secrets.
+              Authorize with Google to enable video uploads. Requires OAuth credentials configured as backend secrets.
             </p>
             <button onClick={handleAuthorize} disabled={authorizing} className={actionBtnClass}>
               {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
@@ -330,51 +396,55 @@ export default function YouTubeDetail() {
       )}
 
       {/* Manual Sync */}
-      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <div className="flex items-center gap-2">
-          <Film className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-          <h3 className="text-sm font-medium text-foreground">Manual Sync</h3>
-        </div>
-        {!channelId.trim() && (
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-3.5 h-3.5" />Add a channel ID to run sync.
+      {isConnected && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+          <div className="flex items-center gap-2">
+            <Film className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+            <h3 className="text-sm font-medium text-foreground">Manual Sync</h3>
           </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => runSync("sync_channels")} disabled={syncingChannels} className={actionBtnClass}>
-            {syncingChannels ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Channel
-          </button>
-          <button onClick={() => runSync("sync_videos")} disabled={syncingVideos} className={secondaryBtnClass}>
-            {syncingVideos ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Videos
-          </button>
+          {!channelId.trim() && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5" />Add a channel ID to run sync.
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => runSync("sync_channels")} disabled={syncingChannels} className={actionBtnClass}>
+              {syncingChannels ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Channel
+            </button>
+            <button onClick={() => runSync("sync_videos")} disabled={syncingVideos} className={secondaryBtnClass}>
+              {syncingVideos ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Videos
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Sync Runs */}
-      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">Recent Sync Runs</h3>
-          <button onClick={() => loadRuns()} className={secondaryBtnClass} disabled={loadingRuns}>
-            {loadingRuns ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Refresh
-          </button>
-        </div>
-        <div className="space-y-2">
-          {runs.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No sync runs yet.</p>
-          ) : (
-            runs.map((run) => (
-              <div key={run.id} className="p-3 rounded-xl border border-border/40 bg-background/60 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{run.status}</span>
-                  <span className="text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
+      {isConnected && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-foreground">Recent Sync Runs</h3>
+            <button onClick={() => loadRuns(savedConn?.id)} className={secondaryBtnClass} disabled={loadingRuns}>
+              {loadingRuns ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Refresh
+            </button>
+          </div>
+          <div className="space-y-2">
+            {runs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No sync runs yet.</p>
+            ) : (
+              runs.map((run) => (
+                <div key={run.id} className="p-3 rounded-xl border border-border/40 bg-background/60 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{run.status}</span>
+                    <span className="text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
+                  </div>
+                  <p className="text-muted-foreground mt-1">Records: {run.records_processed}</p>
+                  {run.error_message ? <p className="text-destructive mt-1">{run.error_message}</p> : null}
                 </div>
-                <p className="text-muted-foreground mt-1">Records: {run.records_processed}</p>
-                {run.error_message ? <p className="text-destructive mt-1">{run.error_message}</p> : null}
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </IntegrationDetailLayout>
   );
 }
