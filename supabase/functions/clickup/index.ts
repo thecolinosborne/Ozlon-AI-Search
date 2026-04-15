@@ -32,7 +32,7 @@ When replying in ClickUp:
 // ============================================================================
 
 function getToken(tokenOverride?: string): string {
-  const token = tokenOverride || Deno.env.get('CLICKUP_API_TOKEN');
+  const token = tokenOverride || Deno.env.get('CLICKUP_API_TOKEN') || Deno.env.get('ClickupAPIKey');
   if (!token) throw new Error('CLICKUP_API_TOKEN not configured');
   return token;
 }
@@ -61,8 +61,9 @@ async function resolveTeamId(
 }
 
 async function getListId(params?: Record<string, unknown>): Promise<string> {
-  // Priority: explicit param → DB config → env var
+  // Priority: explicit param → defaultListId param → DB config → env var
   if (params?.listId) return String(params.listId);
+  if (params?.defaultListId) return String(params.defaultListId);
   
   // Check DB for saved default_list_id
   try {
