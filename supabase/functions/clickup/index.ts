@@ -586,9 +586,55 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'list_tasks': {
-        const listId = await getListId(params);
-        if (!listId) throw new Error('listId required');
-        const data = await clickupCall(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
+        // If listId provided, scope to that list; otherwise search whole workspace
+        const listId = params?.listId ? String(params.listId) : await getListId(params).catch(() => '');
+        if (listId) {
+          const qs = new URLSearchParams();
+          if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
+          if (params?.assignees) for (const a of (Array.isArray(params.assignees) ? params.assignees : [params.assignees])) qs.append('assignees[]', a);
+          if (params?.page) qs.set('page', String(params.page));
+          if (params?.subtasks) qs.set('subtasks', 'true');
+          if (params?.include_closed) qs.set('include_closed', 'true');
+          const data = await clickupCall(`/list/${listId}/task?${qs.toString()}`);
+          return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        // Fallback: team-level filtered tasks (workspace-wide)
+        const token = resolvedToken;
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const qs = new URLSearchParams();
+        qs.set('page', String(params?.page || 0));
+        if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
+        if (params?.assignees) for (const a of (Array.isArray(params.assignees) ? params.assignees : [params.assignees])) qs.append('assignees[]', a);
+        if (params?.subtasks) qs.set('subtasks', 'true');
+        if (params?.include_closed) qs.set('include_closed', 'true');
+        if (params?.space_ids) for (const id of (Array.isArray(params.space_ids) ? params.space_ids : [params.space_ids])) qs.append('space_ids[]', id);
+        if (params?.list_ids) for (const id of (Array.isArray(params.list_ids) ? params.list_ids : [params.list_ids])) qs.append('list_ids[]', id);
+        if (params?.folder_ids) for (const id of (Array.isArray(params.folder_ids) ? params.folder_ids : [params.folder_ids])) qs.append('folder_ids[]', id);
+        const data = await clickupCall(`/team/${resolved.teamId}/task?${qs.toString()}`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'search_tasks': {
+        // Workspace-wide task search by name/keyword
+        const token = resolvedToken;
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const qs = new URLSearchParams();
+        qs.set('page', String(params?.page || 0));
+        if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
+        if (params?.assignees) for (const a of (Array.isArray(params.assignees) ? params.assignees : [params.assignees])) qs.append('assignees[]', a);
+        if (params?.subtasks) qs.set('subtasks', 'true');
+        if (params?.include_closed) qs.set('include_closed', 'true');
+        if (params?.space_ids) for (const id of (Array.isArray(params.space_ids) ? params.space_ids : [params.space_ids])) qs.append('space_ids[]', id);
+        if (params?.list_ids) for (const id of (Array.isArray(params.list_ids) ? params.list_ids : [params.list_ids])) qs.append('list_ids[]', id);
+        if (params?.folder_ids) for (const id of (Array.isArray(params.folder_ids) ? params.folder_ids : [params.folder_ids])) qs.append('folder_ids[]', id);
+        if (params?.tags) for (const t of (Array.isArray(params.tags) ? params.tags : [params.tags])) qs.append('tags[]', t);
+        if (params?.due_date_gt) qs.set('due_date_gt', String(params.due_date_gt));
+        if (params?.due_date_lt) qs.set('due_date_lt', String(params.due_date_lt));
+        if (params?.date_created_gt) qs.set('date_created_gt', String(params.date_created_gt));
+        if (params?.date_created_lt) qs.set('date_created_lt', String(params.date_created_lt));
+        if (params?.order_by) qs.set('order_by', String(params.order_by));
+        if (params?.reverse) qs.set('reverse', 'true');
+        const data = await clickupCall(`/team/${resolved.teamId}/task?${qs.toString()}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -599,8 +645,8 @@ serve(async (req) => {
       }
 
       case 'create_task': {
-        const listId = await getListId(params);
-        if (!listId) throw new Error('listId required');
+        const listId = params?.listId ? String(params.listId) : await getListId(params);
+        if (!listId) throw new Error('listId required — specify listId or set a default list');
         const { name, description, assignees, priority, due_date, parent, ...rest } = params || {};
         const taskBody: Record<string, unknown> = { name: name || 'New Task', ...rest };
         if (description) taskBody.description = description;
@@ -608,22 +654,20 @@ serve(async (req) => {
         if (priority) taskBody.priority = priority;
         if (due_date) taskBody.due_date = due_date;
         if (parent) taskBody.parent = parent;
+        // Remove non-ClickUp params
+        delete taskBody.listId;
+        delete taskBody.apiToken;
+        delete taskBody.teamId;
+        delete taskBody.defaultListId;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', taskBody);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
-      case 'update_task': {
-        if (!params?.taskId) throw new Error('taskId required');
-        const { taskId, ...updates } = params;
-        const data = await clickupCall(`/task/${taskId}`, 'PUT', updates);
-        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-
       case 'create_subtask': {
-        const listId = await getListId(params);
+        const listId = params?.listId ? String(params.listId) : await getListId(params);
         if (!listId) throw new Error('listId required');
         if (!params?.parent) throw new Error('parent taskId required');
-        const { name, description, parent, ...rest } = params;
+        const { name, description, parent, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', {
           name: name || 'Subtask',
           description,
