@@ -37,6 +37,38 @@ function getToken(tokenOverride?: string): string {
   return token;
 }
 
+/** Resolve ClickUp token from per-user DB first, then env fallback */
+async function resolveClickUpToken(req: Request, tokenOverride?: string): Promise<string> {
+  if (tokenOverride) return tokenOverride;
+
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'clickup')
+          .eq('status', 'connected')
+          .single();
+        const key = (data?.metadata as Record<string, string>)?.api_key;
+        if (key) return key;
+      }
+    } catch { /* fall through */ }
+  }
+
+  return getToken();
+}
+
 async function resolveTeamId(
   token: string,
   explicitTeamId?: string
@@ -489,8 +521,9 @@ serve(async (req) => {
     const body = await req.json();
     const { action, params } = body;
     const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
+    const resolvedToken = await resolveClickUpToken(req, tokenFromParams);
     const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
-      clickupFetch(path, method, payload, tokenFromParams);
+      clickupFetch(path, method, payload, resolvedToken);
 
     // ClickUp webhooks send the payload directly (no action field)
     if (!action && body.event) {
@@ -505,8 +538,7 @@ serve(async (req) => {
       // ============ CONNECTION ============
       case 'connect':
       case 'test_connection': {
-        const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
-        const token = getToken(tokenFromParams);
+        const token = resolvedToken;
         const listId = typeof params?.defaultListId === 'string'
           ? params.defaultListId
           : Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
@@ -618,7 +650,7 @@ serve(async (req) => {
 
       // ============ WEBHOOK ============
       case 'register_webhook': {
-        const token = getToken();
+        const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const endpoint = params?.endpoint;

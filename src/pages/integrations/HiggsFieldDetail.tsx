@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { Sparkles, Settings2, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
+import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 
 const HiggsFieldDetail = () => {
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
@@ -58,19 +58,31 @@ const HiggsFieldDetail = () => {
     return () => { cancelled = true; };
   }, [settings.apiKey, settings.appId]);
 
-  const handleSaveApiKey = (key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     setSavingApiKey(true);
-    updateSettings("higgsfield", { ...settings, apiKey: key });
-    setApiKeyConfigured("higgsfield", true);
-    toast.success("API Key saved");
-    setSavingApiKey(false);
+    try {
+      await upsertIntegrationConnection("higgsfield", { api_key: key, app_id: settings.appId || '' });
+      updateSettings("higgsfield", { ...settings, apiKey: key });
+      setApiKeyConfigured("higgsfield", true);
+      toast.success("API Key saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingApiKey(false);
+    }
   };
 
-  const handleSaveAppId = (id: string) => {
+  const handleSaveAppId = async (id: string) => {
     setSavingAppId(true);
-    updateSettings("higgsfield", { ...settings, appId: id });
-    toast.success("App ID saved");
-    setSavingAppId(false);
+    try {
+      await upsertIntegrationConnection("higgsfield", { app_id: id, api_key: settings.apiKey || '' });
+      updateSettings("higgsfield", { ...settings, appId: id });
+      toast.success("App ID saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingAppId(false);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -92,9 +104,10 @@ const HiggsFieldDetail = () => {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setStatus("higgsfield", "disconnected");
     setApiKeyConfigured("higgsfield", false);
+    await disconnectIntegration("higgsfield");
     toast.success("Higgsfield AI disconnected");
   };
 

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
 const HEADERS = {
@@ -99,12 +100,18 @@ const ClickUpDetail = () => {
     check();
   }, []);
 
-  const handleSaveApiToken = (token: string) => {
+  const handleSaveApiToken = async (token: string) => {
     setSavingKey(true);
-    updateSettings("clickup", { ...storedSettings, apiToken: token });
-    setApiKeyConfigured("clickup", true);
-    toast.success("API Token saved");
-    setSavingKey(false);
+    try {
+      await upsertIntegrationConnection("clickup", { api_key: token });
+      updateSettings("clickup", { ...storedSettings, apiToken: token });
+      setApiKeyConfigured("clickup", true);
+      toast.success("API Token saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingKey(false);
+    }
   };
 
   const handleConnect = async () => {
@@ -131,10 +138,11 @@ const ClickUpDetail = () => {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setStatus("clickup", "disconnected");
     setApiKeyConfigured("clickup", false);
     updateSettings("clickup", {});
+    await disconnectIntegration("clickup");
     toast.success("ClickUp disconnected");
   };
 

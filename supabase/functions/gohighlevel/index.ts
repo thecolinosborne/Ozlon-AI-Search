@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,6 +7,46 @@ const corsHeaders = {
 };
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
+
+async function resolveGHLCredentials(req: Request, params?: Record<string, unknown>): Promise<{ apiKey: string; locationId: string }> {
+  // 1. Explicit params
+  const paramKey = params?.apiKey as string | undefined;
+  const paramLoc = params?.locationId as string | undefined;
+  if (paramKey && paramLoc) return { apiKey: paramKey, locationId: paramLoc };
+
+  // 2. Per-user lookup
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'gohighlevel')
+          .eq('status', 'connected')
+          .single();
+        const meta = data?.metadata as Record<string, string> | null;
+        if (meta?.api_key) return { apiKey: meta.api_key, locationId: meta.location_id || paramLoc || Deno.env.get('GHL_LOCATION_ID') || '' };
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Env fallback
+  const envKey = paramKey || Deno.env.get('GHL_API_KEY');
+  const envLoc = paramLoc || Deno.env.get('GHL_LOCATION_ID');
+  if (envKey) return { apiKey: envKey, locationId: envLoc || '' };
+
+  throw new Error('GHL_API_KEY is not configured. Enter your API key in the integration settings.');
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -15,13 +56,7 @@ serve(async (req) => {
   try {
     const { action, path, body: reqBody, method: reqMethod, params } = await req.json();
 
-    // Accept API key and location ID from params (UI-provided), fallback to env vars
-    const GHL_API_KEY = params?.apiKey || Deno.env.get('GHL_API_KEY');
-    const GHL_LOCATION_ID = params?.locationId || Deno.env.get('GHL_LOCATION_ID');
-
-    if (!GHL_API_KEY) {
-      throw new Error('GHL_API_KEY is not configured. Enter your API key in the integration settings.');
-    }
+    const { apiKey: GHL_API_KEY, locationId: GHL_LOCATION_ID } = await resolveGHLCredentials(req, params);
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${GHL_API_KEY}`,

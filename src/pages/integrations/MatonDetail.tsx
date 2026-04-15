@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Zap, ExternalLink } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { IntegrationStatusBadge } from "@/components/integrations/IntegrationStatusBadge";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { fetchMatonConnections, formatAppName, type MatonConnection } from "@/services/matonService";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 
 const MatonDetail = () => {
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
@@ -38,12 +38,18 @@ const MatonDetail = () => {
     }
   };
 
-  const handleSaveApiKey = (key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     setSavingKey(true);
-    updateSettings("maton", { ...settings, apiKey: key });
-    setApiKeyConfigured("maton", true);
-    toast.success("API Key saved");
-    setSavingKey(false);
+    try {
+      await upsertIntegrationConnection("maton", { api_key: key });
+      updateSettings("maton", { ...settings, apiKey: key });
+      setApiKeyConfigured("maton", true);
+      toast.success("API Key saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingKey(false);
+    }
   };
 
   const handleSync = async () => {
@@ -59,10 +65,11 @@ const MatonDetail = () => {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setStatus("maton", "disconnected");
     setApiKeyConfigured("maton", false);
     setConnections([]);
+    await disconnectIntegration("maton");
     toast.success("Maton disconnected");
   };
 

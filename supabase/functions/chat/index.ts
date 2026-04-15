@@ -836,8 +836,8 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
-async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?: string): Promise<unknown> {
+  const GHL_API_KEY = ghlApiKey || Deno.env.get('GHL_API_KEY');
   if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     method,
@@ -4092,9 +4092,8 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-  const hasGHL = !!GHL_API_KEY;
+function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): ToolDef[] {
+  const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
@@ -4742,7 +4741,53 @@ serve(async (req) => {
     }
 
     // Get Maton connections for data injection AND tool availability
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
+    // Per-user credential resolution: look up from integration_connections first
+    let MATON_API_KEY: string | undefined;
+    let GHL_API_KEY_RESOLVED: string | undefined;
+    let GHL_LOCATION_ID_RESOLVED: string | undefined;
+
+    // Resolve user ID early for credential lookup
+    const authHeaderForCreds = req.headers.get('Authorization');
+    let credUserId: string | null = null;
+    if (authHeaderForCreds) {
+      try {
+        const { createClient: cc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const anonK = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const uc = cc(Deno.env.get('SUPABASE_URL')!, anonK, { global: { headers: { Authorization: authHeaderForCreds } } });
+        const { data: { user: credUser } } = await uc.auth.getUser();
+        credUserId = credUser?.id || null;
+      } catch { /* no auth */ }
+    }
+
+    if (credUserId) {
+      try {
+        const { createClient: cc2 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const srvKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const admin = cc2(Deno.env.get('SUPABASE_URL')!, srvKey);
+        const { data: conns } = await admin
+          .from('integration_connections')
+          .select('provider, metadata')
+          .eq('user_id', credUserId)
+          .eq('status', 'connected')
+          .in('provider', ['maton', 'gohighlevel']);
+        if (conns) {
+          for (const c of conns) {
+            const meta = c.metadata as Record<string, string> | null;
+            if (c.provider === 'maton' && meta?.api_key) MATON_API_KEY = meta.api_key;
+            if (c.provider === 'gohighlevel' && meta?.api_key) {
+              GHL_API_KEY_RESOLVED = meta.api_key;
+              GHL_LOCATION_ID_RESOLVED = meta.location_id;
+            }
+          }
+        }
+      } catch (e) { console.error('Per-user credential lookup failed:', e); }
+    }
+
+    // Fallback to env vars if no per-user credentials found
+    if (!MATON_API_KEY) MATON_API_KEY = Deno.env.get('MATON_API_KEY') || undefined;
+    if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
+    if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
+
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
     let aliasMap: AliasEntry[] = [];
@@ -4760,7 +4805,7 @@ serve(async (req) => {
         console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
 
         // Determine available tools based on active connections
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
 
         // Add connected services info to system prompt with account details
@@ -4844,8 +4889,8 @@ BEHAVIOR:
     }
 
     // GoHighLevel data injection (separate from Maton - uses its own API key)
-    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-    if (GHL_API_KEY) {
+    if (GHL_API_KEY_RESOLVED) {
+      // Check if user is asking about GHL
       // Check if user is asking about GHL
       const ghlDetected = detectServiceIntents(messages).includes('gohighlevel');
       if (ghlDetected) {
@@ -4867,7 +4912,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // If no Maton tools were added, ensure GHL tools are still available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
       }
     }
 
