@@ -96,10 +96,10 @@ const MatonDetail = () => {
       <ApiKeyInput
         label="Maton API Key"
         placeholder="Enter your Maton API key…"
-        configured={!!settings.apiKey}
+        configured={!!settings.apiKey || integration.status === "connected"}
         onSave={handleSaveApiKey}
         saving={savingKey}
-        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
 
       {/* Connected Services */}

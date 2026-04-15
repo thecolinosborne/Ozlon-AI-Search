@@ -119,18 +119,18 @@ const HiggsFieldDetail = () => {
       <ApiKeyInput
         label="Higgsfield API Key"
         placeholder="Enter your Higgsfield API key…"
-        configured={!!settings.apiKey}
+        configured={!!settings.apiKey || integration.status === "connected"}
         onSave={handleSaveApiKey}
         saving={savingApiKey}
-        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
       <ApiKeyInput
         label="Higgsfield App ID"
         placeholder="Enter your App ID…"
-        configured={!!settings.appId}
+        configured={!!settings.appId || integration.status === "connected"}
         onSave={handleSaveAppId}
         saving={savingAppId}
-        maskedHint={settings.appId ? "••••" + settings.appId.slice(-4) : undefined}
+        maskedHint={settings.appId ? "••••" + settings.appId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
 
       {autoDetecting && (

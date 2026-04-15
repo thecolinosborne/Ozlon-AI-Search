@@ -327,10 +327,10 @@ const ClickUpDetail = () => {
       <ApiKeyInput
         label="ClickUp API Token"
         placeholder="pk_..."
-        configured={!!storedSettings.apiToken}
+        configured={!!storedSettings.apiToken || isConnected}
         onSave={handleSaveApiToken}
         saving={savingKey}
-        maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : undefined}
+        maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : isConnected ? "•••••••• (server)" : undefined}
       />
 
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
