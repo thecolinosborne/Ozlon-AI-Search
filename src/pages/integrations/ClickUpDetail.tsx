@@ -149,7 +149,7 @@ const ClickUpDetail = () => {
   const handleSync = async () => {
     setStatus("clickup", "syncing");
     try {
-      const tasks = await callClickUp("list_tasks");
+      const tasks = await callClickUp("list_tasks", getAuthParams());
       setTaskCount(tasks.tasks?.length || 0);
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
@@ -162,7 +162,7 @@ const ClickUpDetail = () => {
 
   const handleFetchTasks = async () => {
     try {
-      const data = await callClickUp("list_tasks");
+      const data = await callClickUp("list_tasks", getAuthParams());
       setTaskCount(data.tasks?.length || 0);
       toast.success(`Found ${data.tasks?.length || 0} tasks`);
     } catch (err) {
@@ -173,6 +173,7 @@ const ClickUpDetail = () => {
   const handleCreateTestTask = async () => {
     try {
       await callClickUp("create_task", {
+        ...getAuthParams(),
         name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
         description: "This is a test task created by the AI Project Manager integration.",
       });
@@ -186,7 +187,7 @@ const ClickUpDetail = () => {
   const fetchSpaces = async () => {
     setLoadingSpaces(true);
     try {
-      const data = await callClickUp("list_spaces");
+      const data = await callClickUp("list_spaces", getAuthParams());
       setSpaces((data.spaces || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -203,11 +204,11 @@ const ClickUpDetail = () => {
     setLists([]);
     setLoadingFolders(true);
     try {
-      const data = await callClickUp("list_folders", { spaceId });
+      const data = await callClickUp("list_folders", { ...getAuthParams(), spaceId });
       const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
       setFolders(f);
       // Also fetch folderless lists
-      const folderless = await callClickUp("list_lists", { spaceId });
+      const folderless = await callClickUp("list_lists", { ...getAuthParams(), spaceId });
       const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
       if (fl.length > 0 && f.length === 0) {
         // Only folderless lists exist — show them directly
@@ -233,7 +234,7 @@ const ClickUpDetail = () => {
       // Re-fetch folderless lists
       setLoadingLists(true);
       try {
-        const data = await callClickUp("list_lists", { spaceId: selectedSpace });
+        const data = await callClickUp("list_lists", { ...getAuthParams(), spaceId: selectedSpace });
         setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
       } catch (err) {
         toast.error((err as Error).message);
@@ -244,7 +245,7 @@ const ClickUpDetail = () => {
     }
     setLoadingLists(true);
     try {
-      const data = await callClickUp("list_lists", { folderId });
+      const data = await callClickUp("list_lists", { ...getAuthParams(), folderId });
       setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -256,7 +257,7 @@ const ClickUpDetail = () => {
   const handleListSelect = async (listId: string) => {
     setSelectedList(listId);
     try {
-      await callClickUp("update_config", { default_list_id: listId });
+      await callClickUp("update_config", { ...getAuthParams(), default_list_id: listId });
       setConfig((c) => ({ ...c }));
       toast.success("Default list updated");
     } catch (err) {
@@ -267,7 +268,7 @@ const ClickUpDetail = () => {
   const handleRegisterWebhook = async () => {
     try {
       const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-      await callClickUp("register_webhook", { endpoint: webhookUrl });
+      await callClickUp("register_webhook", { ...getAuthParams(), endpoint: webhookUrl });
       setConfig((c) => ({ ...c, webhook_status: "registered" }));
       toast.success("Webhook registered");
     } catch (err) {
@@ -277,7 +278,7 @@ const ClickUpDetail = () => {
 
   const updateConfigField = async (field: string, value: unknown) => {
     try {
-      const updated = await callClickUp("update_config", { [field]: value });
+      const updated = await callClickUp("update_config", { ...getAuthParams(), [field]: value });
       setConfig((c) => ({ ...c, ...updated }));
     } catch (err) {
       toast.error((err as Error).message);

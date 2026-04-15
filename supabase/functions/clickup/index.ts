@@ -195,7 +195,7 @@ async function fetchTaskContext(taskId: string) {
   const task = await clickupFetch(`/task/${taskId}`);
   let comments: Array<{ comment_text?: string; user?: { username?: string }; date?: string }> = [];
   try {
-    const commentsRes = await clickupFetch(`/task/${taskId}/comment`);
+    const commentsRes = await clickupFetch(`/task/${taskId}/comment`, 'GET', undefined, tokenOverride);
     comments = (commentsRes.comments || []).slice(-10);
   } catch { /* comments fetch optional */ }
 
@@ -450,6 +450,9 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const { action, params } = body;
+    const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
+    const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
+      clickupFetch(path, method, payload, tokenFromParams);
 
     // ClickUp webhooks send the payload directly (no action field)
     if (!action && body.event) {
@@ -515,13 +518,13 @@ serve(async (req) => {
       case 'list_tasks': {
         const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
-        const data = await clickupFetch(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
+        const data = await clickupCall(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_task': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await clickupFetch(`/task/${params.taskId}`);
+        const data = await clickupCall(`/task/${params.taskId}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -535,14 +538,14 @@ serve(async (req) => {
         if (priority) taskBody.priority = priority;
         if (due_date) taskBody.due_date = due_date;
         if (parent) taskBody.parent = parent;
-        const data = await clickupFetch(`/list/${listId}/task`, 'POST', taskBody);
+        const data = await clickupCall(`/list/${listId}/task`, 'POST', taskBody);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'update_task': {
         if (!params?.taskId) throw new Error('taskId required');
         const { taskId, ...updates } = params;
-        const data = await clickupFetch(`/task/${taskId}`, 'PUT', updates);
+        const data = await clickupCall(`/task/${taskId}`, 'PUT', updates);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -551,7 +554,7 @@ serve(async (req) => {
         if (!listId) throw new Error('listId required');
         if (!params?.parent) throw new Error('parent taskId required');
         const { name, description, parent, ...rest } = params;
-        const data = await clickupFetch(`/list/${listId}/task`, 'POST', {
+        const data = await clickupCall(`/list/${listId}/task`, 'POST', {
           name: name || 'Subtask',
           description,
           parent,
@@ -563,13 +566,15 @@ serve(async (req) => {
       // ============ COMMENTS ============
       case 'create_comment': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await postComment(params.taskId, params.comment_text || params.text || '');
+        const data = await clickupCall(`/task/${params.taskId}/comment`, 'POST', {
+          comment_text: params.comment_text || params.text || '',
+        });
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_comments': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await clickupFetch(`/task/${params.taskId}/comment`);
+        const data = await clickupCall(`/task/${params.taskId}/comment`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -581,7 +586,7 @@ serve(async (req) => {
         const endpoint = params?.endpoint;
         if (!endpoint) throw new Error('endpoint URL required');
 
-        const data = await clickupFetch(`/team/${teamId}/webhook`, 'POST', {
+        const data = await clickupCall(`/team/${teamId}/webhook`, 'POST', {
           endpoint,
           events: ['taskCommentPosted'],
         });
@@ -629,7 +634,7 @@ serve(async (req) => {
       // ============ PM ACTIONS ============
       case 'get_task_context': {
         if (!params?.taskId) throw new Error('taskId required');
-        const ctx = await fetchTaskContext(params.taskId);
+        const ctx = await fetchTaskContext(params.taskId, tokenFromParams);
         return new Response(JSON.stringify(ctx), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -640,7 +645,7 @@ serve(async (req) => {
       case 'generate_project_update':
       case 'create_execution_plan': {
         if (!params?.taskId) throw new Error('taskId required');
-        const ctx = await fetchTaskContext(params.taskId);
+        const ctx = await fetchTaskContext(params.taskId, tokenFromParams);
         const intentMap: Record<string, string> = {
           analyze_task: 'summarize',
           suggest_next_steps: 'next_steps',
@@ -668,19 +673,19 @@ serve(async (req) => {
 
       case 'list_folders': {
         if (!params?.spaceId) throw new Error('spaceId required');
-        const data = await clickupFetch(`/space/${params.spaceId}/folder?archived=false`);
+        const data = await clickupCall(`/space/${params.spaceId}/folder?archived=false`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_lists': {
         // Lists in a folder
         if (params?.folderId) {
-          const data = await clickupFetch(`/folder/${params.folderId}/list?archived=false`);
+          const data = await clickupCall(`/folder/${params.folderId}/list?archived=false`);
           return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         // Folderless lists in a space
         if (params?.spaceId) {
-          const data = await clickupFetch(`/space/${params.spaceId}/list?archived=false`);
+          const data = await clickupCall(`/space/${params.spaceId}/list?archived=false`);
           return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         throw new Error('folderId or spaceId required');
