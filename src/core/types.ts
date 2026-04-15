@@ -140,12 +140,30 @@ export interface OrchestratorRequest {
   priority?: "low" | "normal" | "high" | "critical";
 }
 
+export type DecisionAction = "answer" | "clarify" | "run_tools";
+
+export interface IntentClassification {
+  intent: string;
+  confidence: number;
+  suggestedAgents: string[];
+  missingContext?: string[];
+}
+
+export interface OrchestratorDecision {
+  action: DecisionAction;
+  confidence: number;
+  reason: string;
+  missingContext?: string[];
+}
+
 export interface OrchestratorResponse {
   requestId: string;
   success: boolean;
   responses: AgentOutput[];
   aggregatedData?: unknown;
   executionTime: number;
+  decision?: OrchestratorDecision;
+  classification?: IntentClassification;
 }
 
 // ============================================

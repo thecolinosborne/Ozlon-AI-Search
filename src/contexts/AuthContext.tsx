@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ONBOARDED_KEY);
   }, []);
 
-  // Load user profile from Supabase
+  // Load user profile from backend
   const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId, "isNewSignup:", isNewSignup);
     try {
