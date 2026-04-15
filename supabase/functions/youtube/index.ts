@@ -54,7 +54,7 @@ function maskKey(apiKey: string): string {
   return `***${tail}`;
 }
 
-async function getStoredApiKey(adminClient: ReturnType<typeof createClient>, connectionId: string, userId: string): Promise<string> {
+async function getStoredApiKey(adminClient: any, connectionId: string, userId: string): Promise<string> {
   const { data } = await adminClient
     .from("integration_connections")
     .select("metadata")
@@ -71,7 +71,7 @@ async function getStoredApiKey(adminClient: ReturnType<typeof createClient>, con
 
 // Helper: refresh OAuth token if expired, returns { accessToken, refreshed }
 async function refreshOAuthIfNeeded(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   userId: string,
   meta: AnyJson,
 ): Promise<{ accessToken: string; refreshed: boolean }> {

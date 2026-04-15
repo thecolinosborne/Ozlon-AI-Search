@@ -575,7 +575,8 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseUrl || !serviceRoleKey) return null;
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const { createClient: cc1 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+  const adminClient = cc1(supabaseUrl, serviceRoleKey);
 
   const { data: conn } = await adminClient
     .from('integration_connections')
@@ -620,7 +621,7 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   if (videos?.length) {
     result += 'Recent uploads:\n';
     result += videos
-      .map((v) => `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}`)
+      .map((v: any) => `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}`)
       .join('\n');
   }
 
@@ -633,7 +634,8 @@ async function fetchClickUpLocalData(userId: string): Promise<string | null> {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseUrl || !serviceRoleKey) return null;
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const { createClient: cc2 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+  const adminClient = cc2(supabaseUrl, serviceRoleKey);
   const { data: config, error } = await adminClient
     .from('clickup_integration_state')
     .select('team_id, default_list_id, webhook_status, last_webhook_event_at, last_successful_ai_reply_at, updated_at')
@@ -3056,7 +3058,7 @@ async function executeToolCall(
       case 'get_clickup_task': {
         try {
           const res = await callClickUpEdge('get_task', { taskId: args.task_id });
-          return { success: true, result: res };
+          return { success: true, result: JSON.stringify(res) };
         } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
       case 'update_clickup_task': {
@@ -3066,7 +3068,7 @@ async function executeToolCall(
           if (args.description) params.description = args.description;
           if (args.priority) params.priority = args.priority;
           const res = await callClickUpEdge('update_task', params);
-          return { success: true, result: res };
+          return { success: true, result: JSON.stringify(res) };
         } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
       case 'delete_clickup_task': {
@@ -3104,7 +3106,7 @@ async function executeToolCall(
       case 'create_clickup_comment': {
         try {
           const res = await callClickUpEdge('create_comment', { taskId: args.task_id, comment_text: args.comment_text });
-          return { success: true, result: res };
+          return { success: true, result: JSON.stringify(res) };
         } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
       case 'list_clickup_comments': {
@@ -5002,8 +5004,8 @@ BEHAVIOR:
           MATON_API_KEY,
           connMap,
           aliasMap,
-          authenticatedUserId,
-          integrationSourceMode,
+          credUserId,
+          'auto',
         );
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
