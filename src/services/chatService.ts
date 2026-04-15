@@ -151,7 +151,7 @@ export async function streamChat({
   try {
     // Use the user's session JWT so edge functions can identify the caller.
     // Falls back to the anon key for unauthenticated / guest flows.
-    // Timeout getSession to prevent hanging when Supabase is slow/unreachable.
+    // Timeout getSession to prevent hanging when backend is slow/unreachable.
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     let token = anonKey;
     try {
