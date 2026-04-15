@@ -112,6 +112,12 @@ export default function YouTubeDetail() {
   }, []);
 
   useEffect(() => {
+    // Don't attempt to load until auth is resolved and we have a session
+    if (authLoading || !session) {
+      setLoadingConnection(false);
+      return;
+    }
+
     loadConnection();
 
     // Handle OAuth callback code in URL
@@ -125,7 +131,7 @@ export default function YouTubeDetail() {
       handleOAuthCallback(code);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, session]);
 
   // Load runs when connectionId becomes available
   useEffect(() => {
