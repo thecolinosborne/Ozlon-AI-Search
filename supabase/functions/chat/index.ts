@@ -1267,6 +1267,134 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_task',
+      description: 'Get full details of a ClickUp task by ID.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_task',
+      description: 'Update an existing ClickUp task (name, description, priority).',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, name: { type: 'string', description: 'New name (optional)' }, description: { type: 'string', description: 'New description (optional)' }, priority: { type: 'number', description: '1=Urgent 2=High 3=Normal 4=Low (optional)' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_task',
+      description: 'Delete a ClickUp task permanently.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_task_status',
+      description: 'Change the status of a ClickUp task (e.g. "open", "in progress", "complete").',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, status: { type: 'string', description: 'New status value' } }, required: ['task_id', 'status'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_due_date',
+      description: 'Set or clear a due date on a ClickUp task. Pass Unix timestamp in ms.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, due_date: { type: 'number', description: 'Unix timestamp in ms, or null to clear' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_assignees',
+      description: 'Add or remove assignees on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, add: { type: 'array', items: { type: 'number' }, description: 'User IDs to add' }, rem: { type: 'array', items: { type: 'number' }, description: 'User IDs to remove' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_subtask',
+      description: 'Create a subtask under a parent ClickUp task.',
+      parameters: { type: 'object', properties: { parent_id: { type: 'string', description: 'Parent task ID' }, name: { type: 'string', description: 'Subtask name' }, description: { type: 'string', description: 'Subtask description (optional)' } }, required: ['parent_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_comment',
+      description: 'Add a comment to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, comment_text: { type: 'string', description: 'Comment body text' } }, required: ['task_id', 'comment_text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_comments',
+      description: 'List comments on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_comment',
+      description: 'Edit an existing comment in ClickUp.',
+      parameters: { type: 'object', properties: { comment_id: { type: 'string', description: 'Comment ID' }, comment_text: { type: 'string', description: 'Updated text' } }, required: ['comment_id', 'comment_text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_comment',
+      description: 'Delete a comment from ClickUp.',
+      parameters: { type: 'object', properties: { comment_id: { type: 'string', description: 'Comment ID' } }, required: ['comment_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_clickup_tag',
+      description: 'Add a tag to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, tag: { type: 'string', description: 'Tag name' } }, required: ['task_id', 'tag'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_clickup_tag',
+      description: 'Remove a tag from a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, tag: { type: 'string', description: 'Tag name' } }, required: ['task_id', 'tag'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_checklist',
+      description: 'Add a checklist to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, name: { type: 'string', description: 'Checklist name' } }, required: ['task_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_checklist_item',
+      description: 'Add an item to an existing ClickUp checklist.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, name: { type: 'string', description: 'Item name' } }, required: ['checklist_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_checklist_item',
+      description: 'Toggle resolved or rename a checklist item.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' }, name: { type: 'string', description: 'New name (optional)' }, resolved: { type: 'boolean', description: 'Mark resolved or unresolved (optional)' } }, required: ['checklist_id', 'checklist_item_id'] },
+    },
+  },
   // Trello actions
   {
     type: 'function',
@@ -2809,6 +2937,114 @@ async function executeToolCall(
         }
       }
 
+      case 'get_clickup_task': {
+        try {
+          const res = await callClickUpEdge('get_task', { taskId: args.task_id });
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_task': {
+        try {
+          const params: Record<string, unknown> = { taskId: args.task_id };
+          if (args.name) params.name = args.name;
+          if (args.description) params.description = args.description;
+          if (args.priority) params.priority = args.priority;
+          const res = await callClickUpEdge('update_task', params);
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_task': {
+        try {
+          await callClickUpEdge('delete_task', { taskId: args.task_id });
+          return { success: true, result: `Task ${args.task_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_task_status': {
+        try {
+          await callClickUpEdge('set_task_status', { taskId: args.task_id, status: args.status });
+          return { success: true, result: `Task ${args.task_id} status set to "${args.status}".` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_due_date': {
+        try {
+          await callClickUpEdge('set_due_date', { taskId: args.task_id, due_date: args.due_date ?? null });
+          return { success: true, result: `Due date ${args.due_date ? 'set' : 'cleared'} on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_assignees': {
+        try {
+          await callClickUpEdge('set_assignees', { taskId: args.task_id, add: args.add || [], rem: args.rem || [] });
+          return { success: true, result: `Assignees updated on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_subtask': {
+        try {
+          const params: Record<string, unknown> = { parentId: args.parent_id, name: args.name };
+          if (args.description) params.description = args.description;
+          const res = await callClickUpEdge('create_subtask', params) as { id?: string; name?: string; url?: string };
+          return { success: true, result: `Subtask created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_comment': {
+        try {
+          const res = await callClickUpEdge('create_comment', { taskId: args.task_id, comment_text: args.comment_text });
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_comments': {
+        try {
+          const res = await callClickUpEdge('list_comments', { taskId: args.task_id }) as { comments?: { id: string; comment_text?: string; user?: { username?: string } }[] };
+          const comments = res.comments || [];
+          if (!comments.length) return { success: true, result: 'No comments on this task.' };
+          return { success: true, result: `${comments.length} comment(s):\n${comments.map((c: { id: string; comment_text?: string; user?: { username?: string } }) => `- [${c.user?.username || '?'}]: ${(c.comment_text || '').substring(0, 200)} (ID: ${c.id})`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_comment': {
+        try {
+          await callClickUpEdge('update_comment', { commentId: args.comment_id, comment_text: args.comment_text });
+          return { success: true, result: `Comment ${args.comment_id} updated.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_comment': {
+        try {
+          await callClickUpEdge('delete_comment', { commentId: args.comment_id });
+          return { success: true, result: `Comment ${args.comment_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'add_clickup_tag': {
+        try {
+          await callClickUpEdge('add_tag', { taskId: args.task_id, tag: args.tag });
+          return { success: true, result: `Tag "${args.tag}" added to task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'remove_clickup_tag': {
+        try {
+          await callClickUpEdge('remove_tag', { taskId: args.task_id, tag: args.tag });
+          return { success: true, result: `Tag "${args.tag}" removed from task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_checklist': {
+        try {
+          const res = await callClickUpEdge('create_checklist', { taskId: args.task_id, name: args.name }) as { checklist?: { id?: string } };
+          return { success: true, result: `Checklist "${args.name}" created (ID: ${res.checklist?.id || '?'}).` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_checklist_item': {
+        try {
+          await callClickUpEdge('create_checklist_item', { checklistId: args.checklist_id, name: args.name });
+          return { success: true, result: `Checklist item "${args.name}" added.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_checklist_item': {
+        try {
+          const params: Record<string, unknown> = { checklistId: args.checklist_id, itemId: args.checklist_item_id };
+          if (args.name) params.name = args.name;
+          if (args.resolved !== undefined) params.resolved = args.resolved;
+          await callClickUpEdge('update_checklist_item', params);
+          return { success: true, result: `Checklist item updated.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+
       // ============ Tier 3: GHL Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
       case 'ghl_list_social_accounts': {
         const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
@@ -3884,6 +4120,22 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'create_google_presentation': 'google-drive',
     'create_clickup_task': '_always_',
     'list_clickup_tasks': '_always_',
+    'get_clickup_task': '_always_',
+    'update_clickup_task': '_always_',
+    'delete_clickup_task': '_always_',
+    'set_clickup_task_status': '_always_',
+    'set_clickup_due_date': '_always_',
+    'set_clickup_assignees': '_always_',
+    'create_clickup_subtask': '_always_',
+    'create_clickup_comment': '_always_',
+    'list_clickup_comments': '_always_',
+    'update_clickup_comment': '_always_',
+    'delete_clickup_comment': '_always_',
+    'add_clickup_tag': '_always_',
+    'remove_clickup_tag': '_always_',
+    'create_clickup_checklist': '_always_',
+    'create_clickup_checklist_item': '_always_',
+    'update_clickup_checklist_item': '_always_',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
     // GHL tools
