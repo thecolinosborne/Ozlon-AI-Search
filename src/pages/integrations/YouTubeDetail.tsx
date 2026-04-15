@@ -187,10 +187,12 @@ export default function YouTubeDetail() {
       hasLoadedOnce.current = true;
       toast.success("YouTube API key saved and validated");
       await loadRuns(connection.id);
+      return true;
     } catch (e) {
       setStatus("youtube", "error");
       console.error("YouTube connect failed", e);
       toast.error(`Connect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+      return false;
     } finally {
       setSavingKey(false);
     }
