@@ -20,11 +20,16 @@ export default function YouTubeDetail() {
   const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("youtube");
-  const settings = integration.settings as { connectionId?: string; channelId?: string };
+  const settings = integration.settings as {
+    connectionId?: string;
+    channelId?: string;
+    apiKey?: string;
+    accountLabel?: string;
+  };
 
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(settings.apiKey || "");
   const [channelId, setChannelId] = useState(settings.channelId || "");
-  const [accountLabel, setAccountLabel] = useState("Primary YouTube");
+  const [accountLabel, setAccountLabel] = useState(settings.accountLabel || "Primary YouTube");
   const [connecting, setConnecting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [syncingChannels, setSyncingChannels] = useState(false);
@@ -32,10 +37,21 @@ export default function YouTubeDetail() {
   const [runs, setRuns] = useState<SyncRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
 
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = 12000): Promise<T> => {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Request timed out. Please check your connection and try again.")), timeoutMs)
+      ),
+    ]);
+  };
+
   const callYouTube = async (action: string, params: Record<string, unknown> = {}) => {
-    const { data, error } = await supabase.functions.invoke("youtube", {
-      body: { action, params },
-    });
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke("youtube", {
+        body: { action, params },
+      })
+    );
     if (error) throw new Error(error.message);
     if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
     return data;
@@ -96,6 +112,8 @@ export default function YouTubeDetail() {
       updateSettings("youtube", {
         connectionId: connection.id,
         channelId: connection.external_account_id || channelId || "",
+        apiKey: apiKey.trim(),
+        accountLabel: accountLabel.trim() || "Primary YouTube",
       });
       setStatus("youtube", "connected");
       setApiKeyConfigured("youtube", true);
@@ -155,7 +173,11 @@ export default function YouTubeDetail() {
       });
       setStatus("youtube", "connected");
       setLastSync("youtube", new Date().toISOString());
-      updateSettings("youtube", { channelId: channelId.trim() });
+      updateSettings("youtube", {
+        channelId: channelId.trim(),
+        apiKey: apiKey.trim(),
+        accountLabel: accountLabel.trim() || "Primary YouTube",
+      });
       toast.success(`Synced ${result.recordsProcessed || 0} records`);
       await loadRuns(connectionId);
     } catch (e) {
