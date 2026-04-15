@@ -6,7 +6,7 @@ interface ApiKeyInputProps {
   label: string;
   placeholder?: string;
   configured: boolean;
-  onSave: (key: string) => void | Promise<void>;
+  onSave: (key: string) => boolean | void | Promise<boolean | void>;
   saving?: boolean;
   maskedHint?: string;
 }
@@ -21,7 +21,9 @@ export const ApiKeyInput = ({ label, placeholder = "Enter API key…", configure
     const nextValue = (inputRef.current?.value ?? value).trim();
     if (!nextValue || saving) return;
 
-    await onSave(nextValue);
+    const result = await onSave(nextValue);
+    if (result === false) return;
+
     setValue("");
     setEditing(false);
   };
