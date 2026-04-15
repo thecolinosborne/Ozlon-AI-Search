@@ -71,8 +71,6 @@ const ClickUpDetail = () => {
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
-  const [teamIdInput, setTeamIdInput] = useState<string>(storedSettings.team_id || "");
-  const [defaultListIdInput, setDefaultListIdInput] = useState<string>(storedSettings.list_id || "");
 
   // List picker state
   const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
@@ -86,8 +84,6 @@ const ClickUpDetail = () => {
   const [loadingLists, setLoadingLists] = useState(false);
 
   const getAuthParams = (): Record<string, unknown> => ({
-    teamId: teamIdInput || undefined,
-    defaultListId: defaultListIdInput || undefined,
     apiToken: storedSettings.apiToken || undefined,
   });
 
@@ -105,11 +101,9 @@ const ClickUpDetail = () => {
             team_id: result.team_id,
             list_id: result.list_id,
           });
-          setTeamIdInput(result.team_id || "");
-          setDefaultListIdInput(result.list_id || "");
         }
         // Load config
-        const cfg = await callClickUp("get_config", { teamId: result?.team_id || teamIdInput || undefined, apiToken: storedSettings.apiToken || undefined });
+        const cfg = await callClickUp("get_config", getAuthParams());
         setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
@@ -141,8 +135,6 @@ const ClickUpDetail = () => {
           team_id: result.team_id,
           list_id: result.list_id,
         });
-        setTeamIdInput(result.team_id || "");
-        setDefaultListIdInput(result.list_id || "");
         toast.success("ClickUp connected");
       } else {
         toast.error("Connection failed — check your API token");
@@ -187,10 +179,8 @@ const ClickUpDetail = () => {
 
   const handleCreateTestTask = async () => {
     try {
-      const authParams = getAuthParams();
       await callClickUp("create_task", {
-        ...authParams,
-        listId: defaultListIdInput || authParams.defaultListId,
+        ...getAuthParams(),
         name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
         description: "This is a test task created by the AI Project Manager integration.",
       });
@@ -335,32 +325,6 @@ const ClickUpDetail = () => {
         maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : isConnected ? "•••••••• (server)" : undefined}
       />
 
-      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Workspace Inputs</h3>
-        <p className="text-xs text-muted-foreground">
-          Team and default list IDs for workspace routing.
-        </p>
-        <input
-          type="text"
-          value={teamIdInput}
-          onChange={(e) => setTeamIdInput(e.target.value)}
-          placeholder="Team ID (optional)"
-          className={cn(
-            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
-            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
-          )}
-        />
-        <input
-          type="text"
-          value={defaultListIdInput}
-          onChange={(e) => setDefaultListIdInput(e.target.value)}
-          placeholder="Default List ID (optional)"
-          className={cn(
-            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
-            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
-          )}
-        />
-      </div>
 
       {isConnected && (
         <>
