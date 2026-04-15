@@ -146,6 +146,11 @@ const ClickUpDetail = () => {
     toast.success("ClickUp disconnected");
   };
 
+  const getAuthParams = () => ({
+    teamId: teamIdInput || undefined,
+    defaultListId: defaultListIdInput || undefined,
+  });
+
   const handleSync = async () => {
     setStatus("clickup", "syncing");
     try {
