@@ -16,14 +16,36 @@ export const UserMenu = () => {
   const { authLoading, session, user, signOut } = useAuth();
   const resetStore = useAppStore((state) => state.reset);
 
-  // State 1: Loading - show skeleton
-  if (authLoading) {
+  // While auth is loading, show sign-in buttons as a safe public fallback
+  // instead of a skeleton that hides all controls
+  if (authLoading && !session) {
     return (
-      <div className="w-9 h-9 rounded-full bg-neutral-100 animate-pulse" />
+      <div className="flex items-center gap-2">
+        <Link
+          to="/auth?mode=signup"
+          className={cn(
+            "px-4 py-2 text-sm font-medium rounded-full",
+            "border border-neutral-200 text-neutral-700",
+            "hover:bg-neutral-50 transition-colors"
+          )}
+        >
+          Sign up
+        </Link>
+        <Link
+          to="/auth"
+          className={cn(
+            "px-4 py-2 text-sm font-medium rounded-full",
+            "bg-neutral-900 text-white",
+            "hover:bg-neutral-800 transition-colors"
+          )}
+        >
+          Sign in
+        </Link>
+      </div>
     );
   }
 
-  // State 2: Not authenticated - show sign in/up buttons
+  // Not authenticated - show sign in/up buttons
   if (!session || !user) {
     return (
       <div className="flex items-center gap-2">
@@ -51,7 +73,7 @@ export const UserMenu = () => {
     );
   }
 
-  // State 3: Authenticated - show user menu
+  // Authenticated - show user menu
   const initials = user.user_metadata?.full_name
     ?.split(" ")
     .map((n: string) => n[0])
@@ -63,7 +85,7 @@ export const UserMenu = () => {
 
   const handleSignOut = async () => {
     console.log("Sign out clicked");
-    resetStore(); // Clear all app state
+    resetStore();
     await signOut();
     navigate("/");
   };
@@ -117,7 +139,7 @@ export const UserMenu = () => {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem 
+        <DropdownMenuItem
           onClick={handleSignOut}
           className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
         >

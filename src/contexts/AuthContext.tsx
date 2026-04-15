@@ -6,23 +6,17 @@ import { toast } from "sonner";
 
 const STORAGE_KEY = "ozlon_system_name";
 const ONBOARDED_KEY = "ozlon_onboarded";
+const AUTH_INIT_TIMEOUT = 5000; // 5s failsafe
 
 interface AuthContextType {
-  // Core auth state
   authLoading: boolean;
   session: Session | null;
   user: User | null;
-  
-  // Profile state
   systemName: string;
   profileLoaded: boolean;
   needsOnboarding: boolean;
   isReturningUser: boolean;
-  
-  // Voice settings
   voiceEnabled: boolean;
-  
-  // Actions
   signOut: () => Promise<void>;
   completeOnboarding: (name: string) => Promise<void>;
   setVoiceEnabled: (enabled: boolean) => Promise<void>;
@@ -32,21 +26,15 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Core auth state - single source of truth
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  
-  // Profile state
   const [systemName, setSystemName] = useState("Ozlon");
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isReturningUser, setIsReturningUser] = useState(false);
-  
-  // Voice settings
   const [voiceEnabled, setVoiceEnabledState] = useState(false);
 
-  // Clear all auth state - used on sign out
   const clearAuthState = useCallback(() => {
     console.log("Clearing auth state");
     setSession(null);
@@ -57,15 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsReturningUser(false);
     setVoiceEnabledState(false);
     setAuthLoading(false);
-    
-    // Clear localStorage
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(ONBOARDED_KEY);
   }, []);
 
-  // Load user profile from backend
-  const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
-    console.log("Loading user profile for:", userId, "isNewSignup:", isNewSignup);
+  const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
+    console.log("Loading user profile for:", userId);
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
@@ -77,37 +62,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const onboardingDone = profile?.onboarding_complete === true;
       const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
-      
-      console.log("Onboarding check:", { onboardingDone, wasOnboarded, isNewSignup });
 
       if (onboardingDone) {
-        // DB says onboarding is complete — trust it
         const name = profile?.system_name || "Ozlon";
         setSystemName(name);
         localStorage.setItem(STORAGE_KEY, name);
         localStorage.setItem(ONBOARDED_KEY, "true");
         setIsReturningUser(true);
         setNeedsOnboarding(false);
-        console.log("Onboarding already completed (DB flag)");
       } else if (wasOnboarded) {
-        // localStorage says done but DB doesn't — trust localStorage, patch DB
         const name = profile?.system_name || localStorage.getItem(STORAGE_KEY) || "Ozlon";
         setSystemName(name);
         setIsReturningUser(true);
         setNeedsOnboarding(false);
-        // Patch DB to sync
         supabase.from("profiles").update({ onboarding_complete: true }).eq("user_id", userId).then(() => {});
-        console.log("Patched onboarding_complete from localStorage");
       } else {
-        // Not onboarded
         setNeedsOnboarding(true);
         setIsReturningUser(false);
-        console.log("Needs onboarding");
       }
-      
-      // Set voice enabled state from profile
+
       setVoiceEnabledState(profile?.voice_enabled ?? false);
-      
       setProfileLoaded(true);
     } catch (error) {
       handleError(error, "Error loading user profile", { silent: true });
@@ -115,116 +89,119 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Refresh voice settings from database
   const refreshVoiceSettings = useCallback(async () => {
     if (!user) return;
-    
     try {
       const { data: profile } = await supabase
         .from("profiles")
         .select("voice_enabled")
         .eq("user_id", user.id)
         .single();
-      
       setVoiceEnabledState(profile?.voice_enabled ?? false);
     } catch (error) {
       handleError(error, "Error refreshing voice settings", { silent: true });
     }
   }, [user]);
 
-  // Set voice enabled - saves to database
   const setVoiceEnabled = useCallback(async (enabled: boolean) => {
-    console.log("setVoiceEnabled called with:", enabled, "user:", user?.id);
-    
     if (!user) {
-      console.error("No user found - cannot update voice setting");
       toast.error("Sign in to enable voice conversation");
       return;
     }
-    
-    // Optimistically update UI first
     setVoiceEnabledState(enabled);
-    
     try {
-      console.log("Updating voice_enabled to:", enabled, "for user:", user.id);
-      const { error, data } = await supabase
+      const { error } = await supabase
         .from("profiles")
         .update({ voice_enabled: enabled })
         .eq("user_id", user.id)
         .select();
-      
-      console.log("Update result:", { error, data });
-      
       if (error) {
-        // Revert on error
         setVoiceEnabledState(!enabled);
         throw error;
       }
-      
       toast.success(enabled ? "Custom voice enabled" : "Custom voice disabled");
     } catch (error: unknown) {
       handleError(error, "Failed to update voice setting");
     }
   }, [user]);
 
-  // Sign out handler
   const signOut = useCallback(async () => {
     console.log("Signing out...");
-    // Clear state first to prevent re-renders from triggering profile loads
     clearAuthState();
     try {
       const { error } = await supabase.auth.signOut({ scope: 'global' });
-      if (error) {
-        console.error("Sign out API error:", error);
-      }
+      if (error) console.error("Sign out API error:", error);
       toast.success("Signed out successfully");
     } catch (error: unknown) {
       handleError(error, "Failed to sign out");
     }
   }, [clearAuthState]);
 
-  // Complete onboarding
   const completeOnboarding = useCallback(async (name: string) => {
     setSystemName(name);
     localStorage.setItem(STORAGE_KEY, name);
     localStorage.setItem(ONBOARDED_KEY, "true");
     setNeedsOnboarding(false);
-    
     if (user) {
       try {
-        await supabase
-          .from("profiles")
-          .update({ system_name: name })
-          .eq("user_id", user.id);
+        await supabase.from("profiles").update({ system_name: name }).eq("user_id", user.id);
       } catch (error) {
         handleError(error, "Error saving system name", { silent: true });
       }
     }
   }, [user]);
 
-  // Initialize auth state
+  // Initialize auth — register listener BEFORE getSession
   useEffect(() => {
     let mounted = true;
 
+    // Failsafe: if authLoading hasn't resolved in AUTH_INIT_TIMEOUT, force it
+    const failsafeTimer = setTimeout(() => {
+      if (mounted && authLoading) {
+        console.warn("Auth init failsafe triggered — forcing authLoading=false");
+        setAuthLoading(false);
+      }
+    }, AUTH_INIT_TIMEOUT);
+
+    // 1. Register listener first so we never miss an event
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!mounted) return;
+      console.log("Auth state changed:", event);
+
+      if (event === "SIGNED_IN" && newSession?.user) {
+        setSession(newSession);
+        setUser(newSession.user);
+        setAuthLoading(false);
+
+        const createdAt = new Date(newSession.user.created_at);
+        const now = new Date();
+        const isNewSignup = (now.getTime() - createdAt.getTime()) < 60000;
+        await loadUserProfile(newSession.user.id, isNewSignup);
+      } else if (event === "SIGNED_OUT") {
+        clearAuthState();
+      } else if (event === "TOKEN_REFRESHED" && newSession?.user) {
+        setSession(newSession);
+        setUser(newSession.user);
+      }
+    });
+
+    // 2. Then fetch the current session
     const initializeAuth = async () => {
       console.log("Initializing auth...");
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
         if (!mounted) return;
 
-        if (session?.user) {
+        if (currentSession?.user) {
           console.log("Found existing session");
-          setSession(session);
-          setUser(session.user);
-          await loadUserProfile(session.user.id, false);
+          setSession(currentSession);
+          setUser(currentSession.user);
+          await loadUserProfile(currentSession.user.id, false);
         } else {
           console.log("No existing session");
-          clearAuthState();
         }
       } catch (error) {
         handleError(error, "Error initializing auth", { silent: true });
-        if (mounted) clearAuthState();
       } finally {
         if (mounted) setAuthLoading(false);
       }
@@ -232,32 +209,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-      
-      console.log("Auth state changed:", event);
-
-      if (event === "SIGNED_IN" && session?.user) {
-        setSession(session);
-        setUser(session.user);
-        setAuthLoading(false);
-        
-        const createdAt = new Date(session.user.created_at);
-        const now = new Date();
-        const isNewSignup = (now.getTime() - createdAt.getTime()) < 60000;
-        
-        await loadUserProfile(session.user.id, isNewSignup);
-      } else if (event === "SIGNED_OUT") {
-        clearAuthState();
-      } else if (event === "TOKEN_REFRESHED" && session?.user) {
-        setSession(session);
-        setUser(session.user);
-      }
-    });
-
     return () => {
       mounted = false;
+      clearTimeout(failsafeTimer);
       subscription.unsubscribe();
     };
   }, [loadUserProfile, clearAuthState]);
