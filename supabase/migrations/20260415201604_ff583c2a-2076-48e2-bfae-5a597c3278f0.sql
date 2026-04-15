@@ -1,0 +1,1 @@
+ALTER TABLE public.clickup_integration_state ADD CONSTRAINT clickup_integration_state_team_id_key UNIQUE (team_id);
