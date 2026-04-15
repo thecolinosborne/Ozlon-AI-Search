@@ -6,10 +6,24 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { buildFunctionUrl, invokeFunction } from "@/services/backendFunctions";
+
+const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
+const HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+};
 
 async function callClickUp(action: string, params?: Record<string, unknown>) {
-  return invokeFunction("clickup", { action, params }, { timeoutMs: 25000 });
+  const res = await fetch(FUNCTION_URL, {
+    method: "POST",
+    headers: HEADERS,
+    body: JSON.stringify({ action, params }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Request failed" }));
+    throw new Error(err.error || "Request failed");
+  }
+  return res.json();
 }
 
 interface ClickUpConfig {
@@ -258,8 +272,8 @@ const ClickUpDetail = () => {
 
   const handleRegisterWebhook = async () => {
     try {
-      const endpoint = buildFunctionUrl("clickup");
-      await callClickUp("register_webhook", { ...getAuthParams(), endpoint });
+      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
+      await callClickUp("register_webhook", { ...getAuthParams(), endpoint: webhookUrl });
       setConfig((c) => ({ ...c, webhook_status: "registered" }));
       toast.success("Webhook registered");
     } catch (err) {

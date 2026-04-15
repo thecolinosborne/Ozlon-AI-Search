@@ -3,7 +3,6 @@ import { Sparkles, Settings2, Loader2, AlertCircle, RefreshCw } from "lucide-rea
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
-import { invokeFunction } from "@/services/backendFunctions";
 
 import { toast } from "sonner";
 
@@ -20,7 +19,16 @@ const HiggsFieldDetail = () => {
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        const data = await invokeFunction<{ success?: boolean }>("higgsfield", { action: "test_connection" });
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ action: "test_connection" }),
+        });
+        const data = await res.json();
         
         if (cancelled) return;
         if (data?.success) {
@@ -51,7 +59,16 @@ const HiggsFieldDetail = () => {
   const handleTestConnection = async () => {
     setTesting(true);
     try {
-      const data = await invokeFunction<{ success?: boolean; error?: string }>("higgsfield", { action: "test_connection" });
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ action: "test_connection" }),
+      });
+      const data = await res.json();
       if (data?.success) {
         toast.success("Higgsfield AI connection verified");
         setStatus("higgsfield", "connected");

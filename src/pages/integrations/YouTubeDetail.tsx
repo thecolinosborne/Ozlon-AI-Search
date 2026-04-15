@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { invokeFunction } from "@/services/backendFunctions";
 
 interface SyncRun {
   id: string;
@@ -33,11 +33,12 @@ export default function YouTubeDetail() {
   const [loadingRuns, setLoadingRuns] = useState(false);
 
   const callYouTube = async (action: string, params: Record<string, unknown> = {}) => {
-    return invokeFunction<{ success?: boolean; error?: string; runs?: SyncRun[]; connection?: unknown; recordsProcessed?: number }>(
-      "youtube",
-      { action, params },
-      { timeoutMs: 25000 }
-    );
+    const { data, error } = await supabase.functions.invoke("youtube", {
+      body: { action, params },
+    });
+    if (error) throw new Error(error.message);
+    if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+    return data;
   };
 
   const loadRuns = async (connectionId = settings.connectionId) => {
