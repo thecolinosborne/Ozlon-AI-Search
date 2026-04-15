@@ -707,6 +707,144 @@ serve(async (req) => {
         });
       }
 
+      // ============ TASK MUTATIONS ============
+      case 'delete_task': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const data = await clickupCall(`/task/${params.taskId}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'set_task_status': {
+        if (!params?.taskId || !params?.status) throw new Error('taskId and status required');
+        const data = await clickupCall(`/task/${params.taskId}`, 'PUT', { status: params.status });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'set_due_date': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const data = await clickupCall(`/task/${params.taskId}`, 'PUT', {
+          due_date: params.due_date || null,
+          due_date_time: params.due_date_time ?? true,
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'set_assignees': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const data = await clickupCall(`/task/${params.taskId}`, 'PUT', {
+          assignees: { add: params.add || [], rem: params.rem || [] },
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ TAGS ============
+      case 'add_tag': {
+        if (!params?.taskId || !params?.tag) throw new Error('taskId and tag required');
+        const data = await clickupCall(`/task/${params.taskId}/tag/${encodeURIComponent(params.tag)}`, 'POST');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'remove_tag': {
+        if (!params?.taskId || !params?.tag) throw new Error('taskId and tag required');
+        const data = await clickupCall(`/task/${params.taskId}/tag/${encodeURIComponent(params.tag)}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ COMMENT MUTATIONS ============
+      case 'update_comment': {
+        if (!params?.commentId) throw new Error('commentId required');
+        const data = await clickupCall(`/comment/${params.commentId}`, 'PUT', {
+          comment_text: params.comment_text || params.text || '',
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'delete_comment': {
+        if (!params?.commentId) throw new Error('commentId required');
+        const data = await clickupCall(`/comment/${params.commentId}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ CHECKLISTS ============
+      case 'create_checklist': {
+        if (!params?.taskId || !params?.name) throw new Error('taskId and name required');
+        const data = await clickupCall(`/task/${params.taskId}/checklist`, 'POST', { name: params.name });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'create_checklist_item': {
+        if (!params?.checklistId || !params?.name) throw new Error('checklistId and name required');
+        const data = await clickupCall(`/checklist/${params.checklistId}/checklist_item`, 'POST', {
+          name: params.name,
+          assignee: params.assignee || undefined,
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'update_checklist_item': {
+        if (!params?.checklistId || !params?.checklistItemId) throw new Error('checklistId and checklistItemId required');
+        const body: Record<string, unknown> = {};
+        if (params.name !== undefined) body.name = params.name;
+        if (params.resolved !== undefined) body.resolved = params.resolved;
+        if (params.assignee !== undefined) body.assignee = params.assignee;
+        const data = await clickupCall(
+          `/checklist/${params.checklistId}/checklist_item/${params.checklistItemId}`, 'PUT', body
+        );
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ CUSTOM FIELDS ============
+      case 'get_custom_fields': {
+        const listId = params?.listId || await getListId(params);
+        if (!listId) throw new Error('listId required');
+        const data = await clickupCall(`/list/${listId}/field`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'set_custom_field': {
+        if (!params?.taskId || !params?.fieldId) throw new Error('taskId and fieldId required');
+        const data = await clickupCall(`/task/${params.taskId}/field/${params.fieldId}`, 'POST', {
+          value: params.value,
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ MEMBERS ============
+      case 'list_members': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const data = await clickupCall(`/task/${params.taskId}/member`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ TIME TRACKING ============
+      case 'get_time_entries': {
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const qs = new URLSearchParams();
+        if (params?.start_date) qs.set('start_date', String(params.start_date));
+        if (params?.end_date) qs.set('end_date', String(params.end_date));
+        if (params?.assignee) qs.set('assignee', String(params.assignee));
+        const data = await clickupCall(`/team/${resolved.teamId}/time_entries?${qs.toString()}`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'start_time_entry': {
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const data = await clickupCall(`/team/${resolved.teamId}/time_entries/start`, 'POST', {
+          tid: params?.taskId,
+          description: params?.description || '',
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'stop_time_entry': {
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const data = await clickupCall(`/team/${resolved.teamId}/time_entries/stop`, 'POST');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       // ============ DISCOVERY ============
       case 'list_spaces': {
         const token = getToken();
