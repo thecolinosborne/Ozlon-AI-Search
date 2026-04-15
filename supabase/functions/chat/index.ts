@@ -752,7 +752,25 @@ async function injectMatonData(
     'google-meet': ['google-calendar'],
   };
 
+  // Services that use their own edge function, not Maton
+  const SELF_MANAGED_SERVICES = new Set(['clickup']);
+
   await Promise.all(detectedApps.map(async (app) => {
+    // Self-managed services bypass Maton connection check
+    if (SELF_MANAGED_SERVICES.has(app)) {
+      const fetcher = SERVICE_FETCHERS[app];
+      if (!fetcher) return;
+      try {
+        const data = await fetcher('', '');
+        sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
+        console.log(`${app} data injected (self-managed)`);
+      } catch (e) {
+        console.error(`Error fetching ${app}:`, e);
+        sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
+      }
+      return;
+    }
+
     let connId = connMap.get(app);
     // Try fallback connections if primary isn't found
     if (!connId && CONNECTION_FALLBACKS[app]) {
