@@ -620,13 +620,23 @@ serve(async (req) => {
       }
 
       case 'update_config': {
-        const token = getToken();
+        const token = getToken(tokenFromParams);
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const supabase = getSupabase();
+        // Only pass valid DB columns, strip out auth/routing params
+        const validColumns = [
+          'auto_reply_enabled', 'reply_trigger_mode', 'ai_reply_mode',
+          'allow_subtask_creation', 'allow_task_updates', 'default_list_id',
+          'webhook_id', 'webhook_status', 'max_reply_length', 'cooldown_seconds',
+        ];
+        const dbPayload: Record<string, unknown> = { team_id: teamId };
+        for (const col of validColumns) {
+          if (params?.[col] !== undefined) dbPayload[col] = params[col];
+        }
         const { data } = await supabase
           .from('clickup_integration_state')
-          .upsert({ team_id: teamId, ...params }, { onConflict: 'team_id' })
+          .upsert(dbPayload, { onConflict: 'team_id' })
           .select()
           .single();
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
