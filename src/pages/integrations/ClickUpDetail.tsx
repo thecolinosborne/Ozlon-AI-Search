@@ -338,20 +338,12 @@ const ClickUpDetail = () => {
 
           {/* Quick Actions */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Quick Actions</h3>
+            <h3 className="text-sm font-medium text-foreground">Diagnostics</h3>
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleFetchTasks} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
-                <RefreshCw className="w-3.5 h-3.5" /> Fetch Tasks
-              </button>
-              <button onClick={handleCreateTestTask} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
-                <Plus className="w-3.5 h-3.5" /> Create Test Task
+              <button onClick={handleSync} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
+                <RefreshCw className="w-3.5 h-3.5" /> Test Connection
               </button>
             </div>
-            {taskCount !== null && (
-              <p className="text-[11px] text-muted-foreground">
-                {taskCount} task{taskCount !== 1 ? "s" : ""} in default list
-              </p>
-            )}
           </div>
         </>
       )}
