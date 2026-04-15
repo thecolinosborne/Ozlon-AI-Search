@@ -1,19 +1,24 @@
 
 
-## Remove "Workspace Inputs" from ClickUp Detail
+## Remove Webhook + AI Reply Settings from ClickUp Detail
 
-### Why
-The backend (`resolveTeamId`) auto-discovers the team from the API token, and `getListId` reads `default_list_id` from the `clickup_integration_state` table (set by the Browse Workspace picker). The manual Team ID and Default List ID text inputs serve no purpose — they don't persist to the database and only get passed as request params that the backend ignores when it already has better sources.
+The Webhook and AI Reply Settings sections will be removed from the ClickUp integration page. The backend defaults (auto-reply enabled, mention-only trigger, standard detail) will continue to work as-is — no backend changes needed.
 
 ### Changes
 
 **File: `src/pages/integrations/ClickUpDetail.tsx`**
 
-1. Remove the `teamIdInput` and `defaultListIdInput` state variables
-2. Remove the entire "Workspace Inputs" card (Team ID / Default List ID text inputs)
-3. Simplify `getAuthParams()` to only pass `apiToken` (the backend resolves team/list automatically)
-4. In `handleCreateTestTask`, rely on the backend's `getListId()` DB lookup instead of passing `listId` from local state
-5. When `test_connection` or `connect` returns `team_id`/`list_id`, store them in integration settings for display only — don't use them as required inputs
+1. Remove the entire **Webhook Status** card (lines ~230–265) — the webhook is already registered and doesn't need UI management
+2. Remove the entire **AI Reply Settings** card (lines ~267–350) — Auto-Reply toggle, Trigger Mode, Reply Detail, Allow Subtask Creation, Allow Task Updates
+3. Remove unused imports: `Webhook`, `Zap`, `Select`/`SelectContent`/`SelectItem`/`SelectTrigger`/`SelectValue` (if no longer used elsewhere — the List Picker still uses Select)
+4. Remove the `config` state, `defaultConfig`, `triggerModes`, `replyModes` constants, and the `updateConfigField` function since nothing references them anymore
+5. Keep the config fetch in `useEffect` only if needed for other purposes — otherwise simplify to just the connection check
 
-This is a removal-only change. The Browse Workspace picker remains as the proper way to select a default list.
+### What remains on the page
+- API Token input
+- Default List picker (Browse Workspace)
+- Quick Actions (Fetch Tasks, Create Test Task)
+
+### No backend changes
+The backend keeps its current defaults and webhook handler intact — this is purely a frontend cleanup.
 
