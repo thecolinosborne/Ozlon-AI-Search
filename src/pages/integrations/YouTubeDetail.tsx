@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Youtube, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -27,6 +27,8 @@ interface SavedConnection {
   lastError: string | null;
 }
 
+type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "expired_no_refresh" | "disconnected" | "unknown";
+
 export default function YouTubeDetail() {
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
@@ -35,25 +37,28 @@ export default function YouTubeDetail() {
 
   const [channelId, setChannelId] = useState(settings.channelId || "");
   const [accountLabel, setAccountLabel] = useState("Primary YouTube");
-  const [connecting, setConnecting] = useState(false);
   const [syncingChannels, setSyncingChannels] = useState(false);
   const [syncingVideos, setSyncingVideos] = useState(false);
   const [runs, setRuns] = useState<SyncRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loadingConnection, setLoadingConnection] = useState(true);
 
-  // Saved connection state
+  // Saved API-key connection state
   const [savedConn, setSavedConn] = useState<SavedConnection | null>(null);
   const [savingKey, setSavingKey] = useState(false);
 
-  // OAuth state
+  // OAuth state — separate from API key
   const [oauthConnected, setOauthConnected] = useState(false);
+  const [oauthDetail, setOauthDetail] = useState<OAuthDetail>("unknown");
   const [authorizing, setAuthorizing] = useState(false);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
   const [uploadVideoUrl, setUploadVideoUrl] = useState("");
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
+
+  // Track whether we've ever loaded successfully to avoid false disconnects
+  const hasLoadedOnce = useRef(false);
 
   const withTimeout = <T,>(promise: Promise<T>, ms = 8000): Promise<T> =>
     Promise.race([
@@ -74,6 +79,9 @@ export default function YouTubeDetail() {
     setLoadingConnection(true);
     try {
       const result = await withTimeout(callYouTube("get_connection"));
+      hasLoadedOnce.current = true;
+
+      // API key connection
       const conn = result.connection as SavedConnection | null;
       if (conn) {
         setSavedConn(conn);
@@ -83,39 +91,26 @@ export default function YouTubeDetail() {
         setStatus("youtube", conn.status === "connected" ? "connected" : "disconnected");
         setApiKeyConfigured("youtube", conn.apiKeyConfigured);
       }
+
+      // OAuth status from same response
+      const oStatus = (result.oauthStatus as OAuthDetail) || "disconnected";
+      setOauthDetail(oStatus);
+      setOauthConnected(oStatus === "connected" || oStatus === "refreshed");
     } catch {
-      // No connection yet
+      // On timeout/error: if we've never loaded, just show disconnected
+      // If we have loaded before, keep existing state (don't false-disconnect)
+      if (!hasLoadedOnce.current) {
+        // First load failed — show page as disconnected but don't error
+      }
+      // Otherwise keep existing savedConn and oauthConnected as-is
     } finally {
       setLoadingConnection(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadRuns = async (connectionId = settings.connectionId) => {
-    if (!connectionId) return;
-    setLoadingRuns(true);
-    try {
-      const result = await callYouTube("list_sync_runs", { connectionId });
-      setRuns((result.runs || []) as SyncRun[]);
-    } catch (e) {
-      toast.error(`Failed to fetch sync history: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setLoadingRuns(false);
-    }
-  };
-
-  const checkOAuthStatus = async () => {
-    try {
-      const result = await withTimeout(callYouTube("oauth_status"));
-      setOauthConnected(!!result.oauth_connected);
-    } catch {
-      // not connected
-    }
-  };
-
   useEffect(() => {
     loadConnection();
-    checkOAuthStatus();
 
     // Handle OAuth callback code in URL
     const url = new URL(window.location.href);
@@ -143,9 +138,23 @@ export default function YouTubeDetail() {
         redirectUri: `${window.location.origin}/integrations/youtube`,
       });
       setOauthConnected(true);
+      setOauthDetail("connected");
       toast.success("YouTube OAuth connected — uploads enabled!");
     } catch (e) {
       toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    }
+  };
+
+  const loadRuns = async (connectionId = settings.connectionId) => {
+    if (!connectionId) return;
+    setLoadingRuns(true);
+    try {
+      const result = await callYouTube("list_sync_runs", { connectionId });
+      setRuns((result.runs || []) as SyncRun[]);
+    } catch (e) {
+      toast.error(`Failed to fetch sync history: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setLoadingRuns(false);
     }
   };
 
@@ -175,11 +184,35 @@ export default function YouTubeDetail() {
         apiKeyMasked: masked,
         apiKeyConfigured: true,
       }));
+      hasLoadedOnce.current = true;
       toast.success("YouTube API key saved and validated");
       await loadRuns(connection.id);
     } catch (e) {
       setStatus("youtube", "error");
       toast.error(`Connect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleUpdateChannel = async () => {
+    setSavingKey(true);
+    try {
+      const result = await callYouTube("connect", {
+        apiKey: "", // empty = update metadata only
+        channelId: channelId.trim() || null,
+        accountLabel: accountLabel.trim() || "Primary YouTube",
+      });
+      const connection = result.connection as { id: string; external_account_id?: string | null };
+      updateSettings("youtube", { channelId: channelId.trim() });
+      setSavedConn((prev) => prev ? {
+        ...prev,
+        channelId: connection.external_account_id || channelId || "",
+        accountLabel: accountLabel.trim() || "Primary YouTube",
+      } : prev);
+      toast.success("Channel settings updated");
+    } catch (e) {
+      toast.error(`Update failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setSavingKey(false);
     }
@@ -269,7 +302,8 @@ export default function YouTubeDetail() {
     }
   };
 
-  const isConnected = savedConn?.status === "connected" || integration.status === "connected";
+  const isApiKeyConnected = savedConn?.status === "connected" || integration.status === "connected";
+  const isConnected = isApiKeyConnected; // Data API connected = core connected
 
   const inputClass = cn(
     "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
@@ -317,6 +351,31 @@ export default function YouTubeDetail() {
         ) : undefined
       }
     >
+      {/* Connection Status Summary */}
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-2">
+        <h3 className="text-sm font-medium text-foreground">Connection Status</h3>
+        <div className="flex flex-wrap gap-3 text-xs">
+          <div className="flex items-center gap-1.5">
+            <div className={cn("w-2 h-2 rounded-full", isApiKeyConnected ? "bg-primary" : "bg-muted-foreground/40")} />
+            <span className="text-muted-foreground">Data API</span>
+            <span className="font-medium text-foreground">{isApiKeyConnected ? "Connected" : "Not connected"}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className={cn("w-2 h-2 rounded-full", oauthConnected ? "bg-primary" : oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "bg-amber-500" : "bg-muted-foreground/40")} />
+            <span className="text-muted-foreground">OAuth (Uploads)</span>
+            <span className="font-medium text-foreground">
+              {oauthConnected ? "Active" : oauthDetail === "refresh_failed" ? "Expired — re-authorize" : oauthDetail === "expired_no_refresh" ? "Expired" : "Not connected"}
+            </span>
+          </div>
+        </div>
+        {savedConn?.lastError && (
+          <div className="p-2 rounded-lg bg-destructive/10 text-destructive text-xs flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            {savedConn.lastError}
+          </div>
+        )}
+      </div>
+
       {/* API Key */}
       <ApiKeyInput
         label="YouTube Data API Key"
@@ -346,10 +405,11 @@ export default function YouTubeDetail() {
         />
         {isConnected && channelId !== (savedConn?.channelId || "") && (
           <button
-            onClick={() => handleSaveApiKey("")}
-            disabled={connecting}
+            onClick={handleUpdateChannel}
+            disabled={savingKey}
             className={secondaryBtnClass}
           >
+            {savingKey ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
             Update Channel
           </button>
         )}
@@ -361,7 +421,7 @@ export default function YouTubeDetail() {
           <Shield className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
           <h3 className="text-sm font-medium text-foreground">YouTube OAuth (Uploads)</h3>
           {oauthConnected && (
-            <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Connected</span>
+            <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Active</span>
           )}
         </div>
         {oauthConnected ? (
@@ -369,11 +429,13 @@ export default function YouTubeDetail() {
         ) : (
           <>
             <p className="text-xs text-muted-foreground">
-              Authorize with Google to enable video uploads. Requires OAuth credentials configured as backend secrets.
+              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh"
+                ? "Your OAuth token has expired. Re-authorize to enable uploads."
+                : "Authorize with Google to enable video uploads. Requires OAuth credentials configured as backend secrets."}
             </p>
             <button onClick={handleAuthorize} disabled={authorizing} className={actionBtnClass}>
               {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
-              Authorize YouTube Uploads
+              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "Re-authorize YouTube" : "Authorize YouTube Uploads"}
             </button>
           </>
         )}

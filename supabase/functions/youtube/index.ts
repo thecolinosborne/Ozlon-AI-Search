@@ -54,7 +54,6 @@ function maskKey(apiKey: string): string {
   return `***${tail}`;
 }
 
-// Helper: get stored API key from connection metadata
 async function getStoredApiKey(adminClient: ReturnType<typeof createClient>, connectionId: string, userId: string): Promise<string> {
   const { data } = await adminClient
     .from("integration_connections")
@@ -70,6 +69,66 @@ async function getStoredApiKey(adminClient: ReturnType<typeof createClient>, con
   return key;
 }
 
+// Helper: refresh OAuth token if expired, returns { accessToken, refreshed }
+async function refreshOAuthIfNeeded(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  meta: AnyJson,
+): Promise<{ accessToken: string; refreshed: boolean }> {
+  const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+  const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+  if (!clientId || !clientSecret) throw new Error("YouTube OAuth credentials not configured");
+
+  let accessToken = String(meta.access_token || "");
+  const refreshToken = String(meta.refresh_token || "");
+  const expiresAt = String(meta.expires_at || "");
+
+  if (new Date(expiresAt) > new Date()) {
+    return { accessToken, refreshed: false };
+  }
+
+  // Token expired — attempt refresh
+  if (!refreshToken) throw new Error("No refresh token — re-authorize YouTube");
+
+  const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const refreshData = await refreshRes.json();
+  if (!refreshRes.ok) throw new Error(`Token refresh failed: ${JSON.stringify(refreshData)}`);
+
+  accessToken = refreshData.access_token;
+  const newExpiresAt = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
+
+  await adminClient
+    .from("integration_connections")
+    .update({
+      metadata: {
+        ...meta,
+        access_token: accessToken,
+        expires_at: newExpiresAt,
+      },
+      last_validated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("provider", "youtube")
+    .eq("auth_type", "oauth2");
+
+  return { accessToken, refreshed: true };
+}
+
+function jsonOk(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -82,9 +141,10 @@ serve(async (req) => {
 
     if (!action) throw new Error("Missing action");
 
-    // ── Get Connection (load saved state) ──
+    // ── Get Connection — returns BOTH api_key and oauth2 states ──
     if (action === "get_connection") {
-      const { data } = await adminClient
+      // Fetch api_key connection
+      const { data: apiKeyConn } = await adminClient
         .from("integration_connections")
         .select("id, status, external_account_id, external_account_label, metadata, last_sync_at, last_error")
         .eq("user_id", userId)
@@ -94,51 +154,105 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      if (!data) {
-        return new Response(JSON.stringify({ success: true, connection: null }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      // Fetch oauth2 connection
+      const { data: oauthConn } = await adminClient
+        .from("integration_connections")
+        .select("status, metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .maybeSingle();
 
-      const meta = (data.metadata || {}) as AnyJson;
-      return new Response(JSON.stringify({
-        success: true,
-        connection: {
-          id: data.id,
-          status: data.status,
-          channelId: data.external_account_id || "",
-          accountLabel: data.external_account_label || "",
+      // Build api_key connection response
+      let apiKeyResponse = null;
+      if (apiKeyConn) {
+        const meta = (apiKeyConn.metadata || {}) as AnyJson;
+        apiKeyResponse = {
+          id: apiKeyConn.id,
+          status: apiKeyConn.status,
+          channelId: apiKeyConn.external_account_id || "",
+          accountLabel: apiKeyConn.external_account_label || "",
           apiKeyMasked: String(meta.api_key_masked || ""),
           apiKeyConfigured: !!meta.api_key,
-          lastSyncAt: data.last_sync_at,
-          lastError: data.last_error,
-        },
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+          lastSyncAt: apiKeyConn.last_sync_at,
+          lastError: apiKeyConn.last_error,
+        };
+      }
+
+      // Build oauth status — attempt token refresh if expired
+      let oauthStatus: "connected" | "expired" | "disconnected" = "disconnected";
+      if (oauthConn && oauthConn.status === "connected") {
+        const oMeta = (oauthConn.metadata || {}) as AnyJson;
+        const expiresAt = oMeta.expires_at as string | undefined;
+        const hasRefreshToken = !!oMeta.refresh_token;
+        const expired = expiresAt ? new Date(expiresAt) < new Date() : true;
+
+        if (!expired) {
+          oauthStatus = "connected";
+        } else if (hasRefreshToken) {
+          // Try to refresh the token
+          try {
+            await refreshOAuthIfNeeded(adminClient, userId, oMeta);
+            oauthStatus = "connected";
+          } catch {
+            oauthStatus = "expired";
+          }
+        } else {
+          oauthStatus = "expired";
+        }
+      }
+
+      return jsonOk({
+        success: true,
+        connection: apiKeyResponse,
+        oauthStatus,
       });
     }
 
+    // ── Connect (API key) ──
     if (action === "connect") {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
       const accountLabel = String((params as AnyJson).accountLabel || "Primary YouTube").trim();
-      if (!apiKey) throw new Error("apiKey is required");
 
-      await validateApiKey(apiKey);
-
-      // Check for existing connection to update
+      // If no API key provided, allow updating channel/label on existing connection
       const { data: existing } = await adminClient
         .from("integration_connections")
-        .select("id")
+        .select("id, metadata")
         .eq("user_id", userId)
         .eq("provider", "youtube")
         .eq("auth_type", "api_key")
         .limit(1)
         .maybeSingle();
 
+      if (!apiKey && existing) {
+        // Update channel/label only, keep existing key
+        const existingMeta = (existing.metadata || {}) as AnyJson;
+        if (!existingMeta.api_key) throw new Error("No existing API key — please provide one");
+
+        const { data: updated, error } = await adminClient
+          .from("integration_connections")
+          .update({
+            external_account_id: channelId || null,
+            external_account_label: accountLabel,
+          })
+          .eq("id", existing.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+
+        return jsonOk({
+          success: true,
+          connection: updated,
+          apiKeyMasked: String(existingMeta.api_key_masked || maskKey(String(existingMeta.api_key))),
+        });
+      }
+
+      if (!apiKey) throw new Error("apiKey is required");
+      await validateApiKey(apiKey);
+
       let data;
       if (existing) {
-        // Update existing
         const { data: updated, error } = await adminClient
           .from("integration_connections")
           .update({
@@ -159,7 +273,6 @@ serve(async (req) => {
         if (error) throw error;
         data = updated;
       } else {
-        // Insert new
         const { data: inserted, error } = await adminClient
           .from("integration_connections")
           .insert({
@@ -183,12 +296,10 @@ serve(async (req) => {
         data = inserted;
       }
 
-      return new Response(JSON.stringify({
+      return jsonOk({
         success: true,
         connection: data,
         apiKeyMasked: maskKey(apiKey),
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -196,10 +307,7 @@ serve(async (req) => {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
       if (!apiKey) throw new Error("apiKey is required");
       await validateApiKey(apiKey);
-
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true });
     }
 
     if (action === "disconnect") {
@@ -214,11 +322,10 @@ serve(async (req) => {
         .eq("provider", "youtube");
       if (error) throw error;
 
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true });
     }
 
+    // ── Sync Channels ──
     if (action === "sync_channels") {
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
@@ -226,7 +333,6 @@ serve(async (req) => {
         throw new Error("connectionId and channelId are required");
       }
 
-      // Use provided key or fall back to stored key
       let apiKey = String((params as AnyJson).apiKey || "").trim();
       if (!apiKey) apiKey = await getStoredApiKey(adminClient, connectionId, userId);
 
@@ -293,9 +399,7 @@ serve(async (req) => {
           .eq("id", connectionId)
           .eq("user_id", userId);
 
-        return new Response(JSON.stringify({ success: true, recordsProcessed: channelRows.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonOk({ success: true, recordsProcessed: channelRows.length });
       } catch (error) {
         await adminClient
           .from("integration_sync_runs")
@@ -309,6 +413,7 @@ serve(async (req) => {
       }
     }
 
+    // ── Sync Videos ──
     if (action === "sync_videos") {
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
@@ -402,9 +507,7 @@ serve(async (req) => {
           .eq("id", connectionId)
           .eq("user_id", userId);
 
-        return new Response(JSON.stringify({ success: true, recordsProcessed: videoRows.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonOk({ success: true, recordsProcessed: videoRows.length });
       } catch (error) {
         await adminClient
           .from("integration_sync_runs")
@@ -418,6 +521,7 @@ serve(async (req) => {
       }
     }
 
+    // ── List Sync Runs ──
     if (action === "list_sync_runs") {
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       if (!connectionId) throw new Error("connectionId is required");
@@ -431,9 +535,7 @@ serve(async (req) => {
         .limit(20);
       if (error) throw error;
 
-      return new Response(JSON.stringify({ success: true, runs: data || [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true, runs: data || [] });
     }
 
     // ── OAuth Authorize ──
@@ -456,9 +558,7 @@ serve(async (req) => {
       authUrl.searchParams.set("prompt", "consent");
       authUrl.searchParams.set("state", userId);
 
-      return new Response(JSON.stringify({ success: true, authUrl: authUrl.toString() }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true, authUrl: authUrl.toString() });
     }
 
     // ── OAuth Callback ──
@@ -486,7 +586,6 @@ serve(async (req) => {
       const tokenData = await tokenRes.json();
       if (!tokenRes.ok) throw new Error(`Token exchange failed: ${JSON.stringify(tokenData)}`);
 
-      // Check for existing oauth2 connection
       const { data: existing } = await adminClient
         .from("integration_connections")
         .select("id")
@@ -496,6 +595,13 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
+      const oauthMeta = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+        scope: tokenData.scope,
+      };
+
       if (existing) {
         await adminClient
           .from("integration_connections")
@@ -503,12 +609,7 @@ serve(async (req) => {
             status: "connected",
             last_validated_at: new Date().toISOString(),
             last_error: null,
-            metadata: {
-              access_token: tokenData.access_token,
-              refresh_token: tokenData.refresh_token,
-              expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-              scope: tokenData.scope,
-            },
+            metadata: oauthMeta,
           })
           .eq("id", existing.id);
       } else {
@@ -522,22 +623,15 @@ serve(async (req) => {
             status: "connected",
             last_validated_at: new Date().toISOString(),
             last_error: null,
-            metadata: {
-              access_token: tokenData.access_token,
-              refresh_token: tokenData.refresh_token,
-              expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-              scope: tokenData.scope,
-            },
+            metadata: oauthMeta,
           });
         if (error) throw error;
       }
 
-      return new Response(JSON.stringify({ success: true, oauth_connected: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true, oauth_connected: true });
     }
 
-    // ── Check OAuth Status ──
+    // ── Check OAuth Status (with auto-refresh) ──
     if (action === "oauth_status") {
       const { data } = await adminClient
         .from("integration_connections")
@@ -547,13 +641,30 @@ serve(async (req) => {
         .eq("auth_type", "oauth2")
         .maybeSingle();
 
-      const connected = data?.status === "connected";
-      const expiresAt = (data?.metadata as AnyJson)?.expires_at as string | undefined;
+      if (!data || data.status !== "connected") {
+        return jsonOk({ success: true, oauth_connected: false, oauth_detail: "disconnected" });
+      }
+
+      const oMeta = (data.metadata || {}) as AnyJson;
+      const expiresAt = oMeta.expires_at as string | undefined;
+      const hasRefreshToken = !!oMeta.refresh_token;
       const expired = expiresAt ? new Date(expiresAt) < new Date() : true;
 
-      return new Response(JSON.stringify({ success: true, oauth_connected: connected && !expired }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (!expired) {
+        return jsonOk({ success: true, oauth_connected: true, oauth_detail: "connected" });
+      }
+
+      // Token expired — try refresh
+      if (hasRefreshToken) {
+        try {
+          await refreshOAuthIfNeeded(adminClient, userId, oMeta);
+          return jsonOk({ success: true, oauth_connected: true, oauth_detail: "refreshed" });
+        } catch {
+          return jsonOk({ success: true, oauth_connected: false, oauth_detail: "refresh_failed" });
+        }
+      }
+
+      return jsonOk({ success: true, oauth_connected: false, oauth_detail: "expired_no_refresh" });
     }
 
     // ── Upload Video ──
@@ -572,39 +683,7 @@ serve(async (req) => {
       if (!conn) throw new Error("YouTube OAuth not connected. Please authorize first.");
 
       const meta = conn.metadata as AnyJson;
-      let accessToken = String(meta.access_token || "");
-      const refreshToken = String(meta.refresh_token || "");
-      const expiresAt = String(meta.expires_at || "");
-
-      if (new Date(expiresAt) < new Date()) {
-        if (!refreshToken) throw new Error("No refresh token — re-authorize YouTube");
-        const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: refreshToken,
-            grant_type: "refresh_token",
-          }),
-        });
-        const refreshData = await refreshRes.json();
-        if (!refreshRes.ok) throw new Error(`Token refresh failed: ${JSON.stringify(refreshData)}`);
-        accessToken = refreshData.access_token;
-
-        await adminClient
-          .from("integration_connections")
-          .update({
-            metadata: {
-              ...meta,
-              access_token: accessToken,
-              expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString(),
-            },
-          })
-          .eq("user_id", userId)
-          .eq("provider", "youtube")
-          .eq("auth_type", "oauth2");
-      }
+      const { accessToken } = await refreshOAuthIfNeeded(adminClient, userId, meta);
 
       const title = String((params as AnyJson).title || "Untitled");
       const description = String((params as AnyJson).description || "");
@@ -651,12 +730,10 @@ serve(async (req) => {
       const uploadData = await uploadRes.json();
       if (!uploadRes.ok) throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
 
-      return new Response(JSON.stringify({
+      return jsonOk({
         success: true,
         videoId: uploadData.id,
         url: `https://www.youtube.com/watch?v=${uploadData.id}`,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
