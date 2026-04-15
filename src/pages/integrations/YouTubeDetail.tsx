@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Youtube, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
+import { Youtube, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
@@ -7,15 +7,6 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
-
-interface SyncRun {
-  id: string;
-  status: string;
-  records_processed: number;
-  created_at: string;
-  completed_at: string | null;
-  error_message: string | null;
-}
 
 interface SavedConnection {
   id: string;
@@ -39,17 +30,11 @@ export default function YouTubeDetail() {
 
   const [channelId, setChannelId] = useState(settings.channelId || "");
   const [accountLabel, setAccountLabel] = useState("Primary YouTube");
-  const [syncingChannels, setSyncingChannels] = useState(false);
-  const [syncingVideos, setSyncingVideos] = useState(false);
-  const [runs, setRuns] = useState<SyncRun[]>([]);
-  const [loadingRuns, setLoadingRuns] = useState(false);
   const [loadingConnection, setLoadingConnection] = useState(true);
 
-  // Saved API-key connection state
   const [savedConn, setSavedConn] = useState<SavedConnection | null>(null);
   const [savingKey, setSavingKey] = useState(false);
 
-  // OAuth state — separate from API key
   const [oauthConnected, setOauthConnected] = useState(false);
   const [oauthDetail, setOauthDetail] = useState<OAuthDetail>("unknown");
   const [authorizing, setAuthorizing] = useState(false);
@@ -59,7 +44,6 @@ export default function YouTubeDetail() {
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
 
-  // Track whether we've ever loaded successfully to avoid false disconnects
   const hasLoadedOnce = useRef(false);
 
   const withTimeout = <T,>(promise: Promise<T>, ms = 8000): Promise<T> =>
@@ -83,7 +67,6 @@ export default function YouTubeDetail() {
       const result = await withTimeout(callYouTube("get_connection"));
       hasLoadedOnce.current = true;
 
-      // API key connection
       const conn = result.connection as SavedConnection | null;
       if (conn) {
         setSavedConn(conn);
@@ -94,52 +77,20 @@ export default function YouTubeDetail() {
         setApiKeyConfigured("youtube", conn.apiKeyConfigured);
       }
 
-      // OAuth status from same response
       const oStatus = (result.oauthStatus as OAuthDetail) || "disconnected";
       setOauthDetail(oStatus);
       setOauthConnected(oStatus === "connected" || oStatus === "refreshed");
     } catch {
-      // On timeout/error: if we've never loaded, just show disconnected
-      // If we have loaded before, keep existing state (don't false-disconnect)
       if (!hasLoadedOnce.current) {
-        // First load failed — show page as disconnected but don't error
+        // First load failed — show disconnected
       }
-      // Otherwise keep existing savedConn and oauthConnected as-is
     } finally {
       setLoadingConnection(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    // Don't attempt to load until auth is resolved and we have a session
-    if (authLoading || !session) {
-      setLoadingConnection(false);
-      return;
-    }
-
-    loadConnection();
-
-    // Handle OAuth callback code in URL
-    const url = new URL(window.location.href);
-    const code = url.searchParams.get("code");
-    if (code) {
-      url.searchParams.delete("code");
-      url.searchParams.delete("state");
-      url.searchParams.delete("scope");
-      window.history.replaceState({}, "", url.toString());
-      handleOAuthCallback(code);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, session]);
-
-  // Load runs when connectionId becomes available
-  useEffect(() => {
-    if (savedConn?.id) loadRuns(savedConn.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedConn?.id]);
-
-  const handleOAuthCallback = async (code: string) => {
+  const handleOAuthCallback = useCallback(async (code: string) => {
     try {
       await callYouTube("oauth_callback", {
         code,
@@ -151,20 +102,33 @@ export default function YouTubeDetail() {
     } catch (e) {
       toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const loadRuns = async (connectionId = settings.connectionId) => {
-    if (!connectionId) return;
-    setLoadingRuns(true);
-    try {
-      const result = await callYouTube("list_sync_runs", { connectionId });
-      setRuns((result.runs || []) as SyncRun[]);
-    } catch (e) {
-      toast.error(`Failed to fetch sync history: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setLoadingRuns(false);
+  useEffect(() => {
+    if (authLoading || !session) {
+      setLoadingConnection(false);
+      return;
     }
-  };
+
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    if (code) {
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      url.searchParams.delete("scope");
+      window.history.replaceState({}, "", url.toString());
+
+      // Process OAuth callback FIRST, then load connection state
+      (async () => {
+        await handleOAuthCallback(code);
+        await loadConnection();
+      })();
+    } else {
+      loadConnection();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, session]);
 
   const handleSaveApiKey = async (apiKey: string) => {
     setSavingKey(true);
@@ -194,7 +158,6 @@ export default function YouTubeDetail() {
       }));
       hasLoadedOnce.current = true;
       toast.success("YouTube API key saved and validated");
-      await loadRuns(connection.id);
       return true;
     } catch (e) {
       setStatus("youtube", "error");
@@ -210,7 +173,7 @@ export default function YouTubeDetail() {
     setSavingKey(true);
     try {
       const result = await callYouTube("connect", {
-        apiKey: "", // empty = update metadata only
+        apiKey: "",
         channelId: channelId.trim() || null,
         accountLabel: accountLabel.trim() || "Primary YouTube",
       });
@@ -266,33 +229,6 @@ export default function YouTubeDetail() {
     }
   };
 
-  const runSync = async (action: "sync_channels" | "sync_videos") => {
-    const connectionId = savedConn?.id || settings.connectionId;
-    if (!connectionId) { toast.error("Connect YouTube first"); return; }
-    if (!channelId.trim()) { toast.error("Channel ID is required"); return; }
-
-    if (action === "sync_channels") setSyncingChannels(true);
-    else setSyncingVideos(true);
-    setStatus("youtube", "syncing");
-    try {
-      const result = await callYouTube(action, {
-        connectionId,
-        channelId: channelId.trim(),
-      });
-      setStatus("youtube", "connected");
-      setLastSync("youtube", new Date().toISOString());
-      updateSettings("youtube", { channelId: channelId.trim() });
-      toast.success(`Synced ${result.recordsProcessed || 0} records`);
-      await loadRuns(connectionId);
-    } catch (e) {
-      setStatus("youtube", "error");
-      toast.error(`Sync failed: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setSyncingChannels(false);
-      setSyncingVideos(false);
-    }
-  };
-
   const handleDisconnect = async () => {
     const connectionId = savedConn?.id || settings.connectionId;
     if (!connectionId) {
@@ -314,7 +250,7 @@ export default function YouTubeDetail() {
   };
 
   const isApiKeyConnected = savedConn?.status === "connected" || integration.status === "connected";
-  const isConnected = isApiKeyConnected; // Data API connected = core connected
+  const isConnected = isApiKeyConnected;
 
   const inputClass = cn(
     "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
@@ -334,7 +270,7 @@ export default function YouTubeDetail() {
     return (
       <IntegrationDetailLayout
         name="YouTube"
-        description="Connect by API key, sync channels/videos, authorize OAuth for uploads"
+        description="Connect your YouTube account to manage and upload videos"
         icon={Youtube}
         status={integration.status}
       >
@@ -348,7 +284,7 @@ export default function YouTubeDetail() {
   return (
     <IntegrationDetailLayout
       name="YouTube"
-      description="Connect by API key, sync channels/videos, authorize OAuth for uploads"
+      description="Connect your YouTube account to manage and upload videos"
       icon={Youtube}
       status={integration.status}
       actions={
@@ -476,57 +412,6 @@ export default function YouTubeDetail() {
             {uploading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Upload className="w-4 h-4 inline mr-1" />}
             Upload to YouTube
           </button>
-        </div>
-      )}
-
-      {/* Manual Sync */}
-      {isConnected && (
-        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-          <div className="flex items-center gap-2">
-            <Film className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-            <h3 className="text-sm font-medium text-foreground">Manual Sync</h3>
-          </div>
-          {!channelId.trim() && (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-3.5 h-3.5" />Add a channel ID to run sync.
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => runSync("sync_channels")} disabled={syncingChannels} className={actionBtnClass}>
-              {syncingChannels ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Channel
-            </button>
-            <button onClick={() => runSync("sync_videos")} disabled={syncingVideos} className={secondaryBtnClass}>
-              {syncingVideos ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Videos
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Sync Runs */}
-      {isConnected && (
-        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-foreground">Recent Sync Runs</h3>
-            <button onClick={() => loadRuns(savedConn?.id)} className={secondaryBtnClass} disabled={loadingRuns}>
-              {loadingRuns ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Refresh
-            </button>
-          </div>
-          <div className="space-y-2">
-            {runs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No sync runs yet.</p>
-            ) : (
-              runs.map((run) => (
-                <div key={run.id} className="p-3 rounded-xl border border-border/40 bg-background/60 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{run.status}</span>
-                    <span className="text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
-                  </div>
-                  <p className="text-muted-foreground mt-1">Records: {run.records_processed}</p>
-                  {run.error_message ? <p className="text-destructive mt-1">{run.error_message}</p> : null}
-                </div>
-              ))
-            )}
-          </div>
         </div>
       )}
     </IntegrationDetailLayout>
