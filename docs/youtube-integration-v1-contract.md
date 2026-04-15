@@ -53,4 +53,3 @@ Enable users to connect YouTube from the Integration Hub, validate credentials, 
 - Video upload/publish
 - Comment moderation actions
 - Token migration/rotation UI
-- ClickUp integration changes (managed separately and intentionally untouched)
