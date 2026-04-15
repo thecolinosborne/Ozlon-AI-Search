@@ -189,6 +189,7 @@ export default function YouTubeDetail() {
       await loadRuns(connection.id);
     } catch (e) {
       setStatus("youtube", "error");
+      console.error("YouTube connect failed", e);
       toast.error(`Connect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setSavingKey(false);
