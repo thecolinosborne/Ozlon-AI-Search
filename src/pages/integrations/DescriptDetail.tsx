@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { Video, Play, Upload, ExternalLink, RefreshCw, X, Info, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 
 interface DescriptJob {
   job_id: string;
@@ -88,17 +88,24 @@ const DescriptDetail = () => {
     return () => { cancelled = true; };
   }, [settings.apiKey]);
 
-  const handleSaveApiKey = (key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     setSavingKey(true);
-    updateSettings("descript", { ...settings, apiKey: key });
-    setApiKeyConfigured("descript", true);
-    toast.success("API Key saved");
-    setSavingKey(false);
+    try {
+      await upsertIntegrationConnection("descript", { api_key: key });
+      updateSettings("descript", { ...settings, apiKey: key });
+      setApiKeyConfigured("descript", true);
+      toast.success("API Key saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingKey(false);
+    }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setStatus("descript", "disconnected");
     setApiKeyConfigured("descript", false);
+    await disconnectIntegration("descript");
     toast.success("Descript disconnected");
   };
 
