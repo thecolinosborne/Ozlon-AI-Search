@@ -4805,7 +4805,7 @@ serve(async (req) => {
         console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
 
         // Determine available tools based on active connections
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
 
         // Add connected services info to system prompt with account details
@@ -4912,7 +4912,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // If no Maton tools were added, ensure GHL tools are still available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
       }
     }
 
