@@ -1,40 +1,61 @@
 
 
-## Fix: ClickUp Invalid List ID
+## YouTube Upload + Fix All Build Errors
 
-### Problem
-Your `CLICKUP_DEFAULT_LIST_ID` secret is set to `6-901710746417`, but ClickUp's API rejects it — `list_accessible: false`. The `getListId()` helper also strips the `6-` prefix, making it `901710746417`, which is equally invalid. No task creation can work until this is fixed.
+### What's Needed for YouTube Upload
 
-Additionally, the edge function has no way to browse your ClickUp workspace to discover valid list IDs — you'd have to manually look them up.
+Uploading videos via the YouTube API requires **OAuth 2.0** — an API key alone only supports read-only operations. Here's what needs to happen:
 
-### Fix
+**Your side (Google Cloud Console):**
+1. You already have a YouTube Data API key — keep it for read operations
+2. In your Google Cloud project, create an **OAuth 2.0 Client ID** (Web application type)
+3. Set these values:
+   - **Authorized JavaScript origins**: `https://ozlon.ai` and `https://ozlon-hello-orb.lovable.app`
+   - **Authorized redirect URI**: `https://ozlon-hello-orb.lovable.app/integrations/youtube` (we'll handle the callback here)
+4. Enable the **YouTube Data API v3** in your Google Cloud project
+5. On the OAuth consent screen, add scope: `https://www.googleapis.com/auth/youtube.upload`
 
-**1. Add a `list_spaces` and `list_lists` action to the ClickUp edge function**
+**Lovable side — what I'll build:**
 
-This lets you (and the settings UI) browse your workspace to find the correct list ID:
-- `list_spaces` → calls `GET /team/{teamId}/space` → returns all spaces
-- `list_folders` → calls `GET /space/{spaceId}/folder` → returns folders in a space  
-- `list_lists` → calls `GET /folder/{folderId}/list` → returns lists in a folder
-- Also: `GET /space/{spaceId}/list` for folderless lists
+### 1. Store OAuth Client ID and Secret as backend secrets
+- `YOUTUBE_CLIENT_ID` — your Google OAuth client ID
+- `YOUTUBE_CLIENT_SECRET` — your Google OAuth client secret
 
-**2. Add a List Picker to the ClickUp integration detail page**
+### 2. Add OAuth flow to the YouTube edge function
+New actions:
+- `oauth_authorize` — generates the Google OAuth URL with `youtube.upload` scope, returns it to the frontend
+- `oauth_callback` — exchanges the auth code for access/refresh tokens, stores them securely in `integration_connections`
+- `upload_video` — uses the stored OAuth token to upload a video via YouTube's resumable upload API
 
-Replace the blind "list ID from env" approach with a dropdown that:
-- Fetches spaces → folders → lists from the API
-- Lets you select the correct list
-- Saves it via `update_config` (stores in `clickup_integration_state` table)
+### 3. Update the YouTube Detail page
+- Add an "OAuth Client ID" input field
+- Add "Authorize YouTube Upload" button that kicks off the OAuth flow
+- Show OAuth connection status (read-only vs. upload-enabled)
+- Add an upload section (appears after OAuth is connected)
 
-**3. Fix `getListId()` to prefer DB-stored list over env var**
+### 4. Fix all 6 existing build errors
 
-Update priority: `params.listId` → config row `default_list_id` → env `CLICKUP_DEFAULT_LIST_ID`. This way the UI-selected list takes precedence.
-
-**4. Update the `CLICKUP_DEFAULT_LIST_ID` secret**
-
-Once we discover the correct list ID from the picker, update the secret to the valid value.
+| File | Error | Fix |
+|---|---|---|
+| `chat/index.ts:3191` | `{} \| null` not assignable to `string` | Cast: `taskRowId = (taskRow?.id as string) \|\| null` |
+| `chat/index.ts:3557` | `createClient` not found | Add dynamic import like line 3184 |
+| `clickup/index.ts:198` | `tokenOverride` undefined in `fetchTaskContext` | Add `tokenOverride?` parameter to function signature |
+| `clickup/index.ts:637,648` | `fetchTaskContext` called with 2 args | Matches fix above — signature now accepts 2 |
+| `render-video/index.ts:261` | `err` is `unknown` | `(err instanceof Error ? err.message : String(err))` |
+| `ClickUpDetail.tsx` | `getAuthParams` not found (11 errors) | Add helper function that returns `{ teamId, defaultListId }` from component state |
 
 ### Files Changed
+
 | File | Change |
 |---|---|
-| `supabase/functions/clickup/index.ts` | Add `list_spaces`, `list_folders`, `list_lists` actions; fix `getListId` to check DB config first |
-| `src/pages/integrations/ClickUpDetail.tsx` | Add list picker UI that browses spaces/folders/lists |
+| `supabase/functions/youtube/index.ts` | Add `oauth_authorize`, `oauth_callback`, `upload_video` actions |
+| `src/pages/integrations/YouTubeDetail.tsx` | Add OAuth Client ID field, authorize button, upload section |
+| `supabase/functions/chat/index.ts` | Fix 2 type errors (lines 3191, 3557) |
+| `supabase/functions/clickup/index.ts` | Fix `fetchTaskContext` signature, fix `tokenOverride` reference |
+| `supabase/functions/render-video/index.ts` | Fix `err` unknown type |
+| `src/pages/integrations/ClickUpDetail.tsx` | Add missing `getAuthParams` helper |
+
+### After Approval
+
+I'll ask you to add two secrets: `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` with your Google Cloud OAuth credentials.
 
