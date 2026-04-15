@@ -69,15 +69,8 @@ const ClickUpDetail = () => {
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
-  const [apiTokenInput, setApiTokenInput] = useState<string>("");
   const [teamIdInput, setTeamIdInput] = useState<string>(storedSettings.team_id || "");
   const [defaultListIdInput, setDefaultListIdInput] = useState<string>(storedSettings.list_id || "");
-
-  const getAuthParams = () => ({
-    apiToken: apiTokenInput.trim() || undefined,
-    teamId: teamIdInput || undefined,
-    defaultListId: defaultListIdInput || undefined,
-  });
 
   // List picker state
   const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
@@ -95,7 +88,8 @@ const ClickUpDetail = () => {
     const check = async () => {
       try {
         const result = await callClickUp("test_connection", {
-          ...getAuthParams(),
+          teamId: teamIdInput || undefined,
+          defaultListId: defaultListIdInput || undefined,
         });
         if (result.connected) {
           setStatus("clickup", "connected");
@@ -123,7 +117,8 @@ const ClickUpDetail = () => {
     setTesting(true);
     try {
       const result = await callClickUp("connect", {
-        ...getAuthParams(),
+        teamId: teamIdInput || undefined,
+        defaultListId: defaultListIdInput || undefined,
       });
       if (result.connected) {
         setStatus("clickup", "connected");
@@ -328,18 +323,8 @@ const ClickUpDetail = () => {
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <h3 className="text-sm font-medium text-foreground">Connection Inputs</h3>
         <p className="text-xs text-muted-foreground">
-          Paste your ClickUp API token here (session-only), then optionally set Team and Default List IDs.
+          Team and default list can now be entered here if env vars are not set.
         </p>
-        <input
-          type="password"
-          value={apiTokenInput}
-          onChange={(e) => setApiTokenInput(e.target.value)}
-          placeholder="ClickUp API token (pk_...)"
-          className={cn(
-            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
-            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
-          )}
-        />
         <input
           type="text"
           value={teamIdInput}

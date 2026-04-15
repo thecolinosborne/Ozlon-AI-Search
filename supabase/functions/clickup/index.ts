@@ -191,8 +191,8 @@ async function isOnCooldown(taskId: string, cooldownSeconds: number, supabase: R
 }
 
 /** Fetch full task context */
-async function fetchTaskContext(taskId: string, tokenOverride?: string) {
-  const task = await clickupFetch(`/task/${taskId}`, 'GET', undefined, tokenOverride);
+async function fetchTaskContext(taskId: string) {
+  const task = await clickupFetch(`/task/${taskId}`);
   let comments: Array<{ comment_text?: string; user?: { username?: string }; date?: string }> = [];
   try {
     const commentsRes = await clickupFetch(`/task/${taskId}/comment`, 'GET', undefined, tokenOverride);
@@ -467,6 +467,7 @@ serve(async (req) => {
       // ============ CONNECTION ============
       case 'connect':
       case 'test_connection': {
+        const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
         const token = getToken(tokenFromParams);
         const listId = typeof params?.defaultListId === 'string'
           ? params.defaultListId
@@ -579,7 +580,7 @@ serve(async (req) => {
 
       // ============ WEBHOOK ============
       case 'register_webhook': {
-        const token = getToken(tokenFromParams);
+        const token = getToken();
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const endpoint = params?.endpoint;
@@ -618,7 +619,7 @@ serve(async (req) => {
       }
 
       case 'update_config': {
-        const token = getToken(tokenFromParams);
+        const token = getToken();
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const supabase = getSupabase();
@@ -663,10 +664,10 @@ serve(async (req) => {
 
       // ============ DISCOVERY ============
       case 'list_spaces': {
-        const token = getToken(tokenFromParams);
+        const token = getToken();
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
-        const data = await clickupCall(`/team/${teamId}/space?archived=false`);
+        const data = await clickupFetch(`/team/${teamId}/space?archived=false`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
