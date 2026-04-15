@@ -521,8 +521,9 @@ serve(async (req) => {
     const body = await req.json();
     const { action, params } = body;
     const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
+    const resolvedToken = await resolveClickUpToken(req, tokenFromParams);
     const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
-      clickupFetch(path, method, payload, tokenFromParams);
+      clickupFetch(path, method, payload, resolvedToken);
 
     // ClickUp webhooks send the payload directly (no action field)
     if (!action && body.event) {
