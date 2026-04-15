@@ -1,11 +1,9 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
+import { CheckSquare, ListTodo, Plus, RefreshCw } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
@@ -27,46 +25,11 @@ async function callClickUp(action: string, params?: Record<string, unknown>) {
   return res.json();
 }
 
-interface ClickUpConfig {
-  auto_reply_enabled: boolean;
-  reply_trigger_mode: string;
-  ai_reply_mode: string;
-  allow_subtask_creation: boolean;
-  allow_task_updates: boolean;
-  webhook_status: string;
-  last_webhook_event_at: string | null;
-  last_successful_ai_reply_at: string | null;
-}
-
-const defaultConfig: ClickUpConfig = {
-  auto_reply_enabled: true,
-  reply_trigger_mode: "mention_only",
-  ai_reply_mode: "standard",
-  allow_subtask_creation: false,
-  allow_task_updates: false,
-  webhook_status: "not_registered",
-  last_webhook_event_at: null,
-  last_successful_ai_reply_at: null,
-};
-
-const triggerModes = [
-  { value: "mention_only", label: "Mention Only" },
-  { value: "always", label: "Always" },
-  { value: "disabled", label: "Disabled" },
-];
-
-const replyModes = [
-  { value: "brief", label: "Brief" },
-  { value: "standard", label: "Standard" },
-  { value: "detailed", label: "Detailed" },
-];
-
 const ClickUpDetail = () => {
   const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
   const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
-  const [config, setConfig] = useState<ClickUpConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
@@ -102,9 +65,6 @@ const ClickUpDetail = () => {
             list_id: result.list_id,
           });
         }
-        // Load config
-        const cfg = await callClickUp("get_config", getAuthParams());
-        setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
       } finally {
@@ -261,28 +221,7 @@ const ClickUpDetail = () => {
     setSelectedList(listId);
     try {
       await callClickUp("update_config", { ...getAuthParams(), default_list_id: listId });
-      setConfig((c) => ({ ...c }));
       toast.success("Default list updated");
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  };
-
-  const handleRegisterWebhook = async () => {
-    try {
-      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-      await callClickUp("register_webhook", { ...getAuthParams(), endpoint: webhookUrl });
-      setConfig((c) => ({ ...c, webhook_status: "registered" }));
-      toast.success("Webhook registered");
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  };
-
-  const updateConfigField = async (field: string, value: unknown) => {
-    try {
-      const updated = await callClickUp("update_config", { ...getAuthParams(), [field]: value });
-      setConfig((c) => ({ ...c, ...updated }));
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -324,7 +263,6 @@ const ClickUpDetail = () => {
         saving={savingKey}
         maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : isConnected ? "•••••••• (server)" : undefined}
       />
-
 
       {isConnected && (
         <>
@@ -395,144 +333,6 @@ const ClickUpDetail = () => {
                   <p className="text-[11px] text-muted-foreground/60">Loading…</p>
                 )}
               </div>
-            )}
-          </div>
-
-          {/* Webhook Status */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Webhook className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-                Webhook
-              </h3>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 text-xs font-medium",
-                  config.webhook_status === "registered"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-muted-foreground"
-                )}
-              >
-                <span
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    config.webhook_status === "registered"
-                      ? "bg-emerald-500"
-                      : "bg-muted-foreground/40"
-                  )}
-                />
-                {config.webhook_status === "registered" ? "Registered" : "Not Registered"}
-              </span>
-            </div>
-            {config.webhook_status !== "registered" && (
-              <button
-                onClick={handleRegisterWebhook}
-                className="w-full py-2 rounded-xl text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-              >
-                Register Webhook
-              </button>
-            )}
-            {config.last_webhook_event_at && (
-              <p className="text-[11px] text-muted-foreground/60">
-                Last event: {new Date(config.last_webhook_event_at).toLocaleString()}
-              </p>
-            )}
-          </div>
-
-          {/* Reply Settings */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
-            <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
-              <Zap className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-              AI Reply Settings
-            </h3>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-foreground">Auto-Reply</span>
-                <button
-                  onClick={() => updateConfigField("auto_reply_enabled", !config.auto_reply_enabled)}
-                  className={cn(
-                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    config.auto_reply_enabled ? "bg-primary" : "bg-muted"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
-                      config.auto_reply_enabled ? "translate-x-[18px]" : "translate-x-0"
-                    )}
-                    style={{ width: 18, height: 18 }}
-                  />
-                </button>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Trigger Mode</label>
-                <Select value={config.reply_trigger_mode} onValueChange={(v) => updateConfigField("reply_trigger_mode", v)}>
-                  <SelectTrigger className="h-9 text-xs rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {triggerModes.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Reply Detail</label>
-                <Select value={config.ai_reply_mode} onValueChange={(v) => updateConfigField("ai_reply_mode", v)}>
-                  <SelectTrigger className="h-9 text-xs rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {replyModes.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-foreground">Allow Subtask Creation</span>
-                <button
-                  onClick={() => updateConfigField("allow_subtask_creation", !config.allow_subtask_creation)}
-                  className={cn(
-                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    config.allow_subtask_creation ? "bg-primary" : "bg-muted"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
-                      config.allow_subtask_creation ? "translate-x-[18px]" : "translate-x-0"
-                    )}
-                    style={{ width: 18, height: 18 }}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-foreground">Allow Task Updates</span>
-                <button
-                  onClick={() => updateConfigField("allow_task_updates", !config.allow_task_updates)}
-                  className={cn(
-                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    config.allow_task_updates ? "bg-primary" : "bg-muted"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
-                      config.allow_task_updates ? "translate-x-[18px]" : "translate-x-0"
-                    )}
-                    style={{ width: 18, height: 18 }}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {config.last_successful_ai_reply_at && (
-              <p className="text-[11px] text-muted-foreground/60">
-                Last AI reply: {new Date(config.last_successful_ai_reply_at).toLocaleString()}
-              </p>
             )}
           </div>
 
