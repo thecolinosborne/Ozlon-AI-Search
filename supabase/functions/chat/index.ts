@@ -825,7 +825,7 @@ The following is REAL data pulled from the user's connected accounts. Use this d
     }
   }
   if (notConnected.length) {
-    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Maton AI Integrations.`;
+    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Integrations.`;
   }
   return injection;
 }
