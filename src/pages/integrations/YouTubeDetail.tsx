@@ -106,7 +106,7 @@ export default function YouTubeDetail() {
 
   const checkOAuthStatus = async () => {
     try {
-      const result = await callYouTube("oauth_status");
+      const result = await withTimeout(callYouTube("oauth_status"));
       setOauthConnected(!!result.oauth_connected);
     } catch {
       // not connected
