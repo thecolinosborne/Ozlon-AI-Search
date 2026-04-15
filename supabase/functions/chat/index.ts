@@ -1513,6 +1513,141 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' }, name: { type: 'string', description: 'New name (optional)' }, resolved: { type: 'boolean', description: 'Mark resolved or unresolved (optional)' } }, required: ['checklist_id', 'checklist_item_id'] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_clickup_tasks',
+      description: 'Search tasks across the entire ClickUp workspace by keyword, status, assignee, tags, or due date.',
+      parameters: { type: 'object', properties: { statuses: { type: 'array', items: { type: 'string' }, description: 'Filter by statuses (optional)' }, assignees: { type: 'array', items: { type: 'number' }, description: 'Filter by assignee user IDs (optional)' }, tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (optional)' }, due_date_gt: { type: 'number', description: 'Due date after (Unix ms, optional)' }, due_date_lt: { type: 'number', description: 'Due date before (Unix ms, optional)' }, include_closed: { type: 'boolean', description: 'Include closed tasks (optional)' }, subtasks: { type: 'boolean', description: 'Include subtasks (optional)' } }, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_spaces',
+      description: 'List all spaces in the ClickUp workspace.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_lists',
+      description: 'List all lists across the entire ClickUp workspace (all spaces and folders).',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_members',
+      description: 'List all members in the ClickUp workspace. Use to discover user IDs for assignee operations.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'move_clickup_task',
+      description: 'Move a ClickUp task to a different list.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID to move' }, list_id: { type: 'string', description: 'Destination list ID' } }, required: ['task_id', 'list_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_priority',
+      description: 'Set the priority of a ClickUp task. 1=Urgent, 2=High, 3=Normal, 4=Low.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, priority: { type: 'number', description: '1=Urgent, 2=High, 3=Normal, 4=Low' } }, required: ['task_id', 'priority'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_clickup_timer',
+      description: 'Start a time tracking timer on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID to track time on' }, description: { type: 'string', description: 'Timer description (optional)' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'stop_clickup_timer',
+      description: 'Stop the currently running ClickUp time tracking timer.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_time_entries',
+      description: 'Get time tracking entries from ClickUp.',
+      parameters: { type: 'object', properties: { start_date: { type: 'number', description: 'Start date Unix ms (optional)' }, end_date: { type: 'number', description: 'End date Unix ms (optional)' } }, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_custom_fields',
+      description: 'List custom fields available on a ClickUp list.',
+      parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_custom_field',
+      description: 'Set a custom field value on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, field_id: { type: 'string', description: 'Custom field ID' }, value: { description: 'Value to set' } }, required: ['task_id', 'field_id', 'value'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_task_dependencies',
+      description: 'List dependencies and dependents of a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_clickup_dependency',
+      description: 'Add a dependency between two ClickUp tasks (task depends on another).',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID that depends on another' }, depends_on: { type: 'string', description: 'Task ID that this task depends on' } }, required: ['task_id', 'depends_on'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_dependency',
+      description: 'Remove a dependency between two ClickUp tasks.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, depends_on: { type: 'string', description: 'Dependency task ID to remove' } }, required: ['task_id', 'depends_on'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_checklist',
+      description: 'Delete an entire checklist from a ClickUp task.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' } }, required: ['checklist_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_checklist_item',
+      description: 'Delete an item from a ClickUp checklist.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' } }, required: ['checklist_id', 'checklist_item_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_list_statuses',
+      description: 'Get available statuses for a ClickUp list. Useful to know valid status values before setting task status.',
+      parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
+    },
   // Trello actions
   {
     type: 'function',
