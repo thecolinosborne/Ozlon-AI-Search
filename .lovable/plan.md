@@ -1,37 +1,31 @@
 
 
-## Fix YouTube Integration — Proper Key Management + End-to-End Sync
+## Fix YouTube Detail Page Infinite Loading
 
-### Problem
-1. The API key lives only in component state — lost on every page reload. Users must re-enter it each time they sync.
-2. Raw `<input type="password">` is used instead of the reusable `ApiKeyInput` component (which has masked display, "Configured" badge, and "Update" flow).
-3. The backend upsert uses `onConflict: "user_id,provider,auth_type,external_account_id"` but `external_account_id` can be NULL, and Postgres treats NULLs as distinct in unique constraints — so upserts silently insert duplicates instead of updating.
+### Root Cause
+`supabase.functions.invoke("youtube")` hangs in the Lovable preview environment — the promise never settles, so `loadingConnection` stays `true` and the spinner shows forever. The backend itself is fine (confirmed via direct curl — returns 200).
 
-### Changes
+### Fix
 
-**1. Database migration** — Fix the unique constraint on `integration_connections`
-- Create a unique index using `COALESCE(external_account_id, '__null__')` so NULL values are treated as equal, preventing duplicate rows.
+**File: `src/pages/integrations/YouTubeDetail.tsx`**
 
-**2. Edge function `supabase/functions/youtube/index.ts`**
-- On `connect`: store the actual API key encrypted-at-rest in `metadata.api_key` (it's already behind RLS + service role). Return `api_key_masked` so the frontend can display it.
-- Add a `get_connection` action so the frontend can load saved connection state (masked key, channel ID, label) on page load.
-- On `sync_channels` / `sync_videos`: if `apiKey` param is empty, fall back to the stored `metadata.api_key` from the connection row — so syncs work without re-entering the key.
+Add a timeout wrapper to both `loadConnection` and `checkOAuthStatus` so they abort after 8 seconds:
 
-**3. Frontend `src/pages/integrations/YouTubeDetail.tsx`**
-- Replace the raw API key `<input>` with the `ApiKeyInput` component. On save, call `connect` (or a new `update_key` action) to persist + validate the new key.
-- On mount, call `get_connection` to load the existing connection state (masked key hint, channel ID, connection status) so the page shows "Configured" with masked `***abcd` immediately.
-- Channel ID input: pre-fill from saved connection, allow editing.
-- When user enters a new API key via the `ApiKeyInput` "Update" flow, it replaces the old key in the database.
-- Keep OAuth, Upload, Manual Sync, and Sync Runs sections as-is.
+```typescript
+const withTimeout = <T>(promise: Promise<T>, ms = 8000): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+```
 
-### What stays unchanged
-- OAuth authorize/callback/upload flow
-- Sync runs display
-- Manual sync buttons
-- Backend sync logic (channels/videos)
+Then wrap the calls:
+- `loadConnection`: `await withTimeout(callYouTube("get_connection"))` — on timeout, catch silently and set `loadingConnection = false`
+- `checkOAuthStatus`: `await withTimeout(callYouTube("oauth_status"))` — on timeout, catch silently
 
-### Files modified
-- `supabase/migrations/[new]` — unique index fix
-- `supabase/functions/youtube/index.ts` — store key, add `get_connection`, fallback key on sync
-- `src/pages/integrations/YouTubeDetail.tsx` — use `ApiKeyInput`, load saved state on mount
+This is a one-file, surgical change. The page will render in its normal disconnected state if the request hangs, instead of spinning forever.
+
+### No other changes
+- Edge function is confirmed working
+- OAuth, sync, upload sections unchanged
 
