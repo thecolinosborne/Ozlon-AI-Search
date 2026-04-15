@@ -377,6 +377,11 @@ export default function YouTubeDetail() {
             {savedConn.lastError}
           </div>
         )}
+        <div className="pt-1 border-t border-border/20">
+          <p className="text-[10px] text-muted-foreground/60 font-mono select-all break-all">
+            Redirect URI: {window.location.origin}/integrations/youtube
+          </p>
+        </div>
       </div>
 
       {/* API Key */}
