@@ -5,6 +5,7 @@ import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDe
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 interface SyncRun {
@@ -30,6 +31,7 @@ interface SavedConnection {
 type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "expired_no_refresh" | "disconnected" | "unknown";
 
 export default function YouTubeDetail() {
+  const { session, authLoading } = useAuth();
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("youtube");
@@ -110,6 +112,12 @@ export default function YouTubeDetail() {
   }, []);
 
   useEffect(() => {
+    // Don't attempt to load until auth is resolved and we have a session
+    if (authLoading || !session) {
+      setLoadingConnection(false);
+      return;
+    }
+
     loadConnection();
 
     // Handle OAuth callback code in URL
@@ -123,7 +131,7 @@ export default function YouTubeDetail() {
       handleOAuthCallback(code);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, session]);
 
   // Load runs when connectionId becomes available
   useEffect(() => {
@@ -322,7 +330,7 @@ export default function YouTubeDetail() {
     "border border-border hover:bg-muted/60 text-foreground",
   );
 
-  if (loadingConnection) {
+  if (loadingConnection || authLoading) {
     return (
       <IntegrationDetailLayout
         name="YouTube"
