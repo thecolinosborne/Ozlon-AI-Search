@@ -3864,8 +3864,8 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'read_sheet_data': 'google-drive',
     'append_sheet_rows': 'google-drive',
     'create_google_presentation': 'google-drive',
-    'create_clickup_task': 'clickup',
-    'list_clickup_tasks': 'clickup',
+    'create_clickup_task': '_always_',
+    'list_clickup_tasks': '_always_',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
     // GHL tools
