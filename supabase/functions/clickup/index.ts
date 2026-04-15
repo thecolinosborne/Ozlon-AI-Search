@@ -136,7 +136,9 @@ async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenO
     const text = await res.text();
     throw new Error(`ClickUp API ${res.status}: ${text}`);
   }
-  return res.json();
+  const text = await res.text();
+  if (!text) return {};
+  return JSON.parse(text);
 }
 
 // ============================================================================
