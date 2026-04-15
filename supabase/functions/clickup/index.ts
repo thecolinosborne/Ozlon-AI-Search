@@ -37,6 +37,38 @@ function getToken(tokenOverride?: string): string {
   return token;
 }
 
+/** Resolve ClickUp token from per-user DB first, then env fallback */
+async function resolveClickUpToken(req: Request, tokenOverride?: string): Promise<string> {
+  if (tokenOverride) return tokenOverride;
+
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'clickup')
+          .eq('status', 'connected')
+          .single();
+        const key = (data?.metadata as Record<string, string>)?.api_key;
+        if (key) return key;
+      }
+    } catch { /* fall through */ }
+  }
+
+  return getToken();
+}
+
 async function resolveTeamId(
   token: string,
   explicitTeamId?: string
