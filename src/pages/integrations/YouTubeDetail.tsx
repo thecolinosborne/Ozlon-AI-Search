@@ -55,6 +55,12 @@ export default function YouTubeDetail() {
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
 
+  const withTimeout = <T,>(promise: Promise<T>, ms = 8000): Promise<T> =>
+    Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+    ]);
+
   const callYouTube = async (action: string, params: Record<string, unknown> = {}) => {
     const { data, error } = await supabase.functions.invoke("youtube", {
       body: { action, params },
@@ -67,7 +73,7 @@ export default function YouTubeDetail() {
   const loadConnection = useCallback(async () => {
     setLoadingConnection(true);
     try {
-      const result = await callYouTube("get_connection");
+      const result = await withTimeout(callYouTube("get_connection"));
       const conn = result.connection as SavedConnection | null;
       if (conn) {
         setSavedConn(conn);
@@ -100,7 +106,7 @@ export default function YouTubeDetail() {
 
   const checkOAuthStatus = async () => {
     try {
-      const result = await callYouTube("oauth_status");
+      const result = await withTimeout(callYouTube("oauth_status"));
       setOauthConnected(!!result.oauth_connected);
     } catch {
       // not connected
