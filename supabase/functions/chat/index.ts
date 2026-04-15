@@ -579,29 +579,48 @@ async function fetchGoogleMeetData(key: string, connId: string): Promise<string>
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
 }
 
-// ---------- ClickUp ----------
-async function fetchClickUpData(key: string, connId: string): Promise<string> {
-  const teamsData = await callMatonGateway(key, '/clickup/api/v2/team', connId) as { teams?: { id: string; name: string }[] };
-  const teams = teamsData.teams || [];
-  if (!teams.length) return 'No ClickUp workspaces found.';
-  const sections: string[] = [];
-  for (const team of teams.slice(0, 2)) {
-    const spacesData = await callMatonGateway(key, `/clickup/api/v2/team/${team.id}/space?archived=false`, connId) as { spaces?: { id: string; name: string }[] };
-    const spaces = spacesData.spaces || [];
-    let teamSection = `**Workspace:** ${team.name}\n`;
-    for (const space of spaces.slice(0, 3)) {
-      teamSection += `  Space: ${space.name}\n`;
-      try {
-        const listsData = await callMatonGateway(key, `/clickup/api/v2/space/${space.id}/list`, connId) as { lists?: { id: string; name: string; task_count?: number }[] };
-        const lists = listsData.lists || [];
-        for (const list of lists.slice(0, 3)) {
-          teamSection += `    - ${list.name} (${list.task_count || 0} tasks)\n`;
-        }
-      } catch { teamSection += '    - Could not load lists\n'; }
-    }
-    sections.push(teamSection);
+// ---------- ClickUp (via dedicated edge function) ----------
+async function callClickUpEdge(action: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const clickupUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/clickup`;
+  const res = await fetch(clickupUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+    },
+    body: JSON.stringify({ action, params }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'ClickUp edge function error' }));
+    throw new Error(err.error || `ClickUp edge function returned ${res.status}`);
   }
-  return sections.join('\n');
+  return res.json();
+}
+
+async function fetchClickUpData(_key: string, _connId: string): Promise<string> {
+  try {
+    const result = await callClickUpEdge('test_connection');
+    if (!result.connected) return 'ClickUp is not connected. Configure the API token in Integrations → ClickUp.';
+    // Fetch spaces and lists overview
+    const spacesResult = await callClickUpEdge('list_spaces') as { spaces?: { id: string; name: string }[] };
+    const spaces = spacesResult.spaces || [];
+    if (!spaces.length) return 'ClickUp connected but no spaces found.';
+    const sections: string[] = [];
+    for (const space of spaces.slice(0, 3)) {
+      let section = `**Space:** ${space.name}\n`;
+      try {
+        const listsResult = await callClickUpEdge('list_lists', { spaceId: space.id }) as { lists?: { id: string; name: string; task_count?: number }[] };
+        const lists = listsResult.lists || [];
+        for (const list of lists.slice(0, 5)) {
+          section += `  - ${list.name} (${list.task_count || 0} tasks) [list_id: ${list.id}]\n`;
+        }
+      } catch { section += '  - Could not load lists\n'; }
+      sections.push(section);
+    }
+    return sections.join('\n');
+  } catch (err) {
+    return `ClickUp error: ${(err as Error).message}`;
+  }
 }
 
 // ---------- Google Analytics (GA4) ----------
@@ -1198,21 +1217,21 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // ClickUp actions
+  // ClickUp actions (via dedicated edge function, not Maton)
   {
     type: 'function',
     function: {
       name: 'create_clickup_task',
-      description: 'Create a new task in ClickUp.',
+      description: 'Create a new task in ClickUp. The list_id is optional — if omitted, the configured default list is used.',
       parameters: {
         type: 'object',
         properties: {
-          list_id: { type: 'string', description: 'ClickUp list ID to create the task in' },
+          list_id: { type: 'string', description: 'ClickUp list ID (optional, uses default list if omitted)' },
           name: { type: 'string', description: 'Task name' },
           description: { type: 'string', description: 'Task description (optional)' },
           priority: { type: 'number', description: 'Priority: 1=Urgent, 2=High, 3=Normal, 4=Low (optional)' },
         },
-        required: ['list_id', 'name'],
+        required: ['name'],
       },
     },
   },
@@ -1220,13 +1239,13 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'list_clickup_tasks',
-      description: 'List tasks from a ClickUp list.',
+      description: 'List tasks from a ClickUp list. If list_id is omitted, uses the configured default list.',
       parameters: {
         type: 'object',
         properties: {
-          list_id: { type: 'string', description: 'ClickUp list ID' },
+          list_id: { type: 'string', description: 'ClickUp list ID (optional, uses default list if omitted)' },
         },
-        required: ['list_id'],
+        required: [],
       },
     },
   },
@@ -2745,25 +2764,31 @@ async function executeToolCall(
         return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
       }
 
-      // ============ ClickUp tools ============
+      // ============ ClickUp tools (via dedicated edge function) ============
       case 'create_clickup_task': {
-        const connId = resolveConnection(connMap, 'clickup')?.id;
-        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
-        const taskData: Record<string, unknown> = { name: args.name };
-        if (args.description) taskData.description = args.description;
-        if (args.priority) taskData.priority = args.priority;
-        const res = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task`, connId, 'POST', taskData) as { id?: string; name?: string; url?: string; err?: string };
-        if (res.err) return { success: false, result: `ClickUp error: ${res.err}` };
-        return { success: true, result: `Task created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        try {
+          const params: Record<string, unknown> = { name: args.name };
+          if (args.list_id) params.listId = args.list_id;
+          if (args.description) params.description = args.description;
+          if (args.priority) params.priority = args.priority;
+          const res = await callClickUpEdge('create_task', params) as { id?: string; name?: string; url?: string };
+          return { success: true, result: `Task created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        } catch (err) {
+          return { success: false, result: `ClickUp error: ${(err as Error).message}` };
+        }
       }
 
       case 'list_clickup_tasks': {
-        const connId = resolveConnection(connMap, 'clickup')?.id;
-        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
-        const data = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task?page=0`, connId) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string; priority?: { priority?: string } }[] };
-        const tasks = data.tasks || [];
-        if (!tasks.length) return { success: true, result: 'No tasks in this list.' };
-        return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map(t => `- ${t.name} (${t.status?.status || '?'}) — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.list_id) params.listId = args.list_id;
+          const data = await callClickUpEdge('list_tasks', params) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string }[] };
+          const tasks = data.tasks || [];
+          if (!tasks.length) return { success: true, result: 'No tasks found.' };
+          return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map((t: { id: string; name: string; status?: { status?: string }; url?: string }) => `- ${t.name} (${t.status?.status || '?'}) — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        } catch (err) {
+          return { success: false, result: `ClickUp error: ${(err as Error).message}` };
+        }
       }
 
       // ============ Tier 3: GHL Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
