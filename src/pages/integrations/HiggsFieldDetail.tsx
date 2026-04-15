@@ -1,49 +1,51 @@
 import { useState, useEffect } from "react";
 import { Sparkles, Settings2, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
-import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
+import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 
 const HiggsFieldDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("higgsfield");
+  const settings = integration.settings as { apiKey?: string; appId?: string };
 
   const [autoDetecting, setAutoDetecting] = useState(true);
   const [testing, setTesting] = useState(false);
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const [savingAppId, setSavingAppId] = useState(false);
 
-  // Auto-detect backend credentials on mount
+  const callHiggsfield = async (action: string, params: Record<string, unknown> = {}) => {
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ action, ...params, apiKey: settings.apiKey || undefined, appId: settings.appId || undefined }),
+    });
+    return res.json();
+  };
+
+  // Auto-detect on mount
   useEffect(() => {
     let cancelled = false;
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ action: "test_connection" }),
-        });
-        const data = await res.json();
-        
+        const data = await callHiggsfield("test_connection");
         if (cancelled) return;
         if (data?.success) {
           setStatus("higgsfield", "connected");
           setApiKeyConfigured("higgsfield", true);
           setLastSync("higgsfield", new Date().toISOString());
-          if (getIntegration("higgsfield").syncDirection !== "two-way") {
-            setSyncDirection("higgsfield", "two-way");
-          }
         } else {
           setStatus("higgsfield", "disconnected");
           setApiKeyConfigured("higgsfield", false);
         }
-      } catch (e) {
-        
+      } catch {
         if (!cancelled) {
           setStatus("higgsfield", "disconnected");
           setApiKeyConfigured("higgsfield", false);
@@ -54,21 +56,27 @@ const HiggsFieldDetail = () => {
     };
     detectKey();
     return () => { cancelled = true; };
-  }, []);
+  }, [settings.apiKey, settings.appId]);
+
+  const handleSaveApiKey = (key: string) => {
+    setSavingApiKey(true);
+    updateSettings("higgsfield", { ...settings, apiKey: key });
+    setApiKeyConfigured("higgsfield", true);
+    toast.success("API Key saved");
+    setSavingApiKey(false);
+  };
+
+  const handleSaveAppId = (id: string) => {
+    setSavingAppId(true);
+    updateSettings("higgsfield", { ...settings, appId: id });
+    toast.success("App ID saved");
+    setSavingAppId(false);
+  };
 
   const handleTestConnection = async () => {
     setTesting(true);
     try {
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ action: "test_connection" }),
-      });
-      const data = await res.json();
+      const data = await callHiggsfield("test_connection");
       if (data?.success) {
         toast.success("Higgsfield AI connection verified");
         setStatus("higgsfield", "connected");
@@ -107,25 +115,40 @@ const HiggsFieldDetail = () => {
         ) : undefined
       }
     >
+      {/* API Credentials */}
+      <ApiKeyInput
+        label="Higgsfield API Key"
+        placeholder="Enter your Higgsfield API key…"
+        configured={!!settings.apiKey || integration.status === "connected"}
+        onSave={handleSaveApiKey}
+        saving={savingApiKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
+      />
+      <ApiKeyInput
+        label="Higgsfield App ID"
+        placeholder="Enter your App ID…"
+        configured={!!settings.appId || integration.status === "connected"}
+        onSave={handleSaveAppId}
+        saving={savingAppId}
+        maskedHint={settings.appId ? "••••" + settings.appId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
+      />
+
       {autoDetecting && (
         <div className="p-4 rounded-2xl border border-border/40 bg-card/60 flex items-center gap-3">
           <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Detecting backend API key…</p>
+          <p className="text-sm text-muted-foreground">Detecting connection…</p>
         </div>
       )}
 
-      {!autoDetecting && integration.status === "disconnected" && (
+      {!autoDetecting && integration.status === "disconnected" && !settings.apiKey && (
         <div className="p-4 rounded-2xl border border-destructive/30 bg-destructive/5 flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-destructive" />
-          <p className="text-sm text-destructive">
-            Backend API key not configured. Please add it as a backend secret.
-          </p>
+          <p className="text-sm text-destructive">Enter your credentials above to connect.</p>
         </div>
       )}
 
       {integration.status === "connected" && (
         <>
-          {/* Connection & Test */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Connection</h3>
             <div className="flex gap-2">
@@ -140,14 +163,6 @@ const HiggsFieldDetail = () => {
             </div>
           </div>
 
-          {/* Two-way Sync Control */}
-          <SyncControl
-            direction={integration.syncDirection}
-            onDirectionChange={(d) => setSyncDirection("higgsfield", d)}
-            lastSync={integration.lastSync}
-          />
-
-          {/* Model & Configuration */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Models</h3>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
@@ -166,7 +181,6 @@ const HiggsFieldDetail = () => {
             </div>
           </div>
 
-          {/* Capabilities */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Capabilities</h3>
             <div className="text-[12px] text-muted-foreground space-y-1.5">

@@ -45,95 +45,6 @@ async function ytFetch(path: string, apiKey: string): Promise<AnyJson> {
   return data;
 }
 
-function normalizeGoogleDriveUrl(url: string): string {
-  const trimmed = url.trim();
-
-  // https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing
-  const fileMatch = trimmed.match(/drive\.google\.com\/file\/d\/([^/]+)/i);
-  if (fileMatch?.[1]) {
-    return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileMatch[1])}`;
-  }
-
-  // https://drive.google.com/open?id=<FILE_ID>
-  const openMatch = trimmed.match(/[?&]id=([^&]+)/i);
-  if (trimmed.includes("drive.google.com") && openMatch?.[1]) {
-    return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(openMatch[1])}`;
-  }
-
-  return trimmed;
-}
-
-async function uploadVideoFromUrl(params: {
-  accessToken: string;
-  sourceUrl: string;
-  title: string;
-  description: string;
-  privacyStatus: "private" | "unlisted" | "public";
-}): Promise<{ videoId: string; title: string }> {
-  const normalizedSourceUrl = normalizeGoogleDriveUrl(params.sourceUrl);
-  const sourceRes = await fetch(normalizedSourceUrl);
-  if (!sourceRes.ok) {
-    const text = await sourceRes.text().catch(() => "");
-    throw new Error(`Failed to download source video (${sourceRes.status}): ${text}`);
-  }
-
-  const contentType = sourceRes.headers.get("content-type") || "video/mp4";
-  const contentLength = sourceRes.headers.get("content-length") || undefined;
-  const binary = await sourceRes.arrayBuffer();
-
-  const initRes = await fetch(
-    "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${params.accessToken}`,
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": contentType,
-        ...(contentLength ? { "X-Upload-Content-Length": contentLength } : {}),
-      },
-      body: JSON.stringify({
-        snippet: {
-          title: params.title,
-          description: params.description,
-        },
-        status: {
-          privacyStatus: params.privacyStatus,
-        },
-      }),
-    },
-  );
-  if (!initRes.ok) {
-    const text = await initRes.text().catch(() => "");
-    throw new Error(`YouTube upload init failed (${initRes.status}): ${text}`);
-  }
-
-  const uploadUrl = initRes.headers.get("Location");
-  if (!uploadUrl) throw new Error("YouTube upload URL missing from resumable init response");
-
-  const uploadRes = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${params.accessToken}`,
-      "Content-Type": contentType,
-      "Content-Length": String(binary.byteLength),
-    },
-    body: binary,
-  });
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text().catch(() => "");
-    throw new Error(`YouTube upload failed (${uploadRes.status}): ${text}`);
-  }
-
-  const uploaded = (await uploadRes.json()) as AnyJson;
-  const videoId = String(uploaded.id || "");
-  if (!videoId) throw new Error("Upload completed but YouTube did not return a video id");
-
-  return {
-    videoId,
-    title: String(((uploaded.snippet || {}) as AnyJson).title || params.title),
-  };
-}
-
 async function validateApiKey(apiKey: string): Promise<void> {
   await ytFetch("/search?part=snippet&type=video&maxResults=1&q=productivity", apiKey);
 }
@@ -141,6 +52,81 @@ async function validateApiKey(apiKey: string): Promise<void> {
 function maskKey(apiKey: string): string {
   const tail = apiKey.slice(-4);
   return `***${tail}`;
+}
+
+async function getStoredApiKey(adminClient: ReturnType<typeof createClient>, connectionId: string, userId: string): Promise<string> {
+  const { data } = await adminClient
+    .from("integration_connections")
+    .select("metadata")
+    .eq("id", connectionId)
+    .eq("user_id", userId)
+    .eq("provider", "youtube")
+    .single();
+  if (!data) throw new Error("Connection not found");
+  const meta = data.metadata as AnyJson;
+  const key = String(meta?.api_key || "").trim();
+  if (!key) throw new Error("No API key stored — please save your API key first");
+  return key;
+}
+
+// Helper: refresh OAuth token if expired, returns { accessToken, refreshed }
+async function refreshOAuthIfNeeded(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  meta: AnyJson,
+): Promise<{ accessToken: string; refreshed: boolean }> {
+  const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+  const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+  if (!clientId || !clientSecret) throw new Error("YouTube OAuth credentials not configured");
+
+  let accessToken = String(meta.access_token || "");
+  const refreshToken = String(meta.refresh_token || "");
+  const expiresAt = String(meta.expires_at || "");
+
+  if (new Date(expiresAt) > new Date()) {
+    return { accessToken, refreshed: false };
+  }
+
+  // Token expired — attempt refresh
+  if (!refreshToken) throw new Error("No refresh token — re-authorize YouTube");
+
+  const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const refreshData = await refreshRes.json();
+  if (!refreshRes.ok) throw new Error(`Token refresh failed: ${JSON.stringify(refreshData)}`);
+
+  accessToken = refreshData.access_token;
+  const newExpiresAt = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
+
+  await adminClient
+    .from("integration_connections")
+    .update({
+      metadata: {
+        ...meta,
+        access_token: accessToken,
+        expires_at: newExpiresAt,
+      },
+      last_validated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("provider", "youtube")
+    .eq("auth_type", "oauth2");
+
+  return { accessToken, refreshed: true };
+}
+
+function jsonOk(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
 serve(async (req) => {
@@ -155,39 +141,165 @@ serve(async (req) => {
 
     if (!action) throw new Error("Missing action");
 
+    // ── Get Connection — returns BOTH api_key and oauth2 states ──
+    if (action === "get_connection") {
+      // Fetch api_key connection
+      const { data: apiKeyConn } = await adminClient
+        .from("integration_connections")
+        .select("id, status, external_account_id, external_account_label, metadata, last_sync_at, last_error")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "api_key")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Fetch oauth2 connection
+      const { data: oauthConn } = await adminClient
+        .from("integration_connections")
+        .select("status, metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .maybeSingle();
+
+      // Build api_key connection response
+      let apiKeyResponse = null;
+      if (apiKeyConn) {
+        const meta = (apiKeyConn.metadata || {}) as AnyJson;
+        apiKeyResponse = {
+          id: apiKeyConn.id,
+          status: apiKeyConn.status,
+          channelId: apiKeyConn.external_account_id || "",
+          accountLabel: apiKeyConn.external_account_label || "",
+          apiKeyMasked: String(meta.api_key_masked || ""),
+          apiKeyConfigured: !!meta.api_key,
+          lastSyncAt: apiKeyConn.last_sync_at,
+          lastError: apiKeyConn.last_error,
+        };
+      }
+
+      // Build oauth status — attempt token refresh if expired
+      let oauthStatus: "connected" | "expired" | "disconnected" = "disconnected";
+      if (oauthConn && oauthConn.status === "connected") {
+        const oMeta = (oauthConn.metadata || {}) as AnyJson;
+        const expiresAt = oMeta.expires_at as string | undefined;
+        const hasRefreshToken = !!oMeta.refresh_token;
+        const expired = expiresAt ? new Date(expiresAt) < new Date() : true;
+
+        if (!expired) {
+          oauthStatus = "connected";
+        } else if (hasRefreshToken) {
+          // Try to refresh the token
+          try {
+            await refreshOAuthIfNeeded(adminClient, userId, oMeta);
+            oauthStatus = "connected";
+          } catch {
+            oauthStatus = "expired";
+          }
+        } else {
+          oauthStatus = "expired";
+        }
+      }
+
+      return jsonOk({
+        success: true,
+        connection: apiKeyResponse,
+        oauthStatus,
+      });
+    }
+
+    // ── Connect (API key) ──
     if (action === "connect") {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
       const accountLabel = String((params as AnyJson).accountLabel || "Primary YouTube").trim();
-      if (!apiKey) throw new Error("apiKey is required");
 
+      // If no API key provided, allow updating channel/label on existing connection
+      const { data: existing } = await adminClient
+        .from("integration_connections")
+        .select("id, metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "api_key")
+        .limit(1)
+        .maybeSingle();
+
+      if (!apiKey && existing) {
+        // Update channel/label only, keep existing key
+        const existingMeta = (existing.metadata || {}) as AnyJson;
+        if (!existingMeta.api_key) throw new Error("No existing API key — please provide one");
+
+        const { data: updated, error } = await adminClient
+          .from("integration_connections")
+          .update({
+            external_account_id: channelId || null,
+            external_account_label: accountLabel,
+          })
+          .eq("id", existing.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+
+        return jsonOk({
+          success: true,
+          connection: updated,
+          apiKeyMasked: String(existingMeta.api_key_masked || maskKey(String(existingMeta.api_key))),
+        });
+      }
+
+      if (!apiKey) throw new Error("apiKey is required");
       await validateApiKey(apiKey);
 
-      const upsertPayload = {
-        user_id: userId,
-        provider: "youtube",
-        auth_type: "api_key",
-        credential_ref: "client_managed_api_key",
-        status: "connected",
-        external_account_id: channelId || null,
-        external_account_label: accountLabel,
-        last_validated_at: new Date().toISOString(),
-        last_error: null,
-        metadata: {
-          credential_mode: "client_managed",
-          api_key_masked: maskKey(apiKey),
-        },
-      };
+      let data;
+      if (existing) {
+        const { data: updated, error } = await adminClient
+          .from("integration_connections")
+          .update({
+            credential_ref: "server_stored_api_key",
+            status: "connected",
+            external_account_id: channelId || null,
+            external_account_label: accountLabel,
+            last_validated_at: new Date().toISOString(),
+            last_error: null,
+            metadata: {
+              api_key: apiKey,
+              api_key_masked: maskKey(apiKey),
+            },
+          })
+          .eq("id", existing.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        data = updated;
+      } else {
+        const { data: inserted, error } = await adminClient
+          .from("integration_connections")
+          .insert({
+            user_id: userId,
+            provider: "youtube",
+            auth_type: "api_key",
+            credential_ref: "server_stored_api_key",
+            status: "connected",
+            external_account_id: channelId || null,
+            external_account_label: accountLabel,
+            last_validated_at: new Date().toISOString(),
+            last_error: null,
+            metadata: {
+              api_key: apiKey,
+              api_key_masked: maskKey(apiKey),
+            },
+          })
+          .select("*")
+          .single();
+        if (error) throw error;
+        data = inserted;
+      }
 
-      const { data, error } = await adminClient
-        .from("integration_connections")
-        .upsert(upsertPayload, { onConflict: "user_id,provider,auth_type,external_account_id" })
-        .select("*")
-        .single();
-      if (error) throw error;
-
-      return new Response(JSON.stringify({ success: true, connection: data }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return jsonOk({
+        success: true,
+        connection: data,
+        apiKeyMasked: maskKey(apiKey),
       });
     }
 
@@ -195,10 +307,7 @@ serve(async (req) => {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
       if (!apiKey) throw new Error("apiKey is required");
       await validateApiKey(apiKey);
-
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true });
     }
 
     if (action === "disconnect") {
@@ -207,40 +316,25 @@ serve(async (req) => {
 
       const { error } = await adminClient
         .from("integration_connections")
-        .update({ status: "disconnected", last_error: null })
+        .update({ status: "disconnected", last_error: null, metadata: {} })
         .eq("id", connectionId)
         .eq("user_id", userId)
         .eq("provider", "youtube");
       if (error) throw error;
 
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonOk({ success: true });
     }
 
-    if (action === "get_connection") {
-      const { data, error } = await adminClient
-        .from("integration_connections")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("provider", "youtube")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-
-      return new Response(JSON.stringify({ success: true, connection: data || null }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // ── Sync Channels ──
     if (action === "sync_channels") {
-      const apiKey = String((params as AnyJson).apiKey || "").trim();
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
-      if (!apiKey || !connectionId || !channelId) {
-        throw new Error("apiKey, connectionId, and channelId are required");
+      if (!connectionId || !channelId) {
+        throw new Error("connectionId and channelId are required");
       }
+
+      let apiKey = String((params as AnyJson).apiKey || "").trim();
+      if (!apiKey) apiKey = await getStoredApiKey(adminClient, connectionId, userId);
 
       const { data: runRow, error: runCreateError } = await adminClient
         .from("integration_sync_runs")
@@ -305,9 +399,7 @@ serve(async (req) => {
           .eq("id", connectionId)
           .eq("user_id", userId);
 
-        return new Response(JSON.stringify({ success: true, recordsProcessed: channelRows.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonOk({ success: true, recordsProcessed: channelRows.length });
       } catch (error) {
         await adminClient
           .from("integration_sync_runs")
@@ -321,14 +413,17 @@ serve(async (req) => {
       }
     }
 
+    // ── Sync Videos ──
     if (action === "sync_videos") {
-      const apiKey = String((params as AnyJson).apiKey || "").trim();
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       const channelId = String((params as AnyJson).channelId || "").trim();
       const maxResults = Number((params as AnyJson).maxResults || 10);
-      if (!apiKey || !connectionId || !channelId) {
-        throw new Error("apiKey, connectionId, and channelId are required");
+      if (!connectionId || !channelId) {
+        throw new Error("connectionId and channelId are required");
       }
+
+      let apiKey = String((params as AnyJson).apiKey || "").trim();
+      if (!apiKey) apiKey = await getStoredApiKey(adminClient, connectionId, userId);
 
       const { data: runRow, error: runCreateError } = await adminClient
         .from("integration_sync_runs")
@@ -412,9 +507,7 @@ serve(async (req) => {
           .eq("id", connectionId)
           .eq("user_id", userId);
 
-        return new Response(JSON.stringify({ success: true, recordsProcessed: videoRows.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonOk({ success: true, recordsProcessed: videoRows.length });
       } catch (error) {
         await adminClient
           .from("integration_sync_runs")
@@ -428,32 +521,7 @@ serve(async (req) => {
       }
     }
 
-    if (action === "upload_video") {
-      const accessToken = String((params as AnyJson).accessToken || "").trim();
-      const sourceUrl = String((params as AnyJson).sourceUrl || "").trim();
-      const title = String((params as AnyJson).title || "").trim();
-      const description = String((params as AnyJson).description || "").trim();
-      const privacyRaw = String((params as AnyJson).privacyStatus || "private").trim();
-      const privacyStatus =
-        privacyRaw === "public" || privacyRaw === "unlisted" ? privacyRaw : "private";
-
-      if (!accessToken) throw new Error("accessToken is required for uploads");
-      if (!sourceUrl) throw new Error("sourceUrl is required");
-      if (!title) throw new Error("title is required");
-
-      const result = await uploadVideoFromUrl({
-        accessToken,
-        sourceUrl,
-        title,
-        description,
-        privacyStatus,
-      });
-
-      return new Response(JSON.stringify({ success: true, ...result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // ── List Sync Runs ──
     if (action === "list_sync_runs") {
       const connectionId = String((params as AnyJson).connectionId || "").trim();
       if (!connectionId) throw new Error("connectionId is required");
@@ -467,8 +535,205 @@ serve(async (req) => {
         .limit(20);
       if (error) throw error;
 
-      return new Response(JSON.stringify({ success: true, runs: data || [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return jsonOk({ success: true, runs: data || [] });
+    }
+
+    // ── OAuth Authorize ──
+    if (action === "oauth_authorize") {
+      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+      if (!clientId) throw new Error("YOUTUBE_CLIENT_ID not configured");
+      const redirectUri = String((params as AnyJson).redirectUri || "").trim();
+      if (!redirectUri) throw new Error("redirectUri is required");
+
+      const scopes = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.readonly",
+      ];
+      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      authUrl.searchParams.set("client_id", clientId);
+      authUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("scope", scopes.join(" "));
+      authUrl.searchParams.set("access_type", "offline");
+      authUrl.searchParams.set("prompt", "consent");
+      authUrl.searchParams.set("state", userId);
+
+      return jsonOk({ success: true, authUrl: authUrl.toString() });
+    }
+
+    // ── OAuth Callback ──
+    if (action === "oauth_callback") {
+      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+      const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+      if (!clientId || !clientSecret) throw new Error("YouTube OAuth credentials not configured");
+
+      const code = String((params as AnyJson).code || "").trim();
+      const redirectUri = String((params as AnyJson).redirectUri || "").trim();
+      if (!code) throw new Error("Authorization code is required");
+      if (!redirectUri) throw new Error("redirectUri is required");
+
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+        }),
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok) throw new Error(`Token exchange failed: ${JSON.stringify(tokenData)}`);
+
+      const { data: existing } = await adminClient
+        .from("integration_connections")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .limit(1)
+        .maybeSingle();
+
+      const oauthMeta = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+        scope: tokenData.scope,
+      };
+
+      if (existing) {
+        await adminClient
+          .from("integration_connections")
+          .update({
+            status: "connected",
+            last_validated_at: new Date().toISOString(),
+            last_error: null,
+            metadata: oauthMeta,
+          })
+          .eq("id", existing.id);
+      } else {
+        const { error } = await adminClient
+          .from("integration_connections")
+          .insert({
+            user_id: userId,
+            provider: "youtube",
+            auth_type: "oauth2",
+            credential_ref: "oauth2_tokens",
+            status: "connected",
+            last_validated_at: new Date().toISOString(),
+            last_error: null,
+            metadata: oauthMeta,
+          });
+        if (error) throw error;
+      }
+
+      return jsonOk({ success: true, oauth_connected: true });
+    }
+
+    // ── Check OAuth Status (with auto-refresh) ──
+    if (action === "oauth_status") {
+      const { data } = await adminClient
+        .from("integration_connections")
+        .select("status, metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .maybeSingle();
+
+      if (!data || data.status !== "connected") {
+        return jsonOk({ success: true, oauth_connected: false, oauth_detail: "disconnected" });
+      }
+
+      const oMeta = (data.metadata || {}) as AnyJson;
+      const expiresAt = oMeta.expires_at as string | undefined;
+      const hasRefreshToken = !!oMeta.refresh_token;
+      const expired = expiresAt ? new Date(expiresAt) < new Date() : true;
+
+      if (!expired) {
+        return jsonOk({ success: true, oauth_connected: true, oauth_detail: "connected" });
+      }
+
+      // Token expired — try refresh
+      if (hasRefreshToken) {
+        try {
+          await refreshOAuthIfNeeded(adminClient, userId, oMeta);
+          return jsonOk({ success: true, oauth_connected: true, oauth_detail: "refreshed" });
+        } catch {
+          return jsonOk({ success: true, oauth_connected: false, oauth_detail: "refresh_failed" });
+        }
+      }
+
+      return jsonOk({ success: true, oauth_connected: false, oauth_detail: "expired_no_refresh" });
+    }
+
+    // ── Upload Video ──
+    if (action === "upload_video") {
+      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+      const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+      if (!clientId || !clientSecret) throw new Error("YouTube OAuth credentials not configured");
+
+      const { data: conn } = await adminClient
+        .from("integration_connections")
+        .select("metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .single();
+      if (!conn) throw new Error("YouTube OAuth not connected. Please authorize first.");
+
+      const meta = conn.metadata as AnyJson;
+      const { accessToken } = await refreshOAuthIfNeeded(adminClient, userId, meta);
+
+      const title = String((params as AnyJson).title || "Untitled");
+      const description = String((params as AnyJson).description || "");
+      const privacyStatus = String((params as AnyJson).privacyStatus || "private");
+      const videoUrl = String((params as AnyJson).videoUrl || "").trim();
+
+      if (!videoUrl) throw new Error("videoUrl is required (public URL to video file)");
+
+      const videoRes = await fetch(videoUrl);
+      if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
+      const videoBlob = await videoRes.blob();
+
+      const initiateRes = await fetch(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            "X-Upload-Content-Length": String(videoBlob.size),
+            "X-Upload-Content-Type": videoBlob.type || "video/mp4",
+          },
+          body: JSON.stringify({
+            snippet: { title, description },
+            status: { privacyStatus },
+          }),
+        },
+      );
+      if (!initiateRes.ok) {
+        const errBody = await initiateRes.text();
+        throw new Error(`Upload initiation failed: ${initiateRes.status} ${errBody}`);
+      }
+      const uploadUrl = initiateRes.headers.get("Location");
+      if (!uploadUrl) throw new Error("No upload URL returned");
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": videoBlob.type || "video/mp4",
+          "Content-Length": String(videoBlob.size),
+        },
+        body: videoBlob,
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
+
+      return jsonOk({
+        success: true,
+        videoId: uploadData.id,
+        url: `https://www.youtube.com/watch?v=${uploadData.id}`,
       });
     }
 
@@ -476,7 +741,7 @@ serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {
-      status: 400,
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

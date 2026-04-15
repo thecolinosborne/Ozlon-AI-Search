@@ -14,11 +14,12 @@ serve(async (req) => {
   }
 
   try {
-    const HIGGSFIELD_APP_ID = Deno.env.get("HIGGSFIELD_APP_ID");
-    const HIGGSFIELD_API_KEY = Deno.env.get("HIGGSFIELD_API_KEY");
-
     const body = await req.json();
-    const { action, ...params } = body;
+    const { action, apiKey: paramApiKey, appId: paramAppId, ...params } = body;
+
+    // Accept credentials from params (UI-provided), fallback to env vars
+    const HIGGSFIELD_APP_ID = paramAppId || Deno.env.get("HIGGSFIELD_APP_ID");
+    const HIGGSFIELD_API_KEY = paramApiKey || Deno.env.get("HIGGSFIELD_API_KEY");
 
     if (action === "test_connection") {
       const configured = !!HIGGSFIELD_APP_ID && !!HIGGSFIELD_API_KEY;

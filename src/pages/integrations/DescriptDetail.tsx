@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { Video, Play, Upload, ExternalLink, RefreshCw, X, Info, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,11 +18,13 @@ interface DescriptJob {
 }
 
 const DescriptDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("descript");
+  const settings = integration.settings as { apiKey?: string };
 
   const [autoDetecting, setAutoDetecting] = useState(true);
   const [testing, setTesting] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
   const [importingMedia, setImportingMedia] = useState(false);
   const [editProjectId, setEditProjectId] = useState("");
@@ -35,13 +38,13 @@ const DescriptDetail = () => {
 
   const callDescript = async (action: string, params: Record<string, unknown> = {}) => {
     const { data, error } = await supabase.functions.invoke("descript", {
-      body: { action, ...params },
+      body: { action, ...params, apiKey: settings.apiKey || undefined },
     });
     if (error) throw new Error(error.message);
     return data;
   };
 
-  // Auto-detect backend API key on mount
+  // Auto-detect on mount
   useEffect(() => {
     let cancelled = false;
     const detectKey = async () => {
@@ -54,7 +57,7 @@ const DescriptDetail = () => {
             "Content-Type": "application/json",
             "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
-          body: JSON.stringify({ action: "test_connection" }),
+          body: JSON.stringify({ action: "test_connection", apiKey: settings.apiKey || undefined }),
         });
         if (cancelled) return;
         if (res.ok) {
@@ -83,7 +86,15 @@ const DescriptDetail = () => {
     };
     detectKey();
     return () => { cancelled = true; };
-  }, []);
+  }, [settings.apiKey]);
+
+  const handleSaveApiKey = (key: string) => {
+    setSavingKey(true);
+    updateSettings("descript", { ...settings, apiKey: key });
+    setApiKeyConfigured("descript", true);
+    toast.success("API Key saved");
+    setSavingKey(false);
+  };
 
   const handleDisconnect = () => {
     setStatus("descript", "disconnected");
@@ -196,23 +207,32 @@ const DescriptDetail = () => {
         ) : undefined
       }
     >
+      {/* API Key Input */}
+      <ApiKeyInput
+        label="Descript API Key"
+        placeholder="Enter your Descript API key…"
+        configured={!!settings.apiKey || integration.status === "connected"}
+        onSave={handleSaveApiKey}
+        saving={savingKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
+      />
+
       {autoDetecting && (
         <div className="p-4 rounded-2xl border border-border/40 bg-card/60 flex items-center gap-3">
           <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Detecting backend API key…</p>
+          <p className="text-sm text-muted-foreground">Detecting connection…</p>
         </div>
       )}
 
-      {!autoDetecting && integration.status === "disconnected" && (
+      {!autoDetecting && integration.status === "disconnected" && !settings.apiKey && (
         <div className="p-4 rounded-2xl border border-destructive/30 bg-destructive/5 flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-destructive" />
-          <p className="text-sm text-destructive">Backend API key not configured. Add <code className="font-mono text-xs">DESCRIPT_API_KEY</code> as a backend secret.</p>
+          <p className="text-sm text-destructive">Enter your Descript API key above to connect.</p>
         </div>
       )}
 
       {integration.status === "connected" && (
         <>
-          {/* Test Connection */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Connection</h3>
             <div className="flex gap-2">
@@ -227,13 +247,6 @@ const DescriptDetail = () => {
             </div>
           </div>
 
-          <SyncControl
-            direction={integration.syncDirection}
-            onDirectionChange={(d) => setSyncDirection("descript", d)}
-            lastSync={integration.lastSync}
-          />
-
-          {/* Import Media */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
               <Upload className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
@@ -246,7 +259,6 @@ const DescriptDetail = () => {
             </button>
           </div>
 
-          {/* Run AI Edit */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
               <Play className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
@@ -261,7 +273,6 @@ const DescriptDetail = () => {
             </button>
           </div>
 
-          {/* Check Job Status */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
               <RefreshCw className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
@@ -274,7 +285,6 @@ const DescriptDetail = () => {
             </button>
           </div>
 
-          {/* Job Result */}
           {jobResult && (
             <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
               <div className="flex items-center justify-between">
@@ -289,7 +299,6 @@ const DescriptDetail = () => {
             </div>
           )}
 
-          {/* Recent Jobs */}
           {recentJobs.length > 0 && (
             <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
               <h3 className="text-sm font-medium text-foreground">Recent Jobs</h3>
@@ -316,7 +325,6 @@ const DescriptDetail = () => {
             </div>
           )}
 
-          {/* Handoff */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
               <ExternalLink className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
@@ -331,14 +339,13 @@ const DescriptDetail = () => {
             </a>
           </div>
 
-          {/* Capabilities Info */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
               <Info className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
               <h3 className="text-sm font-medium text-foreground">Capabilities</h3>
             </div>
             <div className="text-[12px] text-muted-foreground space-y-1.5">
-              <p>Upload media, run AI-powered editing, and retrieve processed results. Descript handles media processing while your app provides the intelligence.</p>
+              <p>Upload media, run AI-powered editing, and retrieve processed results.</p>
               <ul className="list-disc list-inside space-y-0.5">
                 <li>Remove filler words</li>
                 <li>Enhance audio quality</li>

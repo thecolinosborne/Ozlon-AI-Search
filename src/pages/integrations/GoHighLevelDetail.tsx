@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { Globe, Users, GitBranch, MessageSquare } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -19,40 +20,54 @@ const dataSyncOptions = [
 ];
 
 const GoHighLevelDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } = useIntegrationsStore();
   const integration = getIntegration("gohighlevel");
-  const settings = integration.settings as { subAccounts?: SubAccount[]; syncData?: Record<string, boolean> };
+  const settings = integration.settings as { subAccounts?: SubAccount[]; syncData?: Record<string, boolean>; apiKey?: string; locationId?: string };
   const [loading, setLoading] = useState(true);
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const [savingLocationId, setSavingLocationId] = useState(false);
 
   const [selectedAccount, setSelectedAccount] = useState<string | null>(
     (settings.subAccounts?.[0]?.id) || null
   );
 
-  // Auto-detect GHL connection on mount by calling the proxy
+  const callGHL = async (action: string, params?: Record<string, unknown>) => {
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          action,
+          params: { ...params, apiKey: settings.apiKey || undefined, locationId: settings.locationId || undefined },
+        }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Request failed" }));
+      throw new Error(err.error || "Request failed");
+    }
+    return res.json();
+  };
+
+  // Auto-detect GHL connection on mount
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            },
-            body: JSON.stringify({ action: "list_contacts", params: { limit: 1 } }),
-          }
-        );
-        if (response.ok) {
-          setStatus("gohighlevel", "connected");
-          setLastSync("gohighlevel", new Date().toISOString());
-          if (!settings.subAccounts?.length) {
-            updateSettings("gohighlevel", {
-              subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
-              syncData: { contacts: true, pipelines: true, conversations: true },
-            });
-            setSelectedAccount("default");
-          }
+        await callGHL("list_contacts", { limit: 1 });
+        setStatus("gohighlevel", "connected");
+        setApiKeyConfigured("gohighlevel", true);
+        setLastSync("gohighlevel", new Date().toISOString());
+        if (!settings.subAccounts?.length) {
+          updateSettings("gohighlevel", {
+            ...settings,
+            subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
+            syncData: { contacts: true, pipelines: true, conversations: true },
+          });
+          setSelectedAccount("default");
         }
       } catch {
         // silently fail — stays disconnected
@@ -65,34 +80,52 @@ const GoHighLevelDetail = () => {
 
   const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: true };
 
-  const handleConnect = () => {
-    setStatus("gohighlevel", "connected");
-    setLastSync("gohighlevel", new Date().toISOString());
-    updateSettings("gohighlevel", {
-      subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
-    });
-    setSelectedAccount("default");
-    toast.success("Go High Level connected");
+  const handleSaveApiKey = (key: string) => {
+    setSavingApiKey(true);
+    updateSettings("gohighlevel", { ...settings, apiKey: key });
+    setApiKeyConfigured("gohighlevel", true);
+    toast.success("API Key saved");
+    setSavingApiKey(false);
+  };
+
+  const handleSaveLocationId = (id: string) => {
+    setSavingLocationId(true);
+    updateSettings("gohighlevel", { ...settings, locationId: id });
+    toast.success("Location ID saved");
+    setSavingLocationId(false);
+  };
+
+  const handleConnect = async () => {
+    try {
+      await callGHL("list_contacts", { limit: 1 });
+      setStatus("gohighlevel", "connected");
+      setApiKeyConfigured("gohighlevel", true);
+      setLastSync("gohighlevel", new Date().toISOString());
+      updateSettings("gohighlevel", {
+        ...settings,
+        subAccounts: [{ id: "default", name: "Primary Account", syncing: false }],
+      });
+      setSelectedAccount("default");
+      toast.success("Go High Level connected");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   };
 
   const handleDisconnect = () => {
     setStatus("gohighlevel", "disconnected");
+    setApiKeyConfigured("gohighlevel", false);
     updateSettings("gohighlevel", { subAccounts: [], syncData: {} });
     toast.success("Go High Level disconnected");
   };
 
   const toggleSyncData = (key: string) => {
     const updated = { ...syncData, [key]: !syncData[key] };
-    updateSettings("gohighlevel", { syncData: updated });
+    updateSettings("gohighlevel", { ...settings, syncData: updated });
   };
 
   const handleSync = async () => {
     setStatus("gohighlevel", "syncing");
-    const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`;
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    };
 
     const actions: { key: string; action: string }[] = [];
     if (syncData.contacts) actions.push({ key: "contacts", action: "list_contacts" });
@@ -101,10 +134,7 @@ const GoHighLevelDetail = () => {
 
     try {
       const results = await Promise.allSettled(
-        actions.map((a) =>
-          fetch(baseUrl, { method: "POST", headers, body: JSON.stringify({ action: a.action, params: { limit: 1 } }) })
-            .then((r) => { if (!r.ok) throw new Error(`${a.key} failed`); return r.json(); })
-        )
+        actions.map((a) => callGHL(a.action, { limit: 1 }))
       );
       const failed = results.filter((r) => r.status === "rejected");
       if (failed.length === actions.length && actions.length > 0) {
@@ -143,12 +173,22 @@ const GoHighLevelDetail = () => {
         )
       }
     >
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("gohighlevel", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+      {/* API Credentials */}
+      <ApiKeyInput
+        label="GHL API Key"
+        placeholder="Enter your Go High Level API key…"
+        configured={!!settings.apiKey || integration.status === "connected"}
+        onSave={handleSaveApiKey}
+        saving={savingApiKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
+      />
+      <ApiKeyInput
+        label="GHL Location ID"
+        placeholder="Enter your Location ID…"
+        configured={!!settings.locationId || integration.status === "connected"}
+        onSave={handleSaveLocationId}
+        saving={savingLocationId}
+        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
 
       {/* Sub-Accounts */}

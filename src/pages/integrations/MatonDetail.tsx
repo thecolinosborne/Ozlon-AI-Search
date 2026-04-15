@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Zap, ExternalLink } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { IntegrationStatusBadge } from "@/components/integrations/IntegrationStatusBadge";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { fetchMatonConnections, formatAppName, type MatonConnection } from "@/services/matonService";
@@ -9,10 +10,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const MatonDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("maton");
+  const settings = integration.settings as { apiKey?: string };
   const [connections, setConnections] = useState<MatonConnection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState(false);
 
   useEffect(() => {
     loadConnections();
@@ -25,6 +28,7 @@ const MatonDetail = () => {
       setConnections(data);
       if (data.length > 0) {
         setStatus("maton", "connected");
+        setApiKeyConfigured("maton", true);
         setLastSync("maton", new Date().toISOString());
       }
     } catch (error) {
@@ -32,6 +36,14 @@ const MatonDetail = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSaveApiKey = (key: string) => {
+    setSavingKey(true);
+    updateSettings("maton", { ...settings, apiKey: key });
+    setApiKeyConfigured("maton", true);
+    toast.success("API Key saved");
+    setSavingKey(false);
   };
 
   const handleSync = async () => {
@@ -49,6 +61,7 @@ const MatonDetail = () => {
 
   const handleDisconnect = () => {
     setStatus("maton", "disconnected");
+    setApiKeyConfigured("maton", false);
     setConnections([]);
     toast.success("Maton disconnected");
   };
@@ -79,12 +92,14 @@ const MatonDetail = () => {
         )
       }
     >
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("maton", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+      {/* API Key Input */}
+      <ApiKeyInput
+        label="Maton API Key"
+        placeholder="Enter your Maton API key…"
+        configured={!!settings.apiKey || integration.status === "connected"}
+        onSave={handleSaveApiKey}
+        saving={savingKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
 
       {/* Connected Services */}

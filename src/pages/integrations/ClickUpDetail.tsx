@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
+import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
 const HEADERS = {
@@ -26,48 +28,16 @@ async function callClickUp(action: string, params?: Record<string, unknown>) {
   return res.json();
 }
 
-interface ClickUpConfig {
-  auto_reply_enabled: boolean;
-  reply_trigger_mode: string;
-  ai_reply_mode: string;
-  allow_subtask_creation: boolean;
-  allow_task_updates: boolean;
-  webhook_status: string;
-  last_webhook_event_at: string | null;
-  last_successful_ai_reply_at: string | null;
-}
-
-const defaultConfig: ClickUpConfig = {
-  auto_reply_enabled: true,
-  reply_trigger_mode: "mention_only",
-  ai_reply_mode: "standard",
-  allow_subtask_creation: false,
-  allow_task_updates: false,
-  webhook_status: "not_registered",
-  last_webhook_event_at: null,
-  last_successful_ai_reply_at: null,
-};
-
-const triggerModes = [
-  { value: "mention_only", label: "Mention Only" },
-  { value: "always", label: "Always" },
-  { value: "disabled", label: "Disabled" },
-];
-
-const replyModes = [
-  { value: "brief", label: "Brief" },
-  { value: "standard", label: "Standard" },
-  { value: "detailed", label: "Detailed" },
-];
+const DEFAULT_TRIGGERS = ["@ai", "@pm", "@wisdom"];
 
 const ClickUpDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } =
+  const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
-  const [config, setConfig] = useState<ClickUpConfig>(defaultConfig);
+  const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
   const [loading, setLoading] = useState(true);
-  const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
 
   // List picker state
   const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
@@ -80,22 +50,46 @@ const ClickUpDetail = () => {
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [loadingLists, setLoadingLists] = useState(false);
 
+  // Webhook config state
+  const [webhookStatus, setWebhookStatus] = useState<string>("not_registered");
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
+  const [replyMode, setReplyMode] = useState<string>("standard");
+  const [triggers, setTriggers] = useState<string[]>(DEFAULT_TRIGGERS);
+  const [newTrigger, setNewTrigger] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const getAuthParams = (): Record<string, unknown> => ({
+    apiToken: storedSettings.apiToken || undefined,
+  });
+
   // Check connection on mount
   useEffect(() => {
     const check = async () => {
       try {
-        const result = await callClickUp("test_connection");
+        const result = await callClickUp("test_connection", getAuthParams());
         if (result.connected) {
           setStatus("clickup", "connected");
+          setApiKeyConfigured("clickup", true);
           setLastSync("clickup", new Date().toISOString());
           updateSettings("clickup", {
+            ...storedSettings,
             team_id: result.team_id,
             list_id: result.list_id,
           });
+          // Load config
+          try {
+            const config = await callClickUp("get_config", getAuthParams());
+            if (config) {
+              setWebhookStatus(config.webhook_status || "not_registered");
+              setAutoReplyEnabled(config.auto_reply_enabled ?? true);
+              setReplyMode(config.ai_reply_mode || "standard");
+              if (config.custom_triggers?.length > 0) {
+                setTriggers(config.custom_triggers);
+              }
+            }
+          } catch { /* config load is best-effort */ }
         }
-        // Load config
-        const cfg = await callClickUp("get_config");
-        setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
       } finally {
@@ -105,13 +99,27 @@ const ClickUpDetail = () => {
     check();
   }, []);
 
+  const handleSaveApiToken = (token: string) => {
+    setSavingKey(true);
+    updateSettings("clickup", { ...storedSettings, apiToken: token });
+    setApiKeyConfigured("clickup", true);
+    toast.success("API Token saved");
+    setSavingKey(false);
+  };
+
   const handleConnect = async () => {
     setTesting(true);
     try {
-      const result = await callClickUp("test_connection");
+      const result = await callClickUp("connect", getAuthParams());
       if (result.connected) {
         setStatus("clickup", "connected");
+        setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
+        updateSettings("clickup", {
+          ...storedSettings,
+          team_id: result.team_id,
+          list_id: result.list_id,
+        });
         toast.success("ClickUp connected");
       } else {
         toast.error("Connection failed — check your API token");
@@ -125,6 +133,7 @@ const ClickUpDetail = () => {
 
   const handleDisconnect = () => {
     setStatus("clickup", "disconnected");
+    setApiKeyConfigured("clickup", false);
     updateSettings("clickup", {});
     toast.success("ClickUp disconnected");
   };
@@ -132,8 +141,7 @@ const ClickUpDetail = () => {
   const handleSync = async () => {
     setStatus("clickup", "syncing");
     try {
-      const tasks = await callClickUp("list_tasks");
-      setTaskCount(tasks.tasks?.length || 0);
+      const tasks = await callClickUp("list_tasks", getAuthParams());
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
       toast.success(`Synced ${tasks.tasks?.length || 0} tasks`);
@@ -143,33 +151,11 @@ const ClickUpDetail = () => {
     }
   };
 
-  const handleFetchTasks = async () => {
-    try {
-      const data = await callClickUp("list_tasks");
-      setTaskCount(data.tasks?.length || 0);
-      toast.success(`Found ${data.tasks?.length || 0} tasks`);
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  };
-
-  const handleCreateTestTask = async () => {
-    try {
-      await callClickUp("create_task", {
-        name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
-        description: "This is a test task created by the AI Project Manager integration.",
-      });
-      toast.success("Test task created");
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  };
-
   // ===== List Picker Handlers =====
   const fetchSpaces = async () => {
     setLoadingSpaces(true);
     try {
-      const data = await callClickUp("list_spaces");
+      const data = await callClickUp("list_spaces", getAuthParams());
       setSpaces((data.spaces || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -186,17 +172,14 @@ const ClickUpDetail = () => {
     setLists([]);
     setLoadingFolders(true);
     try {
-      const data = await callClickUp("list_folders", { spaceId });
+      const data = await callClickUp("list_folders", { ...getAuthParams(), spaceId });
       const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
       setFolders(f);
-      // Also fetch folderless lists
-      const folderless = await callClickUp("list_lists", { spaceId });
+      const folderless = await callClickUp("list_lists", { ...getAuthParams(), spaceId });
       const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
       if (fl.length > 0 && f.length === 0) {
-        // Only folderless lists exist — show them directly
         setLists(fl);
       } else if (fl.length > 0) {
-        // Add a virtual "No Folder" entry
         setFolders([{ id: "__folderless__", name: "Lists (no folder)" }, ...f]);
         setLists(fl);
         setSelectedFolder("__folderless__");
@@ -213,10 +196,9 @@ const ClickUpDetail = () => {
     setSelectedList("");
     setLists([]);
     if (folderId === "__folderless__") {
-      // Re-fetch folderless lists
       setLoadingLists(true);
       try {
-        const data = await callClickUp("list_lists", { spaceId: selectedSpace });
+        const data = await callClickUp("list_lists", { ...getAuthParams(), spaceId: selectedSpace });
         setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
       } catch (err) {
         toast.error((err as Error).message);
@@ -227,7 +209,7 @@ const ClickUpDetail = () => {
     }
     setLoadingLists(true);
     try {
-      const data = await callClickUp("list_lists", { folderId });
+      const data = await callClickUp("list_lists", { ...getAuthParams(), folderId });
       setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -239,35 +221,70 @@ const ClickUpDetail = () => {
   const handleListSelect = async (listId: string) => {
     setSelectedList(listId);
     try {
-      await callClickUp("update_config", { default_list_id: listId });
-      setConfig((c) => ({ ...c }));
+      await callClickUp("update_config", { ...getAuthParams(), default_list_id: listId });
       toast.success("Default list updated");
     } catch (err) {
       toast.error((err as Error).message);
     }
   };
 
+  // ===== Webhook & Trigger Handlers =====
   const handleRegisterWebhook = async () => {
+    setRegisteringWebhook(true);
     try {
-      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-      await callClickUp("register_webhook", { endpoint: webhookUrl });
-      setConfig((c) => ({ ...c, webhook_status: "registered" }));
-      toast.success("Webhook registered");
+      const endpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
+      await callClickUp("register_webhook", { ...getAuthParams(), endpoint });
+      setWebhookStatus("registered");
+      toast.success("Webhook registered — AI will respond to mentions in ClickUp");
     } catch (err) {
       toast.error((err as Error).message);
+    } finally {
+      setRegisteringWebhook(false);
     }
   };
 
-  const updateConfigField = async (field: string, value: unknown) => {
+  const saveWebhookConfig = async (overrides: Record<string, unknown>) => {
+    setSavingConfig(true);
     try {
-      const updated = await callClickUp("update_config", { [field]: value });
-      setConfig((c) => ({ ...c, ...updated }));
+      await callClickUp("update_config", { ...getAuthParams(), ...overrides });
+      toast.success("Config saved");
     } catch (err) {
       toast.error((err as Error).message);
+    } finally {
+      setSavingConfig(false);
     }
+  };
+
+  const handleToggleAutoReply = async (enabled: boolean) => {
+    setAutoReplyEnabled(enabled);
+    await saveWebhookConfig({ auto_reply_enabled: enabled });
+  };
+
+  const handleReplyModeChange = async (mode: string) => {
+    setReplyMode(mode);
+    await saveWebhookConfig({ ai_reply_mode: mode });
+  };
+
+  const handleAddTrigger = async () => {
+    const t = newTrigger.trim().toLowerCase();
+    if (!t || triggers.includes(t)) {
+      setNewTrigger("");
+      return;
+    }
+    const updated = [...triggers, t];
+    setTriggers(updated);
+    setNewTrigger("");
+    await saveWebhookConfig({ custom_triggers: updated });
+  };
+
+  const handleRemoveTrigger = async (trigger: string) => {
+    const updated = triggers.filter(t => t !== trigger);
+    setTriggers(updated);
+    await saveWebhookConfig({ custom_triggers: updated.length > 0 ? updated : [] });
   };
 
   const isConnected = integration.status === "connected";
+  const isWebhookRegistered = webhookStatus === "registered" || webhookStatus === "active";
 
   return (
     <IntegrationDetailLayout
@@ -294,16 +311,112 @@ const ClickUpDetail = () => {
         )
       }
     >
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("clickup", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+      {/* API Token Input */}
+      <ApiKeyInput
+        label="ClickUp API Token"
+        placeholder="pk_..."
+        configured={!!storedSettings.apiToken || isConnected}
+        onSave={handleSaveApiToken}
+        saving={savingKey}
+        maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : isConnected ? "•••••••• (server)" : undefined}
       />
 
       {isConnected && (
         <>
+          {/* Webhook & Triggers */}
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Webhook className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Webhook & Triggers
+              </h3>
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                <span className={`w-1.5 h-1.5 rounded-full ${isWebhookRegistered ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+                <span className={isWebhookRegistered ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                  {isWebhookRegistered ? "Registered" : "Not Registered"}
+                </span>
+              </span>
+            </div>
+
+            {!isWebhookRegistered && (
+              <button
+                onClick={handleRegisterWebhook}
+                disabled={registeringWebhook}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {registeringWebhook ? "Registering…" : "Register Webhook"}
+              </button>
+            )}
+
+            {isWebhookRegistered && (
+              <div className="space-y-4">
+                {/* Auto-reply toggle */}
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Auto-reply to mentions</Label>
+                  <Switch
+                    checked={autoReplyEnabled}
+                    onCheckedChange={handleToggleAutoReply}
+                    disabled={savingConfig}
+                  />
+                </div>
+
+                {/* Reply mode */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Reply mode</Label>
+                  <Select value={replyMode} onValueChange={handleReplyModeChange}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="brief">Brief</SelectItem>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="detailed">Detailed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Trigger words */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Trigger words</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {triggers.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted/80 text-xs font-medium text-foreground"
+                      >
+                        {t}
+                        <button
+                          onClick={() => handleRemoveTrigger(t)}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newTrigger}
+                      onChange={(e) => setNewTrigger(e.target.value)}
+                      placeholder="@ozlon"
+                      className="h-8 text-xs rounded-xl flex-1"
+                      onKeyDown={(e) => e.key === "Enter" && handleAddTrigger()}
+                    />
+                    <button
+                      onClick={handleAddTrigger}
+                      className="px-3 h-8 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground inline-flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Add
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/60">
+                    Type any of these in a ClickUp task comment to trigger an AI response
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* List Picker */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center justify-between">
@@ -374,198 +487,14 @@ const ClickUpDetail = () => {
             )}
           </div>
 
-          {/* Webhook Status */}
+          {/* Diagnostics */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Webhook className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-                Webhook
-              </h3>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 text-xs font-medium",
-                  config.webhook_status === "registered"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-muted-foreground"
-                )}
-              >
-                <span
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    config.webhook_status === "registered"
-                      ? "bg-emerald-500"
-                      : "bg-muted-foreground/40"
-                  )}
-                />
-                {config.webhook_status === "registered" ? "Registered" : "Not Registered"}
-              </span>
-            </div>
-            {config.webhook_status !== "registered" && (
-              <button
-                onClick={handleRegisterWebhook}
-                className="w-full py-2 rounded-xl text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-              >
-                Register Webhook
-              </button>
-            )}
-            {config.last_webhook_event_at && (
-              <p className="text-[11px] text-muted-foreground/60">
-                Last event: {new Date(config.last_webhook_event_at).toLocaleString()}
-              </p>
-            )}
-          </div>
-
-          {/* Reply Settings */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
-            <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
-              <Zap className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-              AI Reply Settings
-            </h3>
-
-            {/* Auto-reply toggle */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground">Auto-reply enabled</span>
-              <button
-                onClick={() => updateConfigField("auto_reply_enabled", !config.auto_reply_enabled)}
-                className={cn(
-                  "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                  config.auto_reply_enabled ? "bg-primary" : "bg-muted"
-                )}
-              >
-                <div
-                  className={cn(
-                    "rounded-full bg-white transition-transform shadow-sm",
-                    config.auto_reply_enabled ? "translate-x-[18px]" : "translate-x-0"
-                  )}
-                  style={{ width: 18, height: 18 }}
-                />
+            <h3 className="text-sm font-medium text-foreground">Diagnostics</h3>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleSync} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
+                <RefreshCw className="w-3.5 h-3.5" /> Test Connection
               </button>
             </div>
-
-            {/* Trigger mode */}
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">Trigger Mode</span>
-              <div className="flex gap-2">
-                {triggerModes.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => updateConfigField("reply_trigger_mode", m.value)}
-                    className={cn(
-                      "flex-1 py-2 rounded-xl text-xs font-medium transition-all",
-                      config.reply_trigger_mode === m.value
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Reply mode */}
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">Reply Style</span>
-              <div className="flex gap-2">
-                {replyModes.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => updateConfigField("ai_reply_mode", m.value)}
-                    className={cn(
-                      "flex-1 py-2 rounded-xl text-xs font-medium transition-all",
-                      config.ai_reply_mode === m.value
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Permissions */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Permissions</h3>
-            {[
-              { key: "allow_subtask_creation", label: "Allow subtask creation" },
-              { key: "allow_task_updates", label: "Allow task updates" },
-            ].map(({ key, label }) => (
-              <div key={key} className="flex items-center justify-between">
-                <span className="text-sm text-foreground">{label}</span>
-                <button
-                  onClick={() =>
-                    updateConfigField(key, !config[key as keyof ClickUpConfig])
-                  }
-                  className={cn(
-                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    config[key as keyof ClickUpConfig] ? "bg-primary" : "bg-muted"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "rounded-full bg-white transition-transform shadow-sm",
-                      config[key as keyof ClickUpConfig]
-                        ? "translate-x-[18px]"
-                        : "translate-x-0"
-                    )}
-                    style={{ width: 18, height: 18 }}
-                  />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Test Actions */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Actions</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleConnect}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Test Connection
-              </button>
-              <button
-                onClick={handleFetchTasks}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <ListTodo className="w-3.5 h-3.5" />
-                Fetch Tasks
-                {taskCount !== null && (
-                  <span className="text-[10px] text-muted-foreground">({taskCount})</span>
-                )}
-              </button>
-              <button
-                onClick={handleCreateTestTask}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Create Test Task
-              </button>
-            </div>
-          </div>
-
-          {/* Info Panel */}
-          <div className="p-4 rounded-2xl border border-primary/20 bg-primary/5 space-y-2">
-            <p className="text-sm font-medium text-foreground">How it works</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Mention <strong>@AI</strong> in a ClickUp task comment and the AI will
-              respond directly on that task. Ask for summaries, blockers, next steps,
-              subtasks, updates, and priorities.
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Triggers: <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@AI</code>{" "}
-              <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@PM</code>{" "}
-              <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@Wisdom</code>
-            </p>
-            {config.last_successful_ai_reply_at && (
-              <p className="text-[11px] text-muted-foreground/60">
-                Last AI reply: {new Date(config.last_successful_ai_reply_at).toLocaleString()}
-              </p>
-            )}
           </div>
         </>
       )}

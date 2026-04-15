@@ -1,40 +1,27 @@
 
 
-## Fix: ClickUp Invalid List ID
+## Fix Webhook Registration & Enable Trigger Configuration
 
 ### Problem
-Your `CLICKUP_DEFAULT_LIST_ID` secret is set to `6-901710746417`, but ClickUp's API rejects it — `list_accessible: false`. The `getListId()` helper also strips the `6-` prefix, making it `901710746417`, which is equally invalid. No task creation can work until this is fixed.
+The ClickUp API returns error `OAUTH_171: "Webhook configuration already exists"` when trying to register a webhook that's already set up. The edge function treats this as a failure, so the UI stays stuck on "Not Registered" even though the webhook is actually active.
 
-Additionally, the edge function has no way to browse your ClickUp workspace to discover valid list IDs — you'd have to manually look them up.
+### Changes
 
-### Fix
+**1. `supabase/functions/clickup/index.ts`** — Handle "already exists" gracefully in `register_webhook`
+- Wrap the `clickupCall` in a try/catch
+- If the error contains `OAUTH_171` or "already exists", fetch the existing webhooks via `GET /team/{teamId}/webhook` to get the webhook ID
+- Update `clickup_integration_state` with `webhook_status: 'registered'` either way
+- Return success response in both cases
 
-**1. Add a `list_spaces` and `list_lists` action to the ClickUp edge function**
+**2. `supabase/functions/clickup/index.ts`** — Also update `get_config` to check existing webhooks
+- When loading config, if `webhook_status` is null/empty but a webhook exists on the ClickUp side, auto-correct the status
 
-This lets you (and the settings UI) browse your workspace to find the correct list ID:
-- `list_spaces` → calls `GET /team/{teamId}/space` → returns all spaces
-- `list_folders` → calls `GET /space/{spaceId}/folder` → returns folders in a space  
-- `list_lists` → calls `GET /folder/{folderId}/list` → returns lists in a folder
-- Also: `GET /space/{spaceId}/list` for folderless lists
+### No frontend changes needed
+The UI already handles the "registered" state correctly — it shows the trigger word chips, auto-reply toggle, and reply mode selector. The problem is purely that the edge function throws instead of returning success.
 
-**2. Add a List Picker to the ClickUp integration detail page**
-
-Replace the blind "list ID from env" approach with a dropdown that:
-- Fetches spaces → folders → lists from the API
-- Lets you select the correct list
-- Saves it via `update_config` (stores in `clickup_integration_state` table)
-
-**3. Fix `getListId()` to prefer DB-stored list over env var**
-
-Update priority: `params.listId` → config row `default_list_id` → env `CLICKUP_DEFAULT_LIST_ID`. This way the UI-selected list takes precedence.
-
-**4. Update the `CLICKUP_DEFAULT_LIST_ID` secret**
-
-Once we discover the correct list ID from the picker, update the secret to the valid value.
-
-### Files Changed
-| File | Change |
-|---|---|
-| `supabase/functions/clickup/index.ts` | Add `list_spaces`, `list_folders`, `list_lists` actions; fix `getListId` to check DB config first |
-| `src/pages/integrations/ClickUpDetail.tsx` | Add list picker UI that browses spaces/folders/lists |
+### After deploying
+- Re-click "Register Webhook" — it should succeed and reveal the trigger controls
+- Add `@ozlon` as a custom trigger word
+- Toggle auto-reply and reply mode
+- Then you can test from ClickUp by commenting `@ozlon` on a task
 

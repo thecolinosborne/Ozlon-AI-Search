@@ -75,9 +75,13 @@ serve(async (req) => {
   }
 
   try {
-    const DESCRIPT_API_KEY = Deno.env.get("DESCRIPT_API_KEY");
+    const body = await req.json();
+    const { action, apiKey: paramApiKey, ...params } = body;
+
+    // Accept API key from params (UI-provided), fallback to env var
+    const DESCRIPT_API_KEY = paramApiKey || Deno.env.get("DESCRIPT_API_KEY");
     if (!DESCRIPT_API_KEY) {
-      return new Response(JSON.stringify({ error: "DESCRIPT_API_KEY not configured" }), {
+      return new Response(JSON.stringify({ error: "DESCRIPT_API_KEY not configured. Enter your API key in the integration settings." }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -86,9 +90,6 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
-
-    const body = await req.json();
-    const { action, ...params } = body;
 
     switch (action) {
       // ─── TEST CONNECTION ─────────────────────────────────

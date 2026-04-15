@@ -13,14 +13,15 @@ serve(async (req) => {
   }
 
   try {
-    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-    const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+    const { action, path, body: reqBody, method: reqMethod, params } = await req.json();
+
+    // Accept API key and location ID from params (UI-provided), fallback to env vars
+    const GHL_API_KEY = params?.apiKey || Deno.env.get('GHL_API_KEY');
+    const GHL_LOCATION_ID = params?.locationId || Deno.env.get('GHL_LOCATION_ID');
 
     if (!GHL_API_KEY) {
-      throw new Error('GHL_API_KEY is not configured');
+      throw new Error('GHL_API_KEY is not configured. Enter your API key in the integration settings.');
     }
-
-    const { action, path, body: reqBody, method: reqMethod, params } = await req.json();
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${GHL_API_KEY}`,
