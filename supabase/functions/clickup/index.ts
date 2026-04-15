@@ -538,8 +538,7 @@ serve(async (req) => {
       // ============ CONNECTION ============
       case 'connect':
       case 'test_connection': {
-        const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
-        const token = getToken(tokenFromParams);
+        const token = resolvedToken;
         const listId = typeof params?.defaultListId === 'string'
           ? params.defaultListId
           : Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
@@ -651,7 +650,7 @@ serve(async (req) => {
 
       // ============ WEBHOOK ============
       case 'register_webhook': {
-        const token = getToken();
+        const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const endpoint = params?.endpoint;
