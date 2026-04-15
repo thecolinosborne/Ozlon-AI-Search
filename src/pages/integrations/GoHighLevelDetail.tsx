@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Globe, Users, GitBranch, MessageSquare } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 
 interface SubAccount {
   id: string;
@@ -80,19 +80,31 @@ const GoHighLevelDetail = () => {
 
   const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: true };
 
-  const handleSaveApiKey = (key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     setSavingApiKey(true);
-    updateSettings("gohighlevel", { ...settings, apiKey: key });
-    setApiKeyConfigured("gohighlevel", true);
-    toast.success("API Key saved");
-    setSavingApiKey(false);
+    try {
+      await upsertIntegrationConnection("gohighlevel", { api_key: key, location_id: settings.locationId || '' });
+      updateSettings("gohighlevel", { ...settings, apiKey: key });
+      setApiKeyConfigured("gohighlevel", true);
+      toast.success("API Key saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingApiKey(false);
+    }
   };
 
-  const handleSaveLocationId = (id: string) => {
+  const handleSaveLocationId = async (id: string) => {
     setSavingLocationId(true);
-    updateSettings("gohighlevel", { ...settings, locationId: id });
-    toast.success("Location ID saved");
-    setSavingLocationId(false);
+    try {
+      await upsertIntegrationConnection("gohighlevel", { api_key: settings.apiKey || '', location_id: id });
+      updateSettings("gohighlevel", { ...settings, locationId: id });
+      toast.success("Location ID saved to your account");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingLocationId(false);
+    }
   };
 
   const handleConnect = async () => {
@@ -112,10 +124,11 @@ const GoHighLevelDetail = () => {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setStatus("gohighlevel", "disconnected");
     setApiKeyConfigured("gohighlevel", false);
     updateSettings("gohighlevel", { subAccounts: [], syncData: {} });
+    await disconnectIntegration("gohighlevel");
     toast.success("Go High Level disconnected");
   };
 
