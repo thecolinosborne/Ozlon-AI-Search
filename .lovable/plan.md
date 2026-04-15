@@ -1,24 +1,37 @@
 
 
-## Remove Webhook + AI Reply Settings from ClickUp Detail
+## Fix YouTube Integration — Proper Key Management + End-to-End Sync
 
-The Webhook and AI Reply Settings sections will be removed from the ClickUp integration page. The backend defaults (auto-reply enabled, mention-only trigger, standard detail) will continue to work as-is — no backend changes needed.
+### Problem
+1. The API key lives only in component state — lost on every page reload. Users must re-enter it each time they sync.
+2. Raw `<input type="password">` is used instead of the reusable `ApiKeyInput` component (which has masked display, "Configured" badge, and "Update" flow).
+3. The backend upsert uses `onConflict: "user_id,provider,auth_type,external_account_id"` but `external_account_id` can be NULL, and Postgres treats NULLs as distinct in unique constraints — so upserts silently insert duplicates instead of updating.
 
 ### Changes
 
-**File: `src/pages/integrations/ClickUpDetail.tsx`**
+**1. Database migration** — Fix the unique constraint on `integration_connections`
+- Create a unique index using `COALESCE(external_account_id, '__null__')` so NULL values are treated as equal, preventing duplicate rows.
 
-1. Remove the entire **Webhook Status** card (lines ~230–265) — the webhook is already registered and doesn't need UI management
-2. Remove the entire **AI Reply Settings** card (lines ~267–350) — Auto-Reply toggle, Trigger Mode, Reply Detail, Allow Subtask Creation, Allow Task Updates
-3. Remove unused imports: `Webhook`, `Zap`, `Select`/`SelectContent`/`SelectItem`/`SelectTrigger`/`SelectValue` (if no longer used elsewhere — the List Picker still uses Select)
-4. Remove the `config` state, `defaultConfig`, `triggerModes`, `replyModes` constants, and the `updateConfigField` function since nothing references them anymore
-5. Keep the config fetch in `useEffect` only if needed for other purposes — otherwise simplify to just the connection check
+**2. Edge function `supabase/functions/youtube/index.ts`**
+- On `connect`: store the actual API key encrypted-at-rest in `metadata.api_key` (it's already behind RLS + service role). Return `api_key_masked` so the frontend can display it.
+- Add a `get_connection` action so the frontend can load saved connection state (masked key, channel ID, label) on page load.
+- On `sync_channels` / `sync_videos`: if `apiKey` param is empty, fall back to the stored `metadata.api_key` from the connection row — so syncs work without re-entering the key.
 
-### What remains on the page
-- API Token input
-- Default List picker (Browse Workspace)
-- Quick Actions (Fetch Tasks, Create Test Task)
+**3. Frontend `src/pages/integrations/YouTubeDetail.tsx`**
+- Replace the raw API key `<input>` with the `ApiKeyInput` component. On save, call `connect` (or a new `update_key` action) to persist + validate the new key.
+- On mount, call `get_connection` to load the existing connection state (masked key hint, channel ID, connection status) so the page shows "Configured" with masked `***abcd` immediately.
+- Channel ID input: pre-fill from saved connection, allow editing.
+- When user enters a new API key via the `ApiKeyInput` "Update" flow, it replaces the old key in the database.
+- Keep OAuth, Upload, Manual Sync, and Sync Runs sections as-is.
 
-### No backend changes
-The backend keeps its current defaults and webhook handler intact — this is purely a frontend cleanup.
+### What stays unchanged
+- OAuth authorize/callback/upload flow
+- Sync runs display
+- Manual sync buttons
+- Backend sync logic (channels/videos)
+
+### Files modified
+- `supabase/migrations/[new]` — unique index fix
+- `supabase/functions/youtube/index.ts` — store key, add `get_connection`, fallback key on sync
+- `src/pages/integrations/YouTubeDetail.tsx` — use `ApiKeyInput`, load saved state on mount
 
