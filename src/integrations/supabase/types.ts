@@ -87,6 +87,7 @@ export type Database = {
           auto_reply_enabled: boolean | null
           cooldown_seconds: number | null
           created_at: string | null
+          custom_triggers: string[] | null
           default_list_id: string | null
           id: string
           last_error: string | null
@@ -107,6 +108,7 @@ export type Database = {
           auto_reply_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          custom_triggers?: string[] | null
           default_list_id?: string | null
           id?: string
           last_error?: string | null
@@ -127,6 +129,7 @@ export type Database = {
           auto_reply_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          custom_triggers?: string[] | null
           default_list_id?: string | null
           id?: string
           last_error?: string | null

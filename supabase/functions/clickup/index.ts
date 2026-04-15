@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const CLICKUP_BASE = 'https://api.clickup.com/api/v2';
 const AI_MARKER = '[AI]';
-const TRIGGER_PATTERNS = [/@ai\b/i, /@pm\b/i, /@wisdom\b/i];
+const DEFAULT_TRIGGER_PATTERNS = ['@ai', '@pm', '@wisdom'];
 
 // ============================================================================
 // PM SYSTEM PROMPT
@@ -151,8 +151,9 @@ function isSelfAuthored(text: string): boolean {
 }
 
 /** Check if comment matches trigger patterns */
-function matchesTrigger(text: string): boolean {
-  return TRIGGER_PATTERNS.some(p => p.test(text));
+function matchesTrigger(text: string, customTriggers?: string[]): boolean {
+  const patterns = (customTriggers && customTriggers.length > 0) ? customTriggers : DEFAULT_TRIGGER_PATTERNS;
+  return patterns.some(p => text.toLowerCase().includes(p.toLowerCase()));
 }
 
 /** Check if comment_id already processed (idempotency) */
@@ -412,7 +413,7 @@ async function handleWebhook(payload: Record<string, unknown>) {
     return { status: 'ignored', reason: 'replies_disabled' };
   }
 
-  if (config.reply_trigger_mode === 'mention_only' && !matchesTrigger(commentText)) {
+  if (config.reply_trigger_mode === 'mention_only' && !matchesTrigger(commentText, (config as Record<string, unknown>).custom_triggers as string[] | undefined)) {
     return { status: 'ignored', reason: 'no_trigger_mention' };
   }
 
@@ -665,6 +666,7 @@ serve(async (req) => {
           'auto_reply_enabled', 'reply_trigger_mode', 'ai_reply_mode',
           'allow_subtask_creation', 'allow_task_updates', 'default_list_id',
           'webhook_id', 'webhook_status', 'max_reply_length', 'cooldown_seconds',
+          'custom_triggers',
         ];
         const dbPayload: Record<string, unknown> = { team_id: teamId };
         for (const col of validColumns) {

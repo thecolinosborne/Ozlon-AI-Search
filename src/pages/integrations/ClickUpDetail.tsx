@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, RefreshCw } from "lucide-react";
+import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
 const HEADERS = {
@@ -25,13 +28,14 @@ async function callClickUp(action: string, params?: Record<string, unknown>) {
   return res.json();
 }
 
+const DEFAULT_TRIGGERS = ["@ai", "@pm", "@wisdom"];
+
 const ClickUpDetail = () => {
   const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
   const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
   const [loading, setLoading] = useState(true);
-  const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
 
@@ -45,6 +49,15 @@ const ClickUpDetail = () => {
   const [loadingSpaces, setLoadingSpaces] = useState(false);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [loadingLists, setLoadingLists] = useState(false);
+
+  // Webhook config state
+  const [webhookStatus, setWebhookStatus] = useState<string>("not_registered");
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
+  const [replyMode, setReplyMode] = useState<string>("standard");
+  const [triggers, setTriggers] = useState<string[]>(DEFAULT_TRIGGERS);
+  const [newTrigger, setNewTrigger] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
 
   const getAuthParams = (): Record<string, unknown> => ({
     apiToken: storedSettings.apiToken || undefined,
@@ -64,6 +77,18 @@ const ClickUpDetail = () => {
             team_id: result.team_id,
             list_id: result.list_id,
           });
+          // Load config
+          try {
+            const config = await callClickUp("get_config", getAuthParams());
+            if (config) {
+              setWebhookStatus(config.webhook_status || "not_registered");
+              setAutoReplyEnabled(config.auto_reply_enabled ?? true);
+              setReplyMode(config.ai_reply_mode || "standard");
+              if (config.custom_triggers?.length > 0) {
+                setTriggers(config.custom_triggers);
+              }
+            }
+          } catch { /* config load is best-effort */ }
         }
       } catch {
         // stays disconnected
@@ -117,36 +142,12 @@ const ClickUpDetail = () => {
     setStatus("clickup", "syncing");
     try {
       const tasks = await callClickUp("list_tasks", getAuthParams());
-      setTaskCount(tasks.tasks?.length || 0);
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
       toast.success(`Synced ${tasks.tasks?.length || 0} tasks`);
     } catch {
       setStatus("clickup", "error");
       toast.error("Sync failed");
-    }
-  };
-
-  const handleFetchTasks = async () => {
-    try {
-      const data = await callClickUp("list_tasks", getAuthParams());
-      setTaskCount(data.tasks?.length || 0);
-      toast.success(`Found ${data.tasks?.length || 0} tasks`);
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  };
-
-  const handleCreateTestTask = async () => {
-    try {
-      await callClickUp("create_task", {
-        ...getAuthParams(),
-        name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
-        description: "This is a test task created by the AI Project Manager integration.",
-      });
-      toast.success("Test task created");
-    } catch (err) {
-      toast.error((err as Error).message);
     }
   };
 
@@ -227,7 +228,63 @@ const ClickUpDetail = () => {
     }
   };
 
+  // ===== Webhook & Trigger Handlers =====
+  const handleRegisterWebhook = async () => {
+    setRegisteringWebhook(true);
+    try {
+      const endpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
+      await callClickUp("register_webhook", { ...getAuthParams(), endpoint });
+      setWebhookStatus("registered");
+      toast.success("Webhook registered — AI will respond to mentions in ClickUp");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setRegisteringWebhook(false);
+    }
+  };
+
+  const saveWebhookConfig = async (overrides: Record<string, unknown>) => {
+    setSavingConfig(true);
+    try {
+      await callClickUp("update_config", { ...getAuthParams(), ...overrides });
+      toast.success("Config saved");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleToggleAutoReply = async (enabled: boolean) => {
+    setAutoReplyEnabled(enabled);
+    await saveWebhookConfig({ auto_reply_enabled: enabled });
+  };
+
+  const handleReplyModeChange = async (mode: string) => {
+    setReplyMode(mode);
+    await saveWebhookConfig({ ai_reply_mode: mode });
+  };
+
+  const handleAddTrigger = async () => {
+    const t = newTrigger.trim().toLowerCase();
+    if (!t || triggers.includes(t)) {
+      setNewTrigger("");
+      return;
+    }
+    const updated = [...triggers, t];
+    setTriggers(updated);
+    setNewTrigger("");
+    await saveWebhookConfig({ custom_triggers: updated });
+  };
+
+  const handleRemoveTrigger = async (trigger: string) => {
+    const updated = triggers.filter(t => t !== trigger);
+    setTriggers(updated);
+    await saveWebhookConfig({ custom_triggers: updated.length > 0 ? updated : [] });
+  };
+
   const isConnected = integration.status === "connected";
+  const isWebhookRegistered = webhookStatus === "registered" || webhookStatus === "active";
 
   return (
     <IntegrationDetailLayout
@@ -266,6 +323,100 @@ const ClickUpDetail = () => {
 
       {isConnected && (
         <>
+          {/* Webhook & Triggers */}
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Webhook className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Webhook & Triggers
+              </h3>
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                <span className={`w-1.5 h-1.5 rounded-full ${isWebhookRegistered ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+                <span className={isWebhookRegistered ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                  {isWebhookRegistered ? "Registered" : "Not Registered"}
+                </span>
+              </span>
+            </div>
+
+            {!isWebhookRegistered && (
+              <button
+                onClick={handleRegisterWebhook}
+                disabled={registeringWebhook}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {registeringWebhook ? "Registering…" : "Register Webhook"}
+              </button>
+            )}
+
+            {isWebhookRegistered && (
+              <div className="space-y-4">
+                {/* Auto-reply toggle */}
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Auto-reply to mentions</Label>
+                  <Switch
+                    checked={autoReplyEnabled}
+                    onCheckedChange={handleToggleAutoReply}
+                    disabled={savingConfig}
+                  />
+                </div>
+
+                {/* Reply mode */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Reply mode</Label>
+                  <Select value={replyMode} onValueChange={handleReplyModeChange}>
+                    <SelectTrigger className="h-9 text-xs rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="brief">Brief</SelectItem>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="detailed">Detailed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Trigger words */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Trigger words</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {triggers.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted/80 text-xs font-medium text-foreground"
+                      >
+                        {t}
+                        <button
+                          onClick={() => handleRemoveTrigger(t)}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newTrigger}
+                      onChange={(e) => setNewTrigger(e.target.value)}
+                      placeholder="@ozlon"
+                      className="h-8 text-xs rounded-xl flex-1"
+                      onKeyDown={(e) => e.key === "Enter" && handleAddTrigger()}
+                    />
+                    <button
+                      onClick={handleAddTrigger}
+                      className="px-3 h-8 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground inline-flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Add
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/60">
+                    Type any of these in a ClickUp task comment to trigger an AI response
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* List Picker */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center justify-between">
@@ -336,7 +487,7 @@ const ClickUpDetail = () => {
             )}
           </div>
 
-          {/* Quick Actions */}
+          {/* Diagnostics */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Diagnostics</h3>
             <div className="flex flex-wrap gap-2">
