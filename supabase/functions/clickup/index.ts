@@ -975,6 +975,41 @@ serve(async (req) => {
         throw new Error('folderId or spaceId required');
       }
 
+      // ============ WORKSPACE-WIDE DISCOVERY ============
+      case 'list_all_lists': {
+        // Returns every list across all spaces and folders in the workspace
+        const token = resolvedToken;
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const teamId = resolved.teamId;
+        const spacesRes = await clickupFetch(`/team/${teamId}/space?archived=false`, 'GET', undefined, token);
+        const spaces = spacesRes?.spaces || [];
+        const allLists: Array<{ id: string; name: string; space: string; folder: string | null }> = [];
+
+        for (const space of spaces) {
+          // Folderless lists
+          try {
+            const flRes = await clickupFetch(`/space/${space.id}/list?archived=false`, 'GET', undefined, token);
+            for (const l of (flRes?.lists || [])) {
+              allLists.push({ id: l.id, name: l.name, space: space.name, folder: null });
+            }
+          } catch { /* skip */ }
+
+          // Folders and their lists
+          try {
+            const foldersRes = await clickupFetch(`/space/${space.id}/folder?archived=false`, 'GET', undefined, token);
+            for (const folder of (foldersRes?.folders || [])) {
+              for (const l of (folder.lists || [])) {
+                allLists.push({ id: l.id, name: l.name, space: space.name, folder: folder.name });
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        return new Response(JSON.stringify({ lists: allLists, count: allLists.length }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
           status: 400,
