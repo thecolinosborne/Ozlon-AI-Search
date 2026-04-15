@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,35 +9,72 @@ const corsHeaders = {
 
 const BASE_URL = "https://platform.higgsfield.ai";
 
+async function resolveCredentials(req: Request, paramAppId?: string, paramApiKey?: string): Promise<{ appId: string; apiKey: string }> {
+  // 1. Explicit params
+  if (paramAppId && paramApiKey) return { appId: paramAppId, apiKey: paramApiKey };
+
+  // 2. Per-user lookup
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'higgsfield')
+          .eq('status', 'connected')
+          .single();
+        const meta = data?.metadata as Record<string, string> | null;
+        if (meta?.api_key && meta?.app_id) return { appId: meta.app_id, apiKey: meta.api_key };
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Env fallback
+  const envAppId = paramAppId || Deno.env.get("HIGGSFIELD_APP_ID");
+  const envApiKey = paramApiKey || Deno.env.get("HIGGSFIELD_API_KEY");
+  if (envAppId && envApiKey) return { appId: envAppId, apiKey: envApiKey };
+
+  throw new Error("Higgsfield credentials not configured. Enter your API key in the integration settings.");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const HIGGSFIELD_APP_ID = Deno.env.get("HIGGSFIELD_APP_ID");
-    const HIGGSFIELD_API_KEY = Deno.env.get("HIGGSFIELD_API_KEY");
-
     const body = await req.json();
-    const { action, ...params } = body;
+    const { action, apiKey: paramApiKey, appId: paramAppId, ...params } = body;
 
     if (action === "test_connection") {
-      const configured = !!HIGGSFIELD_APP_ID && !!HIGGSFIELD_API_KEY;
-      return new Response(
-        JSON.stringify({ success: configured, data: { connected: configured, note: configured ? "Dual-auth credentials configured" : "Missing credentials" } }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      try {
+        const creds = await resolveCredentials(req, paramAppId, paramApiKey);
+        return new Response(
+          JSON.stringify({ success: true, data: { connected: true, note: "Dual-auth credentials configured" } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch {
+        return new Response(
+          JSON.stringify({ success: false, data: { connected: false, note: "Missing credentials" } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
-    if (!HIGGSFIELD_APP_ID || !HIGGSFIELD_API_KEY) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Backend credentials not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const { appId, apiKey } = await resolveCredentials(req, paramAppId, paramApiKey);
 
     const headers = {
-      "Authorization": `Key ${HIGGSFIELD_APP_ID}:${HIGGSFIELD_API_KEY}`,
+      "Authorization": `Key ${appId}:${apiKey}`,
       "Content-Type": "application/json",
       "Accept": "application/json",
     };

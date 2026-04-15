@@ -1,40 +1,100 @@
 
 
-## Fix: ClickUp Invalid List ID
+## Lock Down Integrations: Per-User API Key Storage
 
 ### Problem
-Your `CLICKUP_DEFAULT_LIST_ID` secret is set to `6-901710746417`, but ClickUp's API rejects it — `list_accessible: false`. The `getListId()` helper also strips the `6-` prefix, making it `901710746417`, which is equally invalid. No task creation can work until this is fixed.
+All integrations (ClickUp, Maton, GHL, Descript, Higgsfield) use shared server-level environment secrets. Any signed-up user gets access to your ClickUp workspace, your Gmail via Maton, your GHL CRM, etc.
 
-Additionally, the edge function has no way to browse your ClickUp workspace to discover valid list IDs — you'd have to manually look them up.
+### Solution
+Follow the pattern already established by the YouTube integration: store each user's API keys in the `integration_connections` table (per-user, RLS-protected), and make edge functions resolve credentials from the calling user's record instead of env vars.
 
-### Fix
+### Architecture
 
-**1. Add a `list_spaces` and `list_lists` action to the ClickUp edge function**
+```text
+User signs up → goes to /integrations → enters their own API keys
+    ↓
+Keys stored in integration_connections table (user_id scoped, RLS protected)
+    ↓
+Edge functions receive JWT → resolve user_id → look up that user's credentials
+    ↓
+No env var fallback for user-facing calls (env vars only for webhook callbacks)
+```
 
-This lets you (and the settings UI) browse your workspace to find the correct list ID:
-- `list_spaces` → calls `GET /team/{teamId}/space` → returns all spaces
-- `list_folders` → calls `GET /space/{spaceId}/folder` → returns folders in a space  
-- `list_lists` → calls `GET /folder/{folderId}/list` → returns lists in a folder
-- Also: `GET /space/{spaceId}/list` for folderless lists
+### Changes
 
-**2. Add a List Picker to the ClickUp integration detail page**
+**1. Edge Functions — Add per-user credential lookup (6 files)**
 
-Replace the blind "list ID from env" approach with a dropdown that:
-- Fetches spaces → folders → lists from the API
-- Lets you select the correct list
-- Saves it via `update_config` (stores in `clickup_integration_state` table)
+Each integration edge function gets a `getUserCredential(userId, provider)` helper that:
+- Queries `integration_connections` where `user_id = userId` and `provider = 'clickup'` (etc.)
+- Returns the API key from `metadata.api_key`
+- Throws "not configured" if missing
+- Falls back to env vars ONLY for webhook-initiated calls (no user context, e.g. ClickUp webhook)
 
-**3. Fix `getListId()` to prefer DB-stored list over env var**
+Files:
+- `supabase/functions/clickup/index.ts` — `getToken()` checks JWT user first, env fallback only for webhooks
+- `supabase/functions/gohighlevel/index.ts` — resolve GHL key + location from user's `integration_connections`
+- `supabase/functions/maton/index.ts` — resolve Maton key from user's record
+- `supabase/functions/descript/index.ts` — resolve Descript key from user's record
+- `supabase/functions/higgsfield/index.ts` — resolve App ID + API key from user's record
+- `supabase/functions/chat/index.ts` — the big one: resolve Maton, GHL, ClickUp keys from the authenticated user's `integration_connections` instead of env vars
 
-Update priority: `params.listId` → config row `default_list_id` → env `CLICKUP_DEFAULT_LIST_ID`. This way the UI-selected list takes precedence.
+**2. Frontend Integration Detail Pages — Save keys to database (5 files)**
 
-**4. Update the `CLICKUP_DEFAULT_LIST_ID` secret**
+Update each detail page's "Save API Key" handler to upsert into `integration_connections` instead of just Zustand:
 
-Once we discover the correct list ID from the picker, update the secret to the valid value.
+- `src/pages/integrations/ClickUpDetail.tsx` — upsert `{ provider: 'clickup', metadata: { api_key } }`
+- `src/pages/integrations/GoHighLevelDetail.tsx` — upsert `{ provider: 'gohighlevel', metadata: { api_key, location_id } }`
+- `src/pages/integrations/MatonDetail.tsx` (already shown) — upsert `{ provider: 'maton', metadata: { api_key } }`
+- `src/pages/integrations/DescriptDetail.tsx` — upsert `{ provider: 'descript', metadata: { api_key } }`
+- `src/pages/integrations/HiggsFieldDetail.tsx` — upsert `{ provider: 'higgsfield', metadata: { app_id, api_key } }`
 
-### Files Changed
-| File | Change |
-|---|---|
-| `supabase/functions/clickup/index.ts` | Add `list_spaces`, `list_folders`, `list_lists` actions; fix `getListId` to check DB config first |
-| `src/pages/integrations/ClickUpDetail.tsx` | Add list picker UI that browses spaces/folders/lists |
+YouTube already does this correctly — no changes needed there.
+
+**3. Shared helper for edge functions**
+
+Create a reusable `getUserIntegrationKey` function used across all edge functions:
+
+```typescript
+async function getUserIntegrationKey(
+  supabase: SupabaseClient,
+  userId: string,
+  provider: string,
+  field = 'api_key'
+): Promise<string> {
+  const { data } = await supabase
+    .from('integration_connections')
+    .select('metadata')
+    .eq('user_id', userId)
+    .eq('provider', provider)
+    .eq('status', 'connected')
+    .single();
+  if (!data) throw new Error(`${provider} not configured for this user`);
+  const key = (data.metadata as Record<string, string>)?.[field];
+  if (!key) throw new Error(`${provider} API key not found`);
+  return key;
+}
+```
+
+**4. Chat edge function credential isolation**
+
+The `chat/index.ts` function (5138 lines) currently pulls `MATON_API_KEY` and `GHL_API_KEY` from env. Update it to:
+- Extract user ID from the Authorization header (already done for message persistence)
+- Look up that user's Maton and GHL keys from `integration_connections`
+- If the user has no keys, those integrations simply aren't available to them (tools won't be offered)
+
+**5. Webhook exception handling**
+
+ClickUp webhooks arrive without user auth. For these, keep the env var fallback but scope it: the webhook handler uses `team_id` to look up the owner from `clickup_integration_state`, then fetches that user's credentials from `integration_connections`.
+
+### What stays the same
+- Database schema — `integration_connections` table already exists with the right columns
+- RLS policies — already scoped to `auth.uid() = user_id`
+- YouTube integration — already follows this pattern
+- Env var secrets — remain as fallback for your account during transition, but new users must provide their own
+
+### Security outcome
+- New users see empty integration pages, must enter their own keys
+- Your keys are stored in your `integration_connections` records, inaccessible to others via RLS
+- The chat AI only has access to integrations the authenticated user has configured
+- Webhook callbacks resolve the integration owner's keys from the database
 

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,29 +69,56 @@ async function descriptFetch(path: string, apiKey: string, options: RequestInit 
   return data;
 }
 
+async function resolveDescriptKey(req: Request, paramApiKey?: string): Promise<string> {
+  if (paramApiKey) return paramApiKey;
+
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'descript')
+          .eq('status', 'connected')
+          .single();
+        const key = (data?.metadata as Record<string, string>)?.api_key;
+        if (key) return key;
+      }
+    } catch { /* fall through */ }
+  }
+
+  const envKey = Deno.env.get("DESCRIPT_API_KEY");
+  if (envKey) return envKey;
+
+  throw new Error("DESCRIPT_API_KEY not configured. Enter your API key in the integration settings.");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const DESCRIPT_API_KEY = Deno.env.get("DESCRIPT_API_KEY");
-    if (!DESCRIPT_API_KEY) {
-      return new Response(JSON.stringify({ error: "DESCRIPT_API_KEY not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const body = await req.json();
+    const { action, apiKey: paramApiKey, ...params } = body;
+
+    const DESCRIPT_API_KEY = await resolveDescriptKey(req, paramApiKey);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    const body = await req.json();
-    const { action, ...params } = body;
-
     switch (action) {
-      // ─── TEST CONNECTION ─────────────────────────────────
       case "test_connection": {
         const data = await descriptFetch("/jobs", DESCRIPT_API_KEY);
         return new Response(JSON.stringify({ success: true, data }), {
@@ -99,7 +126,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── IMPORT MEDIA ────────────────────────────────────
       case "import_media": {
         const { media_url, project_id: existingProjectId, project_name, file_name } = params;
         if (!media_url) {
@@ -137,7 +163,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── RUN AGENT EDIT ──────────────────────────────────
       case "run_agent_edit": {
         const { project_id, user_intent } = params;
         if (!project_id) {
@@ -177,7 +202,6 @@ serve(async (req) => {
         );
       }
 
-      // ─── GET JOB STATUS ──────────────────────────────────
       case "get_job_status": {
         const { job_id } = params;
         if (!job_id) {
@@ -202,7 +226,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── LIST JOBS ───────────────────────────────────────
       case "list_jobs": {
         const data = await descriptFetch("/jobs", DESCRIPT_API_KEY);
         return new Response(JSON.stringify({ success: true, data }), {
@@ -210,7 +233,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── CANCEL JOB ──────────────────────────────────────
       case "cancel_job": {
         const { job_id } = params;
         if (!job_id) {
@@ -234,7 +256,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── EDIT IN DESCRIPT (HANDOFF) ──────────────────────
       case "edit_in_descript": {
         const { schema } = params;
         if (!schema) {
@@ -254,7 +275,6 @@ serve(async (req) => {
         });
       }
 
-      // ─── GET PUBLISHED PROJECT ───────────────────────────
       case "get_published_project": {
         const { slug } = params;
         if (!slug) {

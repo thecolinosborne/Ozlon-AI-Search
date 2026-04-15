@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,18 +9,52 @@ const corsHeaders = {
 const MATON_CTRL_URL = 'https://ctrl.maton.ai';
 const MATON_GATEWAY_URL = 'https://gateway.maton.ai';
 
+async function resolveMatonKey(req: Request, paramApiKey?: string): Promise<string> {
+  // 1. Explicit param from request body
+  if (paramApiKey) return paramApiKey;
+
+  // 2. Per-user lookup from integration_connections
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminClient = createClient(supabaseUrl, serviceKey);
+        const { data } = await adminClient
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user.id)
+          .eq('provider', 'maton')
+          .eq('status', 'connected')
+          .single();
+        const key = (data?.metadata as Record<string, string>)?.api_key;
+        if (key) return key;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Env var fallback
+  const envKey = Deno.env.get('MATON_API_KEY');
+  if (envKey) return envKey;
+
+  throw new Error('MATON_API_KEY is not configured. Enter your API key in the integration settings.');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    if (!MATON_API_KEY) {
-      throw new Error('MATON_API_KEY is not configured');
-    }
+    const { action, path, body: reqBody, method: reqMethod, connectionId, apiKey: paramApiKey } = await req.json();
 
-    const { action, path, body: reqBody, method: reqMethod, connectionId } = await req.json();
+    const MATON_API_KEY = await resolveMatonKey(req, paramApiKey);
 
     const authHeaders: Record<string, string> = {
       'Authorization': `Bearer ${MATON_API_KEY}`,

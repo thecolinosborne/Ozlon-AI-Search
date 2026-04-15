@@ -87,6 +87,7 @@ export type Database = {
           auto_reply_enabled: boolean | null
           cooldown_seconds: number | null
           created_at: string | null
+          custom_triggers: string[] | null
           default_list_id: string | null
           id: string
           last_error: string | null
@@ -107,6 +108,7 @@ export type Database = {
           auto_reply_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          custom_triggers?: string[] | null
           default_list_id?: string | null
           id?: string
           last_error?: string | null
@@ -127,6 +129,7 @@ export type Database = {
           auto_reply_enabled?: boolean | null
           cooldown_seconds?: number | null
           created_at?: string | null
+          custom_triggers?: string[] | null
           default_list_id?: string | null
           id?: string
           last_error?: string | null
@@ -300,6 +303,107 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      integration_connections: {
+        Row: {
+          auth_type: string
+          created_at: string
+          credential_ref: string | null
+          external_account_id: string | null
+          external_account_label: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          last_validated_at: string | null
+          metadata: Json | null
+          provider: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auth_type?: string
+          created_at?: string
+          credential_ref?: string | null
+          external_account_id?: string | null
+          external_account_label?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          last_validated_at?: string | null
+          metadata?: Json | null
+          provider: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auth_type?: string
+          created_at?: string
+          credential_ref?: string | null
+          external_account_id?: string | null
+          external_account_label?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          last_validated_at?: string | null
+          metadata?: Json | null
+          provider?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      integration_sync_runs: {
+        Row: {
+          completed_at: string | null
+          connection_id: string
+          created_at: string
+          direction: string
+          error_message: string | null
+          id: string
+          records_processed: number
+          started_at: string | null
+          status: string
+          sync_type: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          connection_id: string
+          created_at?: string
+          direction?: string
+          error_message?: string | null
+          id?: string
+          records_processed?: number
+          started_at?: string | null
+          status?: string
+          sync_type?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          connection_id?: string
+          created_at?: string
+          direction?: string
+          error_message?: string | null
+          id?: string
+          records_processed?: number
+          started_at?: string | null
+          status?: string
+          sync_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_sync_runs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       knowledge_entries: {
         Row: {
@@ -853,6 +957,130 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      youtube_channels: {
+        Row: {
+          channel_id: string
+          connection_id: string
+          created_at: string
+          description: string | null
+          fetched_at: string
+          id: string
+          raw: Json | null
+          subscriber_count: number | null
+          thumbnail_url: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+          video_count: number | null
+          view_count: number | null
+        }
+        Insert: {
+          channel_id: string
+          connection_id: string
+          created_at?: string
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          raw?: Json | null
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+          video_count?: number | null
+          view_count?: number | null
+        }
+        Update: {
+          channel_id?: string
+          connection_id?: string
+          created_at?: string
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          raw?: Json | null
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+          video_count?: number | null
+          view_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "youtube_channels_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      youtube_videos: {
+        Row: {
+          channel_id: string
+          comment_count: number | null
+          connection_id: string
+          created_at: string
+          description: string | null
+          fetched_at: string
+          id: string
+          like_count: number | null
+          published_at: string | null
+          raw: Json | null
+          thumbnail_url: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+          video_id: string
+          view_count: number | null
+        }
+        Insert: {
+          channel_id: string
+          comment_count?: number | null
+          connection_id: string
+          created_at?: string
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          like_count?: number | null
+          published_at?: string | null
+          raw?: Json | null
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+          video_id: string
+          view_count?: number | null
+        }
+        Update: {
+          channel_id?: string
+          comment_count?: number | null
+          connection_id?: string
+          created_at?: string
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          like_count?: number | null
+          published_at?: string | null
+          raw?: Json | null
+          thumbnail_url?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+          video_id?: string
+          view_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "youtube_videos_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

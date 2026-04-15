@@ -1,0 +1,1 @@
+ALTER TABLE public.clickup_integration_state ADD COLUMN custom_triggers text[] DEFAULT '{}';

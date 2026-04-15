@@ -676,29 +676,48 @@ async function fetchGoogleMeetData(key: string, connId: string): Promise<string>
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
 }
 
-// ---------- ClickUp ----------
-async function fetchClickUpData(key: string, connId: string): Promise<string> {
-  const teamsData = await callMatonGateway(key, '/clickup/api/v2/team', connId) as { teams?: { id: string; name: string }[] };
-  const teams = teamsData.teams || [];
-  if (!teams.length) return 'No ClickUp workspaces found.';
-  const sections: string[] = [];
-  for (const team of teams.slice(0, 2)) {
-    const spacesData = await callMatonGateway(key, `/clickup/api/v2/team/${team.id}/space?archived=false`, connId) as { spaces?: { id: string; name: string }[] };
-    const spaces = spacesData.spaces || [];
-    let teamSection = `**Workspace:** ${team.name}\n`;
-    for (const space of spaces.slice(0, 3)) {
-      teamSection += `  Space: ${space.name}\n`;
-      try {
-        const listsData = await callMatonGateway(key, `/clickup/api/v2/space/${space.id}/list`, connId) as { lists?: { id: string; name: string; task_count?: number }[] };
-        const lists = listsData.lists || [];
-        for (const list of lists.slice(0, 3)) {
-          teamSection += `    - ${list.name} (${list.task_count || 0} tasks)\n`;
-        }
-      } catch { teamSection += '    - Could not load lists\n'; }
-    }
-    sections.push(teamSection);
+// ---------- ClickUp (via dedicated edge function) ----------
+async function callClickUpEdge(action: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const clickupUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/clickup`;
+  const res = await fetch(clickupUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+    },
+    body: JSON.stringify({ action, params }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'ClickUp edge function error' }));
+    throw new Error(err.error || `ClickUp edge function returned ${res.status}`);
   }
-  return sections.join('\n');
+  return res.json();
+}
+
+async function fetchClickUpData(_key: string, _connId: string): Promise<string> {
+  try {
+    const result = await callClickUpEdge('test_connection');
+    if (!result.connected) return 'ClickUp is not connected. Configure the API token in Integrations → ClickUp.';
+    // Fetch spaces and lists overview
+    const spacesResult = await callClickUpEdge('list_spaces') as { spaces?: { id: string; name: string }[] };
+    const spaces = spacesResult.spaces || [];
+    if (!spaces.length) return 'ClickUp connected but no spaces found.';
+    const sections: string[] = [];
+    for (const space of spaces.slice(0, 3)) {
+      let section = `**Space:** ${space.name}\n`;
+      try {
+        const listsResult = await callClickUpEdge('list_lists', { spaceId: space.id }) as { lists?: { id: string; name: string; task_count?: number }[] };
+        const lists = listsResult.lists || [];
+        for (const list of lists.slice(0, 5)) {
+          section += `  - ${list.name} (${list.task_count || 0} tasks) [list_id: ${list.id}]\n`;
+        }
+      } catch { section += '  - Could not load lists\n'; }
+      sections.push(section);
+    }
+    return sections.join('\n');
+  } catch (err) {
+    return `ClickUp error: ${(err as Error).message}`;
+  }
 }
 
 // ---------- Google Analytics (GA4) ----------
@@ -832,7 +851,25 @@ async function injectMatonData(
     'google-meet': ['google-calendar'],
   };
 
+  // Services that use their own edge function, not Maton
+  const SELF_MANAGED_SERVICES = new Set(['clickup']);
+
   await Promise.all(detectedApps.map(async (app) => {
+    // Self-managed services bypass Maton connection check
+    if (SELF_MANAGED_SERVICES.has(app)) {
+      const fetcher = SERVICE_FETCHERS[app];
+      if (!fetcher) return;
+      try {
+        const data = await fetcher('', '');
+        sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
+        console.log(`${app} data injected (self-managed)`);
+      } catch (e) {
+        console.error(`Error fetching ${app}:`, e);
+        sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
+      }
+      return;
+    }
+
     let connId = connMap.get(app);
     const nativeOnlyApp = app === 'youtube' || app === 'clickup';
 
@@ -904,13 +941,7 @@ The following is REAL data pulled from the user's connected accounts. Use this d
     }
   }
   if (notConnected.length) {
-    const sourceHint =
-      sourceMode === 'local_only'
-        ? 'Integration Hub'
-        : sourceMode === 'maton_only'
-        ? 'Settings > Maton AI Integrations'
-        : 'Settings > Maton AI Integrations (or Integration Hub where applicable)';
-    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in ${sourceHint}.`;
+    injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Integrations.`;
   }
   return injection;
 }
@@ -921,8 +952,8 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
-async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?: string): Promise<unknown> {
+  const GHL_API_KEY = ghlApiKey || Deno.env.get('GHL_API_KEY');
   if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     method,
@@ -1320,21 +1351,21 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // ClickUp actions
+  // ClickUp actions (via dedicated edge function, not Maton)
   {
     type: 'function',
     function: {
       name: 'create_clickup_task',
-      description: 'Create a new task in ClickUp.',
+      description: 'Create a new task in ClickUp. The list_id is optional — if omitted, the configured default list is used.',
       parameters: {
         type: 'object',
         properties: {
-          list_id: { type: 'string', description: 'ClickUp list ID to create the task in' },
+          list_id: { type: 'string', description: 'ClickUp list ID (optional, uses default list if omitted)' },
           name: { type: 'string', description: 'Task name' },
           description: { type: 'string', description: 'Task description (optional)' },
           priority: { type: 'number', description: 'Priority: 1=Urgent, 2=High, 3=Normal, 4=Low (optional)' },
         },
-        required: ['list_id', 'name'],
+        required: ['name'],
       },
     },
   },
@@ -1342,14 +1373,142 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'list_clickup_tasks',
-      description: 'List tasks from a ClickUp list.',
+      description: 'List tasks from a ClickUp list. If list_id is omitted, uses the configured default list.',
       parameters: {
         type: 'object',
         properties: {
-          list_id: { type: 'string', description: 'ClickUp list ID' },
+          list_id: { type: 'string', description: 'ClickUp list ID (optional, uses default list if omitted)' },
         },
-        required: ['list_id'],
+        required: [],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_task',
+      description: 'Get full details of a ClickUp task by ID.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_task',
+      description: 'Update an existing ClickUp task (name, description, priority).',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, name: { type: 'string', description: 'New name (optional)' }, description: { type: 'string', description: 'New description (optional)' }, priority: { type: 'number', description: '1=Urgent 2=High 3=Normal 4=Low (optional)' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_task',
+      description: 'Delete a ClickUp task permanently.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_task_status',
+      description: 'Change the status of a ClickUp task (e.g. "open", "in progress", "complete").',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, status: { type: 'string', description: 'New status value' } }, required: ['task_id', 'status'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_due_date',
+      description: 'Set or clear a due date on a ClickUp task. Pass Unix timestamp in ms.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, due_date: { type: 'number', description: 'Unix timestamp in ms, or null to clear' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_assignees',
+      description: 'Add or remove assignees on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, add: { type: 'array', items: { type: 'number' }, description: 'User IDs to add' }, rem: { type: 'array', items: { type: 'number' }, description: 'User IDs to remove' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_subtask',
+      description: 'Create a subtask under a parent ClickUp task.',
+      parameters: { type: 'object', properties: { parent_id: { type: 'string', description: 'Parent task ID' }, name: { type: 'string', description: 'Subtask name' }, description: { type: 'string', description: 'Subtask description (optional)' } }, required: ['parent_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_comment',
+      description: 'Add a comment to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, comment_text: { type: 'string', description: 'Comment body text' } }, required: ['task_id', 'comment_text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_comments',
+      description: 'List comments on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_comment',
+      description: 'Edit an existing comment in ClickUp.',
+      parameters: { type: 'object', properties: { comment_id: { type: 'string', description: 'Comment ID' }, comment_text: { type: 'string', description: 'Updated text' } }, required: ['comment_id', 'comment_text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_comment',
+      description: 'Delete a comment from ClickUp.',
+      parameters: { type: 'object', properties: { comment_id: { type: 'string', description: 'Comment ID' } }, required: ['comment_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_clickup_tag',
+      description: 'Add a tag to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, tag: { type: 'string', description: 'Tag name' } }, required: ['task_id', 'tag'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_clickup_tag',
+      description: 'Remove a tag from a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, tag: { type: 'string', description: 'Tag name' } }, required: ['task_id', 'tag'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_checklist',
+      description: 'Add a checklist to a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'ClickUp task ID' }, name: { type: 'string', description: 'Checklist name' } }, required: ['task_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_clickup_checklist_item',
+      description: 'Add an item to an existing ClickUp checklist.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, name: { type: 'string', description: 'Item name' } }, required: ['checklist_id', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_clickup_checklist_item',
+      description: 'Toggle resolved or rename a checklist item.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' }, name: { type: 'string', description: 'New name (optional)' }, resolved: { type: 'boolean', description: 'Mark resolved or unresolved (optional)' } }, required: ['checklist_id', 'checklist_item_id'] },
     },
   },
   // Trello actions
@@ -2867,25 +3026,139 @@ async function executeToolCall(
         return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
       }
 
-      // ============ ClickUp tools ============
+      // ============ ClickUp tools (via dedicated edge function) ============
       case 'create_clickup_task': {
-        const connId = resolveConnection(connMap, 'clickup')?.id;
-        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
-        const taskData: Record<string, unknown> = { name: args.name };
-        if (args.description) taskData.description = args.description;
-        if (args.priority) taskData.priority = args.priority;
-        const res = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task`, connId, 'POST', taskData) as { id?: string; name?: string; url?: string; err?: string };
-        if (res.err) return { success: false, result: `ClickUp error: ${res.err}` };
-        return { success: true, result: `Task created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        try {
+          const params: Record<string, unknown> = { name: args.name };
+          if (args.list_id) params.listId = args.list_id;
+          if (args.description) params.description = args.description;
+          if (args.priority) params.priority = args.priority;
+          const res = await callClickUpEdge('create_task', params) as { id?: string; name?: string; url?: string };
+          return { success: true, result: `Task created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        } catch (err) {
+          return { success: false, result: `ClickUp error: ${(err as Error).message}` };
+        }
       }
 
       case 'list_clickup_tasks': {
-        const connId = resolveConnection(connMap, 'clickup')?.id;
-        if (!connId) return { success: false, result: 'ClickUp is not connected.' };
-        const data = await callMatonGateway(matonApiKey, `/clickup/api/v2/list/${args.list_id}/task?page=0`, connId) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string; priority?: { priority?: string } }[] };
-        const tasks = data.tasks || [];
-        if (!tasks.length) return { success: true, result: 'No tasks in this list.' };
-        return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map(t => `- ${t.name} (${t.status?.status || '?'}) — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.list_id) params.listId = args.list_id;
+          const data = await callClickUpEdge('list_tasks', params) as { tasks?: { id: string; name: string; status?: { status?: string }; url?: string }[] };
+          const tasks = data.tasks || [];
+          if (!tasks.length) return { success: true, result: 'No tasks found.' };
+          return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map((t: { id: string; name: string; status?: { status?: string }; url?: string }) => `- ${t.name} (${t.status?.status || '?'}) — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        } catch (err) {
+          return { success: false, result: `ClickUp error: ${(err as Error).message}` };
+        }
+      }
+
+      case 'get_clickup_task': {
+        try {
+          const res = await callClickUpEdge('get_task', { taskId: args.task_id });
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_task': {
+        try {
+          const params: Record<string, unknown> = { taskId: args.task_id };
+          if (args.name) params.name = args.name;
+          if (args.description) params.description = args.description;
+          if (args.priority) params.priority = args.priority;
+          const res = await callClickUpEdge('update_task', params);
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_task': {
+        try {
+          await callClickUpEdge('delete_task', { taskId: args.task_id });
+          return { success: true, result: `Task ${args.task_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_task_status': {
+        try {
+          await callClickUpEdge('set_task_status', { taskId: args.task_id, status: args.status });
+          return { success: true, result: `Task ${args.task_id} status set to "${args.status}".` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_due_date': {
+        try {
+          await callClickUpEdge('set_due_date', { taskId: args.task_id, due_date: args.due_date ?? null });
+          return { success: true, result: `Due date ${args.due_date ? 'set' : 'cleared'} on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_assignees': {
+        try {
+          await callClickUpEdge('set_assignees', { taskId: args.task_id, add: args.add || [], rem: args.rem || [] });
+          return { success: true, result: `Assignees updated on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_subtask': {
+        try {
+          const params: Record<string, unknown> = { parentId: args.parent_id, name: args.name };
+          if (args.description) params.description = args.description;
+          const res = await callClickUpEdge('create_subtask', params) as { id?: string; name?: string; url?: string };
+          return { success: true, result: `Subtask created: "${args.name}" — ${res.url || `https://app.clickup.com/t/${res.id}`}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_comment': {
+        try {
+          const res = await callClickUpEdge('create_comment', { taskId: args.task_id, comment_text: args.comment_text });
+          return { success: true, result: res };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_comments': {
+        try {
+          const res = await callClickUpEdge('list_comments', { taskId: args.task_id }) as { comments?: { id: string; comment_text?: string; user?: { username?: string } }[] };
+          const comments = res.comments || [];
+          if (!comments.length) return { success: true, result: 'No comments on this task.' };
+          return { success: true, result: `${comments.length} comment(s):\n${comments.map((c: { id: string; comment_text?: string; user?: { username?: string } }) => `- [${c.user?.username || '?'}]: ${(c.comment_text || '').substring(0, 200)} (ID: ${c.id})`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_comment': {
+        try {
+          await callClickUpEdge('update_comment', { commentId: args.comment_id, comment_text: args.comment_text });
+          return { success: true, result: `Comment ${args.comment_id} updated.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_comment': {
+        try {
+          await callClickUpEdge('delete_comment', { commentId: args.comment_id });
+          return { success: true, result: `Comment ${args.comment_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'add_clickup_tag': {
+        try {
+          await callClickUpEdge('add_tag', { taskId: args.task_id, tag: args.tag });
+          return { success: true, result: `Tag "${args.tag}" added to task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'remove_clickup_tag': {
+        try {
+          await callClickUpEdge('remove_tag', { taskId: args.task_id, tag: args.tag });
+          return { success: true, result: `Tag "${args.tag}" removed from task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_checklist': {
+        try {
+          const res = await callClickUpEdge('create_checklist', { taskId: args.task_id, name: args.name }) as { checklist?: { id?: string } };
+          return { success: true, result: `Checklist "${args.name}" created (ID: ${res.checklist?.id || '?'}).` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'create_clickup_checklist_item': {
+        try {
+          await callClickUpEdge('create_checklist_item', { checklistId: args.checklist_id, name: args.name });
+          return { success: true, result: `Checklist item "${args.name}" added.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'update_clickup_checklist_item': {
+        try {
+          const params: Record<string, unknown> = { checklistId: args.checklist_id, itemId: args.checklist_item_id };
+          if (args.name) params.name = args.name;
+          if (args.resolved !== undefined) params.resolved = args.resolved;
+          await callClickUpEdge('update_checklist_item', params);
+          return { success: true, result: `Checklist item updated.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
 
       // ============ Tier 3: GHL Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
@@ -3310,7 +3583,7 @@ async function executeToolCall(
               query,
               status: 'running',
             }).select('id').single();
-            taskRowId = taskRow?.id || null;
+            taskRowId = (taskRow?.id as string) || null;
           }
 
           // Step 1: Tavily search (with 1 retry for transient failures)
@@ -3676,7 +3949,8 @@ ${pageContents.slice(0, 12000)}`;
           const taskId = args.task_id as string;
           if (!taskId) return { success: false, result: 'task_id is required' };
 
-          const adminClient = createClient(
+          const { createClient: createAdminClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createAdminClient(
             Deno.env.get('SUPABASE_URL')!,
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
           );
@@ -3934,9 +4208,8 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-  const hasGHL = !!GHL_API_KEY;
+function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): ToolDef[] {
+  const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
@@ -3960,8 +4233,24 @@ function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
     'read_sheet_data': 'google-drive',
     'append_sheet_rows': 'google-drive',
     'create_google_presentation': 'google-drive',
-    'create_clickup_task': 'clickup',
-    'list_clickup_tasks': 'clickup',
+    'create_clickup_task': '_always_',
+    'list_clickup_tasks': '_always_',
+    'get_clickup_task': '_always_',
+    'update_clickup_task': '_always_',
+    'delete_clickup_task': '_always_',
+    'set_clickup_task_status': '_always_',
+    'set_clickup_due_date': '_always_',
+    'set_clickup_assignees': '_always_',
+    'create_clickup_subtask': '_always_',
+    'create_clickup_comment': '_always_',
+    'list_clickup_comments': '_always_',
+    'update_clickup_comment': '_always_',
+    'delete_clickup_comment': '_always_',
+    'add_clickup_tag': '_always_',
+    'remove_clickup_tag': '_always_',
+    'create_clickup_checklist': '_always_',
+    'create_clickup_checklist_item': '_always_',
+    'update_clickup_checklist_item': '_always_',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
     // GHL tools
@@ -4568,21 +4857,53 @@ serve(async (req) => {
     }
 
     // Get Maton connections for data injection AND tool availability
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    const integrationSourceMode = (Deno.env.get('INTEGRATION_SOURCE_MODE') || 'auto') as 'auto' | 'maton_only' | 'local_only';
-    const authHeader = req.headers.get('Authorization') || '';
-    let authenticatedUserId: string | null = null;
-    try {
-      const supabaseUrl = Deno.env.get('SUPABASE_URL');
-      const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-      if (supabaseUrl && anonKey && authHeader.startsWith('Bearer ')) {
-        const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
-        const { data: { user } } = await userClient.auth.getUser();
-        authenticatedUserId = user?.id || null;
-      }
-    } catch {
-      authenticatedUserId = null;
+    // Per-user credential resolution: look up from integration_connections first
+    let MATON_API_KEY: string | undefined;
+    let GHL_API_KEY_RESOLVED: string | undefined;
+    let GHL_LOCATION_ID_RESOLVED: string | undefined;
+
+    // Resolve user ID early for credential lookup
+    const authHeaderForCreds = req.headers.get('Authorization');
+    let credUserId: string | null = null;
+    if (authHeaderForCreds) {
+      try {
+        const { createClient: cc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const anonK = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const uc = cc(Deno.env.get('SUPABASE_URL')!, anonK, { global: { headers: { Authorization: authHeaderForCreds } } });
+        const { data: { user: credUser } } = await uc.auth.getUser();
+        credUserId = credUser?.id || null;
+      } catch { /* no auth */ }
     }
+
+    if (credUserId) {
+      try {
+        const { createClient: cc2 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const srvKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const admin = cc2(Deno.env.get('SUPABASE_URL')!, srvKey);
+        const { data: conns } = await admin
+          .from('integration_connections')
+          .select('provider, metadata')
+          .eq('user_id', credUserId)
+          .eq('status', 'connected')
+          .in('provider', ['maton', 'gohighlevel']);
+        if (conns) {
+          for (const c of conns) {
+            const meta = c.metadata as Record<string, string> | null;
+            if (c.provider === 'maton' && meta?.api_key) MATON_API_KEY = meta.api_key;
+            if (c.provider === 'gohighlevel' && meta?.api_key) {
+              GHL_API_KEY_RESOLVED = meta.api_key;
+              GHL_LOCATION_ID_RESOLVED = meta.location_id;
+            }
+          }
+        }
+      } catch (e) { console.error('Per-user credential lookup failed:', e); }
+    }
+
+    // Fallback to env vars if no per-user credentials found
+    if (!MATON_API_KEY) MATON_API_KEY = Deno.env.get('MATON_API_KEY') || undefined;
+    if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
+    if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
+
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
     let aliasMap: AliasEntry[] = [];
@@ -4600,7 +4921,7 @@ serve(async (req) => {
         console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
 
         // Determine available tools based on active connections
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
         console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
 
         // Add connected services info to system prompt with account details
@@ -4691,8 +5012,8 @@ BEHAVIOR:
     }
 
     // GoHighLevel data injection (separate from Maton - uses its own API key)
-    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-    if (GHL_API_KEY) {
+    if (GHL_API_KEY_RESOLVED) {
+      // Check if user is asking about GHL
       // Check if user is asking about GHL
       const ghlDetected = detectServiceIntents(messages).includes('gohighlevel');
       if (ghlDetected) {
@@ -4714,7 +5035,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // If no Maton tools were added, ensure GHL tools are still available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
-        availableTools = getAvailableTools(connMap);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
       }
     }
 
