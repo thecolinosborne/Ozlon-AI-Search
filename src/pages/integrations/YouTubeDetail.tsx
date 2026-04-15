@@ -330,7 +330,7 @@ export default function YouTubeDetail() {
     "border border-border hover:bg-muted/60 text-foreground",
   );
 
-  if (loadingConnection) {
+  if (loadingConnection || authLoading) {
     return (
       <IntegrationDetailLayout
         name="YouTube"
