@@ -1,58 +1,35 @@
 
-Goal: get “Authorize YouTube Uploads” working by aligning Google OAuth with the exact redirect URI the app is sending.
 
-What I found
-- The app is not guessing the redirect URI. In `src/pages/integrations/YouTubeDetail.tsx` it always sends:
-  `window.location.origin + "/integrations/youtube"`
-- Your screenshot shows Google is receiving:
-  `https://ozlon.ai/integrations/youtube`
-- That means Google must have that exact redirect URI on the same OAuth client ID used by the backend secrets.
+## Fix YouTube Integration: OAuth Persistence + Cleanup
 
-Immediate fix in Google Cloud
-1. Open the Web OAuth client whose ID is:
-   `553189125514-7sjlt4r0le800bjrtp0f7obtvtcqe2if.apps.googleusercontent.com`
-2. In that exact client, set these values:
+### Problems Found
 
-JavaScript origins
-```text
-https://ozlon.ai
-https://id-preview--4896957e-1c02-4264-8c4c-1c294087f925.lovable.app
-https://ozlon-hello-orb.lovable.app
-```
+**1. OAuth race condition (root cause)**
+When Google redirects back with `?code=...`, two things fire concurrently in the `useEffect`:
+- `loadConnection()` calls `get_connection` — at this point the OAuth token hasn't been stored yet, so it returns `oauthStatus: "disconnected"`
+- `handleOAuthCallback(code)` calls `oauth_callback` to exchange the code and store the token
 
-Authorized redirect URIs
-```text
-https://ozlon.ai/integrations/youtube
-https://id-preview--4896957e-1c02-4264-8c4c-1c294087f925.lovable.app/integrations/youtube
-https://ozlon-hello-orb.lovable.app/integrations/youtube
-```
+Whichever finishes last wins. If `loadConnection` finishes after `handleOAuthCallback`, it overwrites `oauthConnected` back to `false`. The API key also appears "wiped" because the page may timeout or error during this race.
 
-Important rules
-- JavaScript origins: no path, no trailing slash
-- Redirect URIs: must include `/integrations/youtube`
-- Edit the same OAuth client ID the backend is using, not a different Google app
+**2. Sync controls are confusing and unused**
+Manual Sync and Recent Sync Runs sections add noise. User confirmed: remove them.
 
-Why it is failing now
-- Earlier you were testing on Lovable preview/published domains.
-- Now the live request is coming from `ozlon.ai`.
-- If `ozlon.ai` is missing from that OAuth client, Google returns `redirect_uri_mismatch`.
+### Fix Plan
 
-If you want me to implement a hardening pass after this
-1. Add a read-only debug line in the YouTube page showing the exact redirect URI being used.
-2. Add clearer OAuth error messaging so the page tells you which URI Google expected.
-3. Keep the existing API key save behavior as-is so failed saves do not wipe the field.
-4. Optionally add a small “Copy redirect URI” button for setup.
+**Step 1: Fix OAuth callback flow in `YouTubeDetail.tsx`**
+- If URL contains `?code=`, skip `loadConnection` and process the OAuth callback first
+- After the callback succeeds (or fails), THEN call `loadConnection` to refresh all state
+- This eliminates the race condition entirely
 
-Technical details
-- Frontend authorize call:
-  `redirectUri: ${window.location.origin}/integrations/youtube`
-- Frontend callback exchange:
-  `redirectUri: ${window.location.origin}/integrations/youtube`
-- Backend passes that value directly to Google in `supabase/functions/youtube/index.ts`
-- So this is a Google OAuth client configuration mismatch, not a routing issue
+**Step 2: Remove Manual Sync + Recent Sync Runs UI**
+- Remove the "Manual Sync" card (sync_channels/sync_videos buttons)
+- Remove the "Recent Sync Runs" card and related state (`runs`, `loadingRuns`, `loadRuns`, `runSync`, `SyncRun` type)
+- Keep the backend sync actions intact (they can be used by the chat agent later)
 
-Success check
-- After saving the Google settings, wait 1–2 minutes
-- Open the integration from the same domain you configured
-- Click “Authorize YouTube Uploads”
-- If it still fails, the most likely cause is you updated the wrong Google OAuth client record
+**Step 3: Redeploy edge function (if needed)**
+- The backend `youtube` edge function is already correct — no changes needed there
+- The OAuth callback handler properly stores tokens in `integration_connections` with `auth_type: "oauth2"`
+
+### Files Changed
+- `src/pages/integrations/YouTubeDetail.tsx` — fix callback ordering, remove sync UI
+
