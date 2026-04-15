@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Youtube, Link as LinkIcon, RefreshCw, Film, AlertCircle, Loader2 } from "lucide-react";
+import { Youtube, Link as LinkIcon, RefreshCw, Film, AlertCircle, Loader2, Upload, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
@@ -32,6 +32,15 @@ export default function YouTubeDetail() {
   const [runs, setRuns] = useState<SyncRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
 
+  // OAuth state
+  const [oauthConnected, setOauthConnected] = useState(false);
+  const [authorizing, setAuthorizing] = useState(false);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadVideoUrl, setUploadVideoUrl] = useState("");
+  const [uploadPrivacy, setUploadPrivacy] = useState("private");
+  const [uploading, setUploading] = useState(false);
+
   const callYouTube = async (action: string, params: Record<string, unknown> = {}) => {
     const { data, error } = await supabase.functions.invoke("youtube", {
       body: { action, params },
@@ -54,10 +63,44 @@ export default function YouTubeDetail() {
     }
   };
 
+  const checkOAuthStatus = async () => {
+    try {
+      const result = await callYouTube("oauth_status");
+      setOauthConnected(!!result.oauth_connected);
+    } catch {
+      // not connected
+    }
+  };
+
   useEffect(() => {
     loadRuns();
+    checkOAuthStatus();
+
+    // Handle OAuth callback code in URL
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    if (code) {
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      url.searchParams.delete("scope");
+      window.history.replaceState({}, "", url.toString());
+      handleOAuthCallback(code);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.connectionId]);
+
+  const handleOAuthCallback = async (code: string) => {
+    try {
+      await callYouTube("oauth_callback", {
+        code,
+        redirectUri: `${window.location.origin}/integrations/youtube`,
+      });
+      setOauthConnected(true);
+      toast.success("YouTube OAuth connected — uploads enabled!");
+    } catch (e) {
+      toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    }
+  };
 
   const handleConnect = async () => {
     if (!apiKey.trim()) {
@@ -105,26 +148,51 @@ export default function YouTubeDetail() {
     }
   };
 
+  const handleAuthorize = async () => {
+    setAuthorizing(true);
+    try {
+      const result = await callYouTube("oauth_authorize", {
+        redirectUri: `${window.location.origin}/integrations/youtube`,
+      });
+      window.location.href = result.authUrl;
+    } catch (e) {
+      toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+      setAuthorizing(false);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadVideoUrl.trim()) {
+      toast.error("Video URL is required");
+      return;
+    }
+    setUploading(true);
+    try {
+      const result = await callYouTube("upload_video", {
+        title: uploadTitle.trim() || "Untitled",
+        description: uploadDescription.trim(),
+        privacyStatus: uploadPrivacy,
+        videoUrl: uploadVideoUrl.trim(),
+      });
+      toast.success(`Uploaded! Video ID: ${result.videoId}`);
+      setUploadTitle("");
+      setUploadDescription("");
+      setUploadVideoUrl("");
+    } catch (e) {
+      toast.error(`Upload failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const runSync = async (action: "sync_channels" | "sync_videos") => {
     const connectionId = (integration.settings as { connectionId?: string }).connectionId;
-    if (!connectionId) {
-      toast.error("Connect YouTube first");
-      return;
-    }
-    if (!apiKey.trim()) {
-      toast.error("Enter API key to sync");
-      return;
-    }
-    if (!channelId.trim()) {
-      toast.error("Channel ID is required");
-      return;
-    }
+    if (!connectionId) { toast.error("Connect YouTube first"); return; }
+    if (!apiKey.trim()) { toast.error("Enter API key to sync"); return; }
+    if (!channelId.trim()) { toast.error("Channel ID is required"); return; }
 
-    if (action === "sync_channels") {
-      setSyncingChannels(true);
-    } else {
-      setSyncingVideos(true);
-    }
+    if (action === "sync_channels") setSyncingChannels(true);
+    else setSyncingVideos(true);
     setStatus("youtube", "syncing");
     try {
       const result = await callYouTube(action, {
@@ -181,7 +249,7 @@ export default function YouTubeDetail() {
   return (
     <IntegrationDetailLayout
       name="YouTube"
-      description="Connect by API key, sync channels/videos, and monitor run history"
+      description="Connect by API key, sync channels/videos, authorize OAuth for uploads"
       icon={Youtube}
       status={integration.status}
       actions={
@@ -195,53 +263,75 @@ export default function YouTubeDetail() {
         ) : undefined
       }
     >
+      {/* Connect Section */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center gap-2">
           <LinkIcon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
           <h3 className="text-sm font-medium text-foreground">Connect YouTube</h3>
         </div>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="YouTube Data API key"
-          className={inputClass}
-        />
-        <input
-          type="text"
-          value={channelId}
-          onChange={(e) => setChannelId(e.target.value)}
-          placeholder="Channel ID (UC...)"
-          className={inputClass}
-        />
-        <input
-          type="text"
-          value={accountLabel}
-          onChange={(e) => setAccountLabel(e.target.value)}
-          placeholder="Account label"
-          className={inputClass}
-        />
+        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="YouTube Data API key" className={inputClass} />
+        <input type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="Channel ID (UC...)" className={inputClass} />
+        <input type="text" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} placeholder="Account label" className={inputClass} />
         <div className="flex flex-wrap gap-2">
           <button onClick={handleConnect} disabled={connecting} className={actionBtnClass}>
-            {connecting ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
-            Connect
+            {connecting ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Connect
           </button>
           <button onClick={handleTestConnection} disabled={testing} className={secondaryBtnClass}>
-            {testing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
-            Test
+            {testing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Test
           </button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          API key is used for validation and sync calls. For production, move secret handling fully backend-side.
-        </p>
+        <p className="text-[11px] text-muted-foreground">API key is used for read-only sync. OAuth below is needed for uploads.</p>
       </div>
 
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("youtube", d)}
-        lastSync={integration.lastSync}
-      />
+      {/* OAuth Section */}
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+          <h3 className="text-sm font-medium text-foreground">YouTube OAuth (Uploads)</h3>
+          {oauthConnected && (
+            <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Connected</span>
+          )}
+        </div>
+        {oauthConnected ? (
+          <p className="text-xs text-muted-foreground">OAuth is active — you can upload videos below.</p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Authorize with Google to enable video uploads. Requires <code className="text-foreground">YOUTUBE_CLIENT_ID</code> and <code className="text-foreground">YOUTUBE_CLIENT_SECRET</code> configured as backend secrets.
+            </p>
+            <button onClick={handleAuthorize} disabled={authorizing} className={actionBtnClass}>
+              {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
+              Authorize YouTube Uploads
+            </button>
+          </>
+        )}
+      </div>
 
+      {/* Upload Section */}
+      {oauthConnected && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+          <div className="flex items-center gap-2">
+            <Upload className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+            <h3 className="text-sm font-medium text-foreground">Upload Video</h3>
+          </div>
+          <input type="text" value={uploadVideoUrl} onChange={(e) => setUploadVideoUrl(e.target.value)} placeholder="Public video URL (https://...mp4)" className={inputClass} />
+          <input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Video title" className={inputClass} />
+          <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} placeholder="Video description" className={cn(inputClass, "min-h-[60px]")} />
+          <select value={uploadPrivacy} onChange={(e) => setUploadPrivacy(e.target.value)} className={inputClass}>
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+          <button onClick={handleUpload} disabled={uploading} className={actionBtnClass}>
+            {uploading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Upload className="w-4 h-4 inline mr-1" />}
+            Upload to YouTube
+          </button>
+        </div>
+      )}
+
+      <SyncControl direction={integration.syncDirection} onDirectionChange={(d) => setSyncDirection("youtube", d)} lastSync={integration.lastSync} />
+
+      {/* Manual Sync */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center gap-2">
           <Film className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
@@ -249,28 +339,25 @@ export default function YouTubeDetail() {
         </div>
         {!channelId.trim() && (
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-3.5 h-3.5" />
-            Add a channel ID to run sync.
+            <AlertCircle className="w-3.5 h-3.5" />Add a channel ID to run sync.
           </div>
         )}
         <div className="flex flex-wrap gap-2">
           <button onClick={() => runSync("sync_channels")} disabled={syncingChannels} className={actionBtnClass}>
-            {syncingChannels ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}
-            Sync Channel
+            {syncingChannels ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Channel
           </button>
           <button onClick={() => runSync("sync_videos")} disabled={syncingVideos} className={secondaryBtnClass}>
-            {syncingVideos ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}
-            Sync Videos
+            {syncingVideos ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <RefreshCw className="w-4 h-4 inline mr-1" />}Sync Videos
           </button>
         </div>
       </div>
 
+      {/* Sync Runs */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-foreground">Recent Sync Runs</h3>
           <button onClick={() => loadRuns()} className={secondaryBtnClass} disabled={loadingRuns}>
-            {loadingRuns ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
-            Refresh
+            {loadingRuns ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}Refresh
           </button>
         </div>
         <div className="space-y-2">

@@ -191,8 +191,8 @@ async function isOnCooldown(taskId: string, cooldownSeconds: number, supabase: R
 }
 
 /** Fetch full task context */
-async function fetchTaskContext(taskId: string) {
-  const task = await clickupFetch(`/task/${taskId}`);
+async function fetchTaskContext(taskId: string, tokenOverride?: string) {
+  const task = await clickupFetch(`/task/${taskId}`, 'GET', undefined, tokenOverride);
   let comments: Array<{ comment_text?: string; user?: { username?: string }; date?: string }> = [];
   try {
     const commentsRes = await clickupFetch(`/task/${taskId}/comment`, 'GET', undefined, tokenOverride);

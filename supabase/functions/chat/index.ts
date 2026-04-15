@@ -3188,7 +3188,7 @@ async function executeToolCall(
               query,
               status: 'running',
             }).select('id').single();
-            taskRowId = taskRow?.id || null;
+            taskRowId = (taskRow?.id as string) || null;
           }
 
           // Step 1: Tavily search (with 1 retry for transient failures)
@@ -3554,7 +3554,8 @@ ${pageContents.slice(0, 12000)}`;
           const taskId = args.task_id as string;
           if (!taskId) return { success: false, result: 'task_id is required' };
 
-          const adminClient = createClient(
+          const { createClient: createAdminClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createAdminClient(
             Deno.env.get('SUPABASE_URL')!,
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
           );
