@@ -46,7 +46,8 @@ async function ytFetch(path: string, apiKey: string): Promise<AnyJson> {
 }
 
 async function validateApiKey(apiKey: string): Promise<void> {
-  await ytFetch("/search?part=snippet&type=video&maxResults=1&q=productivity", apiKey);
+  // Use /videos with a known public video ID — costs only 1 quota unit vs 100 for /search
+  await ytFetch("/videos?part=snippet&id=dQw4w9WgXcQ&maxResults=1", apiKey);
 }
 
 function maskKey(apiKey: string): string {
