@@ -31,16 +31,33 @@ When replying in ClickUp:
 // HELPERS
 // ============================================================================
 
-function getToken(): string {
-  const token = Deno.env.get('CLICKUP_API_TOKEN');
+function getToken(tokenOverride?: string): string {
+  const token = tokenOverride || Deno.env.get('CLICKUP_API_TOKEN');
   if (!token) throw new Error('CLICKUP_API_TOKEN not configured');
   return token;
 }
 
-function getTeamId(): string {
-  const id = Deno.env.get('CLICKUP_TEAM_ID');
-  if (!id) throw new Error('CLICKUP_TEAM_ID not configured');
-  return id;
+async function resolveTeamId(
+  token: string,
+  explicitTeamId?: string
+): Promise<{ teamId: string; teams: Array<{ id: string; name: string }> }> {
+  const fromParam = explicitTeamId?.trim();
+  if (fromParam) return { teamId: fromParam, teams: [] };
+
+  const fromEnv = Deno.env.get('CLICKUP_TEAM_ID');
+  if (fromEnv) return { teamId: fromEnv, teams: [] };
+
+  const teamRes = await fetch(`${CLICKUP_BASE}/team`, {
+    headers: { 'Authorization': token },
+  });
+  if (!teamRes.ok) {
+    const text = await teamRes.text();
+    throw new Error(`Unable to resolve ClickUp team (${teamRes.status}): ${text}`);
+  }
+  const teamData = await teamRes.json();
+  const teams = (teamData?.teams || []).map((t: { id: string; name: string }) => ({ id: t.id, name: t.name }));
+  if (!teams.length) throw new Error('No ClickUp teams available for this token');
+  return { teamId: teams[0].id, teams };
 }
 
 async function getListId(params?: Record<string, unknown>): Promise<string> {
@@ -50,12 +67,15 @@ async function getListId(params?: Record<string, unknown>): Promise<string> {
   // Check DB for saved default_list_id
   try {
     const supabase = getSupabase();
-    const teamId = Deno.env.get('CLICKUP_TEAM_ID') || '';
-    const { data } = await supabase
+    const requestedTeamId = String(params?.teamId || '');
+    let query = supabase
       .from('clickup_integration_state')
       .select('default_list_id')
-      .eq('team_id', teamId)
-      .maybeSingle();
+      .not('default_list_id', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (requestedTeamId) query = query.eq('team_id', requestedTeamId);
+    const { data } = await query.maybeSingle();
     if (data?.default_list_id) return data.default_list_id;
   } catch { /* fall through */ }
   
@@ -69,8 +89,8 @@ function getSupabase() {
   );
 }
 
-async function clickupFetch(path: string, method = 'GET', body?: unknown) {
-  const token = getToken();
+async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenOverride?: string) {
+  const token = getToken(tokenOverride);
   const opts: RequestInit = {
     method,
     headers: { 'Authorization': token, 'Content-Type': 'application/json' },
@@ -127,13 +147,19 @@ async function markProcessed(
 }
 
 /** Get integration config */
-async function getConfig(supabase: ReturnType<typeof getSupabase>) {
-  const teamId = Deno.env.get('CLICKUP_TEAM_ID') || '';
-  const { data } = await supabase
+async function getConfig(
+  supabase: ReturnType<typeof getSupabase>,
+  teamId?: string,
+) {
+  let query = supabase
     .from('clickup_integration_state')
     .select('*')
-    .eq('team_id', teamId)
-    .maybeSingle();
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  if (teamId) query = query.eq('team_id', teamId);
+
+  const { data } = await query.maybeSingle();
 
   if (data) return data;
 
@@ -165,11 +191,11 @@ async function isOnCooldown(taskId: string, cooldownSeconds: number, supabase: R
 }
 
 /** Fetch full task context */
-async function fetchTaskContext(taskId: string) {
-  const task = await clickupFetch(`/task/${taskId}`);
-  let comments: unknown[] = [];
+async function fetchTaskContext(taskId: string, tokenOverride?: string) {
+  const task = await clickupFetch(`/task/${taskId}`, 'GET', undefined, tokenOverride);
+  let comments: Array<{ comment_text?: string; user?: { username?: string }; date?: string }> = [];
   try {
-    const commentsRes = await clickupFetch(`/task/${taskId}/comment`);
+    const commentsRes = await clickupFetch(`/task/${taskId}/comment`, 'GET', undefined, tokenOverride);
     comments = (commentsRes.comments || []).slice(-10);
   } catch { /* comments fetch optional */ }
 
@@ -182,7 +208,7 @@ async function fetchTaskContext(taskId: string) {
     due_date: task.due_date ? new Date(Number(task.due_date)).toISOString() : null,
     tags: (task.tags || []).map((t: { name: string }) => t.name),
     url: task.url,
-    recent_comments: comments.map((c: any) => ({
+    recent_comments: comments.map((c) => ({
       text: c.comment_text || '',
       user: c.user?.username || 'unknown',
       date: c.date,
@@ -424,6 +450,9 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const { action, params } = body;
+    const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
+    const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
+      clickupFetch(path, method, payload, tokenFromParams);
 
     // ClickUp webhooks send the payload directly (no action field)
     if (!action && body.event) {
@@ -436,10 +465,14 @@ serve(async (req) => {
     // Action-based routing for frontend calls
     switch (action) {
       // ============ CONNECTION ============
+      case 'connect':
       case 'test_connection': {
-        const token = getToken();
-        const teamId = getTeamId();
-        const listId = Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
+        const token = getToken(tokenFromParams);
+        const listId = typeof params?.defaultListId === 'string'
+          ? params.defaultListId
+          : Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const teamId = resolved.teamId;
 
         // Test team access
         const teamRes = await fetch(`${CLICKUP_BASE}/team`, {
@@ -476,7 +509,7 @@ serve(async (req) => {
           list_id: listId || null,
           team_accessible: teamOk,
           list_accessible: listOk,
-          teams: teamData?.teams?.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })) || [],
+          teams: teamData?.teams?.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })) || resolved.teams,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -484,13 +517,13 @@ serve(async (req) => {
       case 'list_tasks': {
         const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
-        const data = await clickupFetch(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
+        const data = await clickupCall(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_task': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await clickupFetch(`/task/${params.taskId}`);
+        const data = await clickupCall(`/task/${params.taskId}`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -504,14 +537,14 @@ serve(async (req) => {
         if (priority) taskBody.priority = priority;
         if (due_date) taskBody.due_date = due_date;
         if (parent) taskBody.parent = parent;
-        const data = await clickupFetch(`/list/${listId}/task`, 'POST', taskBody);
+        const data = await clickupCall(`/list/${listId}/task`, 'POST', taskBody);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'update_task': {
         if (!params?.taskId) throw new Error('taskId required');
         const { taskId, ...updates } = params;
-        const data = await clickupFetch(`/task/${taskId}`, 'PUT', updates);
+        const data = await clickupCall(`/task/${taskId}`, 'PUT', updates);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -520,7 +553,7 @@ serve(async (req) => {
         if (!listId) throw new Error('listId required');
         if (!params?.parent) throw new Error('parent taskId required');
         const { name, description, parent, ...rest } = params;
-        const data = await clickupFetch(`/list/${listId}/task`, 'POST', {
+        const data = await clickupCall(`/list/${listId}/task`, 'POST', {
           name: name || 'Subtask',
           description,
           parent,
@@ -532,23 +565,27 @@ serve(async (req) => {
       // ============ COMMENTS ============
       case 'create_comment': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await postComment(params.taskId, params.comment_text || params.text || '');
+        const data = await clickupCall(`/task/${params.taskId}/comment`, 'POST', {
+          comment_text: params.comment_text || params.text || '',
+        });
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_comments': {
         if (!params?.taskId) throw new Error('taskId required');
-        const data = await clickupFetch(`/task/${params.taskId}/comment`);
+        const data = await clickupCall(`/task/${params.taskId}/comment`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       // ============ WEBHOOK ============
       case 'register_webhook': {
-        const teamId = getTeamId();
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const teamId = resolved.teamId;
         const endpoint = params?.endpoint;
         if (!endpoint) throw new Error('endpoint URL required');
 
-        const data = await clickupFetch(`/team/${teamId}/webhook`, 'POST', {
+        const data = await clickupCall(`/team/${teamId}/webhook`, 'POST', {
           endpoint,
           events: ['taskCommentPosted'],
         });
@@ -575,12 +612,15 @@ serve(async (req) => {
       // ============ CONFIG ============
       case 'get_config': {
         const supabase = getSupabase();
-        const config = await getConfig(supabase);
+        const teamId = typeof params?.teamId === 'string' ? params.teamId : undefined;
+        const config = await getConfig(supabase, teamId);
         return new Response(JSON.stringify(config), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'update_config': {
-        const teamId = getTeamId();
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const teamId = resolved.teamId;
         const supabase = getSupabase();
         const { data } = await supabase
           .from('clickup_integration_state')
@@ -593,7 +633,7 @@ serve(async (req) => {
       // ============ PM ACTIONS ============
       case 'get_task_context': {
         if (!params?.taskId) throw new Error('taskId required');
-        const ctx = await fetchTaskContext(params.taskId);
+        const ctx = await fetchTaskContext(params.taskId, tokenFromParams);
         return new Response(JSON.stringify(ctx), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -604,7 +644,7 @@ serve(async (req) => {
       case 'generate_project_update':
       case 'create_execution_plan': {
         if (!params?.taskId) throw new Error('taskId required');
-        const ctx = await fetchTaskContext(params.taskId);
+        const ctx = await fetchTaskContext(params.taskId, tokenFromParams);
         const intentMap: Record<string, string> = {
           analyze_task: 'summarize',
           suggest_next_steps: 'next_steps',
@@ -623,26 +663,28 @@ serve(async (req) => {
 
       // ============ DISCOVERY ============
       case 'list_spaces': {
-        const teamId = getTeamId();
-        const data = await clickupFetch(`/team/${teamId}/space?archived=false`);
+        const token = getToken(tokenFromParams);
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        const teamId = resolved.teamId;
+        const data = await clickupCall(`/team/${teamId}/space?archived=false`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_folders': {
         if (!params?.spaceId) throw new Error('spaceId required');
-        const data = await clickupFetch(`/space/${params.spaceId}/folder?archived=false`);
+        const data = await clickupCall(`/space/${params.spaceId}/folder?archived=false`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_lists': {
         // Lists in a folder
         if (params?.folderId) {
-          const data = await clickupFetch(`/folder/${params.folderId}/list?archived=false`);
+          const data = await clickupCall(`/folder/${params.folderId}/list?archived=false`);
           return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         // Folderless lists in a space
         if (params?.spaceId) {
-          const data = await clickupFetch(`/space/${params.spaceId}/list?archived=false`);
+          const data = await clickupCall(`/space/${params.spaceId}/list?archived=false`);
           return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         throw new Error('folderId or spaceId required');

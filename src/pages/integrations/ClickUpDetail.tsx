@@ -6,24 +6,10 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-const HEADERS = {
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-};
+import { buildFunctionUrl, invokeFunction } from "@/services/backendFunctions";
 
 async function callClickUp(action: string, params?: Record<string, unknown>) {
-  const res = await fetch(FUNCTION_URL, {
-    method: "POST",
-    headers: HEADERS,
-    body: JSON.stringify({ action, params }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+  return invokeFunction("clickup", { action, params }, { timeoutMs: 25000 });
 }
 
 interface ClickUpConfig {
@@ -64,10 +50,20 @@ const ClickUpDetail = () => {
   const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
+  const storedSettings = integration.settings as { team_id?: string; list_id?: string };
   const [config, setConfig] = useState<ClickUpConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
+  const [apiTokenInput, setApiTokenInput] = useState<string>("");
+  const [teamIdInput, setTeamIdInput] = useState<string>(storedSettings.team_id || "");
+  const [defaultListIdInput, setDefaultListIdInput] = useState<string>(storedSettings.list_id || "");
+
+  const getAuthParams = () => ({
+    apiToken: apiTokenInput.trim() || undefined,
+    teamId: teamIdInput || undefined,
+    defaultListId: defaultListIdInput || undefined,
+  });
 
   // List picker state
   const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
@@ -84,7 +80,9 @@ const ClickUpDetail = () => {
   useEffect(() => {
     const check = async () => {
       try {
-        const result = await callClickUp("test_connection");
+        const result = await callClickUp("test_connection", {
+          ...getAuthParams(),
+        });
         if (result.connected) {
           setStatus("clickup", "connected");
           setLastSync("clickup", new Date().toISOString());
@@ -92,9 +90,11 @@ const ClickUpDetail = () => {
             team_id: result.team_id,
             list_id: result.list_id,
           });
+          setTeamIdInput(result.team_id || "");
+          setDefaultListIdInput(result.list_id || "");
         }
         // Load config
-        const cfg = await callClickUp("get_config");
+        const cfg = await callClickUp("get_config", { teamId: result?.team_id || teamIdInput || undefined });
         setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
@@ -108,10 +108,18 @@ const ClickUpDetail = () => {
   const handleConnect = async () => {
     setTesting(true);
     try {
-      const result = await callClickUp("test_connection");
+      const result = await callClickUp("connect", {
+        ...getAuthParams(),
+      });
       if (result.connected) {
         setStatus("clickup", "connected");
         setLastSync("clickup", new Date().toISOString());
+        updateSettings("clickup", {
+          team_id: result.team_id,
+          list_id: result.list_id,
+        });
+        setTeamIdInput(result.team_id || "");
+        setDefaultListIdInput(result.list_id || "");
         toast.success("ClickUp connected");
       } else {
         toast.error("Connection failed — check your API token");
@@ -132,7 +140,7 @@ const ClickUpDetail = () => {
   const handleSync = async () => {
     setStatus("clickup", "syncing");
     try {
-      const tasks = await callClickUp("list_tasks");
+      const tasks = await callClickUp("list_tasks", getAuthParams());
       setTaskCount(tasks.tasks?.length || 0);
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
@@ -145,7 +153,7 @@ const ClickUpDetail = () => {
 
   const handleFetchTasks = async () => {
     try {
-      const data = await callClickUp("list_tasks");
+      const data = await callClickUp("list_tasks", getAuthParams());
       setTaskCount(data.tasks?.length || 0);
       toast.success(`Found ${data.tasks?.length || 0} tasks`);
     } catch (err) {
@@ -156,6 +164,7 @@ const ClickUpDetail = () => {
   const handleCreateTestTask = async () => {
     try {
       await callClickUp("create_task", {
+        ...getAuthParams(),
         name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
         description: "This is a test task created by the AI Project Manager integration.",
       });
@@ -169,7 +178,7 @@ const ClickUpDetail = () => {
   const fetchSpaces = async () => {
     setLoadingSpaces(true);
     try {
-      const data = await callClickUp("list_spaces");
+      const data = await callClickUp("list_spaces", getAuthParams());
       setSpaces((data.spaces || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -186,11 +195,11 @@ const ClickUpDetail = () => {
     setLists([]);
     setLoadingFolders(true);
     try {
-      const data = await callClickUp("list_folders", { spaceId });
+      const data = await callClickUp("list_folders", { ...getAuthParams(), spaceId });
       const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
       setFolders(f);
       // Also fetch folderless lists
-      const folderless = await callClickUp("list_lists", { spaceId });
+      const folderless = await callClickUp("list_lists", { ...getAuthParams(), spaceId });
       const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
       if (fl.length > 0 && f.length === 0) {
         // Only folderless lists exist — show them directly
@@ -216,7 +225,7 @@ const ClickUpDetail = () => {
       // Re-fetch folderless lists
       setLoadingLists(true);
       try {
-        const data = await callClickUp("list_lists", { spaceId: selectedSpace });
+        const data = await callClickUp("list_lists", { ...getAuthParams(), spaceId: selectedSpace });
         setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
       } catch (err) {
         toast.error((err as Error).message);
@@ -227,7 +236,7 @@ const ClickUpDetail = () => {
     }
     setLoadingLists(true);
     try {
-      const data = await callClickUp("list_lists", { folderId });
+      const data = await callClickUp("list_lists", { ...getAuthParams(), folderId });
       setLists((data.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
     } catch (err) {
       toast.error((err as Error).message);
@@ -239,7 +248,7 @@ const ClickUpDetail = () => {
   const handleListSelect = async (listId: string) => {
     setSelectedList(listId);
     try {
-      await callClickUp("update_config", { default_list_id: listId });
+      await callClickUp("update_config", { ...getAuthParams(), default_list_id: listId });
       setConfig((c) => ({ ...c }));
       toast.success("Default list updated");
     } catch (err) {
@@ -249,8 +258,8 @@ const ClickUpDetail = () => {
 
   const handleRegisterWebhook = async () => {
     try {
-      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-      await callClickUp("register_webhook", { endpoint: webhookUrl });
+      const endpoint = buildFunctionUrl("clickup");
+      await callClickUp("register_webhook", { ...getAuthParams(), endpoint });
       setConfig((c) => ({ ...c, webhook_status: "registered" }));
       toast.success("Webhook registered");
     } catch (err) {
@@ -260,7 +269,7 @@ const ClickUpDetail = () => {
 
   const updateConfigField = async (field: string, value: unknown) => {
     try {
-      const updated = await callClickUp("update_config", { [field]: value });
+      const updated = await callClickUp("update_config", { ...getAuthParams(), [field]: value });
       setConfig((c) => ({ ...c, ...updated }));
     } catch (err) {
       toast.error((err as Error).message);
@@ -301,6 +310,43 @@ const ClickUpDetail = () => {
         onSync={handleSync}
         syncing={integration.status === "syncing"}
       />
+
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+        <h3 className="text-sm font-medium text-foreground">Connection Inputs</h3>
+        <p className="text-xs text-muted-foreground">
+          Paste your ClickUp API token here (session-only), then optionally set Team and Default List IDs.
+        </p>
+        <input
+          type="password"
+          value={apiTokenInput}
+          onChange={(e) => setApiTokenInput(e.target.value)}
+          placeholder="ClickUp API token (pk_...)"
+          className={cn(
+            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          )}
+        />
+        <input
+          type="text"
+          value={teamIdInput}
+          onChange={(e) => setTeamIdInput(e.target.value)}
+          placeholder="Team ID (optional)"
+          className={cn(
+            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          )}
+        />
+        <input
+          type="text"
+          value={defaultListIdInput}
+          onChange={(e) => setDefaultListIdInput(e.target.value)}
+          placeholder="Default List ID (optional)"
+          className={cn(
+            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          )}
+        />
+      </div>
 
       {isConnected && (
         <>

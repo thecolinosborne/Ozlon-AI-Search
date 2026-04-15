@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare } from "lucide-react";
+import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
+import { invokeFunction } from "@/services/backendFunctions";
 
 
 const integrations = [
@@ -48,6 +49,13 @@ const integrations = [
     icon: CheckSquare,
     path: "/integrations/clickup",
   },
+  {
+    id: "youtube",
+    name: "YouTube",
+    description: "Connect by API key and sync channels/videos into your workspace.",
+    icon: Youtube,
+    path: "/integrations/youtube",
+  },
 ];
 
 const Integrations = () => {
@@ -59,16 +67,7 @@ const Integrations = () => {
     let cancelled = false;
     const detect = async () => {
       try {
-        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ action: "test_connection" }),
-        });
-        const data = await res.json();
+        const data = await invokeFunction<{ success?: boolean }>("higgsfield", { action: "test_connection" });
         if (cancelled) return;
         if (data?.success) {
           setStatus("higgsfield", "connected");

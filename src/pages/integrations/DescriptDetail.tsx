@@ -4,8 +4,8 @@ import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDe
 import { SyncControl } from "@/components/integrations/SyncControl";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { invokeFunction } from "@/services/backendFunctions";
 
 interface DescriptJob {
   job_id: string;
@@ -34,11 +34,7 @@ const DescriptDetail = () => {
   const [loadingJobs, setLoadingJobs] = useState(false);
 
   const callDescript = async (action: string, params: Record<string, unknown> = {}) => {
-    const { data, error } = await supabase.functions.invoke("descript", {
-      body: { action, ...params },
-    });
-    if (error) throw new Error(error.message);
-    return data;
+    return invokeFunction("descript", { action, ...params }, { timeoutMs: 30000 });
   };
 
   // Auto-detect backend API key on mount
@@ -47,26 +43,12 @@ const DescriptDetail = () => {
     const detectKey = async () => {
       setAutoDetecting(true);
       try {
-        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/descript`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ action: "test_connection" }),
-        });
+        const result = await invokeFunction<{ success?: boolean }>("descript", { action: "test_connection" });
         if (cancelled) return;
-        if (res.ok) {
-          const result = await res.json();
-          if (result?.success) {
-            setStatus("descript", "connected");
-            setApiKeyConfigured("descript", true);
-            setLastSync("descript", new Date().toISOString());
-          } else {
-            setStatus("descript", "disconnected");
-            setApiKeyConfigured("descript", false);
-          }
+        if (result?.success) {
+          setStatus("descript", "connected");
+          setApiKeyConfigured("descript", true);
+          setLastSync("descript", new Date().toISOString());
         } else {
           setStatus("descript", "disconnected");
           setApiKeyConfigured("descript", false);

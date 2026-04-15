@@ -11,6 +11,8 @@ import type {
   AgentInput,
   AgentOutput,
   AgentContext,
+  IntentClassification,
+  OrchestratorDecision,
 } from "./types";
 import { getAgent, getEnabledAgents } from "./registry";
 
@@ -40,42 +42,110 @@ export function getOrchestratorConfig(): OrchestratorConfig {
   return { ...currentConfig };
 }
 
+const INTENT_RULES: Array<{
+  intent: string;
+  keywords: string[];
+  agents: string[];
+}> = [
+  {
+    intent: "finance",
+    keywords: ["money", "spend", "finance", "budget", "revenue", "invoice"],
+    agents: ["finance-agent"],
+  },
+  {
+    intent: "scheduling",
+    keywords: ["schedule", "calendar", "meeting", "reschedule", "availability"],
+    agents: ["scheduling-agent"],
+  },
+  {
+    intent: "communication",
+    keywords: ["email", "message", "contact", "reply", "follow up", "dm"],
+    agents: ["communication-agent"],
+  },
+  {
+    intent: "search",
+    keywords: ["search", "find", "research", "look up", "discover"],
+    agents: ["search-agent"],
+  },
+  {
+    intent: "memory",
+    keywords: ["remember", "memory", "recall", "what did i", "history"],
+    agents: ["memory-agent"],
+  },
+];
+
+const TOOL_VERBS = ["send", "create", "update", "delete", "book", "schedule", "sync", "post", "publish", "call"];
+const CLARIFYING_PHRASES = ["not sure", "something", "whatever", "anything", "idk"];
+
 // ============================================
-// INTENT CLASSIFICATION (STUB)
+// INTENT CLASSIFICATION
 // ============================================
 
 /**
  * Classify user intent to determine which agents to route to
- * @stub This should be replaced with actual NLP/LLM classification
+ * Heuristic classifier used until LLM router is introduced.
  */
-export async function classifyIntent(input: string): Promise<{
-  intent: string;
-  confidence: number;
-  suggestedAgents: string[];
-}> {
-  // STUB: Replace with actual intent classification
-  console.log("[Orchestrator] classifyIntent called - STUB", { input });
-  
-  // Placeholder logic based on keywords
+export async function classifyIntent(input: string): Promise<IntentClassification> {
+  console.log("[Orchestrator] classifyIntent called", { input });
+
   const lowerInput = input.toLowerCase();
-  
-  if (lowerInput.includes("money") || lowerInput.includes("spend") || lowerInput.includes("finance")) {
-    return { intent: "finance", confidence: 0.8, suggestedAgents: ["finance-agent"] };
+
+  for (const rule of INTENT_RULES) {
+    const matches = rule.keywords.filter((keyword) => lowerInput.includes(keyword)).length;
+    if (matches > 0) {
+      const confidence = Math.min(0.95, 0.55 + matches * 0.15);
+      return {
+        intent: rule.intent,
+        confidence,
+        suggestedAgents: rule.agents,
+      };
+    }
   }
-  if (lowerInput.includes("schedule") || lowerInput.includes("calendar") || lowerInput.includes("meeting")) {
-    return { intent: "scheduling", confidence: 0.8, suggestedAgents: ["scheduling-agent"] };
+
+  return {
+    intent: "general",
+    confidence: 0.4,
+    suggestedAgents: ["context-agent"],
+  };
+}
+
+/**
+ * Decide whether to answer directly, ask clarifying questions, or run tools.
+ */
+export function decideOrchestratorAction(
+  userInput: string,
+  classification: IntentClassification,
+): OrchestratorDecision {
+  const lowerInput = userInput.toLowerCase();
+  const missingContext: string[] = [];
+
+  const likelyNeedsTool = TOOL_VERBS.some((verb) => lowerInput.includes(verb));
+  const potentiallyAmbiguous = CLARIFYING_PHRASES.some((phrase) => lowerInput.includes(phrase));
+  const shortAndVague = userInput.trim().split(/\s+/).length < 4;
+
+  if (classification.confidence < 0.5 || potentiallyAmbiguous || shortAndVague) {
+    missingContext.push("goal", "target system", "desired output");
+    return {
+      action: "clarify",
+      confidence: Math.max(0.2, classification.confidence),
+      reason: "Input is ambiguous or low-confidence; ask clarifying question first.",
+      missingContext,
+    };
   }
-  if (lowerInput.includes("email") || lowerInput.includes("message") || lowerInput.includes("contact")) {
-    return { intent: "communication", confidence: 0.7, suggestedAgents: ["communication-agent"] };
+
+  if (likelyNeedsTool) {
+    return {
+      action: "run_tools",
+      confidence: classification.confidence,
+      reason: "User request appears actionable and requires integrations/tool execution.",
+    };
   }
-  if (lowerInput.includes("search") || lowerInput.includes("find") || lowerInput.includes("research")) {
-    return { intent: "search", confidence: 0.7, suggestedAgents: ["search-agent"] };
-  }
-  if (lowerInput.includes("remember") || lowerInput.includes("memory") || lowerInput.includes("recall")) {
-    return { intent: "memory", confidence: 0.8, suggestedAgents: ["memory-agent"] };
-  }
-  
-  return { intent: "general", confidence: 0.5, suggestedAgents: ["context-agent"] };
+
+  return {
+    action: "answer",
+    confidence: classification.confidence,
+    reason: "User request is informational and can be answered directly.",
+  };
 }
 
 // ============================================
@@ -91,13 +161,36 @@ export async function routeRequest(
 ): Promise<OrchestratorResponse> {
   const startTime = Date.now();
   console.log("[Orchestrator] routeRequest called", { requestId: request.id, intent: request.intent });
+  const classification = await classifyIntent(request.intent);
+  const decision = decideOrchestratorAction(request.intent, classification);
+
+  if (decision.action === "clarify") {
+    return {
+      requestId: request.id,
+      success: true,
+      responses: [
+        {
+          agentId: "context-agent",
+          success: true,
+          message: "I need a bit more detail before acting. Tell me the exact goal and desired output.",
+          confidence: decision.confidence,
+        },
+      ],
+      aggregatedData: {
+        followUpPrompt:
+          "Can you share the exact outcome you want, which app/system to use, and any deadline?",
+        missingContext: decision.missingContext || [],
+      },
+      executionTime: Date.now() - startTime,
+      decision,
+      classification,
+    };
+  }
 
   // Determine which agents to invoke
   let targetAgentIds = request.targetAgents;
   
   if (!targetAgentIds || targetAgentIds.length === 0) {
-    // Auto-classify intent if no specific agents requested
-    const classification = await classifyIntent(request.intent);
     targetAgentIds = classification.suggestedAgents;
   }
 
@@ -116,6 +209,8 @@ export async function routeRequest(
     responses,
     aggregatedData,
     executionTime: Date.now() - startTime,
+    decision,
+    classification,
   };
 }
 
