@@ -187,8 +187,10 @@ const ClickUpDetail = () => {
 
   const handleCreateTestTask = async () => {
     try {
+      const authParams = getAuthParams();
       await callClickUp("create_task", {
-        ...getAuthParams(),
+        ...authParams,
+        listId: defaultListIdInput || authParams.defaultListId,
         name: `[Test] AI PM Test — ${new Date().toLocaleTimeString()}`,
         description: "This is a test task created by the AI Project Manager integration.",
       });
