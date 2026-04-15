@@ -4890,8 +4890,8 @@ BEHAVIOR:
     }
 
     // GoHighLevel data injection (separate from Maton - uses its own API key)
-    const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-    if (GHL_API_KEY) {
+    if (GHL_API_KEY_RESOLVED) {
+      // Check if user is asking about GHL
       // Check if user is asking about GHL
       const ghlDetected = detectServiceIntents(messages).includes('gohighlevel');
       if (ghlDetected) {
