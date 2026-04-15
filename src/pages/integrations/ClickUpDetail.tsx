@@ -64,10 +64,13 @@ const ClickUpDetail = () => {
   const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
+  const storedSettings = integration.settings as { team_id?: string; list_id?: string };
   const [config, setConfig] = useState<ClickUpConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
+  const [teamIdInput, setTeamIdInput] = useState<string>(storedSettings.team_id || "");
+  const [defaultListIdInput, setDefaultListIdInput] = useState<string>(storedSettings.list_id || "");
 
   // List picker state
   const [spaces, setSpaces] = useState<{ id: string; name: string }[]>([]);
@@ -84,7 +87,10 @@ const ClickUpDetail = () => {
   useEffect(() => {
     const check = async () => {
       try {
-        const result = await callClickUp("test_connection");
+        const result = await callClickUp("test_connection", {
+          teamId: teamIdInput || undefined,
+          defaultListId: defaultListIdInput || undefined,
+        });
         if (result.connected) {
           setStatus("clickup", "connected");
           setLastSync("clickup", new Date().toISOString());
@@ -92,9 +98,11 @@ const ClickUpDetail = () => {
             team_id: result.team_id,
             list_id: result.list_id,
           });
+          setTeamIdInput(result.team_id || "");
+          setDefaultListIdInput(result.list_id || "");
         }
         // Load config
-        const cfg = await callClickUp("get_config");
+        const cfg = await callClickUp("get_config", { teamId: result?.team_id || teamIdInput || undefined });
         setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
@@ -108,10 +116,19 @@ const ClickUpDetail = () => {
   const handleConnect = async () => {
     setTesting(true);
     try {
-      const result = await callClickUp("test_connection");
+      const result = await callClickUp("connect", {
+        teamId: teamIdInput || undefined,
+        defaultListId: defaultListIdInput || undefined,
+      });
       if (result.connected) {
         setStatus("clickup", "connected");
         setLastSync("clickup", new Date().toISOString());
+        updateSettings("clickup", {
+          team_id: result.team_id,
+          list_id: result.list_id,
+        });
+        setTeamIdInput(result.team_id || "");
+        setDefaultListIdInput(result.list_id || "");
         toast.success("ClickUp connected");
       } else {
         toast.error("Connection failed — check your API token");
@@ -301,6 +318,33 @@ const ClickUpDetail = () => {
         onSync={handleSync}
         syncing={integration.status === "syncing"}
       />
+
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+        <h3 className="text-sm font-medium text-foreground">Connection Inputs</h3>
+        <p className="text-xs text-muted-foreground">
+          Team and default list can now be entered here if env vars are not set.
+        </p>
+        <input
+          type="text"
+          value={teamIdInput}
+          onChange={(e) => setTeamIdInput(e.target.value)}
+          placeholder="Team ID (optional)"
+          className={cn(
+            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          )}
+        />
+        <input
+          type="text"
+          value={defaultListIdInput}
+          onChange={(e) => setDefaultListIdInput(e.target.value)}
+          placeholder="Default List ID (optional)"
+          className={cn(
+            "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder:text-muted-foreground"
+          )}
+        />
+      </div>
 
       {isConnected && (
         <>
