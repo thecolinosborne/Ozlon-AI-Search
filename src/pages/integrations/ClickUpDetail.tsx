@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { CheckSquare, ListTodo, Plus, RefreshCw } from "lucide-react";
+import { CheckSquare, ListTodo, RefreshCw } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
