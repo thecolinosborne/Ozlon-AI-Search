@@ -1,46 +1,52 @@
 
-Root cause
+Fix header auth state regression
 
-This likely is not a true backend disconnect. From the code, the YouTube page can look disconnected even when part of the integration is still connected:
+What I found
+- The header structure itself looks intact. On `/`, the top-right is always `UserMenu`, and the top-left hamburger only appears when `isAuthenticated` is true.
+- `UserMenu` hides all login buttons while `authLoading` is true and only shows a tiny skeleton. If auth init gets stuck or races, the user loses the only visible way to sign in.
+- `AuthContext` sets up `getSession()` before `onAuthStateChange()`. That is the wrong order for reliable session restoration and OAuth return handling, and it can cause missed auth transitions.
+- I did not find evidence of a layout/z-index regression in the header itself, so this looks like an auth-state/rendering bug, not a CSS disappearance bug.
 
-1. `loadConnection()` silently treats any error/timeout like “no connection” instead of “status refresh failed” (`src/pages/integrations/YouTubeDetail.tsx`).
-2. `get_connection` only loads the API-key connection row (`auth_type = "api_key"`), but upload auth is stored separately as an OAuth row (`auth_type = "oauth2"`) in `supabase/functions/youtube/index.ts`.
-3. The page mixes both flows into one connection state, so if one side fails to load, the whole UI can appear disconnected.
-4. `oauth_status` marks OAuth as disconnected whenever the short-lived access token is expired, even though refresh logic exists later in upload flow.
-5. The “Update Channel” path currently reuses `connect` with an empty API key, which can make key rotation/update feel broken.
+Likely root cause
+- The recent auth/OAuth work made the app fall into an ambiguous auth-loading state on the published site.
+- Because the header gates both controls off auth state:
+  - top-right becomes a loading skeleton instead of sign-in buttons
+  - top-left hamburger never appears because `isAuthenticated` never resolves true
+- Result: the header looks “missing” and feels unclickable even though the markup is still there.
 
-Plan
+Implementation plan
 
-1. Split YouTube into two explicit states
-   - Data API connection
-   - Upload OAuth connection
-   - Show them separately in the UI and derive overall status from both.
+1. Stabilize auth initialization in `src/contexts/AuthContext.tsx`
+- Register `onAuthStateChange()` before calling `getSession()`.
+- Make auth boot deterministic so `authLoading` always resolves.
+- Add a small timeout/failsafe around initial profile loading so a slow profile query cannot strand the UI in a loading state.
+- Keep session/user updates centralized and avoid duplicate state transitions.
 
-2. Stop false disconnects on refresh
-   - Keep the last known connection state when status checks timeout/fail.
-   - Show a soft warning instead of resetting to disconnected.
+2. Make the header resilient in `src/components/UserMenu.tsx`
+- Stop using an indefinite loading skeleton as the only logged-out header state.
+- Show a safe public fallback (`Sign up` / `Sign in`) once the initial auth check has resolved or timed out.
+- Keep the authenticated avatar menu unchanged once a real session is present.
 
-3. Fix OAuth status handling server-side
-   - Update `oauth_status` to refresh expired access tokens when a refresh token exists.
-   - Return clearer states so frontend can distinguish expired vs disconnected vs backend error.
+3. Harden the landing header behavior in `src/pages/Index.tsx`
+- Ensure the header remains interactive even during auth restoration.
+- Keep the hamburger tied to real authenticated state only, but make the public header usable immediately.
+- Avoid any state combination where both the auth CTA and the authenticated controls disappear.
 
-4. Fix API key rotation/update
-   - Add/update a proper backend update path so entering a new key replaces the old stored key on the same connection.
-   - Keep masked key display synced after replacement.
-   - Allow channel/account metadata updates without forcing a brand-new key entry.
+4. Correct Google sign-in flow in `src/pages/AuthPage.tsx`
+- Replace direct OAuth invocation with the managed Lovable Cloud OAuth helper.
+- This reduces session restore inconsistencies after OAuth redirects on the published domain.
 
-5. Tighten the page UX
-   - Show whether sync/analytics is ready, whether uploads are ready, and what exactly is missing.
-   - Surface backend `last_error` instead of swallowing it.
-
-6. Verify end-to-end after implementation
-   - Connect API key, reload, sync channel data
-   - Authorize OAuth, reload, upload a video
-   - Replace API key, confirm old one is swapped out and sync still works
-   - Confirm the page never falsely drops to disconnected on transient failures
+5. Verify end-to-end
+- Logged out on published site: top-right sign-in/sign-up visible and clickable.
+- After sign-in: top-left hamburger appears, top-right avatar menu opens.
+- Sign out: header returns to public buttons immediately.
+- OAuth return path: session restores cleanly without trapping the header in loading.
+- Check mobile width too, since header controls are tight.
 
 Files to update
-- `src/pages/integrations/YouTubeDetail.tsx`
-- `supabase/functions/youtube/index.ts`
+- `src/contexts/AuthContext.tsx`
+- `src/components/UserMenu.tsx`
+- `src/pages/Index.tsx`
+- `src/pages/AuthPage.tsx`
 
-Likely no database migration is required unless we decide to add extra status metadata fields.
+No database changes expected.
