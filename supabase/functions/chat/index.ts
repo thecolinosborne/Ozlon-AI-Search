@@ -4742,7 +4742,53 @@ serve(async (req) => {
     }
 
     // Get Maton connections for data injection AND tool availability
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
+    // Per-user credential resolution: look up from integration_connections first
+    let MATON_API_KEY: string | undefined;
+    let GHL_API_KEY_RESOLVED: string | undefined;
+    let GHL_LOCATION_ID_RESOLVED: string | undefined;
+
+    // Resolve user ID early for credential lookup
+    const authHeaderForCreds = req.headers.get('Authorization');
+    let credUserId: string | null = null;
+    if (authHeaderForCreds) {
+      try {
+        const { createClient: cc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const anonK = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const uc = cc(Deno.env.get('SUPABASE_URL')!, anonK, { global: { headers: { Authorization: authHeaderForCreds } } });
+        const { data: { user: credUser } } = await uc.auth.getUser();
+        credUserId = credUser?.id || null;
+      } catch { /* no auth */ }
+    }
+
+    if (credUserId) {
+      try {
+        const { createClient: cc2 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const srvKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const admin = cc2(Deno.env.get('SUPABASE_URL')!, srvKey);
+        const { data: conns } = await admin
+          .from('integration_connections')
+          .select('provider, metadata')
+          .eq('user_id', credUserId)
+          .eq('status', 'connected')
+          .in('provider', ['maton', 'gohighlevel']);
+        if (conns) {
+          for (const c of conns) {
+            const meta = c.metadata as Record<string, string> | null;
+            if (c.provider === 'maton' && meta?.api_key) MATON_API_KEY = meta.api_key;
+            if (c.provider === 'gohighlevel' && meta?.api_key) {
+              GHL_API_KEY_RESOLVED = meta.api_key;
+              GHL_LOCATION_ID_RESOLVED = meta.location_id;
+            }
+          }
+        }
+      } catch (e) { console.error('Per-user credential lookup failed:', e); }
+    }
+
+    // Fallback to env vars if no per-user credentials found
+    if (!MATON_API_KEY) MATON_API_KEY = Deno.env.get('MATON_API_KEY') || undefined;
+    if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
+    if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
+
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
     let aliasMap: AliasEntry[] = [];
