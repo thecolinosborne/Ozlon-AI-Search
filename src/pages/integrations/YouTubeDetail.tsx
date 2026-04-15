@@ -73,7 +73,7 @@ export default function YouTubeDetail() {
   const loadConnection = useCallback(async () => {
     setLoadingConnection(true);
     try {
-      const result = await callYouTube("get_connection");
+      const result = await withTimeout(callYouTube("get_connection"));
       const conn = result.connection as SavedConnection | null;
       if (conn) {
         setSavedConn(conn);
