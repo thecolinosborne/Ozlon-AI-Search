@@ -644,36 +644,39 @@ serve(async (req) => {
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
-      case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params);
-        if (!listId) throw new Error('listId required — specify listId or set a default list');
-        const { name, description, assignees, priority, due_date, parent, ...rest } = params || {};
-        const taskBody: Record<string, unknown> = { name: name || 'New Task', ...rest };
-        if (description) taskBody.description = description;
-        if (assignees) taskBody.assignees = assignees;
-        if (priority) taskBody.priority = priority;
-        if (due_date) taskBody.due_date = due_date;
-        if (parent) taskBody.parent = parent;
-        // Remove non-ClickUp params
-        delete taskBody.listId;
-        delete taskBody.apiToken;
-        delete taskBody.teamId;
-        delete taskBody.defaultListId;
-        const data = await clickupCall(`/list/${listId}/task`, 'POST', taskBody);
+      case 'update_task': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const { taskId, apiToken: _uat, teamId: _utid, defaultListId: _udlid, listId: _ulid, ...updateFields } = params;
+        const data = await clickupCall(`/task/${taskId}`, 'PUT', updateFields);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'create_subtask': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params);
-        if (!listId) throw new Error('listId required');
-        if (!params?.parent) throw new Error('parent taskId required');
-        const { name, description, parent, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
+        const parentTaskId = params?.parentId || params?.parent;
+        if (!parentTaskId) throw new Error('parent taskId required (use parentId or parent)');
+        // Auto-resolve listId from parent task if not provided
+        let listId = params?.listId ? String(params.listId) : '';
+        if (!listId) {
+          try {
+            const parentTask = await clickupCall(`/task/${parentTaskId}`);
+            listId = parentTask?.list?.id || '';
+          } catch { /* fall through */ }
+        }
+        if (!listId) listId = await getListId(params);
+        if (!listId) throw new Error('Could not resolve listId for subtask — provide listId or ensure parent task is accessible');
+        const { name, description, parentId: _pid, parent: _p, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', {
           name: name || 'Subtask',
           description,
-          parent,
+          parent: parentTaskId,
           ...rest,
         });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'move_task': {
+        if (!params?.taskId || !params?.listId) throw new Error('taskId and listId required');
+        const data = await clickupCall(`/list/${params.listId}/task/${params.taskId}`, 'POST');
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -914,6 +917,72 @@ serve(async (req) => {
       case 'list_members': {
         if (!params?.taskId) throw new Error('taskId required');
         const data = await clickupCall(`/task/${params.taskId}/member`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_workspace_members': {
+        const token = resolvedToken;
+        const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
+        // ClickUp v2 teams endpoint includes members
+        const teamRes = await fetch(`${CLICKUP_BASE}/team`, { headers: { 'Authorization': token } });
+        if (!teamRes.ok) throw new Error(`Failed to fetch teams: ${teamRes.status}`);
+        const teamData = await teamRes.json();
+        const team = (teamData?.teams || []).find((t: { id: string }) => t.id === resolved.teamId);
+        const members = (team?.members || []).map((m: { user: { id: number; username: string; email: string } }) => ({
+          id: m.user.id, username: m.user.username, email: m.user.email,
+        }));
+        return new Response(JSON.stringify({ members }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ DEPENDENCIES ============
+      case 'get_task_dependencies': {
+        if (!params?.taskId) throw new Error('taskId required');
+        const task = await clickupCall(`/task/${params.taskId}`);
+        return new Response(JSON.stringify({
+          dependencies: task.dependencies || [],
+          dependents: task.dependents || [],
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'add_dependency': {
+        if (!params?.taskId || !params?.depends_on) throw new Error('taskId and depends_on required');
+        const data = await clickupCall(`/task/${params.taskId}/dependency`, 'POST', {
+          depends_on: params.depends_on,
+        });
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'delete_dependency': {
+        if (!params?.taskId || !params?.depends_on) throw new Error('taskId and depends_on required');
+        const data = await clickupCall(`/task/${params.taskId}/dependency?depends_on=${params.depends_on}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ SPACE TAGS ============
+      case 'list_space_tags': {
+        if (!params?.spaceId) throw new Error('spaceId required');
+        const data = await clickupCall(`/space/${params.spaceId}/tag`);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ LIST STATUSES ============
+      case 'get_list_statuses': {
+        const listId = params?.listId || await getListId(params);
+        if (!listId) throw new Error('listId required');
+        const data = await clickupCall(`/list/${listId}`);
+        return new Response(JSON.stringify({ statuses: data.statuses || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============ CHECKLIST DELETIONS ============
+      case 'delete_checklist': {
+        if (!params?.checklistId) throw new Error('checklistId required');
+        const data = await clickupCall(`/checklist/${params.checklistId}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'delete_checklist_item': {
+        if (!params?.checklistId || !params?.checklistItemId) throw new Error('checklistId and checklistItemId required');
+        const data = await clickupCall(`/checklist/${params.checklistId}/checklist_item/${params.checklistItemId}`, 'DELETE');
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
