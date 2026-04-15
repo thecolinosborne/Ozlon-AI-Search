@@ -6,24 +6,17 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-const HEADERS = {
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-};
+import { supabase } from "@/integrations/supabase/client";
 
 async function callClickUp(action: string, params?: Record<string, unknown>) {
-  const res = await fetch(FUNCTION_URL, {
-    method: "POST",
-    headers: HEADERS,
-    body: JSON.stringify({ action, params }),
+  const { data, error } = await supabase.functions.invoke("clickup", {
+    body: { action, params },
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
+  if (error) throw new Error(error.message);
+  if ((data as { error?: string } | null)?.error) {
+    throw new Error((data as { error: string }).error);
   }
-  return res.json();
+  return data;
 }
 
 interface ClickUpConfig {

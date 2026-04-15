@@ -63,6 +63,7 @@ async function resolveTeamId(
 async function getListId(params?: Record<string, unknown>): Promise<string> {
   // Priority: explicit param → DB config → env var
   if (params?.listId) return String(params.listId);
+  if (params?.defaultListId) return String(params.defaultListId);
   
   // Check DB for saved default_list_id
   try {
@@ -517,7 +518,16 @@ serve(async (req) => {
       case 'list_tasks': {
         const listId = await getListId(params);
         if (!listId) throw new Error('listId required');
-        const data = await clickupCall(`/list/${listId}/task?${new URLSearchParams(params || {}).toString()}`);
+        const rawParams = params || {};
+        const queryParams = Object.entries(rawParams).reduce<Record<string, string>>((acc, [key, value]) => {
+          if (value == null) return acc;
+          if (['apiToken', 'teamId', 'defaultListId', 'listId'].includes(key)) return acc;
+          acc[key] = String(value);
+          return acc;
+        }, {});
+        const query = new URLSearchParams(queryParams).toString();
+        const path = query ? `/list/${listId}/task?${query}` : `/list/${listId}/task`;
+        const data = await clickupCall(path);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 

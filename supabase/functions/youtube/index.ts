@@ -129,6 +129,22 @@ serve(async (req) => {
       });
     }
 
+    if (action === "get_connection") {
+      const { data, error } = await adminClient
+        .from("integration_connections")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+
+      return new Response(JSON.stringify({ success: true, connection: data || null }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "sync_channels") {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
       const connectionId = String((params as AnyJson).connectionId || "").trim();

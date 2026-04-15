@@ -55,9 +55,30 @@ export default function YouTubeDetail() {
   };
 
   useEffect(() => {
-    loadRuns();
+    const hydrateConnection = async () => {
+      try {
+        const result = await callYouTube("get_connection");
+        const connection = result?.connection as
+          | { id: string; status?: string; external_account_id?: string | null }
+          | null
+          | undefined;
+        if (connection?.id) {
+          updateSettings("youtube", {
+            connectionId: connection.id,
+            channelId: connection.external_account_id || "",
+          });
+          setChannelId(connection.external_account_id || "");
+          setStatus("youtube", connection.status === "disconnected" ? "disconnected" : "connected");
+          setApiKeyConfigured("youtube", true);
+          await loadRuns(connection.id);
+        }
+      } catch {
+        // no saved connection, remain disconnected
+      }
+    };
+    hydrateConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.connectionId]);
+  }, []);
 
   const handleConnect = async () => {
     if (!apiKey.trim()) {
@@ -157,7 +178,8 @@ export default function YouTubeDetail() {
       await callYouTube("disconnect", { connectionId });
       setStatus("youtube", "disconnected");
       setApiKeyConfigured("youtube", false);
-      updateSettings("youtube", { connectionId: null });
+      updateSettings("youtube", { connectionId: null, channelId: "" });
+      setRuns([]);
       toast.success("YouTube disconnected");
     } catch (e) {
       toast.error(`Disconnect failed: ${e instanceof Error ? e.message : "Unknown error"}`);
