@@ -624,10 +624,31 @@ serve(async (req) => {
         const endpoint = params?.endpoint;
         if (!endpoint) throw new Error('endpoint URL required');
 
-        const data = await clickupCall(`/team/${teamId}/webhook`, 'POST', {
-          endpoint,
-          events: ['taskCommentPosted'],
-        });
+        let webhookId: string | undefined;
+        let alreadyExists = false;
+
+        try {
+          const data = await clickupCall(`/team/${teamId}/webhook`, 'POST', {
+            endpoint,
+            events: ['taskCommentPosted'],
+          });
+          webhookId = data.id || data.webhook?.id;
+        } catch (err: unknown) {
+          const msg = (err instanceof Error ? err.message : String(err));
+          if (msg.includes('OAUTH_171') || msg.toLowerCase().includes('already exists')) {
+            alreadyExists = true;
+            // Fetch existing webhooks to get the ID
+            try {
+              const existing = await clickupCall(`/team/${teamId}/webhook`, 'GET');
+              const hooks = existing.webhooks || existing;
+              if (Array.isArray(hooks) && hooks.length > 0) {
+                webhookId = hooks[0].id;
+              }
+            } catch { /* best effort */ }
+          } else {
+            throw err;
+          }
+        }
 
         // Update integration state
         const supabase = getSupabase();
@@ -635,11 +656,11 @@ serve(async (req) => {
           .from('clickup_integration_state')
           .upsert({
             team_id: teamId,
-            webhook_id: data.id || data.webhook?.id,
+            webhook_id: webhookId || null,
             webhook_status: 'registered',
           }, { onConflict: 'team_id' });
 
-        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ success: true, webhook_id: webhookId, already_exists: alreadyExists }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'webhook': {
