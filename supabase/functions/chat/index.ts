@@ -836,8 +836,8 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
-async function callGHL(path: string, method = 'GET', body?: unknown): Promise<unknown> {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
+async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?: string): Promise<unknown> {
+  const GHL_API_KEY = ghlApiKey || Deno.env.get('GHL_API_KEY');
   if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     method,
@@ -4092,9 +4092,8 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: MultiConnMap): ToolDef[] {
-  const GHL_API_KEY = Deno.env.get('GHL_API_KEY');
-  const hasGHL = !!GHL_API_KEY;
+function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): ToolDef[] {
+  const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
   const toolToService: Record<string, string> = {
     'send_email': 'google-mail',
