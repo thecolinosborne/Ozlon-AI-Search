@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Globe, Users, GitBranch, MessageSquare } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
@@ -20,7 +20,7 @@ const dataSyncOptions = [
 ];
 
 const GoHighLevelDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings, setApiKeyConfigured } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } = useIntegrationsStore();
   const integration = getIntegration("gohighlevel");
   const settings = integration.settings as { subAccounts?: SubAccount[]; syncData?: Record<string, boolean>; apiKey?: string; locationId?: string };
   const [loading, setLoading] = useState(true);
@@ -180,6 +180,7 @@ const GoHighLevelDetail = () => {
         configured={!!settings.apiKey}
         onSave={handleSaveApiKey}
         saving={savingApiKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
       />
       <ApiKeyInput
         label="GHL Location ID"
@@ -187,14 +188,7 @@ const GoHighLevelDetail = () => {
         configured={!!settings.locationId}
         onSave={handleSaveLocationId}
         saving={savingLocationId}
-      />
-
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("gohighlevel", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : undefined}
       />
 
       {/* Sub-Accounts */}

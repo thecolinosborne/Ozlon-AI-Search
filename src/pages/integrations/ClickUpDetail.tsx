@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
@@ -62,7 +62,7 @@ const replyModes = [
 ];
 
 const ClickUpDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings, setApiKeyConfigured } =
+  const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
   const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
@@ -330,14 +330,7 @@ const ClickUpDetail = () => {
         configured={!!storedSettings.apiToken}
         onSave={handleSaveApiToken}
         saving={savingKey}
-      />
-
-      <SyncControl
-        direction={integration.syncDirection}
-        onDirectionChange={(d) => setSyncDirection("clickup", d)}
-        lastSync={integration.lastSync}
-        onSync={handleSync}
-        syncing={integration.status === "syncing"}
+        maskedHint={storedSettings.apiToken ? "••••" + storedSettings.apiToken.slice(-4) : undefined}
       />
 
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">

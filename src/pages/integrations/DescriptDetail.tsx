@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Video, Play, Upload, ExternalLink, RefreshCw, X, Info, Loader2, AlertCircle } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
-import { SyncControl } from "@/components/integrations/SyncControl";
+
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ interface DescriptJob {
 }
 
 const DescriptDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
+  const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
   const integration = getIntegration("descript");
   const settings = integration.settings as { apiKey?: string };
 
@@ -214,6 +214,7 @@ const DescriptDetail = () => {
         configured={!!settings.apiKey}
         onSave={handleSaveApiKey}
         saving={savingKey}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
       />
 
       {autoDetecting && (
@@ -245,12 +246,6 @@ const DescriptDetail = () => {
               </button>
             </div>
           </div>
-
-          <SyncControl
-            direction={integration.syncDirection}
-            onDirectionChange={(d) => setSyncDirection("descript", d)}
-            lastSync={integration.lastSync}
-          />
 
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
             <div className="flex items-center gap-2">
