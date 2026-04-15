@@ -177,18 +177,18 @@ const GoHighLevelDetail = () => {
       <ApiKeyInput
         label="GHL API Key"
         placeholder="Enter your Go High Level API key…"
-        configured={!!settings.apiKey}
+        configured={!!settings.apiKey || integration.status === "connected"}
         onSave={handleSaveApiKey}
         saving={savingApiKey}
-        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : undefined}
+        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
       <ApiKeyInput
         label="GHL Location ID"
         placeholder="Enter your Location ID…"
-        configured={!!settings.locationId}
+        configured={!!settings.locationId || integration.status === "connected"}
         onSave={handleSaveLocationId}
         saving={savingLocationId}
-        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : undefined}
+        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
       />
 
       {/* Sub-Accounts */}
