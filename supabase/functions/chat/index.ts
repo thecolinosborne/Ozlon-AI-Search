@@ -569,6 +569,103 @@ async function fetchYouTubeData(key: string, connId: string): Promise<string> {
   } catch (e) { return `YouTube error: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
+// ---------- YouTube (local Integration Hub fallback) ----------
+async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) return null;
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data: conn } = await adminClient
+    .from('integration_connections')
+    .select('id, status, external_account_label')
+    .eq('user_id', userId)
+    .eq('provider', 'youtube')
+    .eq('auth_type', 'api_key')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!conn?.id) return null;
+  if (conn.status !== 'connected') {
+    return 'YouTube integration exists but is currently disconnected. Reconnect in Integrations > YouTube.';
+  }
+
+  const [{ data: channels }, { data: videos }] = await Promise.all([
+    adminClient
+      .from('youtube_channels')
+      .select('title, subscriber_count, video_count, view_count, fetched_at')
+      .eq('user_id', userId)
+      .eq('connection_id', conn.id)
+      .order('fetched_at', { ascending: false })
+      .limit(1),
+    adminClient
+      .from('youtube_videos')
+      .select('video_id, title, published_at')
+      .eq('user_id', userId)
+      .eq('connection_id', conn.id)
+      .order('published_at', { ascending: false })
+      .limit(10),
+  ]);
+
+  const channel = channels?.[0];
+  let result = '';
+
+  if (channel) {
+    result += `**Channel:** ${channel.title || conn.external_account_label || 'Unknown'}\n`;
+    result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
+  }
+
+  if (videos?.length) {
+    result += 'Recent uploads:\n';
+    result += videos
+      .map((v) => `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}`)
+      .join('\n');
+  }
+
+  return result || 'YouTube is connected locally, but no synced channel/video data is available yet.';
+}
+
+// ---------- ClickUp (local Integration Hub / native integration fallback) ----------
+async function fetchClickUpLocalData(userId: string): Promise<string | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) return null;
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const { data: config, error } = await adminClient
+    .from('clickup_integration_state')
+    .select('team_id, default_list_id, webhook_status, last_webhook_event_at, last_successful_ai_reply_at, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !config) return null;
+
+  let processedCount = 0;
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await adminClient
+      .from('clickup_processed_comments')
+      .select('id', { count: 'exact', head: true })
+      .gte('handled_at', sevenDaysAgo)
+      .eq('status', 'processed');
+    processedCount = count || 0;
+  } catch {
+    processedCount = 0;
+  }
+
+  return [
+    `**Workspace Team ID:** ${config.team_id || 'Not set'}`,
+    `Default list: ${config.default_list_id || 'Not set'}`,
+    `Webhook status: ${config.webhook_status || 'unknown'}`,
+    `Last webhook event: ${config.last_webhook_event_at || 'n/a'}`,
+    `Last successful AI reply: ${config.last_successful_ai_reply_at || 'n/a'}`,
+    `Processed comments (7d): ${processedCount}`,
+  ].join('\n');
+}
+
 // ---------- Google Meet (via Calendar) ----------
 async function fetchGoogleMeetData(key: string, connId: string): Promise<string> {
   const now = new Date();
@@ -704,6 +801,8 @@ async function injectMatonData(
   matonApiKey: string,
   multiConnMap?: MultiConnMap,
   aliasMap?: AliasEntry[],
+  userId?: string | null,
+  sourceMode: 'auto' | 'maton_only' | 'local_only' = 'auto',
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
@@ -772,6 +871,23 @@ async function injectMatonData(
     }
 
     let connId = connMap.get(app);
+    const nativeOnlyApp = app === 'youtube' || app === 'clickup';
+
+    // Native integrations (YouTube / ClickUp) should not route through Maton.
+    if (nativeOnlyApp) {
+      const localData = userId
+        ? app === 'youtube'
+          ? await fetchYouTubeLocalData(userId)
+          : await fetchClickUpLocalData(userId)
+        : null;
+      if (localData) {
+        sections.push(`## ${app === 'youtube' ? 'YouTube' : 'ClickUp'} (Integration Hub)\n${localData}`);
+        return;
+      }
+      notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app);
+      return;
+    }
+
     // Try fallback connections if primary isn't found
     if (!connId && CONNECTION_FALLBACKS[app]) {
       for (const fallback of CONNECTION_FALLBACKS[app]) {
@@ -4881,7 +4997,14 @@ BEHAVIOR:
         }
 
         // Inject read data for detected intents (with alias map for smart resolution)
-        const matonInjection = await injectMatonData(messages, MATON_API_KEY, connMap, aliasMap);
+        const matonInjection = await injectMatonData(
+          messages,
+          MATON_API_KEY,
+          connMap,
+          aliasMap,
+          authenticatedUserId,
+          integrationSourceMode,
+        );
         if (matonInjection) systemPrompt += matonInjection;
       } catch (e) {
         console.error('Error in Maton setup:', e);
