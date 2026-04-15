@@ -14,12 +14,13 @@ serve(async (req) => {
   }
 
   try {
-    const MATON_API_KEY = Deno.env.get('MATON_API_KEY');
-    if (!MATON_API_KEY) {
-      throw new Error('MATON_API_KEY is not configured');
-    }
+    const { action, path, body: reqBody, method: reqMethod, connectionId, apiKey: paramApiKey } = await req.json();
 
-    const { action, path, body: reqBody, method: reqMethod, connectionId } = await req.json();
+    // Accept API key from params (UI-provided), fallback to env var
+    const MATON_API_KEY = paramApiKey || Deno.env.get('MATON_API_KEY');
+    if (!MATON_API_KEY) {
+      throw new Error('MATON_API_KEY is not configured. Enter your API key in the integration settings.');
+    }
 
     const authHeaders: Record<string, string> = {
       'Authorization': `Bearer ${MATON_API_KEY}`,

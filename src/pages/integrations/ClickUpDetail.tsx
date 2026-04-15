@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { CheckSquare, ListTodo, Plus, Webhook, Zap, RefreshCw, ChevronRight } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
+import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -61,14 +62,15 @@ const replyModes = [
 ];
 
 const ClickUpDetail = () => {
-  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings } =
+  const { getIntegration, setStatus, setSyncDirection, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
-  const storedSettings = integration.settings as { team_id?: string; list_id?: string };
+  const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
   const [config, setConfig] = useState<ClickUpConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [testing, setTesting] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
   const [teamIdInput, setTeamIdInput] = useState<string>(storedSettings.team_id || "");
   const [defaultListIdInput, setDefaultListIdInput] = useState<string>(storedSettings.list_id || "");
 
@@ -83,18 +85,23 @@ const ClickUpDetail = () => {
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [loadingLists, setLoadingLists] = useState(false);
 
+  const getAuthParams = (): Record<string, unknown> => ({
+    teamId: teamIdInput || undefined,
+    defaultListId: defaultListIdInput || undefined,
+    apiToken: storedSettings.apiToken || undefined,
+  });
+
   // Check connection on mount
   useEffect(() => {
     const check = async () => {
       try {
-        const result = await callClickUp("test_connection", {
-          teamId: teamIdInput || undefined,
-          defaultListId: defaultListIdInput || undefined,
-        });
+        const result = await callClickUp("test_connection", getAuthParams());
         if (result.connected) {
           setStatus("clickup", "connected");
+          setApiKeyConfigured("clickup", true);
           setLastSync("clickup", new Date().toISOString());
           updateSettings("clickup", {
+            ...storedSettings,
             team_id: result.team_id,
             list_id: result.list_id,
           });
@@ -102,7 +109,7 @@ const ClickUpDetail = () => {
           setDefaultListIdInput(result.list_id || "");
         }
         // Load config
-        const cfg = await callClickUp("get_config", { teamId: result?.team_id || teamIdInput || undefined });
+        const cfg = await callClickUp("get_config", { teamId: result?.team_id || teamIdInput || undefined, apiToken: storedSettings.apiToken || undefined });
         setConfig({ ...defaultConfig, ...cfg });
       } catch {
         // stays disconnected
@@ -113,17 +120,24 @@ const ClickUpDetail = () => {
     check();
   }, []);
 
+  const handleSaveApiToken = (token: string) => {
+    setSavingKey(true);
+    updateSettings("clickup", { ...storedSettings, apiToken: token });
+    setApiKeyConfigured("clickup", true);
+    toast.success("API Token saved");
+    setSavingKey(false);
+  };
+
   const handleConnect = async () => {
     setTesting(true);
     try {
-      const result = await callClickUp("connect", {
-        teamId: teamIdInput || undefined,
-        defaultListId: defaultListIdInput || undefined,
-      });
+      const result = await callClickUp("connect", getAuthParams());
       if (result.connected) {
         setStatus("clickup", "connected");
+        setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
         updateSettings("clickup", {
+          ...storedSettings,
           team_id: result.team_id,
           list_id: result.list_id,
         });
@@ -142,14 +156,10 @@ const ClickUpDetail = () => {
 
   const handleDisconnect = () => {
     setStatus("clickup", "disconnected");
+    setApiKeyConfigured("clickup", false);
     updateSettings("clickup", {});
     toast.success("ClickUp disconnected");
   };
-
-  const getAuthParams = () => ({
-    teamId: teamIdInput || undefined,
-    defaultListId: defaultListIdInput || undefined,
-  });
 
   const handleSync = async () => {
     setStatus("clickup", "syncing");
@@ -212,14 +222,11 @@ const ClickUpDetail = () => {
       const data = await callClickUp("list_folders", { ...getAuthParams(), spaceId });
       const f = (data.folders || []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
       setFolders(f);
-      // Also fetch folderless lists
       const folderless = await callClickUp("list_lists", { ...getAuthParams(), spaceId });
       const fl = (folderless.lists || []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name }));
       if (fl.length > 0 && f.length === 0) {
-        // Only folderless lists exist — show them directly
         setLists(fl);
       } else if (fl.length > 0) {
-        // Add a virtual "No Folder" entry
         setFolders([{ id: "__folderless__", name: "Lists (no folder)" }, ...f]);
         setLists(fl);
         setSelectedFolder("__folderless__");
@@ -236,7 +243,6 @@ const ClickUpDetail = () => {
     setSelectedList("");
     setLists([]);
     if (folderId === "__folderless__") {
-      // Re-fetch folderless lists
       setLoadingLists(true);
       try {
         const data = await callClickUp("list_lists", { ...getAuthParams(), spaceId: selectedSpace });
@@ -317,6 +323,15 @@ const ClickUpDetail = () => {
         )
       }
     >
+      {/* API Token Input */}
+      <ApiKeyInput
+        label="ClickUp API Token"
+        placeholder="pk_..."
+        configured={!!storedSettings.apiToken}
+        onSave={handleSaveApiToken}
+        saving={savingKey}
+      />
+
       <SyncControl
         direction={integration.syncDirection}
         onDirectionChange={(d) => setSyncDirection("clickup", d)}
@@ -326,9 +341,9 @@ const ClickUpDetail = () => {
       />
 
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Connection Inputs</h3>
+        <h3 className="text-sm font-medium text-foreground">Workspace Inputs</h3>
         <p className="text-xs text-muted-foreground">
-          Team and default list can now be entered here if env vars are not set.
+          Team and default list IDs for workspace routing.
         </p>
         <input
           type="text"
@@ -472,148 +487,110 @@ const ClickUpDetail = () => {
               AI Reply Settings
             </h3>
 
-            {/* Auto-reply toggle */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground">Auto-reply enabled</span>
-              <button
-                onClick={() => updateConfigField("auto_reply_enabled", !config.auto_reply_enabled)}
-                className={cn(
-                  "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                  config.auto_reply_enabled ? "bg-primary" : "bg-muted"
-                )}
-              >
-                <div
-                  className={cn(
-                    "rounded-full bg-white transition-transform shadow-sm",
-                    config.auto_reply_enabled ? "translate-x-[18px]" : "translate-x-0"
-                  )}
-                  style={{ width: 18, height: 18 }}
-                />
-              </button>
-            </div>
-
-            {/* Trigger mode */}
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">Trigger Mode</span>
-              <div className="flex gap-2">
-                {triggerModes.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => updateConfigField("reply_trigger_mode", m.value)}
-                    className={cn(
-                      "flex-1 py-2 rounded-xl text-xs font-medium transition-all",
-                      config.reply_trigger_mode === m.value
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Reply mode */}
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">Reply Style</span>
-              <div className="flex gap-2">
-                {replyModes.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => updateConfigField("ai_reply_mode", m.value)}
-                    className={cn(
-                      "flex-1 py-2 rounded-xl text-xs font-medium transition-all",
-                      config.ai_reply_mode === m.value
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Permissions */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Permissions</h3>
-            {[
-              { key: "allow_subtask_creation", label: "Allow subtask creation" },
-              { key: "allow_task_updates", label: "Allow task updates" },
-            ].map(({ key, label }) => (
-              <div key={key} className="flex items-center justify-between">
-                <span className="text-sm text-foreground">{label}</span>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">Auto-Reply</span>
                 <button
-                  onClick={() =>
-                    updateConfigField(key, !config[key as keyof ClickUpConfig])
-                  }
+                  onClick={() => updateConfigField("auto_reply_enabled", !config.auto_reply_enabled)}
                   className={cn(
                     "w-10 h-5.5 rounded-full p-0.5 transition-colors",
-                    config[key as keyof ClickUpConfig] ? "bg-primary" : "bg-muted"
+                    config.auto_reply_enabled ? "bg-primary" : "bg-muted"
                   )}
                 >
                   <div
                     className={cn(
-                      "rounded-full bg-white transition-transform shadow-sm",
-                      config[key as keyof ClickUpConfig]
-                        ? "translate-x-[18px]"
-                        : "translate-x-0"
+                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
+                      config.auto_reply_enabled ? "translate-x-[18px]" : "translate-x-0"
                     )}
                     style={{ width: 18, height: 18 }}
                   />
                 </button>
               </div>
-            ))}
-          </div>
 
-          {/* Test Actions */}
-          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Actions</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleConnect}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Test Connection
-              </button>
-              <button
-                onClick={handleFetchTasks}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <ListTodo className="w-3.5 h-3.5" />
-                Fetch Tasks
-                {taskCount !== null && (
-                  <span className="text-[10px] text-muted-foreground">({taskCount})</span>
-                )}
-              </button>
-              <button
-                onClick={handleCreateTestTask}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-muted/60 text-foreground hover:bg-muted transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Create Test Task
-              </button>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Trigger Mode</label>
+                <Select value={config.reply_trigger_mode} onValueChange={(v) => updateConfigField("reply_trigger_mode", v)}>
+                  <SelectTrigger className="h-9 text-xs rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {triggerModes.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Reply Detail</label>
+                <Select value={config.ai_reply_mode} onValueChange={(v) => updateConfigField("ai_reply_mode", v)}>
+                  <SelectTrigger className="h-9 text-xs rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {replyModes.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">Allow Subtask Creation</span>
+                <button
+                  onClick={() => updateConfigField("allow_subtask_creation", !config.allow_subtask_creation)}
+                  className={cn(
+                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
+                    config.allow_subtask_creation ? "bg-primary" : "bg-muted"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
+                      config.allow_subtask_creation ? "translate-x-[18px]" : "translate-x-0"
+                    )}
+                    style={{ width: 18, height: 18 }}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">Allow Task Updates</span>
+                <button
+                  onClick={() => updateConfigField("allow_task_updates", !config.allow_task_updates)}
+                  className={cn(
+                    "w-10 h-5.5 rounded-full p-0.5 transition-colors",
+                    config.allow_task_updates ? "bg-primary" : "bg-muted"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-4.5 h-4.5 rounded-full bg-white transition-transform shadow-sm",
+                      config.allow_task_updates ? "translate-x-[18px]" : "translate-x-0"
+                    )}
+                    style={{ width: 18, height: 18 }}
+                  />
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* Info Panel */}
-          <div className="p-4 rounded-2xl border border-primary/20 bg-primary/5 space-y-2">
-            <p className="text-sm font-medium text-foreground">How it works</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Mention <strong>@AI</strong> in a ClickUp task comment and the AI will
-              respond directly on that task. Ask for summaries, blockers, next steps,
-              subtasks, updates, and priorities.
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Triggers: <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@AI</code>{" "}
-              <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@PM</code>{" "}
-              <code className="text-[11px] bg-muted/60 px-1 py-0.5 rounded">@Wisdom</code>
-            </p>
             {config.last_successful_ai_reply_at && (
               <p className="text-[11px] text-muted-foreground/60">
                 Last AI reply: {new Date(config.last_successful_ai_reply_at).toLocaleString()}
+              </p>
+            )}
+          </div>
+
+          {/* Quick Actions */}
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+            <h3 className="text-sm font-medium text-foreground">Quick Actions</h3>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleFetchTasks} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
+                <RefreshCw className="w-3.5 h-3.5" /> Fetch Tasks
+              </button>
+              <button onClick={handleCreateTestTask} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
+                <Plus className="w-3.5 h-3.5" /> Create Test Task
+              </button>
+            </div>
+            {taskCount !== null && (
+              <p className="text-[11px] text-muted-foreground">
+                {taskCount} task{taskCount !== 1 ? "s" : ""} in default list
               </p>
             )}
           </div>
