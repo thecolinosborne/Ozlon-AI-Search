@@ -426,8 +426,8 @@ export default function YouTubeDetail() {
   if (loadingConnection || authLoading) {
     return (
       <IntegrationDetailLayout
-        name="YouTube"
-        description="Connect your YouTube account to manage and upload videos"
+        name="Google Workspace (YouTube · Gmail · Drive)"
+        description="One Google sign-in powers YouTube uploads, Gmail and Drive natively."
         icon={Youtube}
         status={integration.status}
       >
@@ -440,8 +440,8 @@ export default function YouTubeDetail() {
 
   return (
     <IntegrationDetailLayout
-      name="YouTube"
-      description="Connect your YouTube account to manage and upload videos"
+      name="Google Workspace (YouTube · Gmail · Drive)"
+      description="One Google sign-in powers YouTube uploads, Gmail and Drive natively."
       icon={Youtube}
       status={integration.status}
       actions={

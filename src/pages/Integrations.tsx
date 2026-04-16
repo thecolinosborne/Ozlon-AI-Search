@@ -50,8 +50,8 @@ const integrations = [
   },
   {
     id: "youtube",
-    name: "YouTube",
-    description: "Connect by API key and sync channels/videos into your workspace.",
+    name: "Google Workspace",
+    description: "One sign-in for YouTube, Gmail and Drive — native, no Maton needed.",
     icon: Youtube,
     path: "/integrations/youtube",
   },
