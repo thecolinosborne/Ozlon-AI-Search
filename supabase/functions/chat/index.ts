@@ -350,10 +350,10 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
 
   const { data: conn } = await adminClient
     .from('integration_connections')
-    .select('id, status, external_account_label')
+    .select('id, status, external_account_label, auth_type')
     .eq('user_id', userId)
     .eq('provider', 'youtube')
-    .eq('auth_type', 'api_key')
+    .eq('status', 'connected')
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
