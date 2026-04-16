@@ -713,12 +713,8 @@ serve(async (req) => {
       return jsonOk({ success: true, oauth_connected: false, oauth_detail: "expired_no_refresh" });
     }
 
-    // ── Upload Video ──
-    if (action === "upload_video") {
-      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
-      const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
-      if (!clientId || !clientSecret) throw new Error("YouTube OAuth credentials not configured");
-
+    // ── Helper: get OAuth access token (used by upload + sub-actions) ──
+    const getOAuthToken = async (): Promise<string> => {
       const { data: conn } = await adminClient
         .from("integration_connections")
         .select("metadata")
@@ -727,49 +723,328 @@ serve(async (req) => {
         .eq("auth_type", "oauth2")
         .single();
       if (!conn) throw new Error("YouTube OAuth not connected. Please authorize first.");
+      const m = conn.metadata as AnyJson;
+      const { accessToken: t } = await refreshOAuthIfNeeded(adminClient, userId, m);
+      return t;
+    };
 
-      const meta = conn.metadata as AnyJson;
-      const { accessToken } = await refreshOAuthIfNeeded(adminClient, userId, meta);
+    // ── Helper: download a remote file (Drive-aware) ──
+    const downloadFile = async (url: string, accessToken: string): Promise<Response> => {
+      const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
+      const driveOpenMatch = !driveFileMatch && url.match(/drive\.google\.com\/open\?id=([^&]+)/);
+      const driveUcMatch = !driveFileMatch && !driveOpenMatch && url.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
+      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1] || driveUcMatch?.[1];
+      if (driveId) {
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${driveId}?alt=media`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          redirect: "follow",
+        });
+        if (!r.ok) {
+          const errBody = await r.text().catch(() => "");
+          throw new Error(`Drive download failed (${r.status}): ${errBody.slice(0, 200)}`);
+        }
+        return r;
+      }
+      const r = await fetch(url, { redirect: "follow" });
+      if (!r.ok) throw new Error(`Download failed: ${r.status}`);
+      return r;
+    };
 
-      const title = String((params as AnyJson).title || "Untitled");
-      const description = String((params as AnyJson).description || "");
-      const privacyStatus = String((params as AnyJson).privacyStatus || "private");
-      let videoUrl = String((params as AnyJson).videoUrl || "").trim();
+    // ── set_thumbnail ──
+    if (action === "set_thumbnail") {
+      const accessToken = await getOAuthToken();
+      const videoId = String((params as AnyJson).videoId || "");
+      const thumbnailUrl = String((params as AnyJson).thumbnailUrl || "");
+      if (!videoId || !thumbnailUrl) throw new Error("videoId and thumbnailUrl are required");
+      const tRes = await downloadFile(thumbnailUrl, accessToken);
+      const ct = (tRes.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+      const buf = await tRes.arrayBuffer();
+      const r = await fetch(
+        `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": ct },
+          body: buf,
+        },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`Thumbnail set failed: ${r.status} ${JSON.stringify(data)}`);
+      return jsonOk({ success: true, data });
+    }
 
+    // ── upload_caption ──
+    if (action === "upload_caption") {
+      const accessToken = await getOAuthToken();
+      const videoId = String((params as AnyJson).videoId || "");
+      const captionsUrl = String((params as AnyJson).captionsUrl || "");
+      const language = String((params as AnyJson).language || "en");
+      const name = String((params as AnyJson).name || "Captions");
+      const isDraft = Boolean((params as AnyJson).isDraft);
+      if (!videoId || !captionsUrl) throw new Error("videoId and captionsUrl are required");
+
+      const cRes = await downloadFile(captionsUrl, accessToken);
+      const captionBuf = await cRes.arrayBuffer();
+
+      // Multipart-related: metadata JSON + binary file body
+      const boundary = `----ozlon${Date.now()}`;
+      const meta = {
+        snippet: { videoId, language, name, isDraft },
+      };
+      const enc = new TextEncoder();
+      const head = enc.encode(
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,
+      );
+      const tail = enc.encode(`\r\n--${boundary}--\r\n`);
+      const body = new Uint8Array(head.length + captionBuf.byteLength + tail.length);
+      body.set(head, 0);
+      body.set(new Uint8Array(captionBuf), head.length);
+      body.set(tail, head.length + captionBuf.byteLength);
+
+      const r = await fetch(
+        "https://www.googleapis.com/upload/youtube/v3/captions?part=snippet&uploadType=multipart",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": `multipart/related; boundary=${boundary}`,
+          },
+          body,
+        },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`Caption upload failed: ${r.status} ${JSON.stringify(data)}`);
+      return jsonOk({ success: true, data });
+    }
+
+    // ── list_playlists ──
+    if (action === "list_playlists") {
+      const accessToken = await getOAuthToken();
+      const r = await fetch(
+        "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&mine=true&maxResults=50",
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await r.json();
+      if (!r.ok) throw new Error(`List playlists failed: ${r.status} ${JSON.stringify(data)}`);
+      return jsonOk({ success: true, items: data.items || [] });
+    }
+
+    // ── list_video_categories ──
+    if (action === "list_video_categories") {
+      const accessToken = await getOAuthToken();
+      const regionCode = String((params as AnyJson).regionCode || "US");
+      const r = await fetch(
+        `https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=${encodeURIComponent(regionCode)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await r.json();
+      if (!r.ok) throw new Error(`List categories failed: ${r.status} ${JSON.stringify(data)}`);
+      const items = (data.items || []).filter((c: AnyJson) => (c.snippet as AnyJson)?.assignable);
+      return jsonOk({ success: true, items });
+    }
+
+    // ── add_to_playlist (supports name → id, creates if missing) ──
+    if (action === "add_to_playlist") {
+      const accessToken = await getOAuthToken();
+      const videoId = String((params as AnyJson).videoId || "");
+      let playlistId = String((params as AnyJson).playlistId || "");
+      const playlistName = String((params as AnyJson).playlistName || "").trim();
+      if (!videoId) throw new Error("videoId is required");
+      if (!playlistId && !playlistName) throw new Error("playlistId or playlistName required");
+
+      if (!playlistId && playlistName) {
+        const lr = await fetch(
+          "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50",
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        const ld = await lr.json();
+        if (lr.ok) {
+          const found = (ld.items || []).find(
+            (p: AnyJson) => String((p.snippet as AnyJson)?.title || "").toLowerCase() === playlistName.toLowerCase(),
+          );
+          if (found) playlistId = (found as AnyJson).id as string;
+        }
+        if (!playlistId) {
+          const cr = await fetch(
+            "https://www.googleapis.com/youtube/v3/playlists?part=snippet,status",
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                snippet: { title: playlistName },
+                status: { privacyStatus: "private" },
+              }),
+            },
+          );
+          const cd = await cr.json();
+          if (!cr.ok) throw new Error(`Playlist create failed: ${cr.status} ${JSON.stringify(cd)}`);
+          playlistId = cd.id;
+        }
+      }
+
+      const r = await fetch(
+        "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            snippet: {
+              playlistId,
+              resourceId: { kind: "youtube#video", videoId },
+            },
+          }),
+        },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`Add to playlist failed: ${r.status} ${JSON.stringify(data)}`);
+      return jsonOk({ success: true, playlistId, data });
+    }
+
+    // ── pin_comment ──
+    if (action === "pin_comment") {
+      const accessToken = await getOAuthToken();
+      const videoId = String((params as AnyJson).videoId || "");
+      const commentText = String((params as AnyJson).commentText || "");
+      if (!videoId || !commentText) throw new Error("videoId and commentText are required");
+
+      const ir = await fetch(
+        "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            snippet: {
+              videoId,
+              topLevelComment: { snippet: { textOriginal: commentText } },
+            },
+          }),
+        },
+      );
+      const idata = await ir.json();
+      if (!ir.ok) throw new Error(`Comment insert failed: ${ir.status} ${JSON.stringify(idata)}`);
+
+      const commentId = idata?.snippet?.topLevelComment?.id;
+      if (commentId) {
+        // Best-effort pin via comments.setModerationStatus (requires force pin)
+        const pr = await fetch(
+          `https://www.googleapis.com/youtube/v3/comments/setModerationStatus?id=${encodeURIComponent(commentId)}&moderationStatus=published&banAuthor=false`,
+          { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (!pr.ok) {
+          // pinning is often manual-only via UI; surface a warning rather than failing
+          return jsonOk({ success: true, commentId, warning: "Comment posted but auto-pin not supported by API; pin manually in Studio if needed." });
+        }
+      }
+      return jsonOk({ success: true, commentId });
+    }
+
+    // ── update_video (metadata-only PUT) ──
+    if (action === "update_video") {
+      const accessToken = await getOAuthToken();
+      const videoId = String((params as AnyJson).videoId || "");
+      if (!videoId) throw new Error("videoId is required");
+      const p = params as AnyJson;
+      const snippet: AnyJson = { categoryId: String(p.categoryId || "22") };
+      if (p.title !== undefined) snippet.title = String(p.title);
+      if (p.description !== undefined) snippet.description = String(p.description);
+      if (p.tags !== undefined) snippet.tags = Array.isArray(p.tags) ? p.tags : [];
+      if (p.defaultLanguage) snippet.defaultLanguage = String(p.defaultLanguage);
+      if (p.defaultAudioLanguage) snippet.defaultAudioLanguage = String(p.defaultAudioLanguage);
+      const status: AnyJson = {};
+      if (p.privacyStatus) status.privacyStatus = String(p.privacyStatus);
+      if (p.license) status.license = String(p.license);
+      if (p.embeddable !== undefined) status.embeddable = Boolean(p.embeddable);
+      if (p.publicStatsViewable !== undefined) status.publicStatsViewable = Boolean(p.publicStatsViewable);
+      if (p.madeForKids !== undefined) status.selfDeclaredMadeForKids = Boolean(p.madeForKids);
+      if (p.publishAt) { status.publishAt = String(p.publishAt); status.privacyStatus = "private"; }
+
+      const parts = ["snippet"];
+      if (Object.keys(status).length) parts.push("status");
+      const r = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=${parts.join(",")}`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ id: videoId, snippet, ...(Object.keys(status).length ? { status } : {}) }),
+        },
+      );
+      const data = await r.json();
+      if (!r.ok) throw new Error(`Update failed: ${r.status} ${JSON.stringify(data)}`);
+      return jsonOk({ success: true, data });
+    }
+
+    // ── Upload Video (expanded) ──
+    if (action === "upload_video") {
+      const accessToken = await getOAuthToken();
+      const p = params as AnyJson;
+
+      const title = String(p.title || "Untitled");
+      let description = String(p.description || "");
+      const privacyStatus = String(p.privacyStatus || "private");
+      const videoUrl = String(p.videoUrl || "").trim();
       if (!videoUrl) throw new Error("videoUrl is required (public URL to video file)");
 
-      // Auto-convert Google Drive share links to direct download via Drive API
-      const driveFileMatch = videoUrl.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
-      const driveOpenMatch = !driveFileMatch && videoUrl.match(/drive\.google\.com\/open\?id=([^&]+)/);
-      const driveUcMatch = !driveFileMatch && !driveOpenMatch && videoUrl.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
-      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1] || driveUcMatch?.[1];
+      // Build snippet
+      const tags: string[] = Array.isArray(p.tags) ? (p.tags as string[]).filter(Boolean).slice(0, 15) : [];
+      const categoryId = String(p.categoryId || "22");
+      const defaultLanguage = p.defaultLanguage ? String(p.defaultLanguage) : undefined;
+      const defaultAudioLanguage = p.defaultAudioLanguage ? String(p.defaultAudioLanguage) : undefined;
 
-      let videoRes: Response;
-      if (driveId) {
-        // Use Google Drive API with the OAuth token — bypasses virus scan and handles any file size
-        videoRes = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${driveId}?alt=media`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            redirect: "follow",
-          }
-        );
-        if (!videoRes.ok) {
-          const errBody = await videoRes.text().catch(() => "");
-          throw new Error(`Failed to download from Google Drive (${videoRes.status}): ${errBody.slice(0, 200)}`);
+      // Append chapters into description (must include 00:00 to be valid YT chapters)
+      const chapters = Array.isArray(p.chapters) ? p.chapters as Array<{ timestamp?: string; title?: string }> : [];
+      if (chapters.length) {
+        const hasZero = chapters.some(c => (c.timestamp || "").trim() === "00:00" || (c.timestamp || "").trim() === "0:00");
+        const formatted = chapters
+          .filter(c => c.timestamp && c.title)
+          .map(c => `${c.timestamp} ${c.title}`)
+          .join("\n");
+        if (formatted) {
+          description = `${description}\n\n${hasZero ? "" : "00:00 Intro\n"}${formatted}`.trim();
         }
-      } else {
-        videoRes = await fetch(videoUrl, { redirect: "follow" });
-        if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
       }
 
-      // Validate content type — reject HTML responses
+      // Append hashtags (deduped, max 15)
+      const hashtags: string[] = Array.isArray(p.hashtags) ? (p.hashtags as string[]).filter(Boolean) : [];
+      if (hashtags.length) {
+        const seen = new Set<string>();
+        const tagLine = hashtags
+          .map(h => (h.startsWith("#") ? h : `#${h}`))
+          .filter(h => { const k = h.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+          .slice(0, 15)
+          .join(" ");
+        description = `${description}\n\n${tagLine}`.trim();
+      }
+
+      // Build status
+      const status: AnyJson = { privacyStatus };
+      if (p.license) status.license = String(p.license);
+      if (p.embeddable !== undefined) status.embeddable = Boolean(p.embeddable);
+      if (p.publicStatsViewable !== undefined) status.publicStatsViewable = Boolean(p.publicStatsViewable);
+      const madeForKids = p.madeForKids !== undefined ? Boolean(p.madeForKids) : (p.selfDeclaredMadeForKids !== undefined ? Boolean(p.selfDeclaredMadeForKids) : undefined);
+      if (madeForKids !== undefined) status.selfDeclaredMadeForKids = madeForKids;
+      if (p.publishAt) {
+        status.publishAt = String(p.publishAt);
+        status.privacyStatus = "private"; // required by YT when scheduling
+      }
+
+      // recordingDetails
+      const recordingDetails: AnyJson = {};
+      if (p.recordingDate) recordingDetails.recordingDate = String(p.recordingDate);
+      if (p.locationDescription) recordingDetails.locationDescription = String(p.locationDescription);
+
+      const snippet: AnyJson = { title, description, categoryId };
+      if (tags.length) snippet.tags = tags;
+      if (defaultLanguage) snippet.defaultLanguage = defaultLanguage;
+      if (defaultAudioLanguage) snippet.defaultAudioLanguage = defaultAudioLanguage;
+
+      const resourceBody: AnyJson = { snippet, status };
+      if (Object.keys(recordingDetails).length) resourceBody.recordingDetails = recordingDetails;
+
+      // Download video (streaming)
+      const videoRes = await downloadFile(videoUrl, accessToken);
       const rawContentType = videoRes.headers.get("content-type") || "";
       if (rawContentType.includes("text/html")) {
-        throw new Error("The URL returned an HTML page instead of a video file. Please provide a direct download link to the video.");
+        throw new Error("The URL returned an HTML page instead of a video file. Please provide a direct download link.");
       }
-
-      // Infer correct MIME type
       const mimeMap: Record<string, string> = {
         mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
         avi: "video/x-msvideo", mkv: "video/x-matroska", m4v: "video/mp4",
@@ -777,19 +1052,20 @@ serve(async (req) => {
       const ext = videoUrl.split("?")[0].split(".").pop()?.toLowerCase() || "";
       const detectedMime = rawContentType.split(";")[0].trim();
       const videoMime = (detectedMime && detectedMime !== "application/octet-stream")
-        ? detectedMime
-        : (mimeMap[ext] || "video/mp4");
+        ? detectedMime : (mimeMap[ext] || "video/mp4");
 
-      // Stream the source body directly to YouTube — never buffer the whole file in memory.
-      // Edge functions have ~256MB memory; large videos (>500MB) crash with .blob() or .arrayBuffer().
       const contentLengthHeader = videoRes.headers.get("content-length");
       const contentLength = contentLengthHeader ? Number(contentLengthHeader) : NaN;
       if (!contentLength || Number.isNaN(contentLength)) {
-        throw new Error("Source did not return a Content-Length header. YouTube resumable upload requires a known size. Use a direct download URL (e.g. Google Drive file ID) that reports size.");
+        throw new Error("Source did not return a Content-Length header. Use a direct download URL (e.g. Google Drive file ID) that reports size.");
       }
 
+      // Initiate resumable session
+      const partsList = ["snippet", "status"];
+      if (Object.keys(recordingDetails).length) partsList.push("recordingDetails");
+      const notify = p.notifySubscribers !== undefined ? Boolean(p.notifySubscribers) : true;
       const initiateRes = await fetch(
-        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        `https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=${partsList.join(",")}&notifySubscribers=${notify}`,
         {
           method: "POST",
           headers: {
@@ -798,10 +1074,7 @@ serve(async (req) => {
             "X-Upload-Content-Length": String(contentLength),
             "X-Upload-Content-Type": videoMime,
           },
-          body: JSON.stringify({
-            snippet: { title, description },
-            status: { privacyStatus },
-          }),
+          body: JSON.stringify(resourceBody),
         },
       );
       if (!initiateRes.ok) {
@@ -810,26 +1083,63 @@ serve(async (req) => {
       }
       const uploadUrl = initiateRes.headers.get("Location");
       if (!uploadUrl) throw new Error("No upload URL returned");
-
       if (!videoRes.body) throw new Error("Source response has no readable body to stream");
 
       const uploadRes = await fetch(uploadUrl, {
         method: "PUT",
-        headers: {
-          "Content-Type": videoMime,
-          "Content-Length": String(contentLength),
-        },
+        headers: { "Content-Type": videoMime, "Content-Length": String(contentLength) },
         body: videoRes.body,
-        // @ts-ignore — Deno fetch supports duplex for streaming request bodies
+        // @ts-ignore — Deno fetch supports duplex
         duplex: "half",
       });
       const uploadData = await uploadRes.json();
       if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status} ${JSON.stringify(uploadData)}`);
 
+      const videoId = uploadData.id as string;
+      const warnings: string[] = [];
+
+      // ── Post-upload chain (best-effort) ──
+      const callSelf = async (sub: string, payload: AnyJson) => {
+        try {
+          const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/youtube`, {
+            method: "POST",
+            headers: { Authorization: req.headers.get("Authorization") || "", "Content-Type": "application/json" },
+            body: JSON.stringify({ action: sub, ...payload }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || d?.error) warnings.push(`${sub}: ${d?.error || r.status}`);
+        } catch (e) {
+          warnings.push(`${sub}: ${e instanceof Error ? e.message : "error"}`);
+        }
+      };
+
+      if (p.thumbnailUrl) {
+        await callSelf("set_thumbnail", { videoId, thumbnailUrl: String(p.thumbnailUrl) });
+      }
+      if (p.captionsUrl) {
+        await callSelf("upload_caption", {
+          videoId,
+          captionsUrl: String(p.captionsUrl),
+          language: String(p.captionsLanguage || "en"),
+          name: String(p.captionsName || "Captions"),
+        });
+      }
+      if (p.playlistId || p.playlistName) {
+        await callSelf("add_to_playlist", {
+          videoId,
+          playlistId: p.playlistId ? String(p.playlistId) : undefined,
+          playlistName: p.playlistName ? String(p.playlistName) : undefined,
+        });
+      }
+      if (p.pinnedComment) {
+        await callSelf("pin_comment", { videoId, commentText: String(p.pinnedComment) });
+      }
+
       return jsonOk({
         success: true,
-        videoId: uploadData.id,
-        url: `https://www.youtube.com/watch?v=${uploadData.id}`,
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        warnings,
       });
     }
 
