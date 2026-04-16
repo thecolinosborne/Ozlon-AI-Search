@@ -318,8 +318,8 @@ async function fetchGoogleDocsData(): Promise<string> {
 }
 
 async function fetchGoogleSheetsData(): Promise<string> {
-  // google-sheets edge doesn't have a list endpoint; use drive search by mimetype
-  const data = await invokeNativeEdge('google-drive', 'search_files', { mimeType: 'application/vnd.google-apps.spreadsheet', pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+  // Native google-sheets edge has list_spreadsheets action (Drive-backed listing)
+  const data = await invokeNativeEdge('google-sheets', 'list_spreadsheets', { pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No Google Sheets found.';
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
@@ -332,26 +332,11 @@ async function fetchGoogleSlidesData(): Promise<string> {
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
 }
 
-async function fetchYouTubeData(): Promise<string> {
-  try {
-    const channelData = await invokeNativeEdge('youtube', 'list_my_channels', {}) as { items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string; videoCount?: string; viewCount?: string } }[] };
-    const ch = channelData.items?.[0];
-    let result = '';
-    if (ch) {
-      result += `**Channel:** ${ch.snippet?.title || 'Unknown'}\n`;
-      result += `Subscribers: ${ch.statistics?.subscriberCount || '?'} | Videos: ${ch.statistics?.videoCount || '?'} | Total views: ${ch.statistics?.viewCount || '?'}\n\n`;
-    }
-    const videosData = await invokeNativeEdge('youtube', 'list_my_videos', { maxResults: 10 }) as { items?: { id?: { videoId?: string } | string; snippet?: { title?: string; publishedAt?: string } }[] };
-    const vids = videosData.items || [];
-    if (vids.length) {
-      result += 'Recent uploads:\n';
-      result += vids.map(v => {
-        const vid = typeof v.id === 'object' ? v.id?.videoId : v.id;
-        return `- [${v.snippet?.title || '(untitled)'}](https://youtube.com/watch?v=${vid}) — ${v.snippet?.publishedAt || ''}`;
-      }).join('\n');
-    }
-    return result || 'YouTube connected but no channel data found.';
-  } catch (e) { return `YouTube error: ${e instanceof Error ? e.message : 'Unknown'}`; }
+async function fetchYouTubeData(userId?: string): Promise<string> {
+  // Native youtube edge has no list_my_channels/list_my_videos actions —
+  // read from the synced youtube_channels / youtube_videos tables instead.
+  if (!userId) return 'YouTube connected but no synced data available (missing user context).';
+  return (await fetchYouTubeLocalData(userId)) || 'YouTube connected but no synced channel data yet. Run a sync from Integrations > YouTube.';
 }
 
 // ---------- YouTube (local Integration Hub fallback for api-key connections) ----------
