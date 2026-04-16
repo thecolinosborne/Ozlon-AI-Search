@@ -4318,7 +4318,8 @@ ${pageContents.slice(0, 12000)}`;
 
           if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
 
-          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+          const { createClient: createUploadClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createUploadClient(supabaseUrl, serviceRoleKey);
 
           // Get OAuth token
           const { data: conn } = await adminClient
