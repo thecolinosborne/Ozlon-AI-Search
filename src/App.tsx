@@ -17,7 +17,7 @@ import Profile from "@/pages/Profile";
 import Billing from "@/pages/Billing";
 import Onboarding from "@/pages/onboarding";
 import Integrations from "@/pages/Integrations";
-import MatonDetail from "@/pages/integrations/MatonDetail";
+
 import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
 import DescriptDetail from "@/pages/integrations/DescriptDetail";
 import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
@@ -58,7 +58,7 @@ const AppRoutes = () => {
         <Route path="/developer" element={<Developer />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/integrations" element={<Integrations />} />
-        <Route path="/integrations/maton" element={<MatonDetail />} />
+        
         <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
         <Route path="/integrations/descript" element={<DescriptDetail />} />
         <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />

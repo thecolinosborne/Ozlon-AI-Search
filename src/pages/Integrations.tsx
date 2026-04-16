@@ -1,18 +1,11 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
+import { ArrowLeft, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 
 
 const integrations = [
-  {
-    id: "maton",
-    name: "Maton AI",
-    description: "API gateway for 100+ services. Connect Gmail, Calendar, Drive, and more.",
-    icon: Zap,
-    path: "/integrations/maton",
-  },
   {
     id: "gohighlevel",
     name: "Go High Level",
