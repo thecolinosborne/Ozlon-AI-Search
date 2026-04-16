@@ -57,206 +57,78 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
 const DEFAULT_MODEL = 'gpt-5.4';
 
 // ============================================================================
-// MATON GATEWAY
+// NATIVE CONNECTION DISCOVERY
+// All Google services route through native edge functions; we discover which
+// services are available by inspecting integration_connections.
 // ============================================================================
 
-const MATON_CTRL_URL = 'https://ctrl.maton.ai';
-const MATON_GATEWAY_URL = 'https://gateway.maton.ai';
-
-interface MatonConnection {
-  app: string;
-  connection_id: string;
-  status: string;
-  metadata?: Record<string, unknown>;
-}
-
-// Multi-account connection support
+// Multi-account connection support (kept for compatibility with resolver/aliases)
 type ConnEntry = { id: string; email?: string; meta?: Record<string, unknown> };
 type MultiConnMap = Map<string, ConnEntry[]>;
 
-// ---------- Dynamic alias map ----------
+interface NativeConnection {
+  app: string;
+  connection_id: string;
+  metadata?: Record<string, unknown>;
+}
 
-/** For each connected account, derive searchable aliases from email/metadata */
-type AliasEntry = { alias: string; email: string; connEntry: ConnEntry };
+/**
+ * Discover the user's native connections from integration_connections.
+ * A single Google OAuth connection (provider='youtube', auth_type='oauth2')
+ * grants access to ALL Google services (Gmail, Calendar, Drive, Docs, Sheets,
+ * Slides, GSC, GA, YouTube) via the shared google-token helper.
+ */
+async function getNativeConnections(userId: string): Promise<NativeConnection[]> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) return [];
 
-function buildDynamicAliasMap(connMap: MultiConnMap): AliasEntry[] {
-  const aliases: AliasEntry[] = [];
-  for (const [, entries] of connMap) {
-    for (const entry of entries) {
-      if (!entry.email) continue;
-      const email = entry.email.toLowerCase();
-      const [localPart, fullDomain] = email.split('@');
-      const domainParts = fullDomain?.split('.') || [];
-      const domainName = domainParts[0] || ''; // "ozlon" from "ozlon.net"
+  try {
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+    const { data: rows } = await admin
+      .from('integration_connections')
+      .select('id, provider, auth_type, status, external_account_label, external_account_id, metadata')
+      .eq('user_id', userId)
+      .eq('status', 'connected');
 
-      // Add all derived aliases
-      aliases.push({ alias: email, email, connEntry: entry }); // full email
-      if (localPart) aliases.push({ alias: localPart, email, connEntry: entry }); // "colin"
-      if (fullDomain) aliases.push({ alias: fullDomain, email, connEntry: entry }); // "ozlon.net"
-      if (domainName && domainName.length >= 3) aliases.push({ alias: domainName, email, connEntry: entry }); // "ozlon"
-      // Multi-word domain like "colinosborne" → also add
-      if (domainName && domainName !== localPart && domainName.length >= 3) {
-        aliases.push({ alias: domainName, email, connEntry: entry });
-      }
+    if (!rows?.length) return [];
 
-      // Also index metadata fields like displayName
-      if (entry.meta) {
-        const displayName = (entry.meta as Record<string, string>).displayName;
-        if (displayName && displayName.length >= 3) {
-          aliases.push({ alias: displayName.toLowerCase(), email, connEntry: entry });
+    const connections: NativeConnection[] = [];
+    const googleApps = [
+      'google-mail', 'google-calendar', 'google-drive', 'google-docs',
+      'google-sheets', 'google-slides', 'google-search-console',
+      'google-analytics-data', 'google-meet',
+    ];
+
+    for (const r of rows) {
+      const meta = (r.metadata || {}) as Record<string, unknown>;
+      const email = (r.external_account_label as string) || (meta.email as string) || undefined;
+      const enrichedMeta = { ...meta, email };
+
+      if (r.provider === 'youtube' && r.auth_type === 'oauth2') {
+        // Google OAuth grants access to YouTube + all Google Workspace services
+        connections.push({ app: 'youtube', connection_id: r.id, metadata: enrichedMeta });
+        for (const app of googleApps) {
+          connections.push({ app, connection_id: r.id, metadata: enrichedMeta });
         }
+      } else if (r.provider === 'youtube' && r.auth_type === 'api_key') {
+        // Local YouTube API-key integration (read-only YouTube only)
+        connections.push({ app: 'youtube', connection_id: r.id, metadata: enrichedMeta });
+      } else if (r.provider === 'clickup') {
+        connections.push({ app: 'clickup', connection_id: r.id, metadata: enrichedMeta });
       }
     }
+
+    console.log(`[Native] ${connections.length} connection-app entries loaded`);
+    return connections;
+  } catch (e) {
+    console.error('[Native] Connection discovery error:', e);
+    return [];
   }
-  return aliases;
 }
 
-// ---------- Robust account resolver ----------
-
-/** Extract an email address from a freeform string like "colin@ozlon.net gmail" */
-function extractEmailFromHint(hint: string): string | null {
-  const match = hint.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  return match ? match[0].toLowerCase() : null;
-}
-
-/** Extract an email address mentioned in a user message */
-function extractAccountFromMessage(message: string): string | null {
-  const emails = message.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi);
-  return emails ? emails[0].toLowerCase() : null;
-}
-
-/** Normalize a hint for partial matching: lowercase, strip spaces/punctuation/trailing words */
-function normalizeHint(hint: string): string {
-  return hint.toLowerCase().replace(/\s*(gmail|email|mail|inbox|account)\s*/gi, '').trim();
-}
-
-/**
- * Extract the best account hint from a user message using the dynamic alias map.
- * Scans for known aliases (domain names, local parts) in the message text.
- */
-function extractAliasHintFromMessage(message: string, aliasMap: AliasEntry[], app: string): ConnEntry | undefined {
-  const lower = message.toLowerCase();
-
-  // First check for explicit email addresses
-  const emailInMsg = extractAccountFromMessage(message);
-  if (emailInMsg) {
-    const match = aliasMap.find(a => a.email === emailInMsg && a.connEntry.id);
-    if (match) return match.connEntry;
-  }
-
-  // Then scan for domain/alias keywords — but only match entries for the requested app
-  // Get entries for this app to filter aliases
-  const appEntryIds = new Set<string>();
-  // We can't filter by app here since aliasMap is flat, so we match any and let caller validate
-
-  // Sort aliases by length descending so longer/more specific matches win
-  const sorted = [...aliasMap].sort((a, b) => b.alias.length - a.alias.length);
-  for (const entry of sorted) {
-    // Skip very short aliases that cause false positives (e.g. "colin" matching "colonial")
-    if (entry.alias.length < 4 && !entry.alias.includes('@')) continue;
-    // Check if the alias appears as a word boundary match
-    const regex = new RegExp(`\\b${entry.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (regex.test(lower)) return entry.connEntry;
-  }
-
-  return undefined;
-}
-
-/**
- * Resolve the correct connection for a service, supporting:
- * - exact email match (case-insensitive)
- * - email extracted from freeform hint ("colin@ozlon.net gmail")
- * - dynamic alias matching from alias map
- * - partial/alias match ("ozlon" matches "colin@ozlon.net")
- * - fallback extraction from the latest user message
- * Returns { id, email } so callers can confirm which account was used.
- */
-function resolveConnection(
-  connMap: MultiConnMap,
-  app: string,
-  hint?: string,
-  userMessage?: string,
-  aliasMap?: AliasEntry[],
-): { id: string; email?: string } | undefined {
-  const entries = connMap.get(app);
-  if (!entries?.length) return undefined;
-  if (entries.length === 1) return entries[0];
-
-  // Priority 1: explicit tool arg hint
-  if (hint) {
-    const found = matchEntry(entries, hint);
-    if (found) return found;
-  }
-
-  // Priority 2: dynamic alias extraction from user message
-  if (userMessage && aliasMap) {
-    const aliasMatch = extractAliasHintFromMessage(userMessage, aliasMap, app);
-    if (aliasMatch) {
-      // Verify this entry belongs to the requested app
-      const appMatch = entries.find(e => e.id === aliasMatch.id);
-      if (appMatch) return appMatch;
-    }
-  }
-
-  // Priority 3: extract email from latest user message (fallback)
-  if (userMessage) {
-    const msgEmail = extractAccountFromMessage(userMessage);
-    if (msgEmail) {
-      const found = matchEntry(entries, msgEmail);
-      if (found) return found;
-    }
-    // Try partial/alias match against user message words
-    const normalized = userMessage.toLowerCase();
-    for (const entry of entries) {
-      if (!entry.email) continue;
-      const domain = entry.email.split('@')[1]?.split('.')[0];
-      if (domain && domain.length >= 3 && normalized.includes(domain)) return entry;
-    }
-  }
-
-  // Priority 4: do NOT default — return undefined to force clarification
-  // Only default if no multi-account ambiguity exists
-  return undefined;
-}
-
-function matchEntry(entries: ConnEntry[], hint: string): ConnEntry | undefined {
-  const hintLower = hint.toLowerCase().trim();
-
-  // Try exact email match
-  const exactMatch = entries.find(e => e.email?.toLowerCase() === hintLower);
-  if (exactMatch) return exactMatch;
-
-  // Try extracting an email from the hint string
-  const extracted = extractEmailFromHint(hint);
-  if (extracted) {
-    const emailMatch = entries.find(e => e.email?.toLowerCase() === extracted);
-    if (emailMatch) return emailMatch;
-  }
-
-  // Try partial/alias match (e.g. "ozlon" matches "colin@ozlon.net")
-  const norm = normalizeHint(hint);
-  if (norm.length >= 3) {
-    for (const entry of entries) {
-      if (!entry.email) continue;
-      if (entry.email.toLowerCase().includes(norm)) return entry;
-      const domain = entry.email.split('@')[1]?.split('.')[0];
-      if (domain && norm.includes(domain)) return entry;
-      const localPart = entry.email.split('@')[0];
-      if (localPart && norm.includes(localPart)) return entry;
-    }
-  }
-
-  // Check metadata fields
-  for (const entry of entries) {
-    if (!entry.meta) continue;
-    const metaStr = JSON.stringify(entry.meta).toLowerCase();
-    if (metaStr.includes(hintLower) || (extracted && metaStr.includes(extracted))) return entry;
-  }
-
-  return undefined;
-}
-
-function buildMultiConnMap(connections: MatonConnection[]): MultiConnMap {
+function buildMultiConnMap(connections: NativeConnection[]): MultiConnMap {
   const map: MultiConnMap = new Map();
   for (const c of connections) {
     const existing = map.get(c.app) || [];
@@ -268,51 +140,6 @@ function buildMultiConnMap(connections: MatonConnection[]): MultiConnMap {
     map.set(c.app, existing);
   }
   return map;
-}
-
-async function getMatonConnections(matonApiKey: string): Promise<MatonConnection[]> {
-  try {
-    const res = await fetch(`${MATON_CTRL_URL}/connections`, {
-      headers: { 'Authorization': `Bearer ${matonApiKey}`, 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) {
-      console.error(`[Maton] Failed to fetch connections: ${res.status}`);
-      return [];
-    }
-    const data = await res.json();
-    const active = (data.connections || []).filter((c: MatonConnection) => c.status === 'ACTIVE');
-    console.log(`[Maton] ${active.length} active connections loaded`);
-    return active;
-  } catch (e) {
-    console.error(`[Maton] Connection fetch error:`, e);
-    return [];
-  }
-}
-
-async function callMatonGateway(
-  matonApiKey: string, path: string, connectionId: string, method = 'GET', body?: unknown,
-): Promise<unknown> {
-  const res = await fetch(`${MATON_GATEWAY_URL}${path}`, {
-    method,
-    headers: {
-      'Authorization': `Bearer ${matonApiKey}`,
-      'Content-Type': 'application/json',
-      'Maton-Connection': connectionId,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const ct = res.headers.get('content-type') || '';
-  let data: unknown;
-  if (ct.includes('application/json')) {
-    data = await res.json();
-  } else {
-    data = { raw: await res.text() };
-  }
-  if (!res.ok) {
-    console.error(`[Maton Gateway] ${method} ${path} failed (${res.status}):`, JSON.stringify(data));
-    throw new Error(`Maton API error ${res.status} on ${path}: ${JSON.stringify(data).substring(0, 200)}`);
-  }
-  return data;
 }
 
 // ============================================================================
