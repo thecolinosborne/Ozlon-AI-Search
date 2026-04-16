@@ -31,6 +31,14 @@ async function getAuthedUserId(req: Request): Promise<string> {
   const token = getBearerToken(req);
   if (!token) throw new Error("Missing bearer token");
 
+  // Service-role bypass: trusted internal callers (e.g. chat function, post-upload self-call) can pass x-user-id
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  if (token === serviceKey) {
+    const xUid = req.headers.get("x-user-id");
+    if (!xUid) throw new Error("Service-role caller must provide x-user-id header");
+    return xUid;
+  }
+
   const { authClient } = getClients();
   const { data, error } = await authClient.auth.getUser(token);
   if (error || !data.user) throw new Error("Unauthorized");
