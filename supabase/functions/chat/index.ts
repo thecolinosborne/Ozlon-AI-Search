@@ -3297,8 +3297,129 @@ async function executeToolCall(
           return { success: true, result: `Checklist item updated.` };
         } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
+      case 'search_clickup_tasks': {
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.statuses) params.statuses = args.statuses;
+          if (args.assignees) params.assignees = args.assignees;
+          if (args.tags) params.tags = args.tags;
+          if (args.due_date_gt) params.due_date_gt = args.due_date_gt;
+          if (args.due_date_lt) params.due_date_lt = args.due_date_lt;
+          if (args.include_closed) params.include_closed = true;
+          if (args.subtasks) params.subtasks = true;
+          const data = await callClickUpEdge('search_tasks', params) as { tasks?: { id: string; name: string; status?: { status?: string }; list?: { name?: string }; url?: string }[] };
+          const tasks = data.tasks || [];
+          if (!tasks.length) return { success: true, result: 'No tasks found matching filters.' };
+          return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map((t: any) => `- ${t.name} (${t.status?.status || '?'}) [${t.list?.name || '?'}] — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_spaces': {
+        try {
+          const data = await callClickUpEdge('list_spaces') as { spaces?: { id: string; name: string }[] };
+          const spaces = data.spaces || [];
+          if (!spaces.length) return { success: true, result: 'No spaces found.' };
+          return { success: true, result: `Spaces:\n${spaces.map((s: any) => `- ${s.name} (ID: ${s.id})`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_lists': {
+        try {
+          const data = await callClickUpEdge('list_all_lists') as { lists?: { id: string; name: string; space: string; folder: string | null }[]; count?: number };
+          const lists = data.lists || [];
+          if (!lists.length) return { success: true, result: 'No lists found.' };
+          return { success: true, result: `${lists.length} lists:\n${lists.map((l: any) => `- ${l.name} (ID: ${l.id}) — Space: ${l.space}${l.folder ? `, Folder: ${l.folder}` : ''}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_members': {
+        try {
+          const data = await callClickUpEdge('list_workspace_members') as { members?: { id: number; username: string; email: string }[] };
+          const members = data.members || [];
+          if (!members.length) return { success: true, result: 'No members found.' };
+          return { success: true, result: `Workspace members:\n${members.map((m: any) => `- ${m.username} (${m.email}) — User ID: ${m.id}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'move_clickup_task': {
+        try {
+          await callClickUpEdge('move_task', { taskId: args.task_id, listId: args.list_id });
+          return { success: true, result: `Task ${args.task_id} moved to list ${args.list_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_priority': {
+        try {
+          await callClickUpEdge('update_task', { taskId: args.task_id, priority: args.priority });
+          return { success: true, result: `Priority set to ${args.priority} on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'start_clickup_timer': {
+        try {
+          const res = await callClickUpEdge('start_time_entry', { taskId: args.task_id, description: args.description || '' });
+          return { success: true, result: `Timer started on task ${args.task_id}. ${JSON.stringify(res)}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'stop_clickup_timer': {
+        try {
+          const res = await callClickUpEdge('stop_time_entry');
+          return { success: true, result: `Timer stopped. ${JSON.stringify(res)}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_time_entries': {
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.start_date) params.start_date = args.start_date;
+          if (args.end_date) params.end_date = args.end_date;
+          const data = await callClickUpEdge('get_time_entries', params);
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_custom_fields': {
+        try {
+          const data = await callClickUpEdge('get_custom_fields', { listId: args.list_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_custom_field': {
+        try {
+          await callClickUpEdge('set_custom_field', { taskId: args.task_id, fieldId: args.field_id, value: args.value });
+          return { success: true, result: `Custom field ${args.field_id} set on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_task_dependencies': {
+        try {
+          const data = await callClickUpEdge('get_task_dependencies', { taskId: args.task_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'add_clickup_dependency': {
+        try {
+          await callClickUpEdge('add_dependency', { taskId: args.task_id, depends_on: args.depends_on });
+          return { success: true, result: `Dependency added: ${args.task_id} depends on ${args.depends_on}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_dependency': {
+        try {
+          await callClickUpEdge('delete_dependency', { taskId: args.task_id, depends_on: args.depends_on });
+          return { success: true, result: `Dependency removed.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_checklist': {
+        try {
+          await callClickUpEdge('delete_checklist', { checklistId: args.checklist_id });
+          return { success: true, result: `Checklist ${args.checklist_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_checklist_item': {
+        try {
+          await callClickUpEdge('delete_checklist_item', { checklistId: args.checklist_id, checklistItemId: args.checklist_item_id });
+          return { success: true, result: `Checklist item deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_list_statuses': {
+        try {
+          const data = await callClickUpEdge('get_list_statuses', { listId: args.list_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
 
-      // ============ Tier 3: GHL Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
+
       case 'ghl_list_social_accounts': {
         const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
