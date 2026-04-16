@@ -780,7 +780,13 @@ serve(async (req) => {
         ? detectedMime
         : (mimeMap[ext] || "video/mp4");
 
-      const videoBlob = await videoRes.blob();
+      // Stream the source body directly to YouTube — never buffer the whole file in memory.
+      // Edge functions have ~256MB memory; large videos (>500MB) crash with .blob() or .arrayBuffer().
+      const contentLengthHeader = videoRes.headers.get("content-length");
+      const contentLength = contentLengthHeader ? Number(contentLengthHeader) : NaN;
+      if (!contentLength || Number.isNaN(contentLength)) {
+        throw new Error("Source did not return a Content-Length header. YouTube resumable upload requires a known size. Use a direct download URL (e.g. Google Drive file ID) that reports size.");
+      }
 
       const initiateRes = await fetch(
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
@@ -789,7 +795,7 @@ serve(async (req) => {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
-            "X-Upload-Content-Length": String(videoBlob.size),
+            "X-Upload-Content-Length": String(contentLength),
             "X-Upload-Content-Type": videoMime,
           },
           body: JSON.stringify({
@@ -805,16 +811,20 @@ serve(async (req) => {
       const uploadUrl = initiateRes.headers.get("Location");
       if (!uploadUrl) throw new Error("No upload URL returned");
 
+      if (!videoRes.body) throw new Error("Source response has no readable body to stream");
+
       const uploadRes = await fetch(uploadUrl, {
         method: "PUT",
         headers: {
           "Content-Type": videoMime,
-          "Content-Length": String(videoBlob.size),
+          "Content-Length": String(contentLength),
         },
-        body: videoBlob,
+        body: videoRes.body,
+        // @ts-ignore — Deno fetch supports duplex for streaming request bodies
+        duplex: "half",
       });
       const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status} ${JSON.stringify(uploadData)}`);
 
       return jsonOk({
         success: true,
