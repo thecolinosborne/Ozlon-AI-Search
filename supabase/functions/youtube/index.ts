@@ -696,18 +696,41 @@ serve(async (req) => {
       // Auto-convert Google Drive share links to direct download URLs
       const driveFileMatch = videoUrl.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
       const driveOpenMatch = !driveFileMatch && videoUrl.match(/drive\.google\.com\/open\?id=([^&]+)/);
-      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
+      const driveUcMatch = !driveFileMatch && !driveOpenMatch && videoUrl.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
+      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1] || driveUcMatch?.[1];
       if (driveId) {
         videoUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${driveId}`;
       }
 
-      const videoRes = await fetch(videoUrl, { redirect: "follow" });
+      let videoRes = await fetch(videoUrl, { redirect: "follow" });
       if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
 
-      // Validate content type — reject HTML responses
-      const rawContentType = videoRes.headers.get("content-type") || "";
+      // Handle Google Drive virus scan warning page for large files
+      let rawContentType = videoRes.headers.get("content-type") || "";
+      if (rawContentType.includes("text/html") && driveId) {
+        // Try extracting confirm token from HTML or cookies
+        const html = await videoRes.text();
+        // Look for confirm token in the HTML form
+        const confirmMatch = html.match(/confirm=([0-9A-Za-z_-]+)/) || html.match(/id="download-form"[\s\S]*?name="confirm"[\s\S]*?value="([^"]+)"/);
+        const confirmToken = confirmMatch?.[1] || "t";
+        // Also check for download_warning cookie
+        const cookies = videoRes.headers.get("set-cookie") || "";
+        const cookieConfirm = cookies.match(/download_warning[^=]*=([^;]+)/)?.[1];
+        const finalConfirm = cookieConfirm || confirmToken;
+
+        const retryUrl = `https://drive.google.com/uc?export=download&confirm=${finalConfirm}&id=${driveId}`;
+        const cookieHeader = cookies ? cookies.split(";")[0] : "";
+        videoRes = await fetch(retryUrl, {
+          redirect: "follow",
+          headers: cookieHeader ? { Cookie: cookieHeader } : {},
+        });
+        if (!videoRes.ok) throw new Error(`Failed to download video from Drive (retry): ${videoRes.status}`);
+        rawContentType = videoRes.headers.get("content-type") || "";
+      }
+
+      // Final validation — reject HTML responses
       if (rawContentType.includes("text/html")) {
-        throw new Error("The URL returned an HTML page instead of a video file. Please provide a direct download link to the video.");
+        throw new Error("The URL returned an HTML page instead of a video file. Ensure the Google Drive file is shared publicly (Anyone with the link) and is not too large for direct download.");
       }
 
       // Infer correct MIME type
