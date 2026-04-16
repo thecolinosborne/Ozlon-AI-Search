@@ -4302,11 +4302,15 @@ ${pageContents.slice(0, 12000)}`;
       // ============ YouTube Upload Handler ============
       case 'upload_youtube_video': {
         try {
-          const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-          const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated. Sign in to upload videos.' };
 
-          // Get the user's bearer token from the current request context
-          // We need to call the youtube edge function with the user's auth
+          const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
+          const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
+          if (!clientId || !clientSecret) return { success: false, result: 'YouTube OAuth credentials not configured on the server. Contact the admin.' };
+
           const title = (args.title as string) || 'Untitled';
           const description = (args.description as string) || '';
           const videoUrl = (args.video_url as string) || '';
@@ -4314,24 +4318,81 @@ ${pageContents.slice(0, 12000)}`;
 
           if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
 
-          // Call the youtube edge function directly using service role
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/youtube`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              action: 'upload_video',
-              params: { title, description, videoUrl, privacyStatus },
-            }),
-          });
-          const data = await res.json();
-          if (data.error) return { success: false, result: `YouTube upload failed: ${data.error}` };
-          if (data.videoId) {
-            return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${data.videoId}` };
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          // Get OAuth token
+          const { data: conn } = await adminClient
+            .from('integration_connections')
+            .select('metadata')
+            .eq('user_id', userId)
+            .eq('provider', 'youtube')
+            .eq('auth_type', 'oauth2')
+            .eq('status', 'connected')
+            .maybeSingle();
+
+          if (!conn) return { success: false, result: 'YouTube OAuth not connected. Go to Integrations > YouTube and authorize uploads first.' };
+
+          const meta = conn.metadata as Record<string, unknown>;
+          let accessToken = String(meta.access_token || '');
+          const refreshToken = String(meta.refresh_token || '');
+          const expiresAt = String(meta.expires_at || '');
+
+          // Refresh if expired
+          if (new Date(expiresAt) <= new Date()) {
+            if (!refreshToken) return { success: false, result: 'YouTube OAuth token expired and no refresh token. Re-authorize in Integrations > YouTube.' };
+            const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
+            });
+            const refreshData = await refreshRes.json();
+            if (!refreshRes.ok) return { success: false, result: `YouTube token refresh failed: ${JSON.stringify(refreshData)}` };
+            accessToken = refreshData.access_token;
+            await adminClient
+              .from('integration_connections')
+              .update({ metadata: { ...meta, access_token: accessToken, expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString() } })
+              .eq('user_id', userId).eq('provider', 'youtube').eq('auth_type', 'oauth2');
           }
-          return { success: false, result: `Unexpected response from YouTube upload: ${JSON.stringify(data)}` };
+
+          // Download the video
+          const videoRes = await fetch(videoUrl);
+          if (!videoRes.ok) return { success: false, result: `Failed to download video from URL: HTTP ${videoRes.status}` };
+          const videoBlob = await videoRes.blob();
+
+          // Initiate resumable upload
+          const initiateRes = await fetch(
+            'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'X-Upload-Content-Length': String(videoBlob.size),
+                'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
+              },
+              body: JSON.stringify({
+                snippet: { title, description },
+                status: { privacyStatus },
+              }),
+            },
+          );
+          if (!initiateRes.ok) {
+            const errBody = await initiateRes.text();
+            return { success: false, result: `YouTube upload initiation failed: ${initiateRes.status} ${errBody}` };
+          }
+          const uploadUrl = initiateRes.headers.get('Location');
+          if (!uploadUrl) return { success: false, result: 'YouTube did not return an upload URL.' };
+
+          // Upload the video
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': videoBlob.type || 'video/mp4', 'Content-Length': String(videoBlob.size) },
+            body: videoBlob,
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok) return { success: false, result: `YouTube upload failed: ${JSON.stringify(uploadData)}` };
+
+          return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${uploadData.id}` };
         } catch (e) {
           console.error('[upload_youtube_video] Error:', e);
           return { success: false, result: `YouTube upload error: ${e instanceof Error ? e.message : 'Unknown'}` };
