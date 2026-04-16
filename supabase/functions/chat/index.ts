@@ -4809,7 +4809,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
