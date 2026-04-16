@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Youtube, AlertCircle, Loader2, Upload, Shield, Mail, HardDrive,
-  Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, ChevronDown, ChevronUp, CheckCircle2, XCircle,
+  Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, ChevronDown, ChevronUp, CheckCircle2, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -51,6 +51,7 @@ const GOOGLE_SERVICES = [
   { id: "slides", name: "Google Slides", icon: Presentation, fn: "google-slides", testAction: "list_presentations", testLabel: "Presentations" },
   { id: "analytics", name: "Google Analytics", icon: BarChart3, fn: "google-analytics", testAction: "list_accounts", testLabel: "Accounts" },
   { id: "search-console", name: "Search Console", icon: Search, fn: "google-search-console", testAction: "list_sites", testLabel: "Sites" },
+  { id: "tag-manager", name: "Tag Manager", icon: Tag, fn: "google-tag-manager", testAction: "list_accounts", testLabel: "GTM Accounts" },
 ] as const;
 
 export default function YouTubeDetail() {

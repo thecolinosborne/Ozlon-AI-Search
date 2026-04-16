@@ -72,3 +72,6 @@ verify_jwt = false
 [functions.google-slides]
 verify_jwt = false
 
+[functions.google-tag-manager]
+verify_jwt = false
+
