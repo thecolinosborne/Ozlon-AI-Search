@@ -1568,41 +1568,6 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
     },
   },
-  // Trello actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_trello_card',
-      description: 'Create a new card on a Trello board.',
-      parameters: {
-        type: 'object',
-        properties: {
-          list_id: { type: 'string', description: 'Trello list ID to add the card to' },
-          name: { type: 'string', description: 'Card name/title' },
-          desc: { type: 'string', description: 'Card description (optional)' },
-        },
-        required: ['list_id', 'name'],
-      },
-    },
-  },
-  // Jira actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_jira_issue',
-      description: 'Create a new issue/ticket in Jira.',
-      parameters: {
-        type: 'object',
-        properties: {
-          project_key: { type: 'string', description: 'Jira project key (e.g. PROJ)' },
-          summary: { type: 'string', description: 'Issue summary/title' },
-          description: { type: 'string', description: 'Issue description' },
-          issue_type: { type: 'string', description: 'Issue type (Task, Bug, Story, Epic). Default: Task' },
-        },
-        required: ['project_key', 'summary'],
-      },
-    },
-  },
   // ============ GoHighLevel actions ============
   {
     type: 'function',
