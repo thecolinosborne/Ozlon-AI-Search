@@ -8,6 +8,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
+function normalizeVideoUrl(url: string): string {
+  const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
+  const driveOpenMatch = !driveFileMatch && url.match(/drive\.google\.com\/open\?id=([^&]+)/);
+  const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
+  if (driveId) {
+    return `https://drive.google.com/uc?export=download&confirm=t&id=${driveId}`;
+  }
+  return url;
+}
+
 interface SavedConnection {
   id: string;
   status: string;

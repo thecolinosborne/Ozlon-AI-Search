@@ -698,7 +698,7 @@ serve(async (req) => {
       const driveOpenMatch = !driveFileMatch && videoUrl.match(/drive\.google\.com\/open\?id=([^&]+)/);
       const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
       if (driveId) {
-        videoUrl = `https://drive.google.com/uc?export=download&id=${driveId}`;
+        videoUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${driveId}`;
       }
 
       const videoRes = await fetch(videoUrl, { redirect: "follow" });
