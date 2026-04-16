@@ -51,7 +51,7 @@ const integrations = [
   {
     id: "youtube",
     name: "Google Workspace",
-    description: "One sign-in for YouTube, Gmail and Drive — native, no Maton needed.",
+    description: "YouTube, Gmail, Drive, Calendar, Sheets, Docs, Analytics, Search Console — one OAuth.",
     icon: Youtube,
     path: "/integrations/youtube",
   },
