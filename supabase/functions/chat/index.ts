@@ -4945,7 +4945,7 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
   const memoryKw = ['remember', 'recall', 'last time', 'you said', 'we discussed', 'previously', 'my preference', 'i told you', 'you know that'];
   const analysisKw = ['analyze', 'analysis', 'compare', 'synthesize', 'summarize a long', 'deep dive', 'explain in detail', 'break down', 'evaluate', 'assess', 'review this', 'what do you think about'];
   const multimodalKw = ['image', 'photo', 'screenshot', 'picture', 'file', 'pdf', 'document', 'attachment'];
-  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose'];
+  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'upload'];
   const liveDataKw = ['weather', 'stock', 'price', 'news', 'current', 'today\'s', 'latest'];
 
   return {
