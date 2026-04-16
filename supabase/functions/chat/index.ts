@@ -5039,7 +5039,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
-    if ((isActionRequest || enableTools) && availableTools.length > 0 && MATON_API_KEY) {
+    if ((isActionRequest || enableTools) && availableTools.length > 0) {
       console.log('Using tool loop (non-streaming) for action request');
 
       try {
@@ -5057,7 +5057,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
             }
 
             const result = await runToolLoop(
-              modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 10,
+              modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
               async (event) => {
                 try {
                   await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
