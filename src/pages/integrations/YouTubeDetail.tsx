@@ -77,6 +77,32 @@ export default function YouTubeDetail() {
   const [driveConverted, setDriveConverted] = useState(false);
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
+
+  // ── Expanded upload fields ──
+  const [tagsInput, setTagsInput] = useState("");
+  const [hashtagsInput, setHashtagsInput] = useState("");
+  const [categoryId, setCategoryId] = useState("22");
+  const [language, setLanguage] = useState("");
+  const [defaultAudioLanguage, setDefaultAudioLanguage] = useState("");
+  const [publishAt, setPublishAt] = useState("");
+  const [madeForKids, setMadeForKids] = useState(false);
+  const [notifySubscribers, setNotifySubscribers] = useState(true);
+  const [recordingDate, setRecordingDate] = useState("");
+  const [locationDescription, setLocationDescription] = useState("");
+  const [chapters, setChapters] = useState<Array<{ timestamp: string; title: string }>>([]);
+  const [captionsUrl, setCaptionsUrl] = useState("");
+  const [captionsLanguage, setCaptionsLanguage] = useState("en");
+  const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [playlistId, setPlaylistId] = useState("");
+  const [playlistName, setPlaylistName] = useState("");
+  const [pinnedComment, setPinnedComment] = useState("");
+  const [license, setLicense] = useState("youtube");
+  const [embeddable, setEmbeddable] = useState(true);
+  const [publicStatsViewable, setPublicStatsViewable] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; title: string }>>([]);
+  const [playlistsList, setPlaylistsList] = useState<Array<{ id: string; title: string }>>([]);
   const [syncing, setSyncing] = useState(false);
 
   const [youtubeOpen, setYoutubeOpen] = useState(false);
