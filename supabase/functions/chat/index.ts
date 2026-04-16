@@ -1179,94 +1179,6 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // Slack actions
-  {
-    type: 'function',
-    function: {
-      name: 'send_slack_message',
-      description: 'Send a message to a Slack channel or user. Use when the user asks to message, notify, or post to Slack.',
-      parameters: {
-        type: 'object',
-        properties: {
-          channel: { type: 'string', description: 'Slack channel ID (e.g. C0123456) or channel name' },
-          text: { type: 'string', description: 'Message text to send' },
-        },
-        required: ['channel', 'text'],
-      },
-    },
-  },
-  // Notion actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_notion_page',
-      description: 'Create a new page in Notion. Use when the user asks to create a note, document, or page in Notion.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Page title' },
-          content: { type: 'string', description: 'Page content as plain text' },
-          parent_page_id: { type: 'string', description: 'Parent page ID to create under (optional - uses workspace root if omitted)' },
-        },
-        required: ['title', 'content'],
-      },
-    },
-  },
-  // GitHub actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_github_issue',
-      description: 'Create a new issue in a GitHub repository.',
-      parameters: {
-        type: 'object',
-        properties: {
-          owner: { type: 'string', description: 'Repository owner (username or org)' },
-          repo: { type: 'string', description: 'Repository name' },
-          title: { type: 'string', description: 'Issue title' },
-          body: { type: 'string', description: 'Issue body/description' },
-          labels: { type: 'string', description: 'Comma-separated labels (optional)' },
-        },
-        required: ['owner', 'repo', 'title', 'body'],
-      },
-    },
-  },
-  // HubSpot actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_hubspot_contact',
-      description: 'Create a new contact in HubSpot CRM.',
-      parameters: {
-        type: 'object',
-        properties: {
-          email: { type: 'string', description: 'Contact email' },
-          firstname: { type: 'string', description: 'First name' },
-          lastname: { type: 'string', description: 'Last name' },
-          phone: { type: 'string', description: 'Phone number (optional)' },
-          company: { type: 'string', description: 'Company name (optional)' },
-        },
-        required: ['email', 'firstname', 'lastname'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_hubspot_deal',
-      description: 'Create a new deal in HubSpot CRM.',
-      parameters: {
-        type: 'object',
-        properties: {
-          dealname: { type: 'string', description: 'Deal name' },
-          amount: { type: 'string', description: 'Deal amount' },
-          dealstage: { type: 'string', description: 'Deal stage (e.g. appointmentscheduled, qualifiedtobuy, closedwon)' },
-          pipeline: { type: 'string', description: 'Pipeline name (optional, defaults to default pipeline)' },
-        },
-        required: ['dealname', 'amount'],
-      },
-    },
-  },
   // Google Drive actions
   {
     type: 'function',
@@ -1654,41 +1566,6 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       name: 'get_clickup_list_statuses',
       description: 'Get available statuses for a ClickUp list. Useful to know valid status values before setting task status.',
       parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
-    },
-  },
-  // Trello actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_trello_card',
-      description: 'Create a new card on a Trello board.',
-      parameters: {
-        type: 'object',
-        properties: {
-          list_id: { type: 'string', description: 'Trello list ID to add the card to' },
-          name: { type: 'string', description: 'Card name/title' },
-          desc: { type: 'string', description: 'Card description (optional)' },
-        },
-        required: ['list_id', 'name'],
-      },
-    },
-  },
-  // Jira actions
-  {
-    type: 'function',
-    function: {
-      name: 'create_jira_issue',
-      description: 'Create a new issue/ticket in Jira.',
-      parameters: {
-        type: 'object',
-        properties: {
-          project_key: { type: 'string', description: 'Jira project key (e.g. PROJ)' },
-          summary: { type: 'string', description: 'Issue summary/title' },
-          description: { type: 'string', description: 'Issue description' },
-          issue_type: { type: 'string', description: 'Issue type (Task, Bug, Story, Epic). Default: Task' },
-        },
-        required: ['project_key', 'summary'],
-      },
     },
   },
   // ============ GoHighLevel actions ============
@@ -2575,120 +2452,116 @@ async function tryNativeGoogleCall(
   }
 }
 
+// ============================================================================
+// NATIVE EDGE FUNCTION INVOKER
+// Calls a Supabase edge function with the user's auth token.
+// All Google services route through here (no Maton).
+// ============================================================================
+async function callNativeEdge(
+  fn: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+  if (!authHeader) throw new Error('No auth context — user must be signed in');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, params }),
+  });
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok || data?.success === false) {
+    const errMsg = (data?.error as string) || (data?.raw as string) || `${fn}/${action} failed (${res.status})`;
+    throw new Error(errMsg);
+  }
+  return data;
+}
+
 async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  matonApiKey: string,
-  connMap: MultiConnMap,
-  userMessage?: string,
-  aliasMap?: AliasEntry[],
+  _matonApiKey: string,
+  _connMap: MultiConnMap,
+  _userMessage?: string,
+  _aliasMap?: AliasEntry[],
 ): Promise<{ success: boolean; result: string }> {
   try {
-    // Try native Google Workspace first (uses user's own OAuth)
-    const nativeResult = await tryNativeGoogleCall(toolName, args);
-    if (nativeResult) return nativeResult;
-
-    const accountHint = args.account as string | undefined;
-
-    // Helper: generate context-aware error when connection not found
-    const noConnError = (app: string, label: string): string => {
-      const entries = connMap.get(app);
-      if (entries && entries.length > 1) {
-        const accounts = entries.map(e => e.email || e.id).join(', ');
-        return `Multiple ${label} accounts are connected (${accounts}). Please specify which account to use by including the email address in your request, then try again.`;
-      }
-      return `${label} is not connected. Ask the user to connect it in Settings > Maton AI Integrations.`;
-    };
-
     switch (toolName) {
+      // ============ Gmail ============
       case 'send_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string, args.cc as string | undefined);
-        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/messages/send', connId, 'POST', { raw }) as { id?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to send: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email sent successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+        try {
+          const data = await callNativeEdge('google-gmail', 'send_message', {
+            to: args.to, subject: args.subject, body: args.body, cc: args.cc,
+          });
+          const msg = data.message as { id?: string } | undefined;
+          return { success: true, result: `Email sent (ID: ${msg?.id || 'unknown'}). To: ${args.to}, Subject: "${args.subject}"` };
+        } catch (e) { return { success: false, result: `Failed to send: ${(e as Error).message}` }; }
       }
 
       case 'create_email_draft': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const raw = buildRawEmail(args.to as string, args.subject as string, args.body as string);
-        const res = await callMatonGateway(matonApiKey, '/google-mail/gmail/v1/users/me/drafts', connId, 'POST', { message: { raw } }) as { id?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create draft: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Draft created successfully (ID: ${res.id}). To: ${args.to}, Subject: "${args.subject}"` };
+        try {
+          const data = await callNativeEdge('google-gmail', 'create_draft', {
+            to: args.to, subject: args.subject, body: args.body,
+          });
+          const draft = data.draft as { id?: string } | undefined;
+          return { success: true, result: `Draft created (ID: ${draft?.id || 'unknown'}). To: ${args.to}, Subject: "${args.subject}"` };
+        } catch (e) { return { success: false, result: `Failed to create draft: ${(e as Error).message}` }; }
       }
 
       case 'list_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const maxResults = Math.min((args.max_results as number) || 50, 100);
-        const query = encodeURIComponent(args.query as string);
-        const data = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, connId) as { messages?: { id: string; threadId: string }[]; resultSizeEstimate?: number };
-        const msgs = data.messages || [];
-        if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
-        // Fetch metadata for each message (batch up to 50)
-        const details: string[] = [`[Using Gmail: ${resolved?.email || "default"}] Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${Math.min(msgs.length, 50)}:`];
-        const batch = msgs.slice(0, 50);
-        const metadataResults = await Promise.all(batch.map(async (m) => {
-          try {
-            const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
-            const headers = full.payload?.headers || [];
-            const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-            const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
-            const date = headers.find(h => h.name === 'Date')?.value || '';
-            return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}`;
-          } catch { return `- ID: ${m.id} | (metadata unavailable)`; }
-        }));
-        details.push(...metadataResults);
-        return { success: true, result: details.join('\n') };
+        try {
+          const data = await callNativeEdge('google-gmail', 'list_messages', {
+            q: args.query, maxResults: Math.min((args.max_results as number) || 50, 100),
+          });
+          const msgs = (data.messages as { id: string }[]) || [];
+          if (!msgs.length) return { success: true, result: `No emails found matching "${args.query}"` };
+          const batch = msgs.slice(0, 50);
+          const details = await Promise.all(batch.map(async (m) => {
+            try {
+              const full = await callNativeEdge('google-gmail', 'get_message', { id: m.id, format: 'full' });
+              const message = full.message as { payload?: { headers?: { name: string; value: string }[] } } | undefined;
+              const headers = message?.payload?.headers || [];
+              const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+              const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+              const date = headers.find(h => h.name === 'Date')?.value || '';
+              return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}`;
+            } catch { return `- ID: ${m.id} | (metadata unavailable)`; }
+          }));
+          return { success: true, result: [`Found ~${data.resultSizeEstimate || msgs.length} emails. Showing ${batch.length}:`, ...details].join('\n') };
+        } catch (e) { return { success: false, result: `Failed to list emails: ${(e as Error).message}` }; }
       }
 
       case 'get_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const full = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}?format=full`, connId) as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
-        const headers = full.payload?.headers || [];
-        const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-        const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
-        const date = headers.find(h => h.name === 'Date')?.value || '';
-        const to = headers.find(h => h.name === 'To')?.value || '';
-        // Decode body
-        let bodyText = '';
-        const bodyData = full.payload?.body?.data || full.payload?.parts?.find(p => p.mimeType === 'text/plain')?.body?.data;
-        if (bodyData) {
-          try { bodyText = atob(bodyData.replace(/-/g, '+').replace(/_/g, '/')); } catch { bodyText = full.snippet || ''; }
-        } else {
-          bodyText = full.snippet || '';
-        }
-        return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 2000)}` };
+        try {
+          const data = await callNativeEdge('google-gmail', 'get_message', { id: args.message_id, format: 'full' });
+          const full = data.message as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
+          const headers = full?.payload?.headers || [];
+          const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+          const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
+          const date = headers.find(h => h.name === 'Date')?.value || '';
+          const to = headers.find(h => h.name === 'To')?.value || '';
+          let bodyText = '';
+          const bodyData = full?.payload?.body?.data || full?.payload?.parts?.find(p => p.mimeType === 'text/plain')?.body?.data;
+          if (bodyData) {
+            try { bodyText = atob(bodyData.replace(/-/g, '+').replace(/_/g, '/')); } catch { bodyText = full?.snippet || ''; }
+          } else {
+            bodyText = full?.snippet || '';
+          }
+          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 2000)}` };
+        } catch (e) { return { success: false, result: `Failed to get email: ${(e as Error).message}` }; }
       }
 
       case 'trash_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        console.log(`[trash_email] Trashing message ${args.message_id} via connection ${connId} (${resolved?.email})`);
         try {
-          const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/trash`, connId, 'POST') as { id?: string; labelIds?: string[]; error?: { message?: string } };
-          console.log(`[trash_email] Result for ${args.message_id}:`, res.error ? `ERROR: ${res.error.message}` : `OK, labels: ${(res.labelIds || []).join(',')}`);
-          if (res.error) return { success: false, result: `Failed to trash: ${res.error.message || JSON.stringify(res.error)}` };
-          return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} moved to trash.` };
-        } catch (e) {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          console.error(`[trash_email] Error trashing ${args.message_id}:`, errMsg);
-          return { success: false, result: `Failed to trash email ${args.message_id}: ${errMsg}` };
-        }
+          await callNativeEdge('google-gmail', 'trash_message', { id: args.message_id });
+          return { success: true, result: `Email ${args.message_id} moved to trash.` };
+        } catch (e) { return { success: false, result: `Failed to trash email: ${(e as Error).message}` }; }
       }
 
       case 'batch_trash_emails': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
         const ids = (args.message_ids as string).split(',').map(id => id.trim()).filter(Boolean);
         if (!ids.length) return { success: false, result: 'No message IDs provided.' };
         const failures: string[] = [];
@@ -2698,173 +2571,72 @@ async function executeToolCall(
           const chunk = ids.slice(i, i + chunkSize);
           await Promise.all(chunk.map(async (id) => {
             try {
-              const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${id}/trash`, connId, 'POST') as { error?: { message?: string } };
-              if (res.error) {
-                failures.push(`${id}: ${res.error.message || JSON.stringify(res.error)}`);
-              } else {
-                successCount++;
-              }
-            } catch (e) {
-              const errMsg = e instanceof Error ? e.message : String(e);
-              failures.push(`${id}: ${errMsg}`);
-            }
+              await callNativeEdge('google-gmail', 'trash_message', { id });
+              successCount++;
+            } catch (e) { failures.push(`${id}: ${(e as Error).message}`); }
           }));
         }
-        const allFailed = successCount === 0;
-        const detail = failures.length ? ` (${failures.join(', ')})` : '';
-        return { success: !allFailed, result: `[Using Gmail: ${resolved?.email || "default"}] Batch trash: ${successCount} trashed, ${failures.length} failed${detail}.` };
+        const detail = failures.length ? ` (${failures.slice(0, 5).join(', ')}${failures.length > 5 ? '...' : ''})` : '';
+        return { success: successCount > 0, result: `Batch trash: ${successCount} trashed, ${failures.length} failed${detail}.` };
       }
 
       case 'list_email_ids': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const maxResults = Math.min((args.max_results as number) || 100, 500);
-        const query = encodeURIComponent(args.query as string);
-        let url = `/google-mail/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`;
-        if (args.page_token) url += `&pageToken=${args.page_token}`;
-        const data = await callMatonGateway(matonApiKey, url, connId) as { messages?: { id: string }[]; nextPageToken?: string; resultSizeEstimate?: number };
-        const msgs = data.messages || [];
-        if (!msgs.length) return { success: true, result: JSON.stringify({ ids: [], total: 0 }) };
-        return { success: true, result: JSON.stringify({ ids: msgs.map(m => m.id), nextPageToken: data.nextPageToken || null, total: data.resultSizeEstimate || msgs.length }) };
+        try {
+          const data = await callNativeEdge('google-gmail', 'list_messages', {
+            q: args.query, maxResults: Math.min((args.max_results as number) || 100, 500), pageToken: args.page_token,
+          });
+          const msgs = (data.messages as { id: string }[]) || [];
+          if (!msgs.length) return { success: true, result: JSON.stringify({ ids: [], total: 0 }) };
+          return { success: true, result: JSON.stringify({ ids: msgs.map(m => m.id), nextPageToken: data.nextPageToken || null, total: data.resultSizeEstimate || msgs.length }) };
+        } catch (e) { return { success: false, result: `Failed to list email IDs: ${(e as Error).message}` }; }
       }
 
       case 'label_email': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const modifyData: Record<string, string[]> = {};
-        if (args.add_labels) modifyData.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
-        if (args.remove_labels) modifyData.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
-        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', modifyData) as { id?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Label modification failed: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Labels updated on email ${args.message_id}.` };
+        try {
+          const params: Record<string, unknown> = { id: args.message_id };
+          if (args.add_labels) params.addLabelIds = (args.add_labels as string).split(',').map(l => l.trim());
+          if (args.remove_labels) params.removeLabelIds = (args.remove_labels as string).split(',').map(l => l.trim());
+          await callNativeEdge('google-gmail', 'modify_message', params);
+          return { success: true, result: `Labels updated on email ${args.message_id}.` };
+        } catch (e) { return { success: false, result: `Label modification failed: ${(e as Error).message}` }; }
       }
 
       case 'mark_email_read': {
-        const resolved = resolveConnection(connMap, 'google-mail', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: noConnError('google-mail', 'Gmail') };
-        const res = await callMatonGateway(matonApiKey, `/google-mail/gmail/v1/users/me/messages/${args.message_id}/modify`, connId, 'POST', { removeLabelIds: ['UNREAD'] }) as { id?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to mark as read: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `[Using Gmail: ${resolved?.email || "default"}] Email ${args.message_id} marked as read.` };
+        try {
+          await callNativeEdge('google-gmail', 'modify_message', { id: args.message_id, removeLabelIds: ['UNREAD'] });
+          return { success: true, result: `Email ${args.message_id} marked as read.` };
+        } catch (e) { return { success: false, result: `Failed to mark as read: ${(e as Error).message}` }; }
       }
 
+      // ============ Google Calendar ============
       case 'create_calendar_event': {
-        const resolved = resolveConnection(connMap, 'google-calendar', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Calendar is not connected.' };
-        const event: Record<string, unknown> = {
-          summary: args.summary,
-          start: { dateTime: args.start_time },
-          end: { dateTime: args.end_time },
-        };
-        if (args.description) event.description = args.description;
-        if (args.location) event.location = args.location;
-        if (args.attendees) {
-          event.attendees = (args.attendees as string).split(',').map(e => ({ email: e.trim() }));
-        }
-        const res = await callMatonGateway(matonApiKey, '/google-calendar/calendar/v3/calendars/primary/events', connId, 'POST', event) as { id?: string; htmlLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create event: ${res.error.message || JSON.stringify(res.error)}` };
-        return { success: true, result: `Calendar event created: "${args.summary}" from ${args.start_time} to ${args.end_time}${res.htmlLink ? ` - ${res.htmlLink}` : ''}` };
-      }
-
-      case 'send_slack_message': {
-        const connId = resolveConnection(connMap, 'slack')?.id;
-        if (!connId) return { success: false, result: 'Slack is not connected.' };
-        const res = await callMatonGateway(matonApiKey, '/slack/api/chat.postMessage', connId, 'POST', {
-          channel: args.channel,
-          text: args.text,
-        }) as { ok?: boolean; error?: string; ts?: string };
-        if (!res.ok) return { success: false, result: `Slack error: ${res.error || 'Unknown error'}` };
-        return { success: true, result: `Message sent to ${args.channel}: "${(args.text as string).substring(0, 100)}..."` };
-      }
-
-      case 'create_notion_page': {
-        const connId = resolveConnection(connMap, 'notion')?.id;
-        if (!connId) return { success: false, result: 'Notion is not connected.' };
-        const pageData: Record<string, unknown> = {
-          parent: args.parent_page_id
-            ? { page_id: args.parent_page_id }
-            : { type: 'workspace', workspace: true },
-          properties: { title: [{ text: { content: args.title } }] },
-          children: [
-            { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: args.content } }] } },
-          ],
-        };
-        const res = await callMatonGateway(matonApiKey, '/notion/v1/pages', connId, 'POST', pageData) as { id?: string; url?: string; error?: string };
-        if (res.error) return { success: false, result: `Notion error: ${res.error}` };
-        return { success: true, result: `Notion page created: "${args.title}"${res.url ? ` - ${res.url}` : ''}` };
-      }
-
-      case 'create_github_issue': {
-        const connId = resolveConnection(connMap, 'github')?.id;
-        if (!connId) return { success: false, result: 'GitHub is not connected.' };
-        const issueData: Record<string, unknown> = { title: args.title, body: args.body };
-        if (args.labels) issueData.labels = (args.labels as string).split(',').map(l => l.trim());
-        const res = await callMatonGateway(matonApiKey, `/github/repos/${args.owner}/${args.repo}/issues`, connId, 'POST', issueData) as { number?: number; html_url?: string; error?: string; message?: string };
-        if (res.message) return { success: false, result: `GitHub error: ${res.message}` };
-        return { success: true, result: `Issue #${res.number} created: "${args.title}" - ${res.html_url || ''}` };
-      }
-
-      case 'create_hubspot_contact': {
-        const connId = resolveConnection(connMap, 'hubspot')?.id;
-        if (!connId) return { success: false, result: 'HubSpot is not connected.' };
-        const props: Record<string, string> = { email: args.email as string, firstname: args.firstname as string, lastname: args.lastname as string };
-        if (args.phone) props.phone = args.phone as string;
-        if (args.company) props.company = args.company as string;
-        const res = await callMatonGateway(matonApiKey, '/hubspot/crm/v3/objects/contacts', connId, 'POST', { properties: props }) as { id?: string; error?: string; message?: string };
-        if (res.message) return { success: false, result: `HubSpot error: ${res.message}` };
-        return { success: true, result: `Contact created: ${args.firstname} ${args.lastname} (${args.email}) - ID: ${res.id}` };
-      }
-
-      case 'create_hubspot_deal': {
-        const connId = resolveConnection(connMap, 'hubspot')?.id;
-        if (!connId) return { success: false, result: 'HubSpot is not connected.' };
-        const props: Record<string, string> = { dealname: args.dealname as string, amount: args.amount as string };
-        if (args.dealstage) props.dealstage = args.dealstage as string;
-        if (args.pipeline) props.pipeline = args.pipeline as string;
-        const res = await callMatonGateway(matonApiKey, '/hubspot/crm/v3/objects/deals', connId, 'POST', { properties: props }) as { id?: string; message?: string };
-        if (res.message) return { success: false, result: `HubSpot error: ${res.message}` };
-        return { success: true, result: `Deal created: "${args.dealname}" ($${args.amount}) - ID: ${res.id}` };
-      }
-
-      case 'search_google_drive': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected.' };
-        const maxResults = (args.max_results as number) || 10;
-        const q = encodeURIComponent(`name contains '${args.query}' or fullText contains '${args.query}'`);
-        const data = await callMatonGateway(matonApiKey, `/google-drive/drive/v3/files?q=${q}&pageSize=${maxResults}&fields=files(id,name,mimeType,modifiedTime,webViewLink)`, connId) as { files?: { name: string; mimeType: string; modifiedTime: string; webViewLink?: string }[] };
-        const files = data.files || [];
-        if (!files.length) return { success: true, result: `No files found matching "${args.query}"` };
-        return { success: true, result: `Found ${files.length} files:\n${files.map(f => `- ${f.name} (${f.mimeType?.split('.').pop()}) - ${f.webViewLink || ''}`).join('\n')}` };
-      }
-
-      case 'create_trello_card': {
-        const connId = resolveConnection(connMap, 'trello')?.id;
-        if (!connId) return { success: false, result: 'Trello is not connected.' };
-        const cardData: Record<string, unknown> = { idList: args.list_id, name: args.name };
-        if (args.desc) cardData.desc = args.desc;
-        const res = await callMatonGateway(matonApiKey, '/trello/1/cards', connId, 'POST', cardData) as { id?: string; url?: string; error?: string };
-        if (res.error) return { success: false, result: `Trello error: ${res.error}` };
-        return { success: true, result: `Card created: "${args.name}" - ${res.url || ''}` };
-      }
-
-      case 'create_jira_issue': {
-        const connId = resolveConnection(connMap, 'jira')?.id;
-        if (!connId) return { success: false, result: 'Jira is not connected.' };
-        const issueData = {
-          fields: {
-            project: { key: args.project_key },
+        try {
+          const event: Record<string, unknown> = {
             summary: args.summary,
-            description: args.description || '',
-            issuetype: { name: args.issue_type || 'Task' },
-          },
-        };
-        const res = await callMatonGateway(matonApiKey, '/jira/rest/api/3/issue', connId, 'POST', issueData) as { key?: string; self?: string; errors?: unknown };
-        if (res.errors) return { success: false, result: `Jira error: ${JSON.stringify(res.errors)}` };
-        return { success: true, result: `Issue created: ${res.key} - "${args.summary}"` };
+            start: { dateTime: args.start_time },
+            end: { dateTime: args.end_time },
+          };
+          if (args.description) event.description = args.description;
+          if (args.location) event.location = args.location;
+          if (args.attendees) {
+            event.attendees = (args.attendees as string).split(',').map(e => ({ email: e.trim() }));
+          }
+          const data = await callNativeEdge('google-calendar', 'create_event', { calendarId: 'primary', event });
+          const created = data.event as { id?: string; htmlLink?: string } | undefined;
+          return { success: true, result: `Calendar event created: "${args.summary}" from ${args.start_time} to ${args.end_time}${created?.htmlLink ? ` - ${created.htmlLink}` : ''}` };
+        } catch (e) { return { success: false, result: `Failed to create event: ${(e as Error).message}` }; }
+      }
+
+      // ============ Google Drive ============
+      case 'search_google_drive': {
+        try {
+          const data = await callNativeEdge('google-drive', 'search_files', { name: args.query });
+          const files = (data.files as { id: string; name: string; mimeType: string; webViewLink?: string }[]) || [];
+          if (!files.length) return { success: true, result: `No files found matching "${args.query}"` };
+          const max = (args.max_results as number) || 10;
+          const shown = files.slice(0, max);
+          return { success: true, result: `Found ${files.length} files:\n${shown.map(f => `- ${f.name} (${f.mimeType?.split('.').pop()}) - ${f.webViewLink || ''}`).join('\n')}` };
+        } catch (e) { return { success: false, result: `Drive search failed: ${(e as Error).message}` }; }
       }
 
       // ============ GoHighLevel tools ============
@@ -3231,72 +3003,66 @@ async function executeToolCall(
         return { success: true, result: `Workflow ${args.workflow_id} triggered for contact ${args.contact_id}.` };
       }
 
-      // ============ Google Docs tools ============
+      // ============ Google Docs ============
       case 'create_google_doc': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create doc: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/document/d/${res.id}/edit`;
-        let result = `Google Doc created: "${args.title}" — ${link}`;
-        if (args.content) {
-          try {
-            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage, aliasMap)?.id || connId;
-            await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
-              requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
-            });
-            result += '\nContent added successfully.';
-          } catch { result += '\nDoc created but could not insert content (Docs API may not be connected).'; }
-        }
-        return { success: true, result };
+        try {
+          const data = await callNativeEdge('google-docs', 'create_document', { title: args.title });
+          const doc = data.document as { documentId?: string } | undefined;
+          const docId = doc?.documentId;
+          if (!docId) return { success: false, result: 'Doc created but no ID returned.' };
+          const link = `https://docs.google.com/document/d/${docId}/edit`;
+          let result = `Google Doc created: "${args.title}" — ${link}`;
+          if (args.content) {
+            try {
+              await callNativeEdge('google-docs', 'insert_text', { documentId: docId, text: args.content as string, index: 1 });
+              result += '\nContent added successfully.';
+            } catch (e) { result += `\nDoc created but could not insert content: ${(e as Error).message}`; }
+          }
+          return { success: true, result };
+        } catch (e) { return { success: false, result: `Failed to create doc: ${(e as Error).message}` }; }
       }
 
-      // ============ Google Sheets tools ============
+      // ============ Google Sheets ============
       case 'create_google_sheet': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create sheet: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/spreadsheets/d/${res.id}/edit`;
-        return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'create_spreadsheet', { title: args.title });
+          const sheet = data.spreadsheet as { spreadsheetId?: string; spreadsheetUrl?: string } | undefined;
+          const link = sheet?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheet?.spreadsheetId}/edit`;
+          return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
+        } catch (e) { return { success: false, result: `Failed to create sheet: ${(e as Error).message}` }; }
       }
 
       case 'read_sheet_data': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
-        const range = encodeURIComponent((args.range as string) || 'Sheet1');
-        const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
-        if (data.error) return { success: false, result: `Failed to read sheet: ${data.error.message}` };
-        const rows = data.values || [];
-        if (!rows.length) return { success: true, result: 'Sheet is empty or range has no data.' };
-        return { success: true, result: `Read ${rows.length} rows:\n${rows.slice(0, 50).map(r => r.join(' | ')).join('\n')}${rows.length > 50 ? `\n... and ${rows.length - 50} more rows` : ''}` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'read_range', {
+            spreadsheetId: args.spreadsheet_id, range: (args.range as string) || 'Sheet1',
+          });
+          const rows = (data.values as string[][]) || [];
+          if (!rows.length) return { success: true, result: 'Sheet is empty or range has no data.' };
+          return { success: true, result: `Read ${rows.length} rows:\n${rows.slice(0, 50).map(r => r.join(' | ')).join('\n')}${rows.length > 50 ? `\n... and ${rows.length - 50} more rows` : ''}` };
+        } catch (e) { return { success: false, result: `Failed to read sheet: ${(e as Error).message}` }; }
       }
 
       case 'append_sheet_rows': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
-        const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
         try { values = JSON.parse(args.values as string); } catch { return { success: false, result: 'Invalid values format. Must be a JSON array of arrays.' }; }
-        const res = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}:append?valueInputOption=USER_ENTERED`, connId, 'POST', { values }) as { updates?: { updatedRows?: number }; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to append: ${res.error.message}` };
-        return { success: true, result: `Appended ${res.updates?.updatedRows || values.length} rows to the spreadsheet.` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'append_rows', {
+            spreadsheetId: args.spreadsheet_id, range: (args.range as string) || 'Sheet1', values,
+          });
+          const updates = data.updates as { updatedRows?: number } | undefined;
+          return { success: true, result: `Appended ${updates?.updatedRows || values.length} rows to the spreadsheet.` };
+        } catch (e) { return { success: false, result: `Failed to append: ${(e as Error).message}` }; }
       }
 
-      // ============ Google Slides tools ============
+      // ============ Google Slides ============
       case 'create_google_presentation': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create presentation: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/presentation/d/${res.id}/edit`;
-        return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
+        try {
+          const data = await callNativeEdge('google-slides', 'create_presentation', { title: args.title });
+          const pres = data as { presentationId?: string };
+          const link = `https://docs.google.com/presentation/d/${pres.presentationId}/edit`;
+          return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
+        } catch (e) { return { success: false, result: `Failed to create presentation: ${(e as Error).message}` }; }
       }
 
       // ============ ClickUp tools (via dedicated edge function) ============
