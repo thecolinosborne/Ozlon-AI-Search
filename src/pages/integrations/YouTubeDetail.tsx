@@ -53,6 +53,7 @@ export default function YouTubeDetail() {
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
   const [uploadVideoUrl, setUploadVideoUrl] = useState("");
+  const [driveConverted, setDriveConverted] = useState(false);
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -564,7 +565,15 @@ export default function YouTubeDetail() {
             <Upload className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
             <h3 className="text-sm font-medium text-foreground">Upload Video</h3>
           </div>
-          <input type="text" value={uploadVideoUrl} onChange={(e) => setUploadVideoUrl(e.target.value)} placeholder="Public video URL (https://...mp4)" className={inputClass} />
+          <input type="text" value={uploadVideoUrl} onChange={(e) => {
+            const raw = e.target.value;
+            const normalized = normalizeVideoUrl(raw);
+            setUploadVideoUrl(normalized);
+            setDriveConverted(normalized !== raw);
+          }} placeholder="Public video URL or Google Drive link" className={inputClass} />
+          {driveConverted && (
+            <p className="text-[11px] text-muted-foreground">Google Drive link auto-converted to direct download URL</p>
+          )}
           <input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Video title" className={inputClass} />
           <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} placeholder="Video description" className={cn(inputClass, "min-h-[60px]")} />
           <select value={uploadPrivacy} onChange={(e) => setUploadPrivacy(e.target.value)} className={inputClass}>
