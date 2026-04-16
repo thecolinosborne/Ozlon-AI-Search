@@ -49,6 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ONBOARDED_KEY);
   }, []);
 
+  const startAuthenticatedSession = useCallback((nextSession: Session, isNewSignup: boolean) => {
+    setSession(nextSession);
+    setUser(nextSession.user);
+    setAuthLoading(false);
+    setProfileLoaded(false);
+
+    void loadUserProfile(nextSession.user.id, isNewSignup);
+  }, [loadUserProfile]);
+
   const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId);
     try {
@@ -157,31 +166,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Failsafe: if authLoading hasn't resolved in AUTH_INIT_TIMEOUT, force it
     const failsafeTimer = setTimeout(() => {
-      if (mounted && authLoading) {
+      if (mounted) {
         console.warn("Auth init failsafe triggered — forcing authLoading=false");
         setAuthLoading(false);
       }
     }, AUTH_INIT_TIMEOUT);
 
     // 1. Register listener first so we never miss an event
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!mounted) return;
       console.log("Auth state changed:", event);
 
       if (event === "SIGNED_IN" && newSession?.user) {
-        setSession(newSession);
-        setUser(newSession.user);
-        setAuthLoading(false);
-
         const createdAt = new Date(newSession.user.created_at);
         const now = new Date();
         const isNewSignup = (now.getTime() - createdAt.getTime()) < 60000;
-        await loadUserProfile(newSession.user.id, isNewSignup);
+        startAuthenticatedSession(newSession, isNewSignup);
       } else if (event === "SIGNED_OUT") {
         clearAuthState();
-      } else if (event === "TOKEN_REFRESHED" && newSession?.user) {
+      } else if ((event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && newSession?.user) {
         setSession(newSession);
         setUser(newSession.user);
+        setAuthLoading(false);
+      } else if (event === "INITIAL_SESSION" && !newSession) {
+        setAuthLoading(false);
       }
     });
 
@@ -194,11 +202,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (currentSession?.user) {
           console.log("Found existing session");
-          setSession(currentSession);
-          setUser(currentSession.user);
-          await loadUserProfile(currentSession.user.id, false);
+          startAuthenticatedSession(currentSession, false);
         } else {
           console.log("No existing session");
+          clearAuthState();
         }
       } catch (error) {
         handleError(error, "Error initializing auth", { silent: true });
@@ -214,7 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(failsafeTimer);
       subscription.unsubscribe();
     };
-  }, [loadUserProfile, clearAuthState]);
+  }, [clearAuthState, startAuthenticatedSession]);
 
   return (
     <AuthContext.Provider
