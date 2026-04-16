@@ -703,7 +703,7 @@ interface ToolDef {
   };
 }
 
-const MATON_ACTION_TOOLS: ToolDef[] = [
+const ACTION_TOOLS: ToolDef[] = [
   // Gmail actions
   {
     type: 'function',
@@ -2175,7 +2175,6 @@ async function callNativeEdge(
 async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  _matonApiKey: string,
   _connMap: MultiConnMap,
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
@@ -3202,30 +3201,31 @@ async function executeToolCall(
         return { success: true, result: `Business: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
 
-      // ============ GSC / SEO Intelligence tool handlers ============
+      // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
-        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
-        const data = await callMatonGateway(matonApiKey, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
-        const sites = data.siteEntry || [];
-        if (!sites.length) return { success: true, result: 'No sites found in Google Search Console.' };
-        return { success: true, result: `GSC Properties (${sites.length}):\n${sites.map(s => `- ${s.siteUrl} (${s.permissionLevel || 'unknown permission'})`).join('\n')}` };
+        try {
+          const data = await callNativeEdge('google-search-console', 'list_sites', {}) as { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
+          const sites = data.siteEntry || [];
+          if (!sites.length) return { success: true, result: 'No sites found in Google Search Console.' };
+          return { success: true, result: `GSC Properties (${sites.length}):\n${sites.map(s => `- ${s.siteUrl} (${s.permissionLevel || 'unknown permission'})`).join('\n')}` };
+        } catch (e) { return { success: false, result: `GSC error: ${(e as Error).message}` }; }
       }
 
       case 'gsc_query': {
-        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
         const dims = (args.dimensions as string || 'query').split(',').map(d => d.trim());
         const rowLimit = Math.min((args.row_limit as number) || 100, 1000);
-        const body: Record<string, unknown> = {
+        const request: Record<string, unknown> = {
           startDate: args.start_date,
           endDate: args.end_date,
           dimensions: dims,
           rowLimit,
         };
-        if (args.aggregation_type) body.aggregationType = args.aggregation_type;
-        if (args.filters) { try { body.dimensionFilterGroups = [{ filters: JSON.parse(args.filters as string) }]; } catch { /* ignore bad filter JSON */ } }
-        const data = await callMatonGateway(matonApiKey, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(args.site_url as string)}/searchAnalytics/query`, connId, 'POST', body) as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        if (args.aggregation_type) request.aggregationType = args.aggregation_type;
+        if (args.filters) { try { request.dimensionFilterGroups = [{ filters: JSON.parse(args.filters as string) }]; } catch { /* ignore bad filter JSON */ } }
+        let data: { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        try {
+          data = await callNativeEdge('google-search-console', 'search_analytics', { siteUrl: args.site_url, request }) as typeof data;
+        } catch (e) { return { success: false, result: `GSC query error: ${(e as Error).message}` }; }
         const rows = data.rows || [];
         if (!rows.length) return { success: true, result: `No data found for ${args.site_url} between ${args.start_date} and ${args.end_date} with dimensions [${dims.join(', ')}].` };
         const totals = rows.reduce((a, r) => ({ clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions }), { clicks: 0, impressions: 0 });
@@ -3988,7 +3988,7 @@ You act as:
 IMPORTANT TOOL USAGE RULES:
 1. When the user asks you to DO something (send, create, schedule, post, etc.), USE THE APPROPRIATE TOOL.
 2. Always confirm the action with the user BEFORE executing destructive or important actions.
-3. If a service is not connected, tell the user to connect it in Settings > Maton AI Integrations.
+3. If a service is not connected, tell the user to connect it in the Integrations page.
 4. For drafts vs sends: default to DRAFTS for emails unless the user explicitly says "send".
 5. For email deletion: ALWAYS use trash (recoverable). Never use permanent HTTP DELETE on messages — it will fail with a permissions error.
 
@@ -4143,11 +4143,6 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'label_email': 'google-mail',
     'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
-    'send_slack_message': 'slack',
-    'create_notion_page': 'notion',
-    'create_github_issue': 'github',
-    'create_hubspot_contact': 'hubspot',
-    'create_hubspot_deal': 'hubspot',
     'search_google_drive': 'google-drive',
     'create_google_doc': 'google-drive',
     'create_google_sheet': 'google-drive',
@@ -4189,8 +4184,6 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'delete_clickup_checklist': '_always_',
     'delete_clickup_checklist_item': '_always_',
     'get_clickup_list_statuses': '_always_',
-    'create_trello_card': 'trello',
-    'create_jira_issue': 'jira',
     // GHL tools
     'ghl_list_contacts': 'ghl',
     'ghl_create_contact': 'ghl',
@@ -4268,7 +4261,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'upload_youtube_video': '_always_',
   };
 
-  return MATON_ACTION_TOOLS.filter(tool => {
+  return ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
@@ -4301,9 +4294,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'send_email': 'Sending email',
   'create_email_draft': 'Creating email draft',
   'create_calendar_event': 'Creating calendar event',
-  'send_slack_message': 'Sending Slack message',
-  'create_notion_page': 'Creating Notion page',
-  'create_github_issue': 'Creating GitHub issue',
   'search_google_drive': 'Searching Google Drive',
   'create_google_doc': 'Creating Google Doc',
   'create_google_sheet': 'Creating Google Sheet',
@@ -4328,10 +4318,7 @@ function inferTaskTitle(toolNames: string[]): string {
   if (toolNames.some(n => n.includes('trash') || n.includes('label') || n === 'list_emails')) return 'Managing emails';
   if (toolNames.some(n => n.includes('email') || n.includes('mail'))) return 'Handling email';
   if (toolNames.some(n => n.includes('calendar'))) return 'Managing calendar';
-  if (toolNames.some(n => n.includes('slack'))) return 'Messaging on Slack';
   if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
-  if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
-  if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
   if (toolNames.some(n => n.includes('youtube'))) return 'Working with YouTube';
   if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
   if (toolNames.some(n => n.includes('event'))) return 'Finding events';
@@ -4343,7 +4330,6 @@ async function runToolLoop(
   apiKey: string,
   openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
   tools: ToolDef[],
-  matonApiKey: string,
   connMap: MultiConnMap,
   maxIterations = 10,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
@@ -4413,7 +4399,7 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage, aliasMap);
+          const result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
