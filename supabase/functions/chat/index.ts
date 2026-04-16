@@ -4797,6 +4797,7 @@ function inferTaskTitle(toolNames: string[]): string {
   if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
   if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
   if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
+  if (toolNames.some(n => n.includes('youtube'))) return 'Working with YouTube';
   if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
   if (toolNames.some(n => n.includes('event'))) return 'Finding events';
   return 'Executing task';
