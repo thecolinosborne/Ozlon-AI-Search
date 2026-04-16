@@ -45,6 +45,7 @@ export default function YouTubeDetail() {
   const [uploading, setUploading] = useState(false);
 
   const hasLoadedOnce = useRef(false);
+  const oauthHandledRef = useRef(false);
 
   const withTimeout = <T,>(promise: Promise<T>, ms = 8000): Promise<T> =>
     Promise.race([
@@ -54,6 +55,11 @@ export default function YouTubeDetail() {
 
   const callYouTube = async (action: string, params: Record<string, unknown> = {}) => {
     const { data, error } = await supabase.functions.invoke("youtube", {
+      headers: session?.access_token
+        ? {
+            Authorization: `Bearer ${session.access_token}`,
+          }
+        : undefined,
       body: { action, params },
     });
     if (error) throw new Error(error.message);
@@ -61,9 +67,10 @@ export default function YouTubeDetail() {
     return data;
   };
 
-  const loadConnection = useCallback(async () => {
-    setLoadingConnection(true);
-    try {
+  const loadConnectionWithRetry = useCallback(async (attempts = 4) => {
+    let lastOauthStatus: OAuthDetail = "disconnected";
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const result = await withTimeout(callYouTube("get_connection"));
       hasLoadedOnce.current = true;
 
@@ -77,9 +84,27 @@ export default function YouTubeDetail() {
         setApiKeyConfigured("youtube", conn.apiKeyConfigured);
       }
 
-      const oStatus = (result.oauthStatus as OAuthDetail) || "disconnected";
-      setOauthDetail(oStatus);
-      setOauthConnected(oStatus === "connected" || oStatus === "refreshed");
+      const oauthStatus = (result.oauthStatus as OAuthDetail) || "disconnected";
+      lastOauthStatus = oauthStatus;
+      setOauthDetail(oauthStatus);
+      setOauthConnected(oauthStatus === "connected" || oauthStatus === "refreshed");
+
+      if (oauthStatus === "connected" || oauthStatus === "refreshed") {
+        return oauthStatus;
+      }
+
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+    }
+
+    return lastOauthStatus;
+  }, [session?.access_token, setApiKeyConfigured, setStatus, updateSettings]);
+
+  const loadConnection = useCallback(async () => {
+    setLoadingConnection(true);
+    try {
+      await loadConnectionWithRetry(1);
     } catch {
       if (!hasLoadedOnce.current) {
         // First load failed — show disconnected
@@ -88,7 +113,7 @@ export default function YouTubeDetail() {
       setLoadingConnection(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadConnectionWithRetry]);
 
   const handleOAuthCallback = useCallback(async (code: string) => {
     try {
@@ -96,14 +121,18 @@ export default function YouTubeDetail() {
         code,
         redirectUri: `${window.location.origin}/integrations/youtube`,
       });
-      setOauthConnected(true);
-      setOauthDetail("connected");
-      toast.success("YouTube OAuth connected — uploads enabled!");
+
+      const oauthStatus = await loadConnectionWithRetry();
+      if (oauthStatus === "connected" || oauthStatus === "refreshed") {
+        toast.success("YouTube OAuth connected — uploads enabled!");
+        return;
+      }
+
+      throw new Error("OAuth completed but the connection status did not persist");
     } catch (e) {
       toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadConnectionWithRetry, session?.access_token]);
 
   useEffect(() => {
     if (authLoading || !session) {
@@ -113,22 +142,33 @@ export default function YouTubeDetail() {
 
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
-    if (code) {
+    const oauthError = url.searchParams.get("error");
+    const oauthErrorDescription = url.searchParams.get("error_description");
+
+    if (oauthError) {
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_description");
+      url.searchParams.delete("state");
+      window.history.replaceState({}, "", url.toString());
+      toast.error(`OAuth failed: ${oauthErrorDescription || oauthError}`);
+      loadConnection();
+      return;
+    }
+
+    if (code && !oauthHandledRef.current) {
+      oauthHandledRef.current = true;
       url.searchParams.delete("code");
       url.searchParams.delete("state");
       url.searchParams.delete("scope");
       window.history.replaceState({}, "", url.toString());
 
-      // Process OAuth callback FIRST, then load connection state
       (async () => {
         await handleOAuthCallback(code);
-        await loadConnection();
       })();
     } else {
       loadConnection();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, session]);
+  }, [authLoading, handleOAuthCallback, loadConnection, session]);
 
   const handleSaveApiKey = async (apiKey: string) => {
     setSavingKey(true);
