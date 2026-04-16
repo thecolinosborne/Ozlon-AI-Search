@@ -703,7 +703,7 @@ interface ToolDef {
   };
 }
 
-const MATON_ACTION_TOOLS: ToolDef[] = [
+const ACTION_TOOLS: ToolDef[] = [
   // Gmail actions
   {
     type: 'function',
@@ -2175,7 +2175,6 @@ async function callNativeEdge(
 async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  _matonApiKey: string,
   _connMap: MultiConnMap,
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
@@ -3202,30 +3201,31 @@ async function executeToolCall(
         return { success: true, result: `Business: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
 
-      // ============ GSC / SEO Intelligence tool handlers ============
+      // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
-        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
-        const data = await callMatonGateway(matonApiKey, '/google-search-console/webmasters/v3/sites', connId) as { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
-        const sites = data.siteEntry || [];
-        if (!sites.length) return { success: true, result: 'No sites found in Google Search Console.' };
-        return { success: true, result: `GSC Properties (${sites.length}):\n${sites.map(s => `- ${s.siteUrl} (${s.permissionLevel || 'unknown permission'})`).join('\n')}` };
+        try {
+          const data = await callNativeEdge('google-search-console', 'list_sites', {}) as { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
+          const sites = data.siteEntry || [];
+          if (!sites.length) return { success: true, result: 'No sites found in Google Search Console.' };
+          return { success: true, result: `GSC Properties (${sites.length}):\n${sites.map(s => `- ${s.siteUrl} (${s.permissionLevel || 'unknown permission'})`).join('\n')}` };
+        } catch (e) { return { success: false, result: `GSC error: ${(e as Error).message}` }; }
       }
 
       case 'gsc_query': {
-        const connId = resolveConnection(connMap, 'google-search-console', undefined, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Search Console is not connected.' };
         const dims = (args.dimensions as string || 'query').split(',').map(d => d.trim());
         const rowLimit = Math.min((args.row_limit as number) || 100, 1000);
-        const body: Record<string, unknown> = {
+        const request: Record<string, unknown> = {
           startDate: args.start_date,
           endDate: args.end_date,
           dimensions: dims,
           rowLimit,
         };
-        if (args.aggregation_type) body.aggregationType = args.aggregation_type;
-        if (args.filters) { try { body.dimensionFilterGroups = [{ filters: JSON.parse(args.filters as string) }]; } catch { /* ignore bad filter JSON */ } }
-        const data = await callMatonGateway(matonApiKey, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(args.site_url as string)}/searchAnalytics/query`, connId, 'POST', body) as { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        if (args.aggregation_type) request.aggregationType = args.aggregation_type;
+        if (args.filters) { try { request.dimensionFilterGroups = [{ filters: JSON.parse(args.filters as string) }]; } catch { /* ignore bad filter JSON */ } }
+        let data: { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] };
+        try {
+          data = await callNativeEdge('google-search-console', 'search_analytics', { siteUrl: args.site_url, request }) as typeof data;
+        } catch (e) { return { success: false, result: `GSC query error: ${(e as Error).message}` }; }
         const rows = data.rows || [];
         if (!rows.length) return { success: true, result: `No data found for ${args.site_url} between ${args.start_date} and ${args.end_date} with dimensions [${dims.join(', ')}].` };
         const totals = rows.reduce((a, r) => ({ clicks: a.clicks + r.clicks, impressions: a.impressions + r.impressions }), { clicks: 0, impressions: 0 });
@@ -3988,7 +3988,7 @@ You act as:
 IMPORTANT TOOL USAGE RULES:
 1. When the user asks you to DO something (send, create, schedule, post, etc.), USE THE APPROPRIATE TOOL.
 2. Always confirm the action with the user BEFORE executing destructive or important actions.
-3. If a service is not connected, tell the user to connect it in Settings > Maton AI Integrations.
+3. If a service is not connected, tell the user to connect it in the Integrations page.
 4. For drafts vs sends: default to DRAFTS for emails unless the user explicitly says "send".
 5. For email deletion: ALWAYS use trash (recoverable). Never use permanent HTTP DELETE on messages — it will fail with a permissions error.
 
@@ -4143,11 +4143,6 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'label_email': 'google-mail',
     'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
-    'send_slack_message': 'slack',
-    'create_notion_page': 'notion',
-    'create_github_issue': 'github',
-    'create_hubspot_contact': 'hubspot',
-    'create_hubspot_deal': 'hubspot',
     'search_google_drive': 'google-drive',
     'create_google_doc': 'google-drive',
     'create_google_sheet': 'google-drive',
@@ -4189,8 +4184,6 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'delete_clickup_checklist': '_always_',
     'delete_clickup_checklist_item': '_always_',
     'get_clickup_list_statuses': '_always_',
-    'create_trello_card': 'trello',
-    'create_jira_issue': 'jira',
     // GHL tools
     'ghl_list_contacts': 'ghl',
     'ghl_create_contact': 'ghl',
@@ -4268,7 +4261,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'upload_youtube_video': '_always_',
   };
 
-  return MATON_ACTION_TOOLS.filter(tool => {
+  return ACTION_TOOLS.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
@@ -4301,9 +4294,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'send_email': 'Sending email',
   'create_email_draft': 'Creating email draft',
   'create_calendar_event': 'Creating calendar event',
-  'send_slack_message': 'Sending Slack message',
-  'create_notion_page': 'Creating Notion page',
-  'create_github_issue': 'Creating GitHub issue',
   'search_google_drive': 'Searching Google Drive',
   'create_google_doc': 'Creating Google Doc',
   'create_google_sheet': 'Creating Google Sheet',
@@ -4328,10 +4318,7 @@ function inferTaskTitle(toolNames: string[]): string {
   if (toolNames.some(n => n.includes('trash') || n.includes('label') || n === 'list_emails')) return 'Managing emails';
   if (toolNames.some(n => n.includes('email') || n.includes('mail'))) return 'Handling email';
   if (toolNames.some(n => n.includes('calendar'))) return 'Managing calendar';
-  if (toolNames.some(n => n.includes('slack'))) return 'Messaging on Slack';
   if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
-  if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
-  if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
   if (toolNames.some(n => n.includes('youtube'))) return 'Working with YouTube';
   if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
   if (toolNames.some(n => n.includes('event'))) return 'Finding events';
@@ -4343,7 +4330,6 @@ async function runToolLoop(
   apiKey: string,
   openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
   tools: ToolDef[],
-  matonApiKey: string,
   connMap: MultiConnMap,
   maxIterations = 10,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
@@ -4413,7 +4399,7 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, matonApiKey, connMap, userMessage, aliasMap);
+          const result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
@@ -4797,13 +4783,11 @@ serve(async (req) => {
       }
     }
 
-    // Get Maton connections for data injection AND tool availability
-    // Per-user credential resolution: look up from integration_connections first
-    let MATON_API_KEY: string | undefined;
+    // Native connection discovery + per-user GHL credential resolution
     let GHL_API_KEY_RESOLVED: string | undefined;
     let GHL_LOCATION_ID_RESOLVED: string | undefined;
 
-    // Resolve user ID early for credential lookup
+    // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
     let credUserId: string | null = null;
     if (authHeaderForCreds) {
@@ -4826,129 +4810,61 @@ serve(async (req) => {
           .select('provider, metadata')
           .eq('user_id', credUserId)
           .eq('status', 'connected')
-          .in('provider', ['maton', 'gohighlevel']);
+          .eq('provider', 'gohighlevel');
         if (conns) {
           for (const c of conns) {
             const meta = c.metadata as Record<string, string> | null;
-            if (c.provider === 'maton' && meta?.api_key) MATON_API_KEY = meta.api_key;
-            if (c.provider === 'gohighlevel' && meta?.api_key) {
+            if (meta?.api_key) {
               GHL_API_KEY_RESOLVED = meta.api_key;
               GHL_LOCATION_ID_RESOLVED = meta.location_id;
             }
           }
         }
-      } catch (e) { console.error('Per-user credential lookup failed:', e); }
+      } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
-    // Fallback to env vars if no per-user credentials found
-    if (!MATON_API_KEY) MATON_API_KEY = Deno.env.get('MATON_API_KEY') || undefined;
+    // Fallback to env vars for GHL
     if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
     if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
 
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
-    let aliasMap: AliasEntry[] = [];
+    const aliasMap: AliasEntry[] = [];
 
-    if (MATON_API_KEY) {
+    if (credUserId) {
       try {
-        // Get connections and build multi-account map
-        const connections = await getMatonConnections(MATON_API_KEY);
-        const builtMap = buildMultiConnMap(connections);
+        // Discover native connections (Google OAuth, ClickUp, YouTube, etc.)
+        const nativeConns = await getNativeConnections(credUserId);
+        const builtMap = buildMultiConnMap(nativeConns);
         for (const [app, entries] of builtMap) connMap.set(app, entries);
-        console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
-
-        // Build dynamic alias map from all connections
-        aliasMap = buildDynamicAliasMap(connMap);
-        console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
+        console.log(`Native connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
-        console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
+        console.log(`Available action tools: ${availableTools.length}`);
 
-        // Add connected services info to system prompt with account details
+        // Add connected services info to system prompt
         if (connMap.size > 0) {
           const connectedServices = Array.from(connMap.entries()).map(([app, entries]) => {
             const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-            if (entries.length > 1) {
-              const accounts = entries.map(e => e.email || e.id).join(', ');
-              return `- ${label} (${entries.length} accounts: ${accounts})`;
-            }
             const email = entries[0]?.email;
             return `- ${label}${email ? ` (${email})` : ''}`;
           }).join('\n');
           systemPrompt += `\n\n===========================================================
 CONNECTED SERVICES (you can read data and take actions on these)
 ===========================================================\n${connectedServices}`;
-
-          // Add multi-account instruction if any service has multiple accounts
-          const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
-          if (multiAccountServices.length > 0) {
-            // Build dynamic examples from actual connected accounts
-            const dynamicExamples: string[] = [];
-            const identityList: string[] = [];
-            for (const [app, entries] of multiAccountServices) {
-              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-              for (const e of entries) {
-                if (!e.email) continue;
-                const email = e.email.toLowerCase();
-                const domain = email.split('@')[1]?.split('.')[0] || '';
-                const fullDomain = email.split('@')[1] || '';
-                dynamicExamples.push(`   - "${email}" → account: "${email}"`);
-                dynamicExamples.push(`   - "${email} ${label.toLowerCase()}" → account: "${email}"`);
-                if (domain.length >= 3) {
-                  dynamicExamples.push(`   - "my ${domain} email" → account: "${email}" (domain alias)`);
-                  dynamicExamples.push(`   - "${domain} inbox" → account: "${email}"`);
-                }
-                identityList.push(`  * ${email} (aliases: "${domain}", "${fullDomain}")`);
-              }
-            }
-
-            systemPrompt += `\n\n===========================================================
-CONTEXT-SENSITIVE ACCOUNT RESOLUTION (CRITICAL)
-===========================================================
-CONNECTED IDENTITIES:
-${identityList.join('\n')}
-
-RESOLUTION RULES — follow this priority order:
-1. If the user explicitly mentions an email, brand, domain, or workspace name → use that account.
-2. If the user mentions contextual keywords that imply a specific account (e.g. a business name that matches a domain) → use that account.
-3. Scan the conversation for context clues before defaulting. Use the most relevant account, not the most convenient.
-4. If genuinely ambiguous and it would materially affect the outcome → ask which account to use.
-5. NEVER silently default to one account when multiple exist and the user has given any signal.
-
-When you identify the account, pass the EXACT email address in the "account" parameter of EVERY tool call.
-
-DYNAMIC EXAMPLES (auto-generated from connected accounts):
-${dynamicExamples.join('\n')}
-
-BEHAVIOR:
-- Do NOT automatically prioritize whichever account is easiest to access or appears first.
-- Do NOT assume one identity is always primary.
-- When a connected account is mentioned or implied, resolve through it first, then validate, then respond.
-- Every tool result will confirm which account was used — verify it matches the user's intent.
-\n`;
-            for (const [app, entries] of multiAccountServices) {
-              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-              systemPrompt += `\n${label} accounts:\n`;
-              for (const e of entries) {
-                systemPrompt += `- ${e.email || 'unknown'} (connection: ${e.id.substring(0, 8)})\n`;
-              }
-            }
-          }
         }
 
-        // Inject read data for detected intents (with alias map for smart resolution)
-        const matonInjection = await injectMatonData(
+        // Inject read data for detected intents via native edges
+        const nativeInjection = await injectNativeData(
           messages,
-          MATON_API_KEY,
           connMap,
-          aliasMap,
           credUserId,
           'auto',
         );
-        if (matonInjection) systemPrompt += matonInjection;
+        if (nativeInjection) systemPrompt += nativeInjection;
       } catch (e) {
-        console.error('Error in Maton setup:', e);
+        console.error('Error in native setup:', e);
       }
     }
 
@@ -5123,7 +5039,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
-    if ((isActionRequest || enableTools) && availableTools.length > 0 && MATON_API_KEY) {
+    if ((isActionRequest || enableTools) && availableTools.length > 0) {
       console.log('Using tool loop (non-streaming) for action request');
 
       try {
@@ -5141,7 +5057,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
             }
 
             const result = await runToolLoop(
-              modelConfig, apiKey, openAIMessages, availableTools, MATON_API_KEY, connMap, 10,
+              modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
               async (event) => {
                 try {
                   await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
