@@ -21,6 +21,8 @@ interface SavedConnection {
 
 type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "expired_no_refresh" | "disconnected" | "unknown";
 
+const YOUTUBE_PENDING_OAUTH_CODE_KEY = "youtube_pending_oauth_code";
+
 export default function YouTubeDetail() {
   const { session, authLoading } = useAuth();
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
@@ -43,9 +45,11 @@ export default function YouTubeDetail() {
   const [uploadVideoUrl, setUploadVideoUrl] = useState("");
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const hasLoadedOnce = useRef(false);
   const oauthHandledRef = useRef(false);
+  const autoSyncAttemptedRef = useRef(false);
 
   const withTimeout = <T,>(promise: Promise<T>, ms = 8000): Promise<T> =>
     Promise.race([
@@ -115,6 +119,52 @@ export default function YouTubeDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadConnectionWithRetry]);
 
+  const syncYouTubeData = useCallback(async (
+    options?: { connectionId?: string | null; channelId?: string | null; silent?: boolean }
+  ) => {
+    const nextConnectionId = options?.connectionId || savedConn?.id || settings.connectionId;
+    const nextChannelId = (options?.channelId || savedConn?.channelId || channelId || "").trim();
+
+    if (!nextConnectionId) {
+      if (!options?.silent) toast.error("Connect the YouTube Data API first");
+      return false;
+    }
+
+    if (!nextChannelId) {
+      if (!options?.silent) toast.error("Add your YouTube channel ID first");
+      return false;
+    }
+
+    setSyncing(true);
+    try {
+      await callYouTube("sync_channels", {
+        connectionId: nextConnectionId,
+        channelId: nextChannelId,
+      });
+      await callYouTube("sync_videos", {
+        connectionId: nextConnectionId,
+        channelId: nextChannelId,
+        maxResults: 10,
+      });
+
+      const now = new Date().toISOString();
+      setLastSync("youtube", now);
+      setSavedConn((prev) => prev ? { ...prev, lastSyncAt: now, channelId: nextChannelId } : prev);
+
+      if (!options?.silent) {
+        toast.success("YouTube data synced");
+      }
+      return true;
+    } catch (e) {
+      if (!options?.silent) {
+        toast.error(`Sync failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+      }
+      return false;
+    } finally {
+      setSyncing(false);
+    }
+  }, [callYouTube, channelId, savedConn, setLastSync, settings.connectionId]);
+
   const handleOAuthCallback = useCallback(async (code: string) => {
     try {
       await callYouTube("oauth_callback", {
@@ -135,40 +185,77 @@ export default function YouTubeDetail() {
   }, [loadConnectionWithRetry, session?.access_token]);
 
   useEffect(() => {
-    if (authLoading || !session) {
-      setLoadingConnection(false);
-      return;
-    }
-
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
     const oauthError = url.searchParams.get("error");
     const oauthErrorDescription = url.searchParams.get("error_description");
 
+    if (code) {
+      sessionStorage.setItem(YOUTUBE_PENDING_OAUTH_CODE_KEY, code);
+    }
+
     if (oauthError) {
+      sessionStorage.removeItem(YOUTUBE_PENDING_OAUTH_CODE_KEY);
       url.searchParams.delete("error");
       url.searchParams.delete("error_description");
       url.searchParams.delete("state");
       window.history.replaceState({}, "", url.toString());
       toast.error(`OAuth failed: ${oauthErrorDescription || oauthError}`);
-      loadConnection();
+      if (!authLoading && session) {
+        loadConnection();
+      } else {
+        setLoadingConnection(false);
+      }
       return;
     }
 
-    if (code && !oauthHandledRef.current) {
+    if (authLoading) {
+      return;
+    }
+
+    if (!session) {
+      setLoadingConnection(false);
+      return;
+    }
+
+    const pendingCode = sessionStorage.getItem(YOUTUBE_PENDING_OAUTH_CODE_KEY);
+
+    if (pendingCode && !oauthHandledRef.current) {
       oauthHandledRef.current = true;
+      setLoadingConnection(true);
+      sessionStorage.removeItem(YOUTUBE_PENDING_OAUTH_CODE_KEY);
       url.searchParams.delete("code");
       url.searchParams.delete("state");
       url.searchParams.delete("scope");
       window.history.replaceState({}, "", url.toString());
 
       (async () => {
-        await handleOAuthCallback(code);
+        await handleOAuthCallback(pendingCode);
+        setLoadingConnection(false);
       })();
     } else {
       loadConnection();
     }
   }, [authLoading, handleOAuthCallback, loadConnection, session]);
+
+  useEffect(() => {
+    if (
+      loadingConnection ||
+      autoSyncAttemptedRef.current ||
+      savedConn?.status !== "connected" ||
+      !savedConn.channelId ||
+      savedConn.lastSyncAt
+    ) {
+      return;
+    }
+
+    autoSyncAttemptedRef.current = true;
+    void syncYouTubeData({
+      connectionId: savedConn.id,
+      channelId: savedConn.channelId,
+      silent: true,
+    });
+  }, [loadingConnection, savedConn, syncYouTubeData]);
 
   const handleSaveApiKey = async (apiKey: string) => {
     setSavingKey(true);
@@ -198,6 +285,13 @@ export default function YouTubeDetail() {
       }));
       hasLoadedOnce.current = true;
       toast.success("YouTube API key saved and validated");
+      if (connection.external_account_id || channelId.trim()) {
+        await syncYouTubeData({
+          connectionId: connection.id,
+          channelId: connection.external_account_id || channelId.trim(),
+          silent: false,
+        });
+      }
       return true;
     } catch (e) {
       setStatus("youtube", "error");
@@ -225,6 +319,13 @@ export default function YouTubeDetail() {
         accountLabel: accountLabel.trim() || "Primary YouTube",
       } : prev);
       toast.success("Channel settings updated");
+      if (connection.external_account_id || channelId.trim()) {
+        await syncYouTubeData({
+          connectionId: connection.id,
+          channelId: connection.external_account_id || channelId.trim(),
+          silent: false,
+        });
+      }
     } catch (e) {
       toast.error(`Update failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
@@ -329,12 +430,25 @@ export default function YouTubeDetail() {
       status={integration.status}
       actions={
         isConnected ? (
-          <button
-            onClick={handleDisconnect}
-            className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            Disconnect
-          </button>
+          <>
+            <button
+              onClick={() => void syncYouTubeData()}
+              disabled={syncing}
+              className={cn(
+                secondaryBtnClass,
+                "disabled:opacity-50 disabled:cursor-not-allowed"
+              )}
+            >
+              {syncing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+              Sync Now
+            </button>
+            <button
+              onClick={handleDisconnect}
+              className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+            >
+              Disconnect
+            </button>
+          </>
         ) : undefined
       }
     >
