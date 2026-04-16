@@ -69,3 +69,6 @@ verify_jwt = false
 [functions.google-search-console]
 verify_jwt = false
 
+[functions.google-slides]
+verify_jwt = false
+
