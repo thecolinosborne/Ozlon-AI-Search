@@ -560,21 +560,11 @@ async function injectNativeData(
   const notConnected: string[] = [];
 
   await Promise.all(detectedApps.map(async (app) => {
-    // YouTube can have either OAuth (native) or api_key (local cache) connection
+    // YouTube: read from synced youtube_channels / youtube_videos tables (works for both OAuth and api_key)
     if (app === 'youtube') {
-      const hasOAuth = multiConnMap.has('youtube');
-      if (hasOAuth) {
-        try {
-          const data = await fetchYouTubeData();
-          sections.push(`## YouTube\n${data}`);
-          return;
-        } catch (e) {
-          console.error('[YouTube native] error, falling back to local:', e);
-        }
-      }
       const localData = userId ? await fetchYouTubeLocalData(userId) : null;
       if (localData) {
-        sections.push(`## YouTube (Integration Hub)\n${localData}`);
+        sections.push(`## YouTube\n${localData}`);
         return;
       }
       notConnected.push('YouTube');
