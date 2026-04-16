@@ -1109,9 +1109,15 @@ serve(async (req) => {
       // ── Post-upload chain (best-effort) ──
       const callSelf = async (sub: string, payload: AnyJson) => {
         try {
+          const fwdHeaders: Record<string, string> = {
+            Authorization: req.headers.get("Authorization") || "",
+            "Content-Type": "application/json",
+          };
+          const xUid = req.headers.get("x-user-id");
+          if (xUid) fwdHeaders["x-user-id"] = xUid;
           const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/youtube`, {
             method: "POST",
-            headers: { Authorization: req.headers.get("Authorization") || "", "Content-Type": "application/json" },
+            headers: fwdHeaders,
             body: JSON.stringify({ action: sub, ...payload }),
           });
           const d = await r.json().catch(() => ({}));
