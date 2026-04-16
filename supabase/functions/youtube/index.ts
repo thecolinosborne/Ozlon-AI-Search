@@ -549,6 +549,7 @@ serve(async (req) => {
       const scopes = [
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
       ];
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authUrl.searchParams.set("client_id", clientId);
