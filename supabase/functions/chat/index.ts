@@ -4783,13 +4783,11 @@ serve(async (req) => {
       }
     }
 
-    // Get Maton connections for data injection AND tool availability
-    // Per-user credential resolution: look up from integration_connections first
-    let MATON_API_KEY: string | undefined;
+    // Native connection discovery + per-user GHL credential resolution
     let GHL_API_KEY_RESOLVED: string | undefined;
     let GHL_LOCATION_ID_RESOLVED: string | undefined;
 
-    // Resolve user ID early for credential lookup
+    // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
     let credUserId: string | null = null;
     if (authHeaderForCreds) {
@@ -4812,129 +4810,61 @@ serve(async (req) => {
           .select('provider, metadata')
           .eq('user_id', credUserId)
           .eq('status', 'connected')
-          .in('provider', ['maton', 'gohighlevel']);
+          .eq('provider', 'gohighlevel');
         if (conns) {
           for (const c of conns) {
             const meta = c.metadata as Record<string, string> | null;
-            if (c.provider === 'maton' && meta?.api_key) MATON_API_KEY = meta.api_key;
-            if (c.provider === 'gohighlevel' && meta?.api_key) {
+            if (meta?.api_key) {
               GHL_API_KEY_RESOLVED = meta.api_key;
               GHL_LOCATION_ID_RESOLVED = meta.location_id;
             }
           }
         }
-      } catch (e) { console.error('Per-user credential lookup failed:', e); }
+      } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
-    // Fallback to env vars if no per-user credentials found
-    if (!MATON_API_KEY) MATON_API_KEY = Deno.env.get('MATON_API_KEY') || undefined;
+    // Fallback to env vars for GHL
     if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
     if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
 
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
-    let aliasMap: AliasEntry[] = [];
+    const aliasMap: AliasEntry[] = [];
 
-    if (MATON_API_KEY) {
+    if (credUserId) {
       try {
-        // Get connections and build multi-account map
-        const connections = await getMatonConnections(MATON_API_KEY);
-        const builtMap = buildMultiConnMap(connections);
+        // Discover native connections (Google OAuth, ClickUp, YouTube, etc.)
+        const nativeConns = await getNativeConnections(credUserId);
+        const builtMap = buildMultiConnMap(nativeConns);
         for (const [app, entries] of builtMap) connMap.set(app, entries);
-        console.log(`Maton connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
-
-        // Build dynamic alias map from all connections
-        aliasMap = buildDynamicAliasMap(connMap);
-        console.log(`Dynamic alias map built: ${aliasMap.length} aliases`);
+        console.log(`Native connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
-        console.log(`Available action tools: ${availableTools.length}`, availableTools.map(t => t.function.name));
+        console.log(`Available action tools: ${availableTools.length}`);
 
-        // Add connected services info to system prompt with account details
+        // Add connected services info to system prompt
         if (connMap.size > 0) {
           const connectedServices = Array.from(connMap.entries()).map(([app, entries]) => {
             const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-            if (entries.length > 1) {
-              const accounts = entries.map(e => e.email || e.id).join(', ');
-              return `- ${label} (${entries.length} accounts: ${accounts})`;
-            }
             const email = entries[0]?.email;
             return `- ${label}${email ? ` (${email})` : ''}`;
           }).join('\n');
           systemPrompt += `\n\n===========================================================
 CONNECTED SERVICES (you can read data and take actions on these)
 ===========================================================\n${connectedServices}`;
-
-          // Add multi-account instruction if any service has multiple accounts
-          const multiAccountServices = Array.from(connMap.entries()).filter(([, entries]) => entries.length > 1);
-          if (multiAccountServices.length > 0) {
-            // Build dynamic examples from actual connected accounts
-            const dynamicExamples: string[] = [];
-            const identityList: string[] = [];
-            for (const [app, entries] of multiAccountServices) {
-              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-              for (const e of entries) {
-                if (!e.email) continue;
-                const email = e.email.toLowerCase();
-                const domain = email.split('@')[1]?.split('.')[0] || '';
-                const fullDomain = email.split('@')[1] || '';
-                dynamicExamples.push(`   - "${email}" → account: "${email}"`);
-                dynamicExamples.push(`   - "${email} ${label.toLowerCase()}" → account: "${email}"`);
-                if (domain.length >= 3) {
-                  dynamicExamples.push(`   - "my ${domain} email" → account: "${email}" (domain alias)`);
-                  dynamicExamples.push(`   - "${domain} inbox" → account: "${email}"`);
-                }
-                identityList.push(`  * ${email} (aliases: "${domain}", "${fullDomain}")`);
-              }
-            }
-
-            systemPrompt += `\n\n===========================================================
-CONTEXT-SENSITIVE ACCOUNT RESOLUTION (CRITICAL)
-===========================================================
-CONNECTED IDENTITIES:
-${identityList.join('\n')}
-
-RESOLUTION RULES — follow this priority order:
-1. If the user explicitly mentions an email, brand, domain, or workspace name → use that account.
-2. If the user mentions contextual keywords that imply a specific account (e.g. a business name that matches a domain) → use that account.
-3. Scan the conversation for context clues before defaulting. Use the most relevant account, not the most convenient.
-4. If genuinely ambiguous and it would materially affect the outcome → ask which account to use.
-5. NEVER silently default to one account when multiple exist and the user has given any signal.
-
-When you identify the account, pass the EXACT email address in the "account" parameter of EVERY tool call.
-
-DYNAMIC EXAMPLES (auto-generated from connected accounts):
-${dynamicExamples.join('\n')}
-
-BEHAVIOR:
-- Do NOT automatically prioritize whichever account is easiest to access or appears first.
-- Do NOT assume one identity is always primary.
-- When a connected account is mentioned or implied, resolve through it first, then validate, then respond.
-- Every tool result will confirm which account was used — verify it matches the user's intent.
-\n`;
-            for (const [app, entries] of multiAccountServices) {
-              const label = SERVICE_DETECTORS.find(s => s.app === app)?.label || app;
-              systemPrompt += `\n${label} accounts:\n`;
-              for (const e of entries) {
-                systemPrompt += `- ${e.email || 'unknown'} (connection: ${e.id.substring(0, 8)})\n`;
-              }
-            }
-          }
         }
 
-        // Inject read data for detected intents (with alias map for smart resolution)
-        const matonInjection = await injectMatonData(
+        // Inject read data for detected intents via native edges
+        const nativeInjection = await injectNativeData(
           messages,
-          MATON_API_KEY,
           connMap,
-          aliasMap,
           credUserId,
           'auto',
         );
-        if (matonInjection) systemPrompt += matonInjection;
+        if (nativeInjection) systemPrompt += nativeInjection;
       } catch (e) {
-        console.error('Error in Maton setup:', e);
+        console.error('Error in native setup:', e);
       }
     }
 
