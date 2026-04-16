@@ -318,8 +318,8 @@ async function fetchGoogleDocsData(): Promise<string> {
 }
 
 async function fetchGoogleSheetsData(): Promise<string> {
-  // google-sheets edge doesn't have a list endpoint; use drive search by mimetype
-  const data = await invokeNativeEdge('google-drive', 'search_files', { mimeType: 'application/vnd.google-apps.spreadsheet', pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+  // Native google-sheets edge has list_spreadsheets action (Drive-backed listing)
+  const data = await invokeNativeEdge('google-sheets', 'list_spreadsheets', { pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No Google Sheets found.';
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
@@ -332,26 +332,11 @@ async function fetchGoogleSlidesData(): Promise<string> {
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
 }
 
-async function fetchYouTubeData(): Promise<string> {
-  try {
-    const channelData = await invokeNativeEdge('youtube', 'list_my_channels', {}) as { items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string; videoCount?: string; viewCount?: string } }[] };
-    const ch = channelData.items?.[0];
-    let result = '';
-    if (ch) {
-      result += `**Channel:** ${ch.snippet?.title || 'Unknown'}\n`;
-      result += `Subscribers: ${ch.statistics?.subscriberCount || '?'} | Videos: ${ch.statistics?.videoCount || '?'} | Total views: ${ch.statistics?.viewCount || '?'}\n\n`;
-    }
-    const videosData = await invokeNativeEdge('youtube', 'list_my_videos', { maxResults: 10 }) as { items?: { id?: { videoId?: string } | string; snippet?: { title?: string; publishedAt?: string } }[] };
-    const vids = videosData.items || [];
-    if (vids.length) {
-      result += 'Recent uploads:\n';
-      result += vids.map(v => {
-        const vid = typeof v.id === 'object' ? v.id?.videoId : v.id;
-        return `- [${v.snippet?.title || '(untitled)'}](https://youtube.com/watch?v=${vid}) — ${v.snippet?.publishedAt || ''}`;
-      }).join('\n');
-    }
-    return result || 'YouTube connected but no channel data found.';
-  } catch (e) { return `YouTube error: ${e instanceof Error ? e.message : 'Unknown'}`; }
+async function fetchYouTubeData(userId?: string): Promise<string> {
+  // Native youtube edge has no list_my_channels/list_my_videos actions —
+  // read from the synced youtube_channels / youtube_videos tables instead.
+  if (!userId) return 'YouTube connected but no synced data available (missing user context).';
+  return (await fetchYouTubeLocalData(userId)) || 'YouTube connected but no synced channel data yet. Run a sync from Integrations > YouTube.';
 }
 
 // ---------- YouTube (local Integration Hub fallback for api-key connections) ----------
@@ -363,44 +348,42 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   const { createClient: cc1 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
   const adminClient = cc1(supabaseUrl, serviceRoleKey);
 
-  const { data: conn } = await adminClient
-    .from('integration_connections')
-    .select('id, status, external_account_label')
+  // Prefer the connection that actually has synced channel data; fall back to most recent connected.
+  const { data: channelsAll } = await adminClient
+    .from('youtube_channels')
+    .select('connection_id, title, subscriber_count, video_count, view_count, fetched_at')
     .eq('user_id', userId)
-    .eq('provider', 'youtube')
-    .eq('auth_type', 'api_key')
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('fetched_at', { ascending: false })
+    .limit(1);
 
-  if (!conn?.id) return null;
-  if (conn.status !== 'connected') {
-    return 'YouTube integration exists but is currently disconnected. Reconnect in Integrations > YouTube.';
+  const channel = channelsAll?.[0];
+  const connectionId = channel?.connection_id;
+
+  if (!connectionId) {
+    // No synced data — check if any connection exists at all
+    const { data: anyConn } = await adminClient
+      .from('integration_connections')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('provider', 'youtube')
+      .eq('status', 'connected')
+      .limit(1)
+      .maybeSingle();
+    if (!anyConn?.id) return null;
+    return 'YouTube is connected, but no channel data has been synced yet. Run a sync from Integrations > YouTube.';
   }
 
-  const [{ data: channels }, { data: videos }] = await Promise.all([
-    adminClient
-      .from('youtube_channels')
-      .select('title, subscriber_count, video_count, view_count, fetched_at')
-      .eq('user_id', userId)
-      .eq('connection_id', conn.id)
-      .order('fetched_at', { ascending: false })
-      .limit(1),
-    adminClient
-      .from('youtube_videos')
-      .select('video_id, title, published_at, view_count, like_count, comment_count')
-      .eq('user_id', userId)
-      .eq('connection_id', conn.id)
-      .order('published_at', { ascending: false })
-      .limit(10),
-  ]);
+  const { data: videos } = await adminClient
+    .from('youtube_videos')
+    .select('video_id, title, published_at, view_count, like_count, comment_count')
+    .eq('user_id', userId)
+    .eq('connection_id', connectionId)
+    .order('published_at', { ascending: false })
+    .limit(10);
 
-  const channel = channels?.[0];
   let result = '';
-  if (channel) {
-    result += `**Channel:** ${channel.title || conn.external_account_label || 'Unknown'}\n`;
-    result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
-  }
+  result += `**Channel:** ${channel.title || 'Unknown'}\n`;
+  result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
   if (videos?.length) {
     result += 'Recent uploads:\n';
     result += videos.map((v: any) => {
@@ -575,21 +558,11 @@ async function injectNativeData(
   const notConnected: string[] = [];
 
   await Promise.all(detectedApps.map(async (app) => {
-    // YouTube can have either OAuth (native) or api_key (local cache) connection
+    // YouTube: read from synced youtube_channels / youtube_videos tables (works for both OAuth and api_key)
     if (app === 'youtube') {
-      const hasOAuth = multiConnMap.has('youtube');
-      if (hasOAuth) {
-        try {
-          const data = await fetchYouTubeData();
-          sections.push(`## YouTube\n${data}`);
-          return;
-        } catch (e) {
-          console.error('[YouTube native] error, falling back to local:', e);
-        }
-      }
       const localData = userId ? await fetchYouTubeLocalData(userId) : null;
       if (localData) {
-        sections.push(`## YouTube (Integration Hub)\n${localData}`);
+        sections.push(`## YouTube\n${localData}`);
         return;
       }
       notConnected.push('YouTube');
