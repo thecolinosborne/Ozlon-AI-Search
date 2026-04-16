@@ -49,15 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ONBOARDED_KEY);
   }, []);
 
-  const startAuthenticatedSession = useCallback((nextSession: Session, isNewSignup: boolean) => {
-    setSession(nextSession);
-    setUser(nextSession.user);
-    setAuthLoading(false);
-    setProfileLoaded(false);
-
-    void loadUserProfile(nextSession.user.id, isNewSignup);
-  }, [loadUserProfile]);
-
   const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId);
     try {
@@ -97,6 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileLoaded(true);
     }
   }, []);
+
+  const startAuthenticatedSession = useCallback((nextSession: Session, isNewSignup: boolean) => {
+    setSession(nextSession);
+    setUser(nextSession.user);
+    setAuthLoading(false);
+    setProfileLoaded(false);
+
+    void loadUserProfile(nextSession.user.id, isNewSignup);
+  }, [loadUserProfile]);
 
   const refreshVoiceSettings = useCallback(async () => {
     if (!user) return;
