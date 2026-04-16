@@ -689,12 +689,38 @@ serve(async (req) => {
       const title = String((params as AnyJson).title || "Untitled");
       const description = String((params as AnyJson).description || "");
       const privacyStatus = String((params as AnyJson).privacyStatus || "private");
-      const videoUrl = String((params as AnyJson).videoUrl || "").trim();
+      let videoUrl = String((params as AnyJson).videoUrl || "").trim();
 
       if (!videoUrl) throw new Error("videoUrl is required (public URL to video file)");
 
-      const videoRes = await fetch(videoUrl);
+      // Auto-convert Google Drive share links to direct download URLs
+      const driveFileMatch = videoUrl.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
+      const driveOpenMatch = !driveFileMatch && videoUrl.match(/drive\.google\.com\/open\?id=([^&]+)/);
+      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
+      if (driveId) {
+        videoUrl = `https://drive.google.com/uc?export=download&id=${driveId}`;
+      }
+
+      const videoRes = await fetch(videoUrl, { redirect: "follow" });
       if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
+
+      // Validate content type — reject HTML responses
+      const rawContentType = videoRes.headers.get("content-type") || "";
+      if (rawContentType.includes("text/html")) {
+        throw new Error("The URL returned an HTML page instead of a video file. Please provide a direct download link to the video.");
+      }
+
+      // Infer correct MIME type
+      const mimeMap: Record<string, string> = {
+        mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+        avi: "video/x-msvideo", mkv: "video/x-matroska", m4v: "video/mp4",
+      };
+      const ext = videoUrl.split("?")[0].split(".").pop()?.toLowerCase() || "";
+      const detectedMime = rawContentType.split(";")[0].trim();
+      const videoMime = (detectedMime && detectedMime !== "application/octet-stream")
+        ? detectedMime
+        : (mimeMap[ext] || "video/mp4");
+
       const videoBlob = await videoRes.blob();
 
       const initiateRes = await fetch(
@@ -705,7 +731,7 @@ serve(async (req) => {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
             "X-Upload-Content-Length": String(videoBlob.size),
-            "X-Upload-Content-Type": videoBlob.type || "video/mp4",
+            "X-Upload-Content-Type": videoMime,
           },
           body: JSON.stringify({
             snippet: { title, description },
@@ -723,7 +749,7 @@ serve(async (req) => {
       const uploadRes = await fetch(uploadUrl, {
         method: "PUT",
         headers: {
-          "Content-Type": videoBlob.type || "video/mp4",
+          "Content-Type": videoMime,
           "Content-Length": String(videoBlob.size),
         },
         body: videoBlob,
