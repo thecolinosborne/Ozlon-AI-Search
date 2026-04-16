@@ -549,6 +549,7 @@ serve(async (req) => {
       const scopes = [
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
       ];
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authUrl.searchParams.set("client_id", clientId);
@@ -693,16 +694,30 @@ serve(async (req) => {
 
       if (!videoUrl) throw new Error("videoUrl is required (public URL to video file)");
 
-      // Auto-convert Google Drive share links to direct download URLs
+      // Auto-convert Google Drive share links to direct download via Drive API
       const driveFileMatch = videoUrl.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
       const driveOpenMatch = !driveFileMatch && videoUrl.match(/drive\.google\.com\/open\?id=([^&]+)/);
-      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
-      if (driveId) {
-        videoUrl = `https://drive.google.com/uc?export=download&confirm=t&id=${driveId}`;
-      }
+      const driveUcMatch = !driveFileMatch && !driveOpenMatch && videoUrl.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
+      const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1] || driveUcMatch?.[1];
 
-      const videoRes = await fetch(videoUrl, { redirect: "follow" });
-      if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
+      let videoRes: Response;
+      if (driveId) {
+        // Use Google Drive API with the OAuth token — bypasses virus scan and handles any file size
+        videoRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${driveId}?alt=media`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            redirect: "follow",
+          }
+        );
+        if (!videoRes.ok) {
+          const errBody = await videoRes.text().catch(() => "");
+          throw new Error(`Failed to download from Google Drive (${videoRes.status}): ${errBody.slice(0, 200)}`);
+        }
+      } else {
+        videoRes = await fetch(videoUrl, { redirect: "follow" });
+        if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
+      }
 
       // Validate content type — reject HTML responses
       const rawContentType = videoRes.headers.get("content-type") || "";
