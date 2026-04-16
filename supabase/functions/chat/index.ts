@@ -2435,6 +2435,26 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ YouTube Upload Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'upload_youtube_video',
+      description: 'Upload a video to the user\'s YouTube channel. Requires YouTube OAuth to be connected. The user must provide a public URL to the video file. Confirm title, description, and privacy before uploading.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Video title (max 100 chars)' },
+          description: { type: 'string', description: 'Video description' },
+          video_url: { type: 'string', description: 'Public URL to the video file (mp4, mov, etc.)' },
+          privacy_status: { type: 'string', enum: ['private', 'unlisted', 'public'], description: 'Video privacy setting. Default to private unless user specifies otherwise.' },
+          tags: { type: 'string', description: 'Comma-separated tags for the video' },
+        },
+        required: ['title', 'video_url'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -4279,6 +4299,45 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ YouTube Upload Handler ============
+      case 'upload_youtube_video': {
+        try {
+          const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+          const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+          // Get the user's bearer token from the current request context
+          // We need to call the youtube edge function with the user's auth
+          const title = (args.title as string) || 'Untitled';
+          const description = (args.description as string) || '';
+          const videoUrl = (args.video_url as string) || '';
+          const privacyStatus = (args.privacy_status as string) || 'private';
+
+          if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
+
+          // Call the youtube edge function directly using service role
+          const res = await fetch(`${SUPABASE_URL}/functions/v1/youtube`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              action: 'upload_video',
+              params: { title, description, videoUrl, privacyStatus },
+            }),
+          });
+          const data = await res.json();
+          if (data.error) return { success: false, result: `YouTube upload failed: ${data.error}` };
+          if (data.videoId) {
+            return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${data.videoId}` };
+          }
+          return { success: false, result: `Unexpected response from YouTube upload: ${JSON.stringify(data)}` };
+        } catch (e) {
+          console.error('[upload_youtube_video] Error:', e);
+          return { success: false, result: `YouTube upload error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -4610,6 +4669,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
+    'upload_youtube_video': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -4665,6 +4725,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
+  'upload_youtube_video': 'Uploading to YouTube',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
