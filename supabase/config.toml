@@ -48,3 +48,24 @@ verify_jwt = false
 [functions.gohighlevel]
 verify_jwt = false
 
+[functions.google-gmail]
+verify_jwt = false
+
+[functions.google-drive]
+verify_jwt = false
+
+[functions.google-calendar]
+verify_jwt = false
+
+[functions.google-sheets]
+verify_jwt = false
+
+[functions.google-docs]
+verify_jwt = false
+
+[functions.google-analytics]
+verify_jwt = false
+
+[functions.google-search-console]
+verify_jwt = false
+

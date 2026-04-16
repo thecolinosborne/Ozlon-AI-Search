@@ -31,6 +31,16 @@ async function gFetch(token: string, path: string, init: RequestInit = {}) {
   return data;
 }
 
+function buildRawEmail(headers: Record<string, string>, body: string): string {
+  const lines = Object.entries(headers).map(([k, v]) => `${k}: ${v}`);
+  lines.push("Content-Type: text/plain; charset=UTF-8", "", body);
+  const raw = lines.join("\r\n");
+  return btoa(unescape(encodeURIComponent(raw)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -42,14 +52,17 @@ serve(async (req) => {
     const token = await getGoogleAccessToken(userId);
 
     switch (action) {
+      // ── Existing ──
       case "list_messages": {
         const q = String((params as AnyJson).q || "");
         const maxResults = Number((params as AnyJson).maxResults || 20);
         const labelIds = (params as AnyJson).labelIds as string[] | undefined;
+        const pageToken = String((params as AnyJson).pageToken || "");
         const qs = new URLSearchParams();
         qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
         if (q) qs.set("q", q);
         if (labelIds && labelIds.length) qs.set("labelIds", labelIds.join(","));
+        if (pageToken) qs.set("pageToken", pageToken);
         const data = await gFetch(token, `/messages?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
@@ -66,24 +79,18 @@ serve(async (req) => {
         const to = String((params as AnyJson).to || "");
         const subject = String((params as AnyJson).subject || "");
         const body = String((params as AnyJson).body || "");
+        const cc = String((params as AnyJson).cc || "");
+        const bcc = String((params as AnyJson).bcc || "");
         if (!to || !subject) return jsonErr("to and subject are required");
 
-        const raw = [
-          `To: ${to}`,
-          `Subject: ${subject}`,
-          "Content-Type: text/plain; charset=UTF-8",
-          "",
-          body,
-        ].join("\r\n");
-        // base64url encode
-        const b64 = btoa(unescape(encodeURIComponent(raw)))
-          .replace(/\+/g, "-")
-          .replace(/\//g, "_")
-          .replace(/=+$/, "");
+        const hdrs: Record<string, string> = { To: to, Subject: subject };
+        if (cc) hdrs["Cc"] = cc;
+        if (bcc) hdrs["Bcc"] = bcc;
 
+        const raw = buildRawEmail(hdrs, body);
         const data = await gFetch(token, "/messages/send", {
           method: "POST",
-          body: JSON.stringify({ raw: b64 }),
+          body: JSON.stringify({ raw }),
         });
         return jsonOk({ success: true, message: data });
       }
@@ -91,14 +98,153 @@ serve(async (req) => {
       case "trash_message": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/trash`, {
-          method: "POST",
-        });
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/trash`, { method: "POST" });
         return jsonOk({ success: true, message: data });
       }
 
       case "list_labels": {
         const data = await gFetch(token, "/labels");
+        return jsonOk({ success: true, ...data });
+      }
+
+      // ── New actions ──
+      case "untrash_message": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/untrash`, { method: "POST" });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "modify_message": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const addLabelIds = (params as AnyJson).addLabelIds as string[] | undefined;
+        const removeLabelIds = (params as AnyJson).removeLabelIds as string[] | undefined;
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "list_threads": {
+        const q = String((params as AnyJson).q || "");
+        const maxResults = Number((params as AnyJson).maxResults || 20);
+        const pageToken = String((params as AnyJson).pageToken || "");
+        const qs = new URLSearchParams();
+        qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
+        if (q) qs.set("q", q);
+        if (pageToken) qs.set("pageToken", pageToken);
+        const data = await gFetch(token, `/threads?${qs.toString()}`);
+        return jsonOk({ success: true, ...data });
+      }
+
+      case "get_thread": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const format = String((params as AnyJson).format || "full");
+        const data = await gFetch(token, `/threads/${encodeURIComponent(id)}?format=${format}`);
+        return jsonOk({ success: true, thread: data });
+      }
+
+      case "create_draft": {
+        const to = String((params as AnyJson).to || "");
+        const subject = String((params as AnyJson).subject || "");
+        const body = String((params as AnyJson).body || "");
+        const threadId = String((params as AnyJson).threadId || "");
+        const hdrs: Record<string, string> = { To: to, Subject: subject };
+        const raw = buildRawEmail(hdrs, body);
+        const draftBody: AnyJson = { message: { raw } };
+        if (threadId) (draftBody.message as AnyJson).threadId = threadId;
+        const data = await gFetch(token, "/drafts", { method: "POST", body: JSON.stringify(draftBody) });
+        return jsonOk({ success: true, draft: data });
+      }
+
+      case "list_drafts": {
+        const maxResults = Number((params as AnyJson).maxResults || 20);
+        const pageToken = String((params as AnyJson).pageToken || "");
+        const qs = new URLSearchParams();
+        qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
+        if (pageToken) qs.set("pageToken", pageToken);
+        const data = await gFetch(token, `/drafts?${qs.toString()}`);
+        return jsonOk({ success: true, ...data });
+      }
+
+      case "send_draft": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, "/drafts/send", {
+          method: "POST",
+          body: JSON.stringify({ id }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "delete_draft": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        await gFetch(token, `/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return jsonOk({ success: true });
+      }
+
+      case "reply_message": {
+        const messageId = String((params as AnyJson).messageId || "");
+        const threadId = String((params as AnyJson).threadId || "");
+        const to = String((params as AnyJson).to || "");
+        const subject = String((params as AnyJson).subject || "");
+        const body = String((params as AnyJson).body || "");
+        if (!to || !body) return jsonErr("to and body are required");
+
+        const hdrs: Record<string, string> = { To: to, Subject: subject || "Re:" };
+        if (messageId) {
+          hdrs["In-Reply-To"] = messageId;
+          hdrs["References"] = messageId;
+        }
+        const raw = buildRawEmail(hdrs, body);
+        const msgBody: AnyJson = { raw };
+        if (threadId) msgBody.threadId = threadId;
+        const data = await gFetch(token, "/messages/send", { method: "POST", body: JSON.stringify(msgBody) });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "search_messages": {
+        const q = String((params as AnyJson).q || "");
+        if (!q) return jsonErr("q (search query) is required");
+        const maxResults = Number((params as AnyJson).maxResults || 25);
+        const pageToken = String((params as AnyJson).pageToken || "");
+        const qs = new URLSearchParams();
+        qs.set("q", q);
+        qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
+        if (pageToken) qs.set("pageToken", pageToken);
+        const data = await gFetch(token, `/messages?${qs.toString()}`);
+        return jsonOk({ success: true, ...data });
+      }
+
+      case "get_profile": {
+        const data = await gFetch(token, "/profile");
+        return jsonOk({ success: true, profile: data });
+      }
+
+      case "batch_modify": {
+        const ids = (params as AnyJson).ids as string[] | undefined;
+        if (!ids || !ids.length) return jsonErr("ids array is required");
+        const addLabelIds = (params as AnyJson).addLabelIds as string[] | undefined;
+        const removeLabelIds = (params as AnyJson).removeLabelIds as string[] | undefined;
+        const data = await gFetch(token, "/messages/batchModify", {
+          method: "POST",
+          body: JSON.stringify({ ids, addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }),
+        });
+        return jsonOk({ success: true, ...data as AnyJson });
+      }
+
+      case "list_history": {
+        const startHistoryId = String((params as AnyJson).startHistoryId || "");
+        if (!startHistoryId) return jsonErr("startHistoryId is required");
+        const maxResults = Number((params as AnyJson).maxResults || 100);
+        const qs = new URLSearchParams();
+        qs.set("startHistoryId", startHistoryId);
+        qs.set("maxResults", String(Math.min(500, Math.max(1, maxResults))));
+        const data = await gFetch(token, `/history?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
