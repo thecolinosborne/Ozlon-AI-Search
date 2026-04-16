@@ -323,7 +323,35 @@ serve(async (req) => {
         .eq("provider", "youtube");
       if (error) throw error;
 
+      // Also clear OAuth connection if it exists
+      await adminClient
+        .from("integration_connections")
+        .update({ status: "disconnected", last_error: null, metadata: {} })
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2");
+
       return jsonOk({ success: true });
+    }
+
+    // ── OAuth Disconnect — clears OAuth tokens only, keeps API key ──
+    if (action === "oauth_disconnect") {
+      const { data: oauthConn } = await adminClient
+        .from("integration_connections")
+        .select("id, metadata")
+        .eq("user_id", userId)
+        .eq("provider", "youtube")
+        .eq("auth_type", "oauth2")
+        .maybeSingle();
+
+      if (oauthConn) {
+        await adminClient
+          .from("integration_connections")
+          .update({ status: "disconnected", metadata: {}, last_error: null })
+          .eq("id", oauthConn.id);
+      }
+
+      return jsonOk({ success: true, oauthStatus: "disconnected" });
     }
 
     // ── Sync Channels ──
