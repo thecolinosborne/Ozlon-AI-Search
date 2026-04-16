@@ -2435,6 +2435,26 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ YouTube Upload Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'upload_youtube_video',
+      description: 'Upload a video to the user\'s YouTube channel. Requires YouTube OAuth to be connected. The user must provide a public URL to the video file. Confirm title, description, and privacy before uploading.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Video title (max 100 chars)' },
+          description: { type: 'string', description: 'Video description' },
+          video_url: { type: 'string', description: 'Public URL to the video file (mp4, mov, etc.)' },
+          privacy_status: { type: 'string', enum: ['private', 'unlisted', 'public'], description: 'Video privacy setting. Default to private unless user specifies otherwise.' },
+          tags: { type: 'string', description: 'Comma-separated tags for the video' },
+        },
+        required: ['title', 'video_url'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 // ============================================================================
 
@@ -4279,6 +4299,106 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ YouTube Upload Handler ============
+      case 'upload_youtube_video': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated. Sign in to upload videos.' };
+
+          const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
+          const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
+          if (!clientId || !clientSecret) return { success: false, result: 'YouTube OAuth credentials not configured on the server. Contact the admin.' };
+
+          const title = (args.title as string) || 'Untitled';
+          const description = (args.description as string) || '';
+          const videoUrl = (args.video_url as string) || '';
+          const privacyStatus = (args.privacy_status as string) || 'private';
+
+          if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
+
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          // Get OAuth token
+          const { data: conn } = await adminClient
+            .from('integration_connections')
+            .select('metadata')
+            .eq('user_id', userId)
+            .eq('provider', 'youtube')
+            .eq('auth_type', 'oauth2')
+            .eq('status', 'connected')
+            .maybeSingle();
+
+          if (!conn) return { success: false, result: 'YouTube OAuth not connected. Go to Integrations > YouTube and authorize uploads first.' };
+
+          const meta = conn.metadata as Record<string, unknown>;
+          let accessToken = String(meta.access_token || '');
+          const refreshToken = String(meta.refresh_token || '');
+          const expiresAt = String(meta.expires_at || '');
+
+          // Refresh if expired
+          if (new Date(expiresAt) <= new Date()) {
+            if (!refreshToken) return { success: false, result: 'YouTube OAuth token expired and no refresh token. Re-authorize in Integrations > YouTube.' };
+            const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
+            });
+            const refreshData = await refreshRes.json();
+            if (!refreshRes.ok) return { success: false, result: `YouTube token refresh failed: ${JSON.stringify(refreshData)}` };
+            accessToken = refreshData.access_token;
+            await adminClient
+              .from('integration_connections')
+              .update({ metadata: { ...meta, access_token: accessToken, expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString() } })
+              .eq('user_id', userId).eq('provider', 'youtube').eq('auth_type', 'oauth2');
+          }
+
+          // Download the video
+          const videoRes = await fetch(videoUrl);
+          if (!videoRes.ok) return { success: false, result: `Failed to download video from URL: HTTP ${videoRes.status}` };
+          const videoBlob = await videoRes.blob();
+
+          // Initiate resumable upload
+          const initiateRes = await fetch(
+            'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'X-Upload-Content-Length': String(videoBlob.size),
+                'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
+              },
+              body: JSON.stringify({
+                snippet: { title, description },
+                status: { privacyStatus },
+              }),
+            },
+          );
+          if (!initiateRes.ok) {
+            const errBody = await initiateRes.text();
+            return { success: false, result: `YouTube upload initiation failed: ${initiateRes.status} ${errBody}` };
+          }
+          const uploadUrl = initiateRes.headers.get('Location');
+          if (!uploadUrl) return { success: false, result: 'YouTube did not return an upload URL.' };
+
+          // Upload the video
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': videoBlob.type || 'video/mp4', 'Content-Length': String(videoBlob.size) },
+            body: videoBlob,
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok) return { success: false, result: `YouTube upload failed: ${JSON.stringify(uploadData)}` };
+
+          return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${uploadData.id}` };
+        } catch (e) {
+          console.error('[upload_youtube_video] Error:', e);
+          return { success: false, result: `YouTube upload error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -4610,6 +4730,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
+    'upload_youtube_video': '_always_',
   };
 
   return MATON_ACTION_TOOLS.filter(tool => {
@@ -4665,6 +4786,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
+  'upload_youtube_video': 'Uploading to YouTube',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -4675,6 +4797,7 @@ function inferTaskTitle(toolNames: string[]): string {
   if (toolNames.some(n => n.startsWith('ghl_'))) return 'Working in GoHighLevel';
   if (toolNames.some(n => n.includes('notion'))) return 'Working in Notion';
   if (toolNames.some(n => n.includes('github'))) return 'Working on GitHub';
+  if (toolNames.some(n => n.includes('youtube'))) return 'Working with YouTube';
   if (toolNames.some(n => n.includes('google'))) return 'Working in Google';
   if (toolNames.some(n => n.includes('event'))) return 'Finding events';
   return 'Executing task';
@@ -4748,7 +4871,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
