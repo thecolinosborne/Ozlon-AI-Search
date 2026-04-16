@@ -1648,6 +1648,7 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       description: 'Get available statuses for a ClickUp list. Useful to know valid status values before setting task status.',
       parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
     },
+  },
   // Trello actions
   {
     type: 'function',
