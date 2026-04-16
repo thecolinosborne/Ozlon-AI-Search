@@ -1513,6 +1513,142 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' }, name: { type: 'string', description: 'New name (optional)' }, resolved: { type: 'boolean', description: 'Mark resolved or unresolved (optional)' } }, required: ['checklist_id', 'checklist_item_id'] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_clickup_tasks',
+      description: 'Search tasks across the entire ClickUp workspace by keyword, status, assignee, tags, or due date.',
+      parameters: { type: 'object', properties: { statuses: { type: 'array', items: { type: 'string' }, description: 'Filter by statuses (optional)' }, assignees: { type: 'array', items: { type: 'number' }, description: 'Filter by assignee user IDs (optional)' }, tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (optional)' }, due_date_gt: { type: 'number', description: 'Due date after (Unix ms, optional)' }, due_date_lt: { type: 'number', description: 'Due date before (Unix ms, optional)' }, include_closed: { type: 'boolean', description: 'Include closed tasks (optional)' }, subtasks: { type: 'boolean', description: 'Include subtasks (optional)' } }, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_spaces',
+      description: 'List all spaces in the ClickUp workspace.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_lists',
+      description: 'List all lists across the entire ClickUp workspace (all spaces and folders).',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_members',
+      description: 'List all members in the ClickUp workspace. Use to discover user IDs for assignee operations.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'move_clickup_task',
+      description: 'Move a ClickUp task to a different list.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID to move' }, list_id: { type: 'string', description: 'Destination list ID' } }, required: ['task_id', 'list_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_priority',
+      description: 'Set the priority of a ClickUp task. 1=Urgent, 2=High, 3=Normal, 4=Low.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, priority: { type: 'number', description: '1=Urgent, 2=High, 3=Normal, 4=Low' } }, required: ['task_id', 'priority'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_clickup_timer',
+      description: 'Start a time tracking timer on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID to track time on' }, description: { type: 'string', description: 'Timer description (optional)' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'stop_clickup_timer',
+      description: 'Stop the currently running ClickUp time tracking timer.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_time_entries',
+      description: 'Get time tracking entries from ClickUp.',
+      parameters: { type: 'object', properties: { start_date: { type: 'number', description: 'Start date Unix ms (optional)' }, end_date: { type: 'number', description: 'End date Unix ms (optional)' } }, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_custom_fields',
+      description: 'List custom fields available on a ClickUp list.',
+      parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_clickup_custom_field',
+      description: 'Set a custom field value on a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, field_id: { type: 'string', description: 'Custom field ID' }, value: { description: 'Value to set' } }, required: ['task_id', 'field_id', 'value'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_clickup_task_dependencies',
+      description: 'List dependencies and dependents of a ClickUp task.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' } }, required: ['task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_clickup_dependency',
+      description: 'Add a dependency between two ClickUp tasks (task depends on another).',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID that depends on another' }, depends_on: { type: 'string', description: 'Task ID that this task depends on' } }, required: ['task_id', 'depends_on'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_dependency',
+      description: 'Remove a dependency between two ClickUp tasks.',
+      parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'Task ID' }, depends_on: { type: 'string', description: 'Dependency task ID to remove' } }, required: ['task_id', 'depends_on'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_checklist',
+      description: 'Delete an entire checklist from a ClickUp task.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' } }, required: ['checklist_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_clickup_checklist_item',
+      description: 'Delete an item from a ClickUp checklist.',
+      parameters: { type: 'object', properties: { checklist_id: { type: 'string', description: 'Checklist ID' }, checklist_item_id: { type: 'string', description: 'Item ID' } }, required: ['checklist_id', 'checklist_item_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_clickup_list_statuses',
+      description: 'Get available statuses for a ClickUp list. Useful to know valid status values before setting task status.',
+      parameters: { type: 'object', properties: { list_id: { type: 'string', description: 'List ID' } }, required: ['list_id'] },
+    },
+  },
   // Trello actions
   {
     type: 'function',
@@ -3162,8 +3298,129 @@ async function executeToolCall(
           return { success: true, result: `Checklist item updated.` };
         } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
       }
+      case 'search_clickup_tasks': {
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.statuses) params.statuses = args.statuses;
+          if (args.assignees) params.assignees = args.assignees;
+          if (args.tags) params.tags = args.tags;
+          if (args.due_date_gt) params.due_date_gt = args.due_date_gt;
+          if (args.due_date_lt) params.due_date_lt = args.due_date_lt;
+          if (args.include_closed) params.include_closed = true;
+          if (args.subtasks) params.subtasks = true;
+          const data = await callClickUpEdge('search_tasks', params) as { tasks?: { id: string; name: string; status?: { status?: string }; list?: { name?: string }; url?: string }[] };
+          const tasks = data.tasks || [];
+          if (!tasks.length) return { success: true, result: 'No tasks found matching filters.' };
+          return { success: true, result: `Found ${tasks.length} tasks:\n${tasks.map((t: any) => `- ${t.name} (${t.status?.status || '?'}) [${t.list?.name || '?'}] — ${t.url || `https://app.clickup.com/t/${t.id}`}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_spaces': {
+        try {
+          const data = await callClickUpEdge('list_spaces') as { spaces?: { id: string; name: string }[] };
+          const spaces = data.spaces || [];
+          if (!spaces.length) return { success: true, result: 'No spaces found.' };
+          return { success: true, result: `Spaces:\n${spaces.map((s: any) => `- ${s.name} (ID: ${s.id})`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_lists': {
+        try {
+          const data = await callClickUpEdge('list_all_lists') as { lists?: { id: string; name: string; space: string; folder: string | null }[]; count?: number };
+          const lists = data.lists || [];
+          if (!lists.length) return { success: true, result: 'No lists found.' };
+          return { success: true, result: `${lists.length} lists:\n${lists.map((l: any) => `- ${l.name} (ID: ${l.id}) — Space: ${l.space}${l.folder ? `, Folder: ${l.folder}` : ''}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_members': {
+        try {
+          const data = await callClickUpEdge('list_workspace_members') as { members?: { id: number; username: string; email: string }[] };
+          const members = data.members || [];
+          if (!members.length) return { success: true, result: 'No members found.' };
+          return { success: true, result: `Workspace members:\n${members.map((m: any) => `- ${m.username} (${m.email}) — User ID: ${m.id}`).join('\n')}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'move_clickup_task': {
+        try {
+          await callClickUpEdge('move_task', { taskId: args.task_id, listId: args.list_id });
+          return { success: true, result: `Task ${args.task_id} moved to list ${args.list_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_priority': {
+        try {
+          await callClickUpEdge('update_task', { taskId: args.task_id, priority: args.priority });
+          return { success: true, result: `Priority set to ${args.priority} on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'start_clickup_timer': {
+        try {
+          const res = await callClickUpEdge('start_time_entry', { taskId: args.task_id, description: args.description || '' });
+          return { success: true, result: `Timer started on task ${args.task_id}. ${JSON.stringify(res)}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'stop_clickup_timer': {
+        try {
+          const res = await callClickUpEdge('stop_time_entry');
+          return { success: true, result: `Timer stopped. ${JSON.stringify(res)}` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_time_entries': {
+        try {
+          const params: Record<string, unknown> = {};
+          if (args.start_date) params.start_date = args.start_date;
+          if (args.end_date) params.end_date = args.end_date;
+          const data = await callClickUpEdge('get_time_entries', params);
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_custom_fields': {
+        try {
+          const data = await callClickUpEdge('get_custom_fields', { listId: args.list_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'set_clickup_custom_field': {
+        try {
+          await callClickUpEdge('set_custom_field', { taskId: args.task_id, fieldId: args.field_id, value: args.value });
+          return { success: true, result: `Custom field ${args.field_id} set on task ${args.task_id}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'list_clickup_task_dependencies': {
+        try {
+          const data = await callClickUpEdge('get_task_dependencies', { taskId: args.task_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'add_clickup_dependency': {
+        try {
+          await callClickUpEdge('add_dependency', { taskId: args.task_id, depends_on: args.depends_on });
+          return { success: true, result: `Dependency added: ${args.task_id} depends on ${args.depends_on}.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_dependency': {
+        try {
+          await callClickUpEdge('delete_dependency', { taskId: args.task_id, depends_on: args.depends_on });
+          return { success: true, result: `Dependency removed.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_checklist': {
+        try {
+          await callClickUpEdge('delete_checklist', { checklistId: args.checklist_id });
+          return { success: true, result: `Checklist ${args.checklist_id} deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'delete_clickup_checklist_item': {
+        try {
+          await callClickUpEdge('delete_checklist_item', { checklistId: args.checklist_id, checklistItemId: args.checklist_item_id });
+          return { success: true, result: `Checklist item deleted.` };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
+      case 'get_clickup_list_statuses': {
+        try {
+          const data = await callClickUpEdge('get_list_statuses', { listId: args.list_id });
+          return { success: true, result: JSON.stringify(data) };
+        } catch (err) { return { success: false, result: `ClickUp error: ${(err as Error).message}` }; }
+      }
 
-      // ============ Tier 3: GHL Social, Products, Courses, Surveys, Blogs, Media, Companies, Links, Businesses ============
+
       case 'ghl_list_social_accounts': {
         const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
@@ -4253,6 +4510,23 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'create_clickup_checklist': '_always_',
     'create_clickup_checklist_item': '_always_',
     'update_clickup_checklist_item': '_always_',
+    'search_clickup_tasks': '_always_',
+    'list_clickup_spaces': '_always_',
+    'list_clickup_lists': '_always_',
+    'list_clickup_members': '_always_',
+    'move_clickup_task': '_always_',
+    'set_clickup_priority': '_always_',
+    'start_clickup_timer': '_always_',
+    'stop_clickup_timer': '_always_',
+    'get_clickup_time_entries': '_always_',
+    'get_clickup_custom_fields': '_always_',
+    'set_clickup_custom_field': '_always_',
+    'list_clickup_task_dependencies': '_always_',
+    'add_clickup_dependency': '_always_',
+    'delete_clickup_dependency': '_always_',
+    'delete_clickup_checklist': '_always_',
+    'delete_clickup_checklist_item': '_always_',
+    'get_clickup_list_statuses': '_always_',
     'create_trello_card': 'trello',
     'create_jira_issue': 'jira',
     // GHL tools
