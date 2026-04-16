@@ -77,6 +77,32 @@ export default function YouTubeDetail() {
   const [driveConverted, setDriveConverted] = useState(false);
   const [uploadPrivacy, setUploadPrivacy] = useState("private");
   const [uploading, setUploading] = useState(false);
+
+  // ── Expanded upload fields ──
+  const [tagsInput, setTagsInput] = useState("");
+  const [hashtagsInput, setHashtagsInput] = useState("");
+  const [categoryId, setCategoryId] = useState("22");
+  const [language, setLanguage] = useState("");
+  const [defaultAudioLanguage, setDefaultAudioLanguage] = useState("");
+  const [publishAt, setPublishAt] = useState("");
+  const [madeForKids, setMadeForKids] = useState(false);
+  const [notifySubscribers, setNotifySubscribers] = useState(true);
+  const [recordingDate, setRecordingDate] = useState("");
+  const [locationDescription, setLocationDescription] = useState("");
+  const [chapters, setChapters] = useState<Array<{ timestamp: string; title: string }>>([]);
+  const [captionsUrl, setCaptionsUrl] = useState("");
+  const [captionsLanguage, setCaptionsLanguage] = useState("en");
+  const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [playlistId, setPlaylistId] = useState("");
+  const [playlistName, setPlaylistName] = useState("");
+  const [pinnedComment, setPinnedComment] = useState("");
+  const [license, setLicense] = useState("youtube");
+  const [embeddable, setEmbeddable] = useState(true);
+  const [publicStatsViewable, setPublicStatsViewable] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; title: string }>>([]);
+  const [playlistsList, setPlaylistsList] = useState<Array<{ id: string; title: string }>>([]);
   const [syncing, setSyncing] = useState(false);
 
   const [youtubeOpen, setYoutubeOpen] = useState(false);
@@ -357,24 +383,76 @@ export default function YouTubeDetail() {
 
   const handleUpload = async () => {
     if (!uploadVideoUrl.trim()) { toast.error("Video URL is required"); return; }
+    if (uploadPrivacy === "public") {
+      const ok = window.confirm(`Publish "${uploadTitle.trim() || "Untitled"}" PUBLICLY to YouTube? This will be visible to everyone.`);
+      if (!ok) return;
+    }
     setUploading(true);
     try {
-      const result = await callYouTube("upload_video", {
+      const tags = tagsInput.split(",").map(t => t.trim()).filter(Boolean).slice(0, 15);
+      const hashtags = hashtagsInput.split(/[,\s]+/).map(h => h.replace(/^#/, "").trim()).filter(Boolean);
+      const cleanChapters = chapters.filter(c => c.timestamp.trim() && c.title.trim());
+
+      const payload: Record<string, unknown> = {
         title: uploadTitle.trim() || "Untitled",
         description: uploadDescription.trim(),
         privacyStatus: uploadPrivacy,
         videoUrl: uploadVideoUrl.trim(),
-      });
-      toast.success(`Uploaded! Video ID: ${result.videoId}`);
-      setUploadTitle("");
-      setUploadDescription("");
-      setUploadVideoUrl("");
+        categoryId,
+        madeForKids,
+        notifySubscribers,
+        license,
+        embeddable,
+        publicStatsViewable,
+      };
+      if (tags.length) payload.tags = tags;
+      if (hashtags.length) payload.hashtags = hashtags;
+      if (language) payload.defaultLanguage = language;
+      if (defaultAudioLanguage) payload.defaultAudioLanguage = defaultAudioLanguage;
+      if (publishAt) payload.publishAt = new Date(publishAt).toISOString();
+      if (recordingDate) payload.recordingDate = new Date(recordingDate).toISOString();
+      if (locationDescription) payload.locationDescription = locationDescription;
+      if (cleanChapters.length) payload.chapters = cleanChapters;
+      if (captionsUrl) { payload.captionsUrl = captionsUrl; payload.captionsLanguage = captionsLanguage; }
+      if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
+      if (playlistId) payload.playlistId = playlistId;
+      else if (playlistName.trim()) payload.playlistName = playlistName.trim();
+      if (pinnedComment.trim()) payload.pinnedComment = pinnedComment.trim();
+
+      const result = await callYouTube("upload_video", payload);
+      const warns = Array.isArray(result?.warnings) && result.warnings.length
+        ? ` (${result.warnings.length} warning${result.warnings.length > 1 ? "s" : ""})`
+        : "";
+      toast.success(`Uploaded! Video ID: ${result.videoId}${warns}`);
+      if (Array.isArray(result?.warnings)) {
+        result.warnings.forEach((w: string) => toast.warning(w));
+      }
+      setUploadTitle(""); setUploadDescription(""); setUploadVideoUrl("");
+      setTagsInput(""); setHashtagsInput(""); setChapters([]);
+      setCaptionsUrl(""); setThumbnailUrl(""); setPlaylistId(""); setPlaylistName("");
+      setPinnedComment(""); setPublishAt(""); setRecordingDate(""); setLocationDescription("");
     } catch (e) {
       toast.error(`Upload failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setUploading(false);
     }
   };
+
+  // Load categories & playlists when the upload panel opens
+  useEffect(() => {
+    if (!uploadOpen || !oauthConnected) return;
+    if (!categoriesList.length) {
+      callYouTube("list_video_categories", { regionCode: "US" })
+        .then(r => setCategoriesList(((r?.items || []) as Array<{ id: string; snippet: { title: string } }>).map(i => ({ id: i.id, title: i.snippet.title }))))
+        .catch(() => {});
+    }
+    if (!playlistsList.length) {
+      callYouTube("list_playlists")
+        .then(r => setPlaylistsList(((r?.items || []) as Array<{ id: string; snippet: { title: string } }>).map(i => ({ id: i.id, title: i.snippet.title }))))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadOpen, oauthConnected]);
 
   const handleDisconnect = async () => {
     const connectionId = savedConn?.id || settings.connectionId;
@@ -613,26 +691,142 @@ export default function YouTubeDetail() {
             {uploadOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
           </button>
           {uploadOpen && (
-            <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
-              <input type="text" value={uploadVideoUrl} onChange={(e) => {
-                const raw = e.target.value;
-                const normalized = normalizeVideoUrl(raw);
-                setUploadVideoUrl(normalized);
-                setDriveConverted(normalized !== raw);
-              }} placeholder="Public video URL or Google Drive link" className={inputClass} />
-              {driveConverted && (
-                <p className="text-[11px] text-muted-foreground">Google Drive link auto-converted to direct download URL</p>
-              )}
-              <input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Video title" className={inputClass} />
-              <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} placeholder="Video description" className={cn(inputClass, "min-h-[60px]")} />
-              <select value={uploadPrivacy} onChange={(e) => setUploadPrivacy(e.target.value)} className={inputClass}>
-                <option value="private">Private</option>
-                <option value="unlisted">Unlisted</option>
-                <option value="public">Public</option>
-              </select>
-              <button onClick={handleUpload} disabled={uploading} className={actionBtnClass}>
+            <div className="px-4 pb-4 space-y-5 border-t border-border/20 pt-3">
+              {/* Core */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Core</h4>
+                <input type="text" value={uploadVideoUrl} onChange={(e) => {
+                  const raw = e.target.value;
+                  const normalized = normalizeVideoUrl(raw);
+                  setUploadVideoUrl(normalized);
+                  setDriveConverted(normalized !== raw);
+                }} placeholder="Public video URL or Google Drive link *" className={inputClass} />
+                {driveConverted && (
+                  <p className="text-[11px] text-muted-foreground">Google Drive link auto-converted to direct download URL</p>
+                )}
+                <input type="text" value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Video title *" className={inputClass} />
+                <textarea value={uploadDescription} onChange={(e) => setUploadDescription(e.target.value)} placeholder="Video description" className={cn(inputClass, "min-h-[80px]")} />
+                <select value={uploadPrivacy} onChange={(e) => setUploadPrivacy(e.target.value)} className={inputClass}>
+                  <option value="private">Private</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="public">Public</option>
+                </select>
+              </section>
+
+              {/* SEO */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">SEO & Discovery</h4>
+                <input type="text" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} placeholder="Tags (comma-separated, max 15)" className={inputClass} />
+                <input type="text" value={hashtagsInput} onChange={(e) => setHashtagsInput(e.target.value)} placeholder="Hashtags (space or comma separated, max 15)" className={inputClass} />
+                <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inputClass}>
+                  <option value="22">People & Blogs (default)</option>
+                  {categoriesList.filter(c => c.id !== "22").map(c => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="Language (e.g. en)" className={inputClass} />
+                  <input type="text" value={defaultAudioLanguage} onChange={(e) => setDefaultAudioLanguage(e.target.value)} placeholder="Audio language" className={inputClass} />
+                </div>
+                <input type="text" value={locationDescription} onChange={(e) => setLocationDescription(e.target.value)} placeholder="Recording location (e.g. Los Angeles, CA)" className={inputClass} />
+              </section>
+
+              {/* Schedule & Audience */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Schedule & Audience</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground">Publish at</label>
+                    <input type="datetime-local" value={publishAt} onChange={(e) => setPublishAt(e.target.value)} className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground">Recording date</label>
+                    <input type="datetime-local" value={recordingDate} onChange={(e) => setRecordingDate(e.target.value)} className={inputClass} />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-4 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={madeForKids} onChange={(e) => setMadeForKids(e.target.checked)} />
+                    <span className="text-foreground">Made for kids (COPPA)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={notifySubscribers} onChange={(e) => setNotifySubscribers(e.target.checked)} />
+                    <span className="text-foreground">Notify subscribers</span>
+                  </label>
+                </div>
+              </section>
+
+              {/* Content: chapters + captions */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Content Structure</h4>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">Chapters (must include 00:00)</span>
+                    <button type="button" onClick={() => setChapters([...chapters, { timestamp: "", title: "" }])} className="text-[11px] text-primary hover:underline">+ Add chapter</button>
+                  </div>
+                  {chapters.map((c, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input type="text" value={c.timestamp} onChange={(e) => {
+                        const next = [...chapters]; next[i] = { ...next[i], timestamp: e.target.value }; setChapters(next);
+                      }} placeholder="00:00" className={cn(inputClass, "w-24 shrink-0")} />
+                      <input type="text" value={c.title} onChange={(e) => {
+                        const next = [...chapters]; next[i] = { ...next[i], title: e.target.value }; setChapters(next);
+                      }} placeholder="Chapter title" className={inputClass} />
+                      <button type="button" onClick={() => setChapters(chapters.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive text-sm shrink-0">×</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-[1fr_120px] gap-2">
+                  <input type="text" value={captionsUrl} onChange={(e) => setCaptionsUrl(e.target.value)} placeholder="Captions URL (.srt or .vtt)" className={inputClass} />
+                  <input type="text" value={captionsLanguage} onChange={(e) => setCaptionsLanguage(e.target.value)} placeholder="Lang" className={inputClass} />
+                </div>
+              </section>
+
+              {/* Distribution */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Distribution</h4>
+                <select value={playlistId} onChange={(e) => { setPlaylistId(e.target.value); if (e.target.value) setPlaylistName(""); }} className={inputClass}>
+                  <option value="">— No playlist —</option>
+                  {playlistsList.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                </select>
+                <input type="text" value={playlistName} onChange={(e) => { setPlaylistName(e.target.value); if (e.target.value) setPlaylistId(""); }} placeholder="…or new playlist name (created if missing)" className={inputClass} />
+                <input type="text" value={thumbnailUrl} onChange={(e) => setThumbnailUrl(e.target.value)} placeholder="Custom thumbnail URL (jpg/png)" className={inputClass} />
+              </section>
+
+              {/* Engagement */}
+              <section className="space-y-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Engagement</h4>
+                <textarea value={pinnedComment} onChange={(e) => setPinnedComment(e.target.value)} placeholder="Pinned comment (auto-pin attempted; may need manual pin in Studio)" className={cn(inputClass, "min-h-[60px]")} />
+              </section>
+
+              {/* Advanced */}
+              <section className="space-y-2">
+                <button type="button" onClick={() => setAdvancedOpen(!advancedOpen)} className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground">
+                  Advanced {advancedOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+                {advancedOpen && (
+                  <div className="space-y-2 pl-1">
+                    <select value={license} onChange={(e) => setLicense(e.target.value)} className={inputClass}>
+                      <option value="youtube">Standard YouTube License</option>
+                      <option value="creativeCommon">Creative Commons</option>
+                    </select>
+                    <div className="flex flex-wrap gap-4 text-xs">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={embeddable} onChange={(e) => setEmbeddable(e.target.checked)} />
+                        <span className="text-foreground">Embeddable</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={publicStatsViewable} onChange={(e) => setPublicStatsViewable(e.target.checked)} />
+                        <span className="text-foreground">Public stats viewable</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <button onClick={handleUpload} disabled={uploading} className={cn(actionBtnClass, "w-full")}>
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Upload className="w-4 h-4 inline mr-1" />}
-                Upload to YouTube
+                {uploading ? "Uploading…" : "Upload to YouTube"}
               </button>
             </div>
           )}

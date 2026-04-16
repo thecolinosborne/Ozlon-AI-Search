@@ -2440,15 +2440,57 @@ const MATON_ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'upload_youtube_video',
-      description: 'Upload a video to the user\'s YouTube channel. Requires YouTube OAuth to be connected. The user must provide a public URL to the video file. Confirm title, description, and privacy before uploading.',
+      description: [
+        'Upload a video to the user\'s YouTube channel via their OAuth connection.',
+        'Required: title, video_url. Everything else is optional and should be SUGGESTED, not required.',
+        'Rules:',
+        '- Preserve user-provided fields verbatim — never rewrite unless explicitly asked.',
+        '- Suggest missing SEO fields (tags, hashtags, chapters, category) but never block the upload.',
+        '- No keyword stuffing: max 15 tags, total tag length ≤ 500 chars, max 15 hashtags.',
+        '- ALWAYS confirm before uploading when privacy_status="public".',
+        '- If video is vertical and ≤60s (Shorts), append "#Shorts" to hashtags if not already present.',
+        '- chapters[] must include a 00:00 entry; if missing, the system will auto-prepend "00:00 Intro".',
+        '- For scheduled publish (publish_at), YT will hold as private until the scheduled time.',
+      ].join(' '),
       parameters: {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Video title (max 100 chars)' },
-          description: { type: 'string', description: 'Video description' },
-          video_url: { type: 'string', description: 'Public URL to the video file (mp4, mov, etc.)' },
-          privacy_status: { type: 'string', enum: ['private', 'unlisted', 'public'], description: 'Video privacy setting. Default to private unless user specifies otherwise.' },
-          tags: { type: 'string', description: 'Comma-separated tags for the video' },
+          description: { type: 'string', description: 'Video description (full body, before chapters/hashtags are appended)' },
+          video_url: { type: 'string', description: 'Public URL to video file (mp4/mov/webm). Google Drive share links are auto-resolved via the user\'s OAuth.' },
+          privacy_status: { type: 'string', enum: ['private', 'unlisted', 'public'], description: 'Default private unless user specifies.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Max 15 SEO tags.' },
+          category_id: { type: 'string', description: 'YouTube category ID (e.g. "22" People & Blogs, "27" Education, "10" Music). Defaults to 22.' },
+          made_for_kids: { type: 'boolean', description: 'COPPA self-declaration. Required by YT — defaults to false if not specified.' },
+          language: { type: 'string', description: 'BCP-47 language code for the video metadata (e.g. "en", "es").' },
+          default_audio_language: { type: 'string', description: 'BCP-47 language code for audio track.' },
+          recording_date: { type: 'string', description: 'ISO datetime when the video was recorded.' },
+          location: { type: 'string', description: 'Free-text location description.' },
+          hashtags: { type: 'array', items: { type: 'string' }, description: 'Hashtags appended to description (max 15, deduped, "#" optional).' },
+          chapters: {
+            type: 'array',
+            description: 'Timestamped chapters appended to description. Must include 00:00.',
+            items: {
+              type: 'object',
+              properties: {
+                timestamp: { type: 'string', description: 'mm:ss or hh:mm:ss' },
+                title: { type: 'string' },
+              },
+              required: ['timestamp', 'title'],
+              additionalProperties: false,
+            },
+          },
+          thumbnail_url: { type: 'string', description: 'Public URL to a custom thumbnail (jpg/png, ≤2MB recommended).' },
+          captions_url: { type: 'string', description: 'Public URL to an SRT/VTT captions file.' },
+          captions_language: { type: 'string', description: 'BCP-47 code for captions (default "en").' },
+          playlist_id: { type: 'string', description: 'Add to existing playlist by ID.' },
+          playlist_name: { type: 'string', description: 'Add to playlist by name. Created if missing.' },
+          publish_at: { type: 'string', description: 'ISO 8601 datetime to schedule publishing. Forces private until that time.' },
+          license: { type: 'string', enum: ['youtube', 'creativeCommon'], description: 'Default "youtube".' },
+          embeddable: { type: 'boolean' },
+          public_stats_viewable: { type: 'boolean' },
+          notify_subscribers: { type: 'boolean', description: 'Default true. Set false for silent uploads.' },
+          pinned_comment: { type: 'string', description: 'Comment to post on the video. Auto-pin attempted but may require manual pin in Studio.' },
         },
         required: ['title', 'video_url'],
         additionalProperties: false,
@@ -4365,7 +4407,7 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
-      // ============ YouTube Upload Handler ============
+      // ============ YouTube Upload Handler (delegates to youtube edge function) ============
       case 'upload_youtube_video': {
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -4373,93 +4415,61 @@ ${pageContents.slice(0, 12000)}`;
           const userId = (args as Record<string, unknown>).__user_id as string;
           if (!userId) return { success: false, result: 'User not authenticated. Sign in to upload videos.' };
 
-          const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-          const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-          if (!clientId || !clientSecret) return { success: false, result: 'YouTube OAuth credentials not configured on the server. Contact the admin.' };
-
-          const title = (args.title as string) || 'Untitled';
-          const description = (args.description as string) || '';
-          const videoUrl = (args.video_url as string) || '';
-          const privacyStatus = (args.privacy_status as string) || 'private';
-
+          const a = args as Record<string, unknown>;
+          const title = String(a.title || 'Untitled');
+          const videoUrl = String(a.video_url || '');
           if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
 
-          const { createClient: createUploadClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
-          const adminClient = createUploadClient(supabaseUrl, serviceRoleKey);
+          // Map snake_case tool args → camelCase edge function params
+          const payload: Record<string, unknown> = {
+            action: 'upload_video',
+            title,
+            videoUrl,
+            description: a.description,
+            privacyStatus: a.privacy_status || 'private',
+            tags: a.tags,
+            categoryId: a.category_id,
+            madeForKids: a.made_for_kids,
+            defaultLanguage: a.language,
+            defaultAudioLanguage: a.default_audio_language,
+            recordingDate: a.recording_date,
+            locationDescription: a.location,
+            hashtags: a.hashtags,
+            chapters: a.chapters,
+            thumbnailUrl: a.thumbnail_url,
+            captionsUrl: a.captions_url,
+            captionsLanguage: a.captions_language,
+            playlistId: a.playlist_id,
+            playlistName: a.playlist_name,
+            publishAt: a.publish_at,
+            license: a.license,
+            embeddable: a.embeddable,
+            publicStatsViewable: a.public_stats_viewable,
+            notifySubscribers: a.notify_subscribers,
+            pinnedComment: a.pinned_comment,
+          };
+          for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
 
-          // Get OAuth token
-          const { data: conn } = await adminClient
-            .from('integration_connections')
-            .select('metadata')
-            .eq('user_id', userId)
-            .eq('provider', 'youtube')
-            .eq('auth_type', 'oauth2')
-            .eq('status', 'connected')
-            .maybeSingle();
-
-          if (!conn) return { success: false, result: 'YouTube OAuth not connected. Go to Integrations > YouTube and authorize uploads first.' };
-
-          const meta = conn.metadata as Record<string, unknown>;
-          let accessToken = String(meta.access_token || '');
-          const refreshToken = String(meta.refresh_token || '');
-          const expiresAt = String(meta.expires_at || '');
-
-          // Refresh if expired
-          if (new Date(expiresAt) <= new Date()) {
-            if (!refreshToken) return { success: false, result: 'YouTube OAuth token expired and no refresh token. Re-authorize in Integrations > YouTube.' };
-            const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
-            });
-            const refreshData = await refreshRes.json();
-            if (!refreshRes.ok) return { success: false, result: `YouTube token refresh failed: ${JSON.stringify(refreshData)}` };
-            accessToken = refreshData.access_token;
-            await adminClient
-              .from('integration_connections')
-              .update({ metadata: { ...meta, access_token: accessToken, expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString() } })
-              .eq('user_id', userId).eq('provider', 'youtube').eq('auth_type', 'oauth2');
-          }
-
-          // Download the video
-          const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) return { success: false, result: `Failed to download video from URL: HTTP ${videoRes.status}` };
-          const videoBlob = await videoRes.blob();
-
-          // Initiate resumable upload
-          const initiateRes = await fetch(
-            'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-                'X-Upload-Content-Length': String(videoBlob.size),
-                'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
-              },
-              body: JSON.stringify({
-                snippet: { title, description },
-                status: { privacyStatus },
-              }),
+          const res = await fetch(`${supabaseUrl}/functions/v1/youtube`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'Content-Type': 'application/json',
+              'x-user-id': userId,
             },
-          );
-          if (!initiateRes.ok) {
-            const errBody = await initiateRes.text();
-            return { success: false, result: `YouTube upload initiation failed: ${initiateRes.status} ${errBody}` };
-          }
-          const uploadUrl = initiateRes.headers.get('Location');
-          if (!uploadUrl) return { success: false, result: 'YouTube did not return an upload URL.' };
-
-          // Upload the video
-          const uploadRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': videoBlob.type || 'video/mp4', 'Content-Length': String(videoBlob.size) },
-            body: videoBlob,
+            body: JSON.stringify(payload),
           });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) return { success: false, result: `YouTube upload failed: ${JSON.stringify(uploadData)}` };
-
-          return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${uploadData.id}` };
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.error || data?.success === false) {
+            return { success: false, result: `YouTube upload error: ${data?.error || JSON.stringify(data).slice(0, 400)}` };
+          }
+          const warnings = Array.isArray(data?.warnings) && data.warnings.length
+            ? `\n\n⚠️ Post-upload warnings:\n- ${data.warnings.join('\n- ')}`
+            : '';
+          return {
+            success: true,
+            result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${payload.privacyStatus}\n**URL:** ${data.url || `https://www.youtube.com/watch?v=${data.videoId}`}${warnings}`,
+          };
         } catch (e) {
           console.error('[upload_youtube_video] Error:', e);
           return { success: false, result: `YouTube upload error: ${e instanceof Error ? e.message : 'Unknown'}` };
