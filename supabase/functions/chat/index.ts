@@ -3003,72 +3003,66 @@ async function executeToolCall(
         return { success: true, result: `Workflow ${args.workflow_id} triggered for contact ${args.contact_id}.` };
       }
 
-      // ============ Google Docs tools ============
+      // ============ Google Docs ============
       case 'create_google_doc': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Docs).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.document' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create doc: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/document/d/${res.id}/edit`;
-        let result = `Google Doc created: "${args.title}" — ${link}`;
-        if (args.content) {
-          try {
-            const docConnId = resolveConnection(connMap, 'google-docs', accountHint, userMessage, aliasMap)?.id || connId;
-            await callMatonGateway(matonApiKey, `/google-docs/v1/documents/${res.id}:batchUpdate`, docConnId, 'POST', {
-              requests: [{ insertText: { location: { index: 1 }, text: args.content as string } }],
-            });
-            result += '\nContent added successfully.';
-          } catch { result += '\nDoc created but could not insert content (Docs API may not be connected).'; }
-        }
-        return { success: true, result };
+        try {
+          const data = await callNativeEdge('google-docs', 'create_document', { title: args.title });
+          const doc = data.document as { documentId?: string } | undefined;
+          const docId = doc?.documentId;
+          if (!docId) return { success: false, result: 'Doc created but no ID returned.' };
+          const link = `https://docs.google.com/document/d/${docId}/edit`;
+          let result = `Google Doc created: "${args.title}" — ${link}`;
+          if (args.content) {
+            try {
+              await callNativeEdge('google-docs', 'insert_text', { documentId: docId, text: args.content as string, index: 1 });
+              result += '\nContent added successfully.';
+            } catch (e) { result += `\nDoc created but could not insert content: ${(e as Error).message}`; }
+          }
+          return { success: true, result };
+        } catch (e) { return { success: false, result: `Failed to create doc: ${(e as Error).message}` }; }
       }
 
-      // ============ Google Sheets tools ============
+      // ============ Google Sheets ============
       case 'create_google_sheet': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Sheets).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.spreadsheet' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create sheet: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/spreadsheets/d/${res.id}/edit`;
-        return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'create_spreadsheet', { title: args.title });
+          const sheet = data.spreadsheet as { spreadsheetId?: string; spreadsheetUrl?: string } | undefined;
+          const link = sheet?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheet?.spreadsheetId}/edit`;
+          return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
+        } catch (e) { return { success: false, result: `Failed to create sheet: ${(e as Error).message}` }; }
       }
 
       case 'read_sheet_data': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
-        const range = encodeURIComponent((args.range as string) || 'Sheet1');
-        const data = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}`, connId) as { values?: string[][]; error?: { message?: string } };
-        if (data.error) return { success: false, result: `Failed to read sheet: ${data.error.message}` };
-        const rows = data.values || [];
-        if (!rows.length) return { success: true, result: 'Sheet is empty or range has no data.' };
-        return { success: true, result: `Read ${rows.length} rows:\n${rows.slice(0, 50).map(r => r.join(' | ')).join('\n')}${rows.length > 50 ? `\n... and ${rows.length - 50} more rows` : ''}` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'read_range', {
+            spreadsheetId: args.spreadsheet_id, range: (args.range as string) || 'Sheet1',
+          });
+          const rows = (data.values as string[][]) || [];
+          if (!rows.length) return { success: true, result: 'Sheet is empty or range has no data.' };
+          return { success: true, result: `Read ${rows.length} rows:\n${rows.slice(0, 50).map(r => r.join(' | ')).join('\n')}${rows.length > 50 ? `\n... and ${rows.length - 50} more rows` : ''}` };
+        } catch (e) { return { success: false, result: `Failed to read sheet: ${(e as Error).message}` }; }
       }
 
       case 'append_sheet_rows': {
-        const connId = resolveConnection(connMap, 'google-sheets', accountHint, userMessage)?.id || resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap)?.id;
-        if (!connId) return { success: false, result: 'Google Sheets is not connected.' };
-        const range = encodeURIComponent((args.range as string) || 'Sheet1');
         let values: string[][];
         try { values = JSON.parse(args.values as string); } catch { return { success: false, result: 'Invalid values format. Must be a JSON array of arrays.' }; }
-        const res = await callMatonGateway(matonApiKey, `/google-sheets/v4/spreadsheets/${args.spreadsheet_id}/values/${range}:append?valueInputOption=USER_ENTERED`, connId, 'POST', { values }) as { updates?: { updatedRows?: number }; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to append: ${res.error.message}` };
-        return { success: true, result: `Appended ${res.updates?.updatedRows || values.length} rows to the spreadsheet.` };
+        try {
+          const data = await callNativeEdge('google-sheets', 'append_rows', {
+            spreadsheetId: args.spreadsheet_id, range: (args.range as string) || 'Sheet1', values,
+          });
+          const updates = data.updates as { updatedRows?: number } | undefined;
+          return { success: true, result: `Appended ${updates?.updatedRows || values.length} rows to the spreadsheet.` };
+        } catch (e) { return { success: false, result: `Failed to append: ${(e as Error).message}` }; }
       }
 
-      // ============ Google Slides tools ============
+      // ============ Google Slides ============
       case 'create_google_presentation': {
-        const resolved = resolveConnection(connMap, 'google-drive', accountHint, userMessage, aliasMap);
-        const connId = resolved?.id;
-        if (!connId) return { success: false, result: 'Google Drive is not connected (needed for Slides).' };
-        const fileMetadata = { name: args.title, mimeType: 'application/vnd.google-apps.presentation' };
-        const res = await callMatonGateway(matonApiKey, '/google-drive/drive/v3/files?fields=id,name,webViewLink', connId, 'POST', fileMetadata) as { id?: string; name?: string; webViewLink?: string; error?: { message?: string } };
-        if (res.error) return { success: false, result: `Failed to create presentation: ${res.error.message || JSON.stringify(res.error)}` };
-        const link = res.webViewLink || `https://docs.google.com/presentation/d/${res.id}/edit`;
-        return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
+        try {
+          const data = await callNativeEdge('google-slides', 'create_presentation', { title: args.title });
+          const pres = data as { presentationId?: string };
+          const link = `https://docs.google.com/presentation/d/${pres.presentationId}/edit`;
+          return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
+        } catch (e) { return { success: false, result: `Failed to create presentation: ${(e as Error).message}` }; }
       }
 
       // ============ ClickUp tools (via dedicated edge function) ============
