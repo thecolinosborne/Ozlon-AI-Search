@@ -348,44 +348,42 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   const { createClient: cc1 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
   const adminClient = cc1(supabaseUrl, serviceRoleKey);
 
-  const { data: conn } = await adminClient
-    .from('integration_connections')
-    .select('id, status, external_account_label, auth_type')
+  // Prefer the connection that actually has synced channel data; fall back to most recent connected.
+  const { data: channelsAll } = await adminClient
+    .from('youtube_channels')
+    .select('connection_id, title, subscriber_count, video_count, view_count, fetched_at')
     .eq('user_id', userId)
-    .eq('provider', 'youtube')
-    .eq('status', 'connected')
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('fetched_at', { ascending: false })
+    .limit(1);
 
-  if (!conn?.id) return null;
-  if (conn.status !== 'connected') {
-    return 'YouTube integration exists but is currently disconnected. Reconnect in Integrations > YouTube.';
+  const channel = channelsAll?.[0];
+  const connectionId = channel?.connection_id;
+
+  if (!connectionId) {
+    // No synced data — check if any connection exists at all
+    const { data: anyConn } = await adminClient
+      .from('integration_connections')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('provider', 'youtube')
+      .eq('status', 'connected')
+      .limit(1)
+      .maybeSingle();
+    if (!anyConn?.id) return null;
+    return 'YouTube is connected, but no channel data has been synced yet. Run a sync from Integrations > YouTube.';
   }
 
-  const [{ data: channels }, { data: videos }] = await Promise.all([
-    adminClient
-      .from('youtube_channels')
-      .select('title, subscriber_count, video_count, view_count, fetched_at')
-      .eq('user_id', userId)
-      .eq('connection_id', conn.id)
-      .order('fetched_at', { ascending: false })
-      .limit(1),
-    adminClient
-      .from('youtube_videos')
-      .select('video_id, title, published_at, view_count, like_count, comment_count')
-      .eq('user_id', userId)
-      .eq('connection_id', conn.id)
-      .order('published_at', { ascending: false })
-      .limit(10),
-  ]);
+  const { data: videos } = await adminClient
+    .from('youtube_videos')
+    .select('video_id, title, published_at, view_count, like_count, comment_count')
+    .eq('user_id', userId)
+    .eq('connection_id', connectionId)
+    .order('published_at', { ascending: false })
+    .limit(10);
 
-  const channel = channels?.[0];
   let result = '';
-  if (channel) {
-    result += `**Channel:** ${channel.title || conn.external_account_label || 'Unknown'}\n`;
-    result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
-  }
+  result += `**Channel:** ${channel.title || 'Unknown'}\n`;
+  result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
   if (videos?.length) {
     result += 'Recent uploads:\n';
     result += videos.map((v: any) => {
