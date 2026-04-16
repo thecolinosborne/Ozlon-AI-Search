@@ -383,24 +383,76 @@ export default function YouTubeDetail() {
 
   const handleUpload = async () => {
     if (!uploadVideoUrl.trim()) { toast.error("Video URL is required"); return; }
+    if (uploadPrivacy === "public") {
+      const ok = window.confirm(`Publish "${uploadTitle.trim() || "Untitled"}" PUBLICLY to YouTube? This will be visible to everyone.`);
+      if (!ok) return;
+    }
     setUploading(true);
     try {
-      const result = await callYouTube("upload_video", {
+      const tags = tagsInput.split(",").map(t => t.trim()).filter(Boolean).slice(0, 15);
+      const hashtags = hashtagsInput.split(/[,\s]+/).map(h => h.replace(/^#/, "").trim()).filter(Boolean);
+      const cleanChapters = chapters.filter(c => c.timestamp.trim() && c.title.trim());
+
+      const payload: Record<string, unknown> = {
         title: uploadTitle.trim() || "Untitled",
         description: uploadDescription.trim(),
         privacyStatus: uploadPrivacy,
         videoUrl: uploadVideoUrl.trim(),
-      });
-      toast.success(`Uploaded! Video ID: ${result.videoId}`);
-      setUploadTitle("");
-      setUploadDescription("");
-      setUploadVideoUrl("");
+        categoryId,
+        madeForKids,
+        notifySubscribers,
+        license,
+        embeddable,
+        publicStatsViewable,
+      };
+      if (tags.length) payload.tags = tags;
+      if (hashtags.length) payload.hashtags = hashtags;
+      if (language) payload.defaultLanguage = language;
+      if (defaultAudioLanguage) payload.defaultAudioLanguage = defaultAudioLanguage;
+      if (publishAt) payload.publishAt = new Date(publishAt).toISOString();
+      if (recordingDate) payload.recordingDate = new Date(recordingDate).toISOString();
+      if (locationDescription) payload.locationDescription = locationDescription;
+      if (cleanChapters.length) payload.chapters = cleanChapters;
+      if (captionsUrl) { payload.captionsUrl = captionsUrl; payload.captionsLanguage = captionsLanguage; }
+      if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
+      if (playlistId) payload.playlistId = playlistId;
+      else if (playlistName.trim()) payload.playlistName = playlistName.trim();
+      if (pinnedComment.trim()) payload.pinnedComment = pinnedComment.trim();
+
+      const result = await callYouTube("upload_video", payload);
+      const warns = Array.isArray(result?.warnings) && result.warnings.length
+        ? ` (${result.warnings.length} warning${result.warnings.length > 1 ? "s" : ""})`
+        : "";
+      toast.success(`Uploaded! Video ID: ${result.videoId}${warns}`);
+      if (Array.isArray(result?.warnings)) {
+        result.warnings.forEach((w: string) => toast.warning(w));
+      }
+      setUploadTitle(""); setUploadDescription(""); setUploadVideoUrl("");
+      setTagsInput(""); setHashtagsInput(""); setChapters([]);
+      setCaptionsUrl(""); setThumbnailUrl(""); setPlaylistId(""); setPlaylistName("");
+      setPinnedComment(""); setPublishAt(""); setRecordingDate(""); setLocationDescription("");
     } catch (e) {
       toast.error(`Upload failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setUploading(false);
     }
   };
+
+  // Load categories & playlists when the upload panel opens
+  useEffect(() => {
+    if (!uploadOpen || !oauthConnected) return;
+    if (!categoriesList.length) {
+      callYouTube("list_video_categories", { regionCode: "US" })
+        .then(r => setCategoriesList(((r?.items || []) as Array<{ id: string; snippet: { title: string } }>).map(i => ({ id: i.id, title: i.snippet.title }))))
+        .catch(() => {});
+    }
+    if (!playlistsList.length) {
+      callYouTube("list_playlists")
+        .then(r => setPlaylistsList(((r?.items || []) as Array<{ id: string; snippet: { title: string } }>).map(i => ({ id: i.id, title: i.snippet.title }))))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadOpen, oauthConnected]);
 
   const handleDisconnect = async () => {
     const connectionId = savedConn?.id || settings.connectionId;
