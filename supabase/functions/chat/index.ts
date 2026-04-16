@@ -603,7 +603,7 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
       .limit(1),
     adminClient
       .from('youtube_videos')
-      .select('video_id, title, published_at')
+      .select('video_id, title, published_at, view_count, like_count, comment_count')
       .eq('user_id', userId)
       .eq('connection_id', conn.id)
       .order('published_at', { ascending: false })
@@ -621,7 +621,14 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   if (videos?.length) {
     result += 'Recent uploads:\n';
     result += videos
-      .map((v: any) => `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}`)
+      .map((v: any) => {
+        const stats = [
+          v.view_count != null ? `${Number(v.view_count).toLocaleString()} views` : null,
+          v.like_count != null ? `${Number(v.like_count).toLocaleString()} likes` : null,
+          v.comment_count != null ? `${Number(v.comment_count).toLocaleString()} comments` : null,
+        ].filter(Boolean).join(', ');
+        return `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}${stats ? ` (${stats})` : ''}`;
+      })
       .join('\n');
   }
 
