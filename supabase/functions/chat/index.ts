@@ -326,10 +326,14 @@ async function fetchGoogleSheetsData(): Promise<string> {
 }
 
 async function fetchGoogleSlidesData(): Promise<string> {
-  const data = await invokeNativeEdge('google-drive', 'search_files', { mimeType: 'application/vnd.google-apps.presentation', pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
-  const files = data.files || [];
-  if (!files.length) return 'No Google Slides found.';
-  return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
+  try {
+    const data = await invokeNativeEdge('google-slides', 'list_presentations', { pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+    const files = data.files || [];
+    if (!files.length) return 'No Google Slides found.';
+    return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
+  } catch (e) {
+    return `Google Slides error: ${e instanceof Error ? e.message : 'Unknown'}`;
+  }
 }
 
 async function fetchYouTubeData(userId?: string): Promise<string> {
@@ -494,11 +498,11 @@ async function fetchClickUpData(): Promise<string> {
 // ---------- Google Analytics (GA4) ----------
 async function fetchGoogleAnalyticsData(): Promise<string> {
   try {
-    const accountsData = await invokeNativeEdge('google-analytics', 'list_account_summaries', {}) as { accountSummaries?: { account?: string; displayName?: string; propertySummaries?: { property?: string; displayName?: string }[] }[] };
-    const accounts = accountsData.accountSummaries || [];
-    if (!accounts.length) return 'No Google Analytics accounts found.';
-    const prop = accounts[0]?.propertySummaries?.[0];
-    if (!prop?.property) return 'No GA4 properties found.';
+    const propsData = await invokeNativeEdge('google-analytics', 'list_properties', {}) as { properties?: { name?: string; displayName?: string }[] };
+    const properties = propsData.properties || [];
+    if (!properties.length) return 'No GA4 properties found.';
+    const prop = { property: properties[0].name, displayName: properties[0].displayName };
+    if (!prop.property) return 'No GA4 properties found.';
     const propertyId = prop.property.replace('properties/', '');
     const reportData = await invokeNativeEdge('google-analytics', 'run_report', {
       propertyId,
