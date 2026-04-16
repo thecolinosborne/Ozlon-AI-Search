@@ -2471,6 +2471,68 @@ function isValidTaskTransition(from: string, to: string): boolean {
   return VALID_TASK_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+// ============================================================================
+// NATIVE GOOGLE WORKSPACE ROUTER
+// Routes Gmail/Drive/Calendar/Sheets/Docs/GSC tool calls to native edge
+// functions (using the user's own Google OAuth token) instead of Maton.
+// Falls through to Maton on any failure.
+// ============================================================================
+
+const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs?: (a: Record<string, unknown>) => Record<string, unknown> }> = {
+  // Gmail
+  list_emails: { fn: 'google-gmail', action: 'list_messages', mapArgs: (a) => ({ q: a.query, maxResults: a.max_results }) },
+  get_email: { fn: 'google-gmail', action: 'get_message', mapArgs: (a) => ({ id: a.message_id }) },
+  send_email: { fn: 'google-gmail', action: 'send_message', mapArgs: (a) => ({ to: a.to, subject: a.subject, body: a.body, cc: a.cc }) },
+  create_email_draft: { fn: 'google-gmail', action: 'create_draft', mapArgs: (a) => ({ to: a.to, subject: a.subject, body: a.body }) },
+  trash_email: { fn: 'google-gmail', action: 'trash_message', mapArgs: (a) => ({ id: a.message_id }) },
+  label_email: { fn: 'google-gmail', action: 'modify_message', mapArgs: (a) => ({ id: a.message_id, addLabelIds: a.add_labels, removeLabelIds: a.remove_labels }) },
+  mark_email_read: { fn: 'google-gmail', action: 'modify_message', mapArgs: (a) => ({ id: a.message_id, removeLabelIds: ['UNREAD'] }) },
+  // Drive
+  search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ q: a.query, pageSize: a.max_results }) },
+  // Calendar
+  create_calendar_event: { fn: 'google-calendar', action: 'create_event', mapArgs: (a) => ({ summary: a.title, description: a.description, start: a.start_time, end: a.end_time, attendees: a.attendees, location: a.location }) },
+  // GSC
+  gsc_list_sites: { fn: 'google-search-console', action: 'list_sites' },
+  gsc_query: { fn: 'google-search-console', action: 'search_analytics', mapArgs: (a) => ({ siteUrl: a.site_url, startDate: a.start_date, endDate: a.end_date, dimensions: a.dimensions, rowLimit: a.row_limit }) },
+};
+
+async function tryNativeGoogleCall(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<{ success: boolean; result: string } | null> {
+  const route = NATIVE_GOOGLE_ROUTES[toolName];
+  if (!route) return null;
+
+  const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+  if (!authHeader) return null;
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const payload = {
+      action: route.action,
+      ...(route.mapArgs ? route.mapArgs(args) : args),
+    };
+    const res = await fetch(`${supabaseUrl}/functions/v1/${route.fn}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.success === false) {
+      console.warn(`[NativeGoogle] ${toolName} failed:`, res.status, JSON.stringify(data).slice(0, 300));
+      return null; // fall through to Maton
+    }
+    console.log(`[NativeGoogle] ${toolName} → ${route.fn}/${route.action} OK`);
+    return { success: true, result: `[Native Google Workspace] ${JSON.stringify(data).slice(0, 4000)}` };
+  } catch (e) {
+    console.warn(`[NativeGoogle] ${toolName} error:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -2480,6 +2542,10 @@ async function executeToolCall(
   aliasMap?: AliasEntry[],
 ): Promise<{ success: boolean; result: string }> {
   try {
+    // Try native Google Workspace first (uses user's own OAuth)
+    const nativeResult = await tryNativeGoogleCall(toolName, args);
+    if (nativeResult) return nativeResult;
+
     const accountHint = args.account as string | undefined;
 
     // Helper: generate context-aware error when connection not found
