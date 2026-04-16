@@ -91,7 +91,12 @@ export default function YouTubeDetail() {
 
       const conn = result.connection as SavedConnection | null;
       if (conn) {
-        setSavedConn(conn);
+        // Preserve apiKeyMasked from previous state if the new response doesn't include it
+        setSavedConn((prev) => ({
+          ...conn,
+          apiKeyMasked: conn.apiKeyMasked || prev?.apiKeyMasked || "",
+          apiKeyConfigured: conn.apiKeyConfigured || prev?.apiKeyConfigured || false,
+        }));
         setChannelId(conn.channelId || "");
         setAccountLabel(conn.accountLabel || "Primary YouTube");
         updateSettings("youtube", { connectionId: conn.id, channelId: conn.channelId });
@@ -542,7 +547,30 @@ export default function YouTubeDetail() {
           )}
         </div>
         {oauthConnected ? (
-          <p className="text-xs text-muted-foreground">OAuth is active — you can upload videos below.</p>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">OAuth is active — you can upload videos below.</p>
+            <div className="flex gap-2">
+              <button onClick={handleAuthorize} disabled={authorizing} className={secondaryBtnClass}>
+                {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
+                Re-authorize
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await callYouTube("oauth_disconnect");
+                    setOauthConnected(false);
+                    setOauthDetail("disconnected");
+                    toast.success("YouTube OAuth disconnected");
+                  } catch (e) {
+                    toast.error(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+              >
+                Disconnect OAuth
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             <p className="text-xs text-muted-foreground">
