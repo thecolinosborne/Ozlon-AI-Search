@@ -4407,7 +4407,7 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
-      // ============ YouTube Upload Handler ============
+      // ============ YouTube Upload Handler (delegates to youtube edge function) ============
       case 'upload_youtube_video': {
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -4415,93 +4415,61 @@ ${pageContents.slice(0, 12000)}`;
           const userId = (args as Record<string, unknown>).__user_id as string;
           if (!userId) return { success: false, result: 'User not authenticated. Sign in to upload videos.' };
 
-          const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-          const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-          if (!clientId || !clientSecret) return { success: false, result: 'YouTube OAuth credentials not configured on the server. Contact the admin.' };
-
-          const title = (args.title as string) || 'Untitled';
-          const description = (args.description as string) || '';
-          const videoUrl = (args.video_url as string) || '';
-          const privacyStatus = (args.privacy_status as string) || 'private';
-
+          const a = args as Record<string, unknown>;
+          const title = String(a.title || 'Untitled');
+          const videoUrl = String(a.video_url || '');
           if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
 
-          const { createClient: createUploadClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
-          const adminClient = createUploadClient(supabaseUrl, serviceRoleKey);
+          // Map snake_case tool args → camelCase edge function params
+          const payload: Record<string, unknown> = {
+            action: 'upload_video',
+            title,
+            videoUrl,
+            description: a.description,
+            privacyStatus: a.privacy_status || 'private',
+            tags: a.tags,
+            categoryId: a.category_id,
+            madeForKids: a.made_for_kids,
+            defaultLanguage: a.language,
+            defaultAudioLanguage: a.default_audio_language,
+            recordingDate: a.recording_date,
+            locationDescription: a.location,
+            hashtags: a.hashtags,
+            chapters: a.chapters,
+            thumbnailUrl: a.thumbnail_url,
+            captionsUrl: a.captions_url,
+            captionsLanguage: a.captions_language,
+            playlistId: a.playlist_id,
+            playlistName: a.playlist_name,
+            publishAt: a.publish_at,
+            license: a.license,
+            embeddable: a.embeddable,
+            publicStatsViewable: a.public_stats_viewable,
+            notifySubscribers: a.notify_subscribers,
+            pinnedComment: a.pinned_comment,
+          };
+          for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
 
-          // Get OAuth token
-          const { data: conn } = await adminClient
-            .from('integration_connections')
-            .select('metadata')
-            .eq('user_id', userId)
-            .eq('provider', 'youtube')
-            .eq('auth_type', 'oauth2')
-            .eq('status', 'connected')
-            .maybeSingle();
-
-          if (!conn) return { success: false, result: 'YouTube OAuth not connected. Go to Integrations > YouTube and authorize uploads first.' };
-
-          const meta = conn.metadata as Record<string, unknown>;
-          let accessToken = String(meta.access_token || '');
-          const refreshToken = String(meta.refresh_token || '');
-          const expiresAt = String(meta.expires_at || '');
-
-          // Refresh if expired
-          if (new Date(expiresAt) <= new Date()) {
-            if (!refreshToken) return { success: false, result: 'YouTube OAuth token expired and no refresh token. Re-authorize in Integrations > YouTube.' };
-            const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
-            });
-            const refreshData = await refreshRes.json();
-            if (!refreshRes.ok) return { success: false, result: `YouTube token refresh failed: ${JSON.stringify(refreshData)}` };
-            accessToken = refreshData.access_token;
-            await adminClient
-              .from('integration_connections')
-              .update({ metadata: { ...meta, access_token: accessToken, expires_at: new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString() } })
-              .eq('user_id', userId).eq('provider', 'youtube').eq('auth_type', 'oauth2');
-          }
-
-          // Download the video
-          const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) return { success: false, result: `Failed to download video from URL: HTTP ${videoRes.status}` };
-          const videoBlob = await videoRes.blob();
-
-          // Initiate resumable upload
-          const initiateRes = await fetch(
-            'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-                'X-Upload-Content-Length': String(videoBlob.size),
-                'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
-              },
-              body: JSON.stringify({
-                snippet: { title, description },
-                status: { privacyStatus },
-              }),
+          const res = await fetch(`${supabaseUrl}/functions/v1/youtube`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'Content-Type': 'application/json',
+              'x-user-id': userId,
             },
-          );
-          if (!initiateRes.ok) {
-            const errBody = await initiateRes.text();
-            return { success: false, result: `YouTube upload initiation failed: ${initiateRes.status} ${errBody}` };
-          }
-          const uploadUrl = initiateRes.headers.get('Location');
-          if (!uploadUrl) return { success: false, result: 'YouTube did not return an upload URL.' };
-
-          // Upload the video
-          const uploadRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': videoBlob.type || 'video/mp4', 'Content-Length': String(videoBlob.size) },
-            body: videoBlob,
+            body: JSON.stringify(payload),
           });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) return { success: false, result: `YouTube upload failed: ${JSON.stringify(uploadData)}` };
-
-          return { success: true, result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${privacyStatus}\n**URL:** https://www.youtube.com/watch?v=${uploadData.id}` };
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.error || data?.success === false) {
+            return { success: false, result: `YouTube upload error: ${data?.error || JSON.stringify(data).slice(0, 400)}` };
+          }
+          const warnings = Array.isArray(data?.warnings) && data.warnings.length
+            ? `\n\n⚠️ Post-upload warnings:\n- ${data.warnings.join('\n- ')}`
+            : '';
+          return {
+            success: true,
+            result: `Video uploaded successfully!\n\n**Title:** ${title}\n**Privacy:** ${payload.privacyStatus}\n**URL:** ${data.url || `https://www.youtube.com/watch?v=${data.videoId}`}${warnings}`,
+          };
         } catch (e) {
           console.error('[upload_youtube_video] Error:', e);
           return { success: false, result: `YouTube upload error: ${e instanceof Error ? e.message : 'Unknown'}` };
