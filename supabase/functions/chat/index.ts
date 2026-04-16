@@ -162,24 +162,8 @@ const SERVICE_DETECTORS: ServiceDetection[] = [
   { app: 'google-slides', label: 'Google Slides', keywords: ['google slides', 'presentation', 'presentations', 'slide deck', 'slides', 'gslides'] },
   { app: 'youtube', label: 'YouTube', keywords: ['youtube', 'video', 'videos', 'channel', 'subscribers', 'views', 'youtube analytics', 'uploads', 'my channel'] },
   { app: 'google-meet', label: 'Google Meet', keywords: ['google meet', 'meet', 'video call', 'video meeting', 'gmeet'] },
-  { app: 'google-ads', label: 'Google Ads', keywords: ['google ads', 'adwords', 'ad campaign', 'ad spend', 'ppc', 'cost per click', 'ad performance', 'campaigns', 'ad groups'] },
   { app: 'google-analytics-data', label: 'Google Analytics', keywords: ['analytics', 'google analytics', 'ga4', 'page views', 'sessions', 'bounce rate', 'visitors', 'website traffic', 'site traffic', 'user behavior'] },
-  { app: 'slack', label: 'Slack', keywords: ['slack', 'slack message', 'channel', 'channels', 'dm', 'direct message', 'workspace'] },
-  { app: 'notion', label: 'Notion', keywords: ['notion', 'notion page', 'notion database', 'wiki', 'notes'] },
-  { app: 'airtable', label: 'Airtable', keywords: ['airtable', 'base', 'airtable base', 'airtable table'] },
-  { app: 'hubspot', label: 'HubSpot', keywords: ['hubspot', 'crm', 'contacts', 'deals', 'pipeline', 'leads', 'sales pipeline'] },
-  { app: 'quickbooks-online', label: 'QuickBooks', keywords: ['quickbooks', 'accounting', 'invoices', 'expenses', 'profit', 'loss', 'revenue', 'bookkeeping', 'p&l', 'balance sheet'] },
-  { app: 'stripe', label: 'Stripe', keywords: ['stripe', 'payments', 'charges', 'subscriptions', 'mrr', 'revenue', 'customers', 'payment'] },
-  { app: 'shopify', label: 'Shopify', keywords: ['shopify', 'store', 'orders', 'products', 'inventory', 'ecommerce', 'e-commerce', 'sales'] },
-  { app: 'trello', label: 'Trello', keywords: ['trello', 'trello board', 'cards', 'trello cards'] },
-  { app: 'asana', label: 'Asana', keywords: ['asana', 'asana task', 'asana project'] },
   { app: 'clickup', label: 'ClickUp', keywords: ['clickup', 'click up', 'clickup task', 'clickup tasks', 'task management'] },
-  { app: 'jira', label: 'Jira', keywords: ['jira', 'jira ticket', 'jira issue', 'sprint', 'backlog'] },
-  { app: 'github', label: 'GitHub', keywords: ['github', 'pull request', 'pr', 'commit', 'commits', 'repository', 'repo', 'issues', 'merge'] },
-  { app: 'microsoft-teams', label: 'Microsoft Teams', keywords: ['teams', 'microsoft teams', 'ms teams'] },
-  { app: 'zoom', label: 'Zoom', keywords: ['zoom', 'zoom meeting', 'zoom call', 'video call'] },
-  { app: 'discord', label: 'Discord', keywords: ['discord', 'discord server', 'discord channel'] },
-  { app: 'typeform', label: 'Typeform', keywords: ['typeform', 'form responses', 'survey', 'survey responses'] },
   { app: 'gohighlevel', label: 'GoHighLevel', keywords: ['gohighlevel', 'ghl', 'high level', 'highlevel', 'go high level', 'leadconnector', 'lead connector', 'sub-account', 'subaccount', 'pipeline', 'pipelines', 'opportunity', 'opportunities', 'funnels', 'funnel', 'workflows', 'workflow', 'campaigns', 'campaign', 'conversations', 'conversation', 'invoice', 'invoices', 'orders', 'transactions', 'crm contacts', 'custom fields', 'custom values', 'form submissions', 'social post', 'social media post', 'social planner', 'social accounts', 'products', 'product', 'store items', 'courses', 'course', 'training', 'surveys', 'survey', 'survey responses', 'blog', 'blogs', 'blog post', 'blog posts', 'articles', 'media files', 'media library', 'companies', 'company', 'links', 'tracking links', 'trigger links', 'businesses', 'business'] },
 ];
 
@@ -197,21 +181,49 @@ function detectServiceIntents(messages: { role: string; content: string }[]): st
 }
 
 // ============================================================================
-// SERVICE DATA FETCHERS (READ)
+// NATIVE EDGE INVOKER (for service data fetchers)
+// Forward-declared minimally; full helper is defined later for tool handlers.
+// ============================================================================
+async function invokeNativeEdge(
+  fn: string,
+  action: string,
+  params: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+  if (!authHeader) throw new Error('No auth context — user must be signed in');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, params }),
+  });
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok || data?.success === false) {
+    const errMsg = (data?.error as string) || (data?.raw as string) || `${fn}/${action} failed (${res.status})`;
+    throw new Error(errMsg);
+  }
+  return data;
+}
+
+// ============================================================================
+// SERVICE DATA FETCHERS (READ) — All native edge functions, no Maton.
 // ============================================================================
 
-async function fetchGSCData(key: string, connId: string): Promise<string> {
-  console.log(`[GSC] Fetching sites with connection ${connId}`);
+async function fetchGSCData(): Promise<string> {
+  console.log(`[GSC] Fetching sites via native edge`);
   let sitesData: { siteEntry?: { siteUrl: string; permissionLevel?: string }[] };
   try {
-    sitesData = await callMatonGateway(key, '/google-search-console/webmasters/v3/sites', connId) as typeof sitesData;
+    const r = await invokeNativeEdge('google-search-console', 'list_sites');
+    sitesData = r as typeof sitesData;
   } catch (e) {
     console.error('[GSC] Failed to fetch sites:', e);
-    return `❌ Failed to fetch GSC sites: ${e instanceof Error ? e.message : 'Unknown error'}. The connection may need to be re-authorized.`;
+    return `Failed to fetch GSC sites: ${e instanceof Error ? e.message : 'Unknown error'}. The connection may need to be re-authorized.`;
   }
   const sites = sitesData.siteEntry || [];
-  if (!sites.length) return '⚠️ No sites found in Google Search Console. Make sure your GSC account has verified properties.';
-  console.log(`[GSC] Found ${sites.length} sites: ${sites.map(s => s.siteUrl).join(', ')}`);
+  if (!sites.length) return 'No sites found in Google Search Console. Make sure your GSC account has verified properties.';
+  console.log(`[GSC] Found ${sites.length} sites`);
   const recentEnd = new Date(); recentEnd.setDate(recentEnd.getDate() - 2);
   const recentStart = new Date(); recentStart.setDate(recentStart.getDate() - 8);
   const priorEnd = new Date(); priorEnd.setDate(priorEnd.getDate() - 9);
@@ -221,10 +233,10 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
   for (const site of sites) {
     try {
       const [recentQueryData, priorQueryData, recentPageData, recentDateData] = await Promise.all([
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 50 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 50 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['page'], rowLimit: 25 }),
-        callMatonGateway(key, `/google-search-console/webmasters/v3/sites/${encodeURIComponent(site.siteUrl)}/searchAnalytics/query`, connId, 'POST', { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['date'], rowLimit: 7 }),
+        invokeNativeEdge('google-search-console', 'search_analytics', { siteUrl: site.siteUrl, request: { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['query'], rowLimit: 50 } }),
+        invokeNativeEdge('google-search-console', 'search_analytics', { siteUrl: site.siteUrl, request: { startDate: fmt(priorStart), endDate: fmt(priorEnd), dimensions: ['query'], rowLimit: 50 } }),
+        invokeNativeEdge('google-search-console', 'search_analytics', { siteUrl: site.siteUrl, request: { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['page'], rowLimit: 25 } }),
+        invokeNativeEdge('google-search-console', 'search_analytics', { siteUrl: site.siteUrl, request: { startDate: fmt(recentStart), endDate: fmt(recentEnd), dimensions: ['date'], rowLimit: 7 } }),
       ]) as [
         { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
         { rows?: { keys: string[]; clicks: number; impressions: number; ctr: number; position: number }[] },
@@ -248,155 +260,101 @@ async function fetchGSCData(key: string, connId: string): Promise<string> {
       reports.push(r);
     } catch (e) {
       console.error(`[GSC] Error fetching data for ${site.siteUrl}:`, e);
-      reports.push(`### ${site.siteUrl}\n❌ Error: ${e instanceof Error ? e.message : 'Unknown'}`);
+      reports.push(`### ${site.siteUrl}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
     }
   }
   return reports.join('\n');
 }
 
-async function fetchGmailData(key: string, connId: string): Promise<string> {
-  // Fetch latest emails chronologically (all mail, not just unread) + unread count
+async function fetchGmailData(): Promise<string> {
   const [recentData, unreadData] = await Promise.all([
-    callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=20', connId) as Promise<{ messages?: { id: string }[]; resultSizeEstimate?: number }>,
-    callMatonGateway(key, '/google-mail/gmail/v1/users/me/messages?maxResults=1&q=is:unread', connId).catch(() => ({})) as Promise<{ resultSizeEstimate?: number }>,
+    invokeNativeEdge('google-gmail', 'list_messages', { maxResults: 20 }) as Promise<{ messages?: { id: string }[]; resultSizeEstimate?: number }>,
+    invokeNativeEdge('google-gmail', 'list_messages', { maxResults: 1, q: 'is:unread' }).catch(() => ({} as { resultSizeEstimate?: number })),
   ]);
   const msgs = recentData.messages || [];
   if (!msgs.length) return 'Inbox is empty.';
   const unreadCount = unreadData.resultSizeEstimate || 0;
   const details: string[] = [`Latest emails (newest first) | Unread: ~${unreadCount}`];
-  // Fetch metadata in parallel for speed
   const batch = msgs.slice(0, 15);
   const results = await Promise.all(batch.map(async (m) => {
     try {
-      const full = await callMatonGateway(key, `/google-mail/gmail/v1/users/me/messages/${m.id}?format=full&fields=payload/headers,snippet,labelIds`, connId) as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] };
-      const headers = full.payload?.headers || [];
+      const full = await invokeNativeEdge('google-gmail', 'get_message', { id: m.id, format: 'full' });
+      const message = full.message as { payload?: { headers?: { name: string; value: string }[] }; snippet?: string; labelIds?: string[] } | undefined;
+      const headers = message?.payload?.headers || [];
       const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
       const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
       const date = headers.find(h => h.name === 'Date')?.value || '';
-      const unread = (full.labelIds || []).includes('UNREAD') ? ' [UNREAD]' : '';
-      return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}${unread}\n  Preview: ${(full.snippet || '').substring(0, 120)}`;
+      const unread = (message?.labelIds || []).includes('UNREAD') ? ' [UNREAD]' : '';
+      return `- ID: ${m.id} | From: ${from} | Subject: ${subject} | ${date}${unread}\n  Preview: ${(message?.snippet || '').substring(0, 120)}`;
     } catch { return `- ID: ${m.id}: could not load`; }
   }));
   details.push(...results);
   return details.join('\n');
 }
 
-async function fetchCalendarData(key: string, connId: string): Promise<string> {
+async function fetchCalendarData(): Promise<string> {
   const now = new Date();
   const end = new Date(); end.setDate(end.getDate() + 7);
-  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${end.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }[] };
+  const data = await invokeNativeEdge('google-calendar', 'list_events', {
+    calendarId: 'primary', timeMin: now.toISOString(), timeMax: end.toISOString(), maxResults: 20, singleEvents: true,
+  }) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string }[] };
   const events = data.items || [];
   if (!events.length) return 'No upcoming events in the next 7 days.';
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'}${e.location ? ' | ' + e.location : ''}`).join('\n');
 }
 
-async function fetchGoogleDriveData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/google-drive/drive/v3/files?pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,mimeType,modifiedTime,size,webViewLink)', connId) as { files?: { name: string; mimeType: string; modifiedTime: string }[] };
+async function fetchGoogleDriveData(): Promise<string> {
+  const data = await invokeNativeEdge('google-drive', 'list_files', { pageSize: 15, orderBy: 'modifiedTime desc' }) as { files?: { name: string; mimeType: string; modifiedTime: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No recent files.';
   return files.map(f => `- ${f.name} (${f.mimeType?.split('.').pop() || 'file'}) - modified ${f.modifiedTime}`).join('\n');
 }
 
-async function fetchSlackData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/slack/api/conversations.list?types=public_channel,private_channel&limit=10', connId) as { channels?: { name: string; id: string; num_members?: number }[] };
-  const channels = data.channels || [];
-  return `Channels (${channels.length}):\n${channels.map(c => `- #${c.name} (ID: ${c.id}, ${c.num_members || '?'} members)`).join('\n')}`;
-}
-
-async function fetchHubSpotData(key: string, connId: string): Promise<string> {
-  const [contacts, deals] = await Promise.all([
-    callMatonGateway(key, '/hubspot/crm/v3/objects/contacts?limit=10&properties=firstname,lastname,email,createdate', connId) as Promise<{ results?: { properties?: Record<string, string> }[] }>,
-    callMatonGateway(key, '/hubspot/crm/v3/objects/deals?limit=10&properties=dealname,amount,dealstage,createdate', connId) as Promise<{ results?: { properties?: Record<string, string> }[] }>,
-  ]);
-  const c = (contacts.results || []).map(r => `- ${r.properties?.firstname || ''} ${r.properties?.lastname || ''} (${r.properties?.email || 'no email'})`).join('\n');
-  const d = (deals.results || []).map(r => `- ${r.properties?.dealname || 'Untitled'}: $${r.properties?.amount || '0'} (${r.properties?.dealstage || 'unknown'})`).join('\n');
-  return `Contacts:\n${c || 'None'}\n\nDeals:\n${d || 'None'}`;
-}
-
-async function fetchStripeData(key: string, connId: string): Promise<string> {
-  const [charges, balance] = await Promise.all([
-    callMatonGateway(key, '/stripe/v1/charges?limit=10', connId) as Promise<{ data?: { amount: number; currency: string; status: string; created: number; description?: string }[] }>,
-    callMatonGateway(key, '/stripe/v1/balance', connId) as Promise<{ available?: { amount: number; currency: string }[]; pending?: { amount: number; currency: string }[] }>,
-  ]);
-  const bal = (balance.available || []).map(b => `${(b.amount / 100).toFixed(2)} ${b.currency.toUpperCase()}`).join(', ');
-  const recent = (charges.data || []).map(c => `- $${(c.amount / 100).toFixed(2)} ${c.currency.toUpperCase()} - ${c.status} (${new Date(c.created * 1000).toLocaleDateString()})`).join('\n');
-  return `Balance: ${bal || 'N/A'}\n\nRecent charges:\n${recent || 'None'}`;
-}
-
-async function fetchShopifyData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/shopify/admin/api/2024-01/orders.json?status=any&limit=10', connId) as { orders?: { name: string; total_price: string; created_at: string; financial_status: string }[] };
-  const orders = data.orders || [];
-  if (!orders.length) return 'No recent orders.';
-  return orders.map(o => `- ${o.name}: $${o.total_price} (${o.financial_status}) - ${new Date(o.created_at).toLocaleDateString()}`).join('\n');
-}
-
-async function fetchNotionData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, '/notion/v1/search', connId, 'POST', { page_size: 10, sort: { direction: 'descending', timestamp: 'last_edited_time' } }) as { results?: { object: string; properties?: Record<string, unknown>; last_edited_time?: string }[] };
-  const results = data.results || [];
-  if (!results.length) return 'No recent Notion pages.';
-  return results.map(r => {
-    const titleProp = r.properties ? Object.values(r.properties).find((p: unknown) => (p as Record<string, unknown>)?.type === 'title') as { title?: { plain_text?: string }[] } | undefined : undefined;
-    const title = titleProp?.title?.[0]?.plain_text || '(untitled)';
-    return `- ${r.object}: ${title} (edited ${r.last_edited_time || 'unknown'})`;
-  }).join('\n');
-}
-
-async function fetchGitHubData(key: string, connId: string): Promise<string> {
-  const [notifications, repos] = await Promise.all([
-    callMatonGateway(key, '/github/notifications?per_page=10', connId) as Promise<{ subject?: { title?: string; type?: string }; reason?: string }[]>,
-    callMatonGateway(key, '/github/user/repos?sort=updated&per_page=5', connId) as Promise<{ full_name: string; updated_at: string; open_issues_count?: number }[]>,
-  ]);
-  const notifs = Array.isArray(notifications) ? notifications.map(n => `- ${n.subject?.type || '?'}: ${n.subject?.title || '?'} (${n.reason})`).join('\n') : 'No notifications';
-  const repoList = Array.isArray(repos) ? repos.map(r => `- ${r.full_name} (updated ${r.updated_at}, ${r.open_issues_count || 0} issues)`).join('\n') : 'No repos';
-  return `Notifications:\n${notifs}\n\nRecent repos:\n${repoList}`;
-}
-
-// ---------- Google Docs ----------
-async function fetchGoogleDocsData(key: string, connId: string): Promise<string> {
-  // Docs API doesn't have a list endpoint; use Drive to find docs
-  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.document'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+async function fetchGoogleDocsData(): Promise<string> {
+  const data = await invokeNativeEdge('google-docs', 'list_documents', { pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No Google Docs found.';
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/document/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
 }
 
-// ---------- Google Sheets ----------
-async function fetchGoogleSheetsData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.spreadsheet'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+async function fetchGoogleSheetsData(): Promise<string> {
+  // google-sheets edge doesn't have a list endpoint; use drive search by mimetype
+  const data = await invokeNativeEdge('google-drive', 'search_files', { mimeType: 'application/vnd.google-apps.spreadsheet', pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No Google Sheets found.';
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
 }
 
-// ---------- Google Slides ----------
-async function fetchGoogleSlidesData(key: string, connId: string): Promise<string> {
-  const data = await callMatonGateway(key, "/google-drive/drive/v3/files?q=mimeType%3D'application/vnd.google-apps.presentation'&pageSize=15&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,webViewLink)", connId) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
+async function fetchGoogleSlidesData(): Promise<string> {
+  const data = await invokeNativeEdge('google-drive', 'search_files', { mimeType: 'application/vnd.google-apps.presentation', pageSize: 15 }) as { files?: { id: string; name: string; modifiedTime: string; webViewLink?: string }[] };
   const files = data.files || [];
   if (!files.length) return 'No Google Slides found.';
   return files.map(f => `- [${f.name}](${f.webViewLink || `https://docs.google.com/presentation/d/${f.id}/edit`}) — modified ${f.modifiedTime}`).join('\n');
 }
 
-// ---------- YouTube ----------
-async function fetchYouTubeData(key: string, connId: string): Promise<string> {
+async function fetchYouTubeData(): Promise<string> {
   try {
-    const channelData = await callMatonGateway(key, '/youtube/youtube/v3/channels?part=snippet,statistics&mine=true', connId) as { items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string; videoCount?: string; viewCount?: string } }[] };
+    const channelData = await invokeNativeEdge('youtube', 'list_my_channels', {}) as { items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string; videoCount?: string; viewCount?: string } }[] };
     const ch = channelData.items?.[0];
     let result = '';
     if (ch) {
       result += `**Channel:** ${ch.snippet?.title || 'Unknown'}\n`;
       result += `Subscribers: ${ch.statistics?.subscriberCount || '?'} | Videos: ${ch.statistics?.videoCount || '?'} | Total views: ${ch.statistics?.viewCount || '?'}\n\n`;
     }
-    const videosData = await callMatonGateway(key, '/youtube/youtube/v3/search?part=snippet&forMine=true&type=video&maxResults=10&order=date', connId) as { items?: { id?: { videoId?: string }; snippet?: { title?: string; publishedAt?: string } }[] };
+    const videosData = await invokeNativeEdge('youtube', 'list_my_videos', { maxResults: 10 }) as { items?: { id?: { videoId?: string } | string; snippet?: { title?: string; publishedAt?: string } }[] };
     const vids = videosData.items || [];
     if (vids.length) {
       result += 'Recent uploads:\n';
-      result += vids.map(v => `- [${v.snippet?.title || '(untitled)'}](https://youtube.com/watch?v=${v.id?.videoId}) — ${v.snippet?.publishedAt || ''}`).join('\n');
+      result += vids.map(v => {
+        const vid = typeof v.id === 'object' ? v.id?.videoId : v.id;
+        return `- [${v.snippet?.title || '(untitled)'}](https://youtube.com/watch?v=${vid}) — ${v.snippet?.publishedAt || ''}`;
+      }).join('\n');
     }
     return result || 'YouTube connected but no channel data found.';
   } catch (e) { return `YouTube error: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
-// ---------- YouTube (local Integration Hub fallback) ----------
+// ---------- YouTube (local Integration Hub fallback for api-key connections) ----------
 async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -439,30 +397,25 @@ async function fetchYouTubeLocalData(userId: string): Promise<string | null> {
 
   const channel = channels?.[0];
   let result = '';
-
   if (channel) {
     result += `**Channel:** ${channel.title || conn.external_account_label || 'Unknown'}\n`;
     result += `Subscribers: ${channel.subscriber_count ?? '?'} | Videos: ${channel.video_count ?? '?'} | Total views: ${channel.view_count ?? '?'}\n\n`;
   }
-
   if (videos?.length) {
     result += 'Recent uploads:\n';
-    result += videos
-      .map((v: any) => {
-        const stats = [
-          v.view_count != null ? `${Number(v.view_count).toLocaleString()} views` : null,
-          v.like_count != null ? `${Number(v.like_count).toLocaleString()} likes` : null,
-          v.comment_count != null ? `${Number(v.comment_count).toLocaleString()} comments` : null,
-        ].filter(Boolean).join(', ');
-        return `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}${stats ? ` (${stats})` : ''}`;
-      })
-      .join('\n');
+    result += videos.map((v: any) => {
+      const stats = [
+        v.view_count != null ? `${Number(v.view_count).toLocaleString()} views` : null,
+        v.like_count != null ? `${Number(v.like_count).toLocaleString()} likes` : null,
+        v.comment_count != null ? `${Number(v.comment_count).toLocaleString()} comments` : null,
+      ].filter(Boolean).join(', ');
+      return `- [${v.title || '(untitled)'}](https://youtube.com/watch?v=${v.video_id}) — ${v.published_at || ''}${stats ? ` (${stats})` : ''}`;
+    }).join('\n');
   }
-
   return result || 'YouTube is connected locally, but no synced channel/video data is available yet.';
 }
 
-// ---------- ClickUp (local Integration Hub / native integration fallback) ----------
+// ---------- ClickUp (local Integration Hub) ----------
 async function fetchClickUpLocalData(userId: string): Promise<string | null> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -488,9 +441,7 @@ async function fetchClickUpLocalData(userId: string): Promise<string | null> {
       .gte('handled_at', sevenDaysAgo)
       .eq('status', 'processed');
     processedCount = count || 0;
-  } catch {
-    processedCount = 0;
-  }
+  } catch { processedCount = 0; }
 
   return [
     `**Workspace Team ID:** ${config.team_id || 'Not set'}`,
@@ -503,10 +454,12 @@ async function fetchClickUpLocalData(userId: string): Promise<string | null> {
 }
 
 // ---------- Google Meet (via Calendar) ----------
-async function fetchGoogleMeetData(key: string, connId: string): Promise<string> {
+async function fetchGoogleMeetData(): Promise<string> {
   const now = new Date();
   const end = new Date(); end.setDate(end.getDate() + 14);
-  const data = await callMatonGateway(key, `/google-calendar/calendar/v3/calendars/primary/events?timeMin=${now.toISOString()}&timeMax=${end.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20&q=meet.google.com`, connId) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; hangoutLink?: string; htmlLink?: string }[] };
+  const data = await invokeNativeEdge('google-calendar', 'list_events', {
+    calendarId: 'primary', timeMin: now.toISOString(), timeMax: end.toISOString(), maxResults: 20, singleEvents: true, q: 'meet.google.com',
+  }) as { items?: { summary?: string; start?: { dateTime?: string; date?: string }; hangoutLink?: string; htmlLink?: string }[] };
   const events = data.items || [];
   if (!events.length) return 'No upcoming Google Meet meetings found.';
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
@@ -530,11 +483,10 @@ async function callClickUpEdge(action: string, params?: Record<string, unknown>)
   return res.json();
 }
 
-async function fetchClickUpData(_key: string, _connId: string): Promise<string> {
+async function fetchClickUpData(): Promise<string> {
   try {
     const result = await callClickUpEdge('test_connection');
     if (!result.connected) return 'ClickUp is not connected. Configure the API token in Integrations → ClickUp.';
-    // Fetch spaces and lists overview
     const spacesResult = await callClickUpEdge('list_spaces') as { spaces?: { id: string; name: string }[] };
     const spaces = spacesResult.spaces || [];
     if (!spaces.length) return 'ClickUp connected but no spaces found.';
@@ -557,21 +509,22 @@ async function fetchClickUpData(_key: string, _connId: string): Promise<string> 
 }
 
 // ---------- Google Analytics (GA4) ----------
-async function fetchGoogleAnalyticsData(key: string, connId: string): Promise<string> {
+async function fetchGoogleAnalyticsData(): Promise<string> {
   try {
-    // List GA4 properties
-    const accountsData = await callMatonGateway(key, '/google-analytics-data/analytics/admin/v1beta/accountSummaries', connId) as { accountSummaries?: { account?: string; displayName?: string; propertySummaries?: { property?: string; displayName?: string }[] }[] };
+    const accountsData = await invokeNativeEdge('google-analytics', 'list_account_summaries', {}) as { accountSummaries?: { account?: string; displayName?: string; propertySummaries?: { property?: string; displayName?: string }[] }[] };
     const accounts = accountsData.accountSummaries || [];
     if (!accounts.length) return 'No Google Analytics accounts found.';
     const prop = accounts[0]?.propertySummaries?.[0];
     if (!prop?.property) return 'No GA4 properties found.';
     const propertyId = prop.property.replace('properties/', '');
-    // Run a basic report
-    const reportData = await callMatonGateway(key, `/google-analytics-data/analytics/data/v1beta/properties/${propertyId}:runReport`, connId, 'POST', {
-      dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
-      metrics: [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'screenPageViews' }, { name: 'bounceRate' }],
-      dimensions: [{ name: 'date' }],
-      orderBys: [{ dimension: { dimensionName: 'date' }, desc: false }],
+    const reportData = await invokeNativeEdge('google-analytics', 'run_report', {
+      propertyId,
+      report: {
+        dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+        metrics: [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'screenPageViews' }, { name: 'bounceRate' }],
+        dimensions: [{ name: 'date' }],
+        orderBys: [{ dimension: { dimensionName: 'date' }, desc: false }],
+      },
     }) as { rows?: { dimensionValues?: { value: string }[]; metricValues?: { value: string }[] }[] };
     const rows = reportData.rows || [];
     if (!rows.length) return `GA4 Property: ${prop.displayName}\nNo data in the last 7 days.`;
@@ -590,21 +543,7 @@ async function fetchGoogleAnalyticsData(key: string, connId: string): Promise<st
   } catch (e) { return `Google Analytics error: ${e instanceof Error ? e.message : 'Unknown'}`; }
 }
 
-async function fetchGenericData(key: string, connId: string, app: string): Promise<string> {
-  const endpoints: Record<string, string> = {
-    'trello': '/trello/1/members/me/boards?fields=name,dateLastActivity',
-    'asana': '/asana/api/1.0/users/me/user_task_list',
-    'jira': '/jira/rest/api/3/myself',
-    'google-ads': '/google-ads/v17/customers:listAccessibleCustomers',
-  };
-  if (!endpoints[app]) return `${app} connected but no specific fetcher configured.`;
-  try {
-    const data = await callMatonGateway(key, endpoints[app], connId);
-    return JSON.stringify(data, null, 2).substring(0, 2000);
-  } catch (e) { return `Could not fetch ${app} data: ${e instanceof Error ? e.message : 'Unknown'}`; }
-}
-
-const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<string>> = {
+const SERVICE_FETCHERS: Record<string, () => Promise<string>> = {
   'google-search-console': fetchGSCData,
   'google-mail': fetchGmailData,
   'google-calendar': fetchCalendarData,
@@ -616,166 +555,92 @@ const SERVICE_FETCHERS: Record<string, (key: string, connId: string) => Promise<
   'google-meet': fetchGoogleMeetData,
   'google-analytics-data': fetchGoogleAnalyticsData,
   'clickup': fetchClickUpData,
-  'slack': fetchSlackData,
-  'hubspot': fetchHubSpotData,
-  'stripe': fetchStripeData,
-  'shopify': fetchShopifyData,
-  'notion': fetchNotionData,
-  'github': fetchGitHubData,
-  'google-ads': (k, c) => fetchGenericData(k, c, 'google-ads'),
-  'trello': (k, c) => fetchGenericData(k, c, 'trello'),
-  'asana': (k, c) => fetchGenericData(k, c, 'asana'),
-  'jira': (k, c) => fetchGenericData(k, c, 'jira'),
 };
 
 // ============================================================================
-// MATON DATA INJECTION (READ)
+// NATIVE DATA INJECTION (READ)
+// Pre-fetches data for services the user is asking about, using native edges.
 // ============================================================================
 
-async function injectMatonData(
+async function injectNativeData(
   messages: { role: string; content: string }[],
-  matonApiKey: string,
-  multiConnMap?: MultiConnMap,
-  aliasMap?: AliasEntry[],
+  multiConnMap: MultiConnMap,
   userId?: string | null,
-  sourceMode: 'auto' | 'maton_only' | 'local_only' = 'auto',
 ): Promise<string> {
   const detectedApps = detectServiceIntents(messages);
   if (!detectedApps.length) return '';
   console.log('Detected service intents:', detectedApps);
 
-  // Extract account hint from latest user message
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-  const userMessageText = lastUserMsg?.content || '';
-
-  // Build a simple connMap for fetchers, account-aware for multi-account services
-  let connMap: Map<string, string>;
-  if (multiConnMap) {
-    connMap = new Map();
-    for (const [app, entries] of multiConnMap) {
-      if (!entries.length) continue;
-      if (entries.length === 1) {
-        connMap.set(app, entries[0].id);
-      } else {
-        // For multi-account services, resolve using dynamic alias map + user message
-        const resolved = resolveConnection(multiConnMap, app, undefined, userMessageText, aliasMap);
-        if (resolved) {
-          connMap.set(app, resolved.id);
-          console.log(`Multi-account resolved for ${app}: ${resolved.email || resolved.id}`);
-        } else {
-          // No clear account specified — don't inject any single account's data
-          // Instead, we'll note which accounts are available
-          console.log(`Multi-account ambiguous for ${app}, skipping data injection`);
-        }
-      }
-    }
-  } else {
-    const connections = await getMatonConnections(matonApiKey);
-    connMap = new Map();
-    for (const c of connections) { if (!connMap.has(c.app)) connMap.set(c.app, c.connection_id); }
-  }
-
   const sections: string[] = [];
   const notConnected: string[] = [];
-  const ambiguousAccounts: { app: string; accounts: string[] }[] = [];
-
-  // Fallback mapping: services that use another connection's credentials
-  const CONNECTION_FALLBACKS: Record<string, string[]> = {
-    'google-docs': ['google-drive'],
-    'google-sheets': ['google-drive'],
-    'google-slides': ['google-drive'],
-    'google-meet': ['google-calendar'],
-  };
-
-  // Services that use their own edge function, not Maton
-  const SELF_MANAGED_SERVICES = new Set(['clickup']);
 
   await Promise.all(detectedApps.map(async (app) => {
-    // Self-managed services bypass Maton connection check
-    if (SELF_MANAGED_SERVICES.has(app)) {
-      const fetcher = SERVICE_FETCHERS[app];
-      if (!fetcher) return;
-      try {
-        const data = await fetcher('', '');
-        sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
-        console.log(`${app} data injected (self-managed)`);
-      } catch (e) {
-        console.error(`Error fetching ${app}:`, e);
-        sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
+    // YouTube can have either OAuth (native) or api_key (local cache) connection
+    if (app === 'youtube') {
+      const hasOAuth = multiConnMap.has('youtube');
+      if (hasOAuth) {
+        try {
+          const data = await fetchYouTubeData();
+          sections.push(`## YouTube\n${data}`);
+          return;
+        } catch (e) {
+          console.error('[YouTube native] error, falling back to local:', e);
+        }
       }
-      return;
-    }
-
-    let connId = connMap.get(app);
-    const nativeOnlyApp = app === 'youtube' || app === 'clickup';
-
-    // Native integrations (YouTube / ClickUp) should not route through Maton.
-    if (nativeOnlyApp) {
-      const localData = userId
-        ? app === 'youtube'
-          ? await fetchYouTubeLocalData(userId)
-          : await fetchClickUpLocalData(userId)
-        : null;
+      const localData = userId ? await fetchYouTubeLocalData(userId) : null;
       if (localData) {
-        sections.push(`## ${app === 'youtube' ? 'YouTube' : 'ClickUp'} (Integration Hub)\n${localData}`);
+        sections.push(`## YouTube (Integration Hub)\n${localData}`);
         return;
       }
+      notConnected.push('YouTube');
+      return;
+    }
+
+    // ClickUp uses its own edge function — bypass connMap check
+    if (app === 'clickup') {
+      const localData = userId ? await fetchClickUpLocalData(userId) : null;
+      if (localData) {
+        sections.push(`## ClickUp\n${localData}`);
+        return;
+      }
+      try {
+        const data = await fetchClickUpData();
+        sections.push(`## ClickUp\n${data}`);
+      } catch (e) {
+        notConnected.push('ClickUp');
+        console.error('[ClickUp] error:', e);
+      }
+      return;
+    }
+
+    // Google services: require a Google OAuth connection (mapped via discovery)
+    if (!multiConnMap.has(app)) {
       notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app);
       return;
     }
 
-    // Try fallback connections if primary isn't found
-    if (!connId && CONNECTION_FALLBACKS[app]) {
-      for (const fallback of CONNECTION_FALLBACKS[app]) {
-        connId = connMap.get(fallback);
-        if (connId) break;
-      }
-    }
-    if (!connId) {
-      // Check if this is because of ambiguous multi-account
-      const entries = multiConnMap?.get(app);
-      if (entries && entries.length > 1) {
-        ambiguousAccounts.push({
-          app: SERVICE_DETECTORS.find(s => s.app === app)?.label || app,
-          accounts: entries.map(e => e.email || e.id),
-        });
-        return;
-      }
-      notConnected.push(SERVICE_DETECTORS.find(s => s.app === app)?.label || app);
+    const fetcher = SERVICE_FETCHERS[app];
+    if (!fetcher) {
+      sections.push(`## ${app}\nConnected but no data fetcher configured.`);
       return;
     }
-    const fetcher = SERVICE_FETCHERS[app];
-    if (!fetcher) { sections.push(`## ${app}\nConnected but no data fetcher configured.`); return; }
     try {
-      const data = await fetcher(matonApiKey, connId);
-      // For multi-account services, indicate which account the data came from
-      const entries = multiConnMap?.get(app);
-      let accountLabel = '';
-      if (entries && entries.length > 1) {
-        const usedEntry = entries.find(e => e.id === connId);
-        accountLabel = usedEntry?.email ? ` (account: ${usedEntry.email})` : '';
-      }
-      sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}${accountLabel}\n${data}`);
-      console.log(`${app} data injected${accountLabel}`);
+      const data = await fetcher();
+      sections.push(`## ${SERVICE_DETECTORS.find(s => s.app === app)?.label || app}\n${data}`);
+      console.log(`${app} data injected`);
     } catch (e) {
       console.error(`Error fetching ${app}:`, e);
       sections.push(`## ${app}\nError: ${e instanceof Error ? e.message : 'Unknown'}`);
     }
   }));
 
-  if (!sections.length && !notConnected.length && !ambiguousAccounts.length) return '';
+  if (!sections.length && !notConnected.length) return '';
 
   let injection = `\n\n===========================================================
 LIVE DATA FROM CONNECTED SERVICES
 ===========================================================
 The following is REAL data pulled from the user's connected accounts. Use this data to answer with specific numbers, dates, and details.\n\n`;
   injection += sections.join('\n\n');
-  if (ambiguousAccounts.length) {
-    injection += `\n\nIMPORTANT: The user asked about ${ambiguousAccounts.map(a => a.app).join(', ')} but has MULTIPLE accounts connected. You did NOT pre-load data for these because the account was ambiguous. Ask the user which account to use:\n`;
-    for (const a of ambiguousAccounts) {
-      injection += `- ${a.app}: ${a.accounts.join(', ')}\n`;
-    }
-  }
   if (notConnected.length) {
     injection += `\n\nNote: The user asked about ${notConnected.join(', ')} but ${notConnected.length === 1 ? "it isn't" : "they aren't"} connected yet. Let them know they can connect in Settings > Integrations.`;
   }
