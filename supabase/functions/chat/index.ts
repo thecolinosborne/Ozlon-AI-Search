@@ -4318,7 +4318,8 @@ ${pageContents.slice(0, 12000)}`;
 
           if (!videoUrl) return { success: false, result: 'video_url is required — provide a public URL to the video file.' };
 
-          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+          const { createClient: createUploadClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createUploadClient(supabaseUrl, serviceRoleKey);
 
           // Get OAuth token
           const { data: conn } = await adminClient
@@ -4944,7 +4945,7 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
   const memoryKw = ['remember', 'recall', 'last time', 'you said', 'we discussed', 'previously', 'my preference', 'i told you', 'you know that'];
   const analysisKw = ['analyze', 'analysis', 'compare', 'synthesize', 'summarize a long', 'deep dive', 'explain in detail', 'break down', 'evaluate', 'assess', 'review this', 'what do you think about'];
   const multimodalKw = ['image', 'photo', 'screenshot', 'picture', 'file', 'pdf', 'document', 'attachment'];
-  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose'];
+  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'upload'];
   const liveDataKw = ['weather', 'stock', 'price', 'news', 'current', 'today\'s', 'latest'];
 
   return {
