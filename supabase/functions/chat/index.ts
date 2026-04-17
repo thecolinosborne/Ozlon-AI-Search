@@ -4914,6 +4914,7 @@ serve(async (req) => {
   }
 
   try {
+    const requestStart = Date.now();
     const body = await req.json();
     // Support both { messages: [...] } and { message: "..." } formats
     let messages = body.messages;
@@ -5328,11 +5329,23 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
             })}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
 
-            // Fire-and-forget: post-turn memory extraction
+            // Fire-and-forget: post-turn memory extraction + telemetry
             if (wisdomUserId) {
               extractPostTurnMemories(messages, result.content, wisdomUserId).catch(e =>
                 console.error('[PostTurnMemory] Error:', e)
               );
+              try {
+                const { createClient: ccLog } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminLog = ccLog(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                adminLog.from('model_calls').insert({
+                  user_id: wisdomUserId,
+                  session_id: (body.sessionId as string) || null,
+                  model: modelConfig.name,
+                  lane: 'tools',
+                  latency_ms: Date.now() - requestStart,
+                  tool_used: result.toolsUsed?.join(',') || null,
+                }).then(() => {});
+              } catch { /* ignore */ }
             }
           } catch (e) {
             console.error('Tool loop error:', e);
