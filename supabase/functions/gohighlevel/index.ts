@@ -99,12 +99,8 @@ async function resolveGHLCredentials(req: Request, params?: Record<string, unkno
     } catch { /* fall through */ }
   }
 
-  // 3. Env fallback
-  const envKey = paramKey || Deno.env.get('GHL_API_KEY');
-  const envLoc = paramLoc || Deno.env.get('GHL_LOCATION_ID');
-  if (envKey) return { apiKey: envKey, locationId: envLoc || '' };
-
-  throw new Error('GHL_API_KEY is not configured. Enter your API key in the integration settings.');
+  // No env fallback for authenticated user actions — credentials must be per-user.
+  throw new Error('GoHighLevel not connected. Add your API key in Integrations → Go High Level.');
 }
 
 serve(async (req) => {

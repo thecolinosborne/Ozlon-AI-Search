@@ -105,12 +105,8 @@ async function resolveCredentials(
     }
   }
 
-  // 3. Env fallback
-  const envAppId = paramAppId || Deno.env.get("HIGGSFIELD_APP_ID");
-  const envApiKey = paramApiKey || Deno.env.get("HIGGSFIELD_API_KEY");
-  if (envAppId && envApiKey) return { appId: envAppId, apiKey: envApiKey };
-
-  throw new Error("Higgsfield credentials not configured. Enter your API key in the integration settings.");
+  // No env fallback for authenticated user actions — credentials must be per-user.
+  throw new Error("Higgsfield not connected. Add your API key in Integrations → Higgsfield AI.");
 }
 
 serve(async (req) => {

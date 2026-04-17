@@ -151,10 +151,8 @@ async function resolveDescriptKey(req: Request, paramApiKey?: string): Promise<s
     } catch { /* fall through */ }
   }
 
-  const envKey = Deno.env.get("DESCRIPT_API_KEY");
-  if (envKey) return envKey;
-
-  throw new Error("DESCRIPT_API_KEY not configured. Enter your API key in the integration settings.");
+  // No env fallback for authenticated user actions — credentials must be per-user.
+  throw new Error("Descript not connected. Add your API key in Integrations → Descript.");
 }
 
 serve(async (req) => {
