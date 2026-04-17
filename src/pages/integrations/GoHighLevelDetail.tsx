@@ -121,7 +121,21 @@ const GoHighLevelDetail = () => {
     toast.success("Go High Level disconnected");
   };
 
-  const toggleSyncData = (key: string) => {
+  const handleTestConnection = async () => {
+    setTesting(true);
+    try {
+      await callGHL("list_contacts", { limit: 1 });
+      setStatus("gohighlevel", "connected");
+      setApiKeyConfigured("gohighlevel", true);
+      setLastSync("gohighlevel", new Date().toISOString());
+      toast.success("GHL connection verified");
+    } catch (err) {
+      setStatus("gohighlevel", "error");
+      toast.error(`Test failed: ${(err as Error).message}`);
+    } finally {
+      setTesting(false);
+    }
+  };
     const updated = { ...syncData, [key]: !syncData[key] };
     updateSettings("gohighlevel", { ...settings, syncData: updated });
   };
