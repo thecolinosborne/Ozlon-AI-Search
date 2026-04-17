@@ -368,6 +368,7 @@ export function useConversations() {
     return () => window.removeEventListener("ozlon:before-signout", handler);
   }, [closeActiveSession]);
 
+  /**
    * Public contract — consumed by Index.tsx and session UI.
    * Internal mutation helpers (setMessages, updateMessageContent) are NOT
    * exposed. All message mutations flow through saveMessage / finalizeMessage.
