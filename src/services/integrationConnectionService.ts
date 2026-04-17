@@ -47,11 +47,11 @@ export async function upsertIntegrationConnection(
   let connectionId: string;
 
   if (existing) {
-    const merged = { ...(existing.metadata as Record<string, unknown> || {}), ...metadata } as Record<string, string>;
+    const merged = { ...(existing.metadata as Record<string, unknown> || {}), ...metadata };
     await supabase
       .from("integration_connections")
       .update({
-        metadata: merged as unknown as Record<string, string>,
+        metadata: merged as never,
         status: "connected",
         auth_type: authType,
         last_validated_at: new Date().toISOString(),
@@ -66,7 +66,7 @@ export async function upsertIntegrationConnection(
         provider,
         auth_type: authType,
         status: "connected",
-        metadata,
+        metadata: metadata as never,
         last_validated_at: new Date().toISOString(),
       })
       .select("id")
