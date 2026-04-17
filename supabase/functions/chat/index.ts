@@ -5208,7 +5208,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
           adminId.from('profiles').select('first_name, full_name, system_name').eq('user_id', credUserId).maybeSingle(),
           adminId.from('standing_orders').select('id, rule, scope, priority').eq('user_id', credUserId).eq('active', true).order('priority', { ascending: true }).limit(20),
           adminId.from('user_goals').select('id, title, status, target_date, progress_notes').eq('user_id', credUserId).eq('status', 'active').order('updated_at', { ascending: false }).limit(8),
-          adminId.from('chat_sessions').select('id, summary, updated_at').eq('user_id', credUserId).not('summary', 'is', null).order('updated_at', { ascending: false }).limit(3),
+          adminId.from('chat_sessions').select('id, summary, updated_at').eq('user_id', credUserId).not('summary', 'is', null).neq('id', (body.sessionId as string) || '00000000-0000-0000-0000-000000000000').order('updated_at', { ascending: false }).limit(3),
         ]);
 
         const profile = profileRes.data as { first_name?: string; full_name?: string; system_name?: string } | null;
