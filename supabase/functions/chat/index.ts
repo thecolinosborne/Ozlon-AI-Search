@@ -4809,9 +4809,8 @@ serve(async (req) => {
       } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
-    // Fallback to env vars for GHL
-    if (!GHL_API_KEY_RESOLVED) GHL_API_KEY_RESOLVED = Deno.env.get('GHL_API_KEY') || undefined;
-    if (!GHL_LOCATION_ID_RESOLVED) GHL_LOCATION_ID_RESOLVED = Deno.env.get('GHL_LOCATION_ID') || undefined;
+    // No env fallback for GHL — credentials must be per-user from integration_connections.
+    // (env GHL_API_KEY / GHL_LOCATION_ID are reserved for non-user contexts only.)
 
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];
