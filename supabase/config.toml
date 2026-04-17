@@ -75,3 +75,6 @@ verify_jwt = false
 [functions.google-tag-manager]
 verify_jwt = false
 
+[functions.vault-store]
+verify_jwt = false
+
