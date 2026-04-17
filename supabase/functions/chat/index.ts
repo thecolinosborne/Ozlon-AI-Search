@@ -2164,6 +2164,7 @@ async function executeToolCall(
   _connMap: MultiConnMap,
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
+  ghlCreds?: { apiKey?: string; locationId?: string },
 ): Promise<{ success: boolean; result: string }> {
   try {
     switch (toolName) {
@@ -4322,6 +4323,7 @@ async function runToolLoop(
   userMessage?: string,
   aliasMap?: AliasEntry[],
   userId?: string | null,
+  ghlCreds?: { apiKey?: string; locationId?: string },
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
@@ -4385,7 +4387,7 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap);
+          const result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
@@ -5051,6 +5053,7 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
               userText,
               aliasMap,
               wisdomUserId,
+              { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED },
             );
 
             // Write final content as SSE
