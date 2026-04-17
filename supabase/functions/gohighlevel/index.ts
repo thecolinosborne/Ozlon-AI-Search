@@ -91,7 +91,6 @@ async function resolveGHLCredentials(req: Request, params?: Record<string, unkno
             (await tryVaultRead(adminClient, conn.id, user.id, 'location_id')) ||
             meta.location_id ||
             paramLoc ||
-            Deno.env.get('GHL_LOCATION_ID') ||
             '';
           if (apiKey) return { apiKey, locationId };
         }
