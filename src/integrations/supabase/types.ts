@@ -98,6 +98,7 @@ export type Database = {
           reply_trigger_mode: string | null
           team_id: string
           updated_at: string | null
+          user_id: string | null
           webhook_id: string | null
           webhook_status: string | null
         }
@@ -119,6 +120,7 @@ export type Database = {
           reply_trigger_mode?: string | null
           team_id: string
           updated_at?: string | null
+          user_id?: string | null
           webhook_id?: string | null
           webhook_status?: string | null
         }
@@ -140,6 +142,7 @@ export type Database = {
           reply_trigger_mode?: string | null
           team_id?: string
           updated_at?: string | null
+          user_id?: string | null
           webhook_id?: string | null
           webhook_status?: string | null
         }
@@ -156,6 +159,7 @@ export type Database = {
           response_comment_id: string | null
           status: string
           task_id: string
+          user_id: string | null
         }
         Insert: {
           comment_id: string
@@ -167,6 +171,7 @@ export type Database = {
           response_comment_id?: string | null
           status?: string
           task_id: string
+          user_id?: string | null
         }
         Update: {
           comment_id?: string
@@ -178,6 +183,7 @@ export type Database = {
           response_comment_id?: string | null
           status?: string
           task_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -213,6 +219,50 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      credential_audit_log: {
+        Row: {
+          action: string
+          connection_id: string | null
+          created_at: string
+          detail: string | null
+          id: string
+          ip_hash: string | null
+          provider: string | null
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          connection_id?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          ip_hash?: string | null
+          provider?: string | null
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          connection_id?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          ip_hash?: string | null
+          provider?: string | null
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credential_audit_log_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       descript_jobs: {
         Row: {
@@ -354,6 +404,53 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      integration_credentials: {
+        Row: {
+          connection_id: string
+          created_at: string
+          id: string
+          last_used_at: string | null
+          last4: string | null
+          rotated_at: string | null
+          secret_ciphertext: string
+          secret_name: string
+          secret_nonce: string
+          user_id: string
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          last4?: string | null
+          rotated_at?: string | null
+          secret_ciphertext: string
+          secret_name?: string
+          secret_nonce: string
+          user_id: string
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          last4?: string | null
+          rotated_at?: string | null
+          secret_ciphertext?: string
+          secret_name?: string
+          secret_nonce?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_credentials_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       integration_sync_runs: {
         Row: {
@@ -1087,6 +1184,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_user_secret: {
+        Args: {
+          _connection_id: string
+          _encryption_key?: string
+          _secret_name?: string
+          _user_id: string
+        }
+        Returns: string
+      }
       match_knowledge: {
         Args: {
           filter_category?: string
