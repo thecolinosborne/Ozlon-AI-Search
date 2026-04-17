@@ -7,7 +7,10 @@ const corsHeaders = {
 };
 
 function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
+  // Tolerate whitespace/newlines and URL-safe base64 (-, _) and missing padding
+  let s = b64.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4 !== 0) s += "=";
+  const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
