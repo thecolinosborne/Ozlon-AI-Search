@@ -10,6 +10,7 @@ function base64ToBytes(b64: string): Uint8Array {
   // Tolerate whitespace/newlines and URL-safe base64 (-, _) and missing padding
   let s = b64.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4 !== 0) s += "=";
+  console.log(`[vault-store] decoding key: rawLen=${b64.length} sanitizedLen=${s.length} firstChars=${s.slice(0, 4)} lastChars=${s.slice(-4)}`);
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
