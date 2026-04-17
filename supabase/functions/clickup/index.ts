@@ -83,7 +83,7 @@ async function tryVaultRead(
   }
 }
 
-/** Resolve ClickUp token: override → vault → metadata fallback → env fallback */
+/** Resolve ClickUp token for AUTHENTICATED user actions: override → vault → metadata. No env fallback. */
 async function resolveClickUpToken(req: Request, tokenOverride?: string): Promise<string> {
   if (tokenOverride) return tokenOverride;
 
@@ -111,16 +111,16 @@ async function resolveClickUpToken(req: Request, tokenOverride?: string): Promis
           // 1. Vault-first
           const vaultKey = await tryVaultRead(adminClient, conn.id, user.id);
           if (vaultKey) return vaultKey;
+          // 2. Legacy metadata fallback
+          const key = (conn?.metadata as Record<string, string>)?.api_key;
+          if (key) return key;
         }
-
-        // 2. Legacy metadata fallback
-        const key = (conn?.metadata as Record<string, string>)?.api_key;
-        if (key) return key;
       }
     } catch { /* fall through */ }
   }
 
-  return getToken();
+  // No env fallback — user must connect their own account.
+  throw new Error('ClickUp not connected. Add your API key in Integrations → ClickUp.');
 }
 
 async function resolveTeamId(
