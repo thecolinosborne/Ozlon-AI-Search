@@ -1,29 +1,28 @@
 
-User is mid-flow on the integration vault cutover. Higgsfield edge function was just patched server-side, but the frontend (`HiggsFieldDetail.tsx`) is still writing the api_key/app_id into `metadata` only — meaning the new vault resolver has nothing to read until the page is patched too. That's the next logical step.
+User wants the Finance entry point in the top-right user menu (UserMenu dropdown), NOT the bottom nav. Everything else from the prior plan stands.
 
-After Higgsfield is fully cut over, the remaining integration is GoHighLevel (still env/metadata only, no vault). Then we can clean up legacy `metadata.api_key` rows for the now-vaulted providers.
+## Updated plan: Plaid-powered Finance layer
 
-## Recommended next step: finish Higgsfield (frontend) + verify
+### Single entry point (revised)
+- Add a **"Finance"** item to `src/components/UserMenu.tsx` dropdown (between Profile and Settings, with a wallet icon), linking to `/finance`.
+- Do NOT touch BottomNav. No other placements anywhere.
 
-### 1. Patch `src/pages/integrations/HiggsFieldDetail.tsx`
-- On save, call the `vault-store` edge function twice (once with `secret_name: "api_key"`, once with `secret_name: "app_id"`) — same pattern ClickUp/Descript use.
-- Keep writing a non-secret marker into `metadata` (e.g. `last4`, `app_id_last4`, `connected_at`) so the UI can show connection state without exposing secrets.
-- Stop writing the raw `api_key` / `app_id` into `metadata`.
-- Also switch any test/validation calls to `supabase.functions.invoke("higgsfield", ...)` so the user JWT is forwarded (same fix we just applied to ClickUp).
-
-### 2. Verify end-to-end
-- User saves Higgsfield credentials in `/integrations/higgsfield`.
-- Query `credential_audit_log` for two new `vault_store` rows (`api_key` + `app_id`) for provider `higgsfield`.
-- User clicks Test Connection → query for a `vault_read` row.
-- Confirm `integration_credentials.last_used_at` advances.
+### Everything else unchanged from prior plan
+- **DB migration:** `plaid_items`, `plaid_accounts`, `plaid_transactions` — RLS scoped to `auth.uid() = user_id`.
+- **Edge function** `supabase/functions/plaid/index.ts` with action router: `create_link_token`, `exchange_public_token`, `accounts`, `balances`, `transactions`, `sync_transactions`, `update_link_token`, `disconnect_item`. Access tokens stored encrypted via existing `store_user_secret` / `get_user_secret` vault. Audit-logs every connect/sync/repair/disconnect/failure.
+- **Frontend (new files only):**
+  - `src/pages/Finance.tsx` — Apple-minimal dashboard: Free-to-Spend hero, Overview stats, Accounts list, Transactions list, Connection management (refresh/repair/disconnect).
+  - `src/pages/PlaidOAuthReturn.tsx` at `/finance/oauth-return` — handles OAuth re-entry via `receivedRedirectUri`.
+  - `src/components/finance/{PlaidLinkButton,FreeToSpendCard,AccountsList,TransactionsList,ConnectionRow}.tsx`
+  - `src/hooks/useFinance.ts`, `src/services/financeService.ts`
+- **Free-to-Spend formula:** `available_checking - upcoming_bills_estimate - 200`. `estimateUpcomingBills()` returns 0 today; structured for later recurring detection without UI changes.
+- **Dependency:** `react-plaid-link`.
+- **Secrets requested after approval:** `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (default `sandbox`). Redirect URI derived from request origin + `/finance/oauth-return`. `VAULT_ENCRYPTION_KEY` already exists.
+- **Routes added in `src/App.tsx`:** `/finance` and `/finance/oauth-return`.
 
 ### Files touched
-- `src/pages/integrations/HiggsFieldDetail.tsx` — vault dual-write + invoke() switch
+- **New:** migration, plaid edge function, Finance page + OAuth return page, 5 finance components, hook, service.
+- **Edited (minimal):** `src/components/UserMenu.tsx` (add Finance item), `src/App.tsx` (add 2 routes), `package.json` (add `react-plaid-link`).
+- **NOT touched:** BottomNav, chat, home, onboarding.
 
-### Then (separate follow-ups, your call which order)
-- **GHL cutover** — apply the same vault-first resolver to `supabase/functions/gohighlevel/index.ts` and patch `GoHighLevelDetail.tsx` to dual-write `api_key` + `location_id` to vault.
-- **Legacy cleanup** — once all four providers are vault-live and verified, drop `metadata.api_key` from `clickup` / `descript` / `higgsfield` rows and remove the metadata fallback branch from each edge function.
-
-### Out of scope right now
-- No changes to chat function, webhook paths, or other integrations
-- No removal of env var fallbacks yet (kept as last-resort safety net)
+After approval I'll request the three Plaid secrets, then ship migration + edge function + UI in one pass and verify with a sandbox connection.
