@@ -6125,7 +6125,7 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               userText,
               aliasMap,
               wisdomUserId,
-              { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED },
+              { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
             );
 
             // Write final content as SSE
