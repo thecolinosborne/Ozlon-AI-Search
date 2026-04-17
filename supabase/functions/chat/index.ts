@@ -5314,7 +5314,7 @@ async function runToolLoop(
   userMessage?: string,
   aliasMap?: AliasEntry[],
   userId?: string | null,
-  ghlCreds?: { apiKey?: string; locationId?: string },
+  ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
