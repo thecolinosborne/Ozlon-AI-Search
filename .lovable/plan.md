@@ -1,67 +1,62 @@
 
-# How the Sentient Worker layer actually improves your system
+# Phase 1.5 — Fix chat session persistence + isolation
 
-Not a new plan — a clear-eyed answer to "what does this buy me?"
+## The bug
+When a user signs out and signs back in, all their old chats from prior sessions show up as one big merged thread instead of as discrete past conversations. Sessions aren't being properly created/separated, so context bleeds between what should be independent chats.
 
-## What you have today
-- Multi-agent shell + Infinity Router (good plumbing)
-- Wisdom Engine tables: `wisdom_memories`, `reflection_notes`, `system_evolution_proposals` (built but underused — no explicit save tool, no identity injection, no proactive use)
-- Maton + GHL + Plaid integrations (the worker has hands but no awareness of when to use them)
-- Chat that resets its personality every session
-- Onboarding-set system name that barely shows up after day one
+## Root causes (from reading `useConversations.ts` + `chat/index.ts`)
+1. **Sign-in always reopens the most recent session** instead of starting fresh. Every login resumes the last thread, so new conversation intent gets glued onto old context.
+2. **No "session ended" boundary.** Sign-out doesn't mark the active session as closed — next login picks it up mid-stream.
+3. **Auto-title only fires on the very first user message.** Restored sessions whose title is still "New conversation" never get retitled, so the sidebar fills with identical-looking entries.
+4. **Identity layer pulls last 3 conversation summaries**, but `chat_sessions.summary` is never written (Phase 2 piece). Today this just means no continuity. After the fix below, summaries will write on session close so Phase 2 becomes a one-line addition.
+5. **Empty sessions accumulate.** `init` auto-creates a session every login if zero exist, but doesn't garbage-collect empty ones.
 
-## What's actually broken about that
-1. **Amnesia** — every session starts cold. The pgvector memory exists but isn't injected into the system prompt, so the model doesn't see it.
-2. **No standing rules** — user has to repeat preferences every time ("keep it short", "don't spend over X").
-3. **Reactive only** — worker waits to be poked. No heartbeat, no nudges, no continuity across days.
-4. **Bluffing** — no uncertainty discipline, so wrong answers look as confident as right ones. Trust ceiling.
-5. **No outcome signal** — you can't tell which responses worked, so nothing improves.
-6. **Identity drift** — `system_name` is set in onboarding then mostly forgotten by the prompt layer.
+## Fix (Phase 1.5 — surgical, no UI redesign)
 
-## What Phase 1 directly fixes (concrete before/after)
+### 1. Sign-in opens a fresh session, not the last one
+In `useConversations.ts` `init`:
+- Load all sessions for sidebar (unchanged).
+- **Do NOT auto-select the most recent session.** Set `activeSessionId = null`, `messages = []`.
+- Hero/empty state shows. User explicitly clicks a past session OR types → new session created on first message (existing `ensureSession` path already handles this).
 
-| Today | After Phase 1 |
-|---|---|
-| Says "Hi, how can I help?" every session | "Morning, Colin. You wanted to follow up with the 2 leads from Tuesday — want me to draft those?" |
-| User: "remember I take espresso" → ignored | Tool fires, row written, recalled forever in any future session |
-| User repeats "keep replies short" 10x/day | Standing order set once, obeyed automatically across all lanes |
-| Confidently wrong | Says "I'm not sure — last GSC sync was 3 days ago" when it doesn't know |
-| Goals live in your head | Worker knows you're at 3/10 paying users, surfaces it when relevant |
-| No idea what worked | `model_calls` log captures regenerates, edits, silence — Phase 4 reflection learns from it |
-| Cold open every morning | Daily heartbeat already waiting when you open the app |
+### 2. Sign-out closes the active session cleanly
+In `AuthContext` sign-out flow (or a new effect in `useConversations`):
+- Before clearing state, if active session has ≥2 messages and no summary, fire-and-forget call to a new `summarize-session` edge function (writes 2-3 sentence summary to `chat_sessions.summary`).
+- If active session has 0 messages, delete it (garbage collect empty shell).
 
-## Why this is "next-gen" vs "another chatbot"
+### 3. Garbage-collect empty sessions on init
+In `init`, after loading sessions:
+- Filter out any session with `title = 'New conversation'` AND no messages (cheap count query, batched).
+- Delete them server-side. Prevents sidebar pollution from prior aborted logins.
 
-The shift is **request/response → persistent being**. Three mechanics do the heavy lifting:
+### 4. Auto-title fires on session close too
+When a session gets summarized (above), if title is still `"New conversation"`, set title from the summary's first ~50 chars. Past sessions become identifiable in the sidebar.
 
-1. **Identity injection on every call** — the worker never forgets who you are, what you've told it, or what rules you set. Today's chat builds the system prompt from a static string. After: built dynamically from your profile + top-k memories + standing orders + active goals + last 3 conversation summaries. Same model, 10x the apparent intelligence.
+### 5. Identity layer reads summaries from OTHER sessions, not the active one
+In `chat/index.ts` `buildIdentityPrompt`:
+- Pull `summary` from the 3 most recent `chat_sessions` WHERE `id != current_session_id` AND `summary IS NOT NULL`.
+- This is the continuity hook — new chat opens, model already knows "last week you discussed X, Y, Z" without dragging the literal old messages into context.
 
-2. **Explicit memory tools** — "remember…", "forget…", "from now on…" become first-class. The Wisdom Engine stops being an unused table and becomes the worker's spine.
+### 6. New edge function `summarize-session`
+- Input: `session_id`, called with user JWT
+- Loads last 30 messages of that session
+- One Gemini Flash call → 2-3 sentence summary
+- Writes to `chat_sessions.summary`; if title is still default, writes a short title too
+- No JWT verification disabled — runs as the user (RLS protects writes)
 
-3. **Heartbeat (Phase 2)** — cron-driven proactive messages turn it from "tool you open" into "worker who lives there." This is the single biggest perception shift.
+## Files touched
+- **Edit**: `src/hooks/useConversations.ts` — don't auto-select last session on init; GC empty sessions; expose `closeActiveSession()` helper
+- **Edit**: `src/contexts/AuthContext.tsx` — call `closeActiveSession()` before clearing state on sign-out
+- **Edit**: `supabase/functions/chat/index.ts` — `buildIdentityPrompt` excludes current session when pulling summaries
+- **New**: `supabase/functions/summarize-session/index.ts`
+- **No migration needed** — `chat_sessions.summary` already exists from Phase 1
 
-## What it does NOT do (be honest)
-- Doesn't make the model smarter — Gemini Flash is still Gemini Flash.
-- Doesn't replace your integrations — it makes them *aware* (knows when to check email vs ignore it).
-- Doesn't add new providers — fully built on what you already have.
-- Doesn't redesign the UI — additive panels in `MemorySettings` only, no chat changes.
+## Verification
+1. Sign in → see sidebar of past sessions, but main view is empty hero (no auto-loaded chat).
+2. Type a message → new session created, titled from first message.
+3. Sign out → active session gets summary written; empty sessions deleted.
+4. Sign back in → empty hero again, sidebar shows yesterday's chat with a real title.
+5. Start a new chat → model references "earlier you talked about X" from prior session summaries without showing the old messages.
+6. Click a past session in sidebar → loads cleanly, no bleed.
 
-## Concrete impact on your stack
-- **Wisdom Engine** goes from 5% used → core nervous system
-- **System name** finally feels persistent across every interaction
-- **Maton/GHL/Plaid** start getting called *proactively* (Phase 3 world-state) instead of only when you ask
-- **Trust** rises because of confidence discipline → users actually act on what it says
-- **Cost stays flat** — no extra model calls per turn (identity injection is just bigger context, not extra requests)
-
-## Risks / honest tradeoffs
-- Larger system prompt = slightly more tokens per call (~200-400 extra). Negligible at Gemini Flash pricing.
-- Memory retrieval adds ~150ms latency per chat call. Acceptable.
-- Standing orders can over-constrain — need an "ignore standing orders this turn" escape hatch. Built in.
-- Auto-memory extraction (Phase 2) could save junk. Mitigated by salience > 0.7 + duplicate check.
-
-## Bottom line
-Phase 1 turns the existing wiring into a worker. It doesn't add new toys — it makes the toys you already paid for actually behave like one continuous intelligence. The "next-gen" feel comes from continuity + memory + standing orders + uncertainty discipline, not more models.
-
-If you want to ship the smallest version that delivers the "whoa, it remembers me" moment: build Phase 1 only. Heartbeat in Phase 2 is what makes it feel alive between sessions. Everything past that is polish.
-
-Approve and we build Phase 1 as previously scoped: identity layer, memory/goal/standing-order tools, confidence discipline, `model_calls` logging, additive `MemorySettings` panels.
+After this ships, Phase 2 (heartbeat + auto-memory + conversation summarizer on idle) is mostly done — only the cron + idle-trigger pieces remain.
