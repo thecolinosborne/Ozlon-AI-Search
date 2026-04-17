@@ -640,12 +640,12 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
 async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?: string): Promise<unknown> {
-  const GHL_API_KEY = ghlApiKey || Deno.env.get('GHL_API_KEY');
-  if (!GHL_API_KEY) throw new Error('GHL_API_KEY not configured');
+  // No env fallback — caller must pass a per-user key resolved from integration_connections.
+  if (!ghlApiKey) throw new Error('GoHighLevel not connected. Add your API key in Integrations → Go High Level.');
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     method,
     headers: {
-      'Authorization': `Bearer ${GHL_API_KEY}`,
+      'Authorization': `Bearer ${ghlApiKey}`,
       'Content-Type': 'application/json',
       'Version': '2021-07-28',
     },
