@@ -174,21 +174,30 @@ const GoHighLevelDetail = () => {
       icon={Globe}
       status={integration.status}
       actions={
-        integration.status === "connected" ? (
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleDisconnect}
-            className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+            onClick={handleTestConnection}
+            disabled={testing}
+            className="px-4 py-2 rounded-xl text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
           >
-            Disconnect
+            {testing ? "Testing…" : "Test Connection"}
           </button>
-        ) : (
-          <button
-            onClick={handleConnect}
-            className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Connect
-          </button>
-        )
+          {integration.status === "connected" ? (
+            <button
+              onClick={handleDisconnect}
+              className="px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+            >
+              Disconnect
+            </button>
+          ) : (
+            <button
+              onClick={handleConnect}
+              className="px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Connect
+            </button>
+          )}
+        </div>
       }
     >
       {/* API Credentials */}
