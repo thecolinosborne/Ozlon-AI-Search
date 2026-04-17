@@ -130,10 +130,8 @@ export function setActiveIntegrationsUser(userId: string | null): void {
     localStorage.setItem("ozlon_active_user_id", id);
     // Reset in-memory state and rehydrate from the new namespaced key.
     useIntegrationsStore.getState().resetAll();
-    // @ts-expect-error zustand persist API exposes setOptions / rehydrate at runtime
-    useIntegrationsStore.persist?.setOptions?.({ name: `${STORE_PREFIX}:${id}` });
-    // @ts-expect-error rehydrate is exposed by persist middleware
-    useIntegrationsStore.persist?.rehydrate?.();
+    (useIntegrationsStore as unknown as { persist?: { setOptions?: (o: { name: string }) => void; rehydrate?: () => void } }).persist?.setOptions?.({ name: `${STORE_PREFIX}:${id}` });
+    (useIntegrationsStore as unknown as { persist?: { setOptions?: (o: { name: string }) => void; rehydrate?: () => void } }).persist?.rehydrate?.();
   } catch {
     /* ignore */
   }
