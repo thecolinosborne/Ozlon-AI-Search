@@ -59,6 +59,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          summary: string | null
           title: string | null
           updated_at: string
           user_id: string
@@ -66,6 +67,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          summary?: string | null
           title?: string | null
           updated_at?: string
           user_id: string
@@ -73,6 +75,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          summary?: string | null
           title?: string | null
           updated_at?: string
           user_id?: string
@@ -588,6 +591,54 @@ export type Database = {
         }
         Relationships: []
       }
+      model_calls: {
+        Row: {
+          created_at: string
+          est_cost: number | null
+          id: string
+          lane: string | null
+          latency_ms: number | null
+          metadata: Json | null
+          model: string
+          session_id: string | null
+          tokens_in: number | null
+          tokens_out: number | null
+          tool_used: string | null
+          user_id: string
+          user_reaction: string | null
+        }
+        Insert: {
+          created_at?: string
+          est_cost?: number | null
+          id?: string
+          lane?: string | null
+          latency_ms?: number | null
+          metadata?: Json | null
+          model: string
+          session_id?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          tool_used?: string | null
+          user_id: string
+          user_reaction?: string | null
+        }
+        Update: {
+          created_at?: string
+          est_cost?: number | null
+          id?: string
+          lane?: string | null
+          latency_ms?: number | null
+          metadata?: Json | null
+          model?: string
+          session_id?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          tool_used?: string | null
+          user_id?: string
+          user_reaction?: string | null
+        }
+        Relationships: []
+      }
       plaid_accounts: {
         Row: {
           account_id: string
@@ -942,6 +993,39 @@ export type Database = {
         }
         Relationships: []
       }
+      standing_orders: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          priority: number
+          rule: string
+          scope: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          priority?: number
+          rule: string
+          scope?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          priority?: number
+          rule?: string
+          scope?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       system_evolution_proposals: {
         Row: {
           created_at: string
@@ -974,6 +1058,42 @@ export type Database = {
           proposal_type?: string
           status?: string
           title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_goals: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          progress_notes: Json
+          status: string
+          target_date: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          progress_notes?: Json
+          status?: string
+          target_date?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          progress_notes?: Json
+          status?: string
+          target_date?: string | null
+          title?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
