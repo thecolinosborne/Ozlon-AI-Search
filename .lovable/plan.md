@@ -1,38 +1,41 @@
 
-User just finished Phase 2 (vault-store deployed with raw-bytes key fix). Logical next steps fall into verify → backfill → cutover.
+User picked **Option A** — Vault-first with metadata fallback. Surgical, low risk, function-by-function.
 
-Phase 3 plan: verify the dual-write actually worked, backfill remaining keys, then (separately) flip edge functions to read from the vault.
+## Phase 4: Cutover edge function reads (Option A)
 
-Keep it surgical. Don't touch reads yet — they explicitly said "do not touch any edge function reads" until vault is proven populated.
+For each integration edge function, add a vault-first credential resolver: try `get_user_secret` first, fall back to `metadata.api_key` if the vault returns null. No metadata removal, no breakage if vault row is missing.
 
-## What's next — Phase 3: Verify + Backfill
+### Pattern (applied per function)
 
-We just got the vault-store function working with the raw-bytes encryption key. Three things left before we can safely flip the edge functions over to read from the encrypted vault:
+In each function's existing `resolve*Key` (or equivalent) helper, before the current `metadata.api_key` lookup, insert:
 
-### Step 1 — Verify the vault works end-to-end (5 min)
-Re-save your YouTube API key from the Integrations Hub UI, then confirm:
-- A row exists in `integration_credentials` for that connection
-- `secret_ciphertext` is non-null (encrypted blob)
-- `last4` matches the last 4 chars of your real key
-- `credential_audit_log` shows a `vault_store` entry
+```ts
+// 1. Look up connection_id for this user+provider
+// 2. Call admin.rpc("get_user_secret", { _connection_id, _user_id, _secret_name: "api_key", _encryption_key: bytesToHex(rawKeyBytes) })
+// 3. If non-null → use it, log "vault_read" to credential_audit_log
+// 4. If null → fall through to existing metadata.api_key path (legacy)
+// 5. If env var fallback exists → keep as last resort
+```
 
-If any of those fail, we fix before moving on.
+Key handling mirrors `vault-store`: read `VAULT_ENCRYPTION_KEY` as raw 32-byte UTF-8, convert to `\x...` hex bytea for the RPC.
 
-### Step 2 — Backfill your other connected integrations
-For each connection that already has a plaintext `metadata.api_key` (ClickUp, GHL, Higgsfield, Descript, etc.), call `vault-store` once to mirror it into `integration_credentials`. Done from your authenticated session so RLS + JWT validation hold. After this, every connection has both:
-- legacy plaintext in `metadata` (still used by edge functions)
-- encrypted copy in the vault (unused, ready)
+### Rollout order
 
-### Step 3 — Decision point: when to cut over reads
-Once backfill is verified, we have two options for flipping edge functions to read from the vault. I'll lay them out then so you can choose — not doing it in this phase.
+1. **`youtube`** — already dual-writes, vault row exists, safest first cutover
+2. **`descript`** — server-side connect path, needs same dual-write patch as youtube before flip *(or accept metadata-only for now since you have no vault row)*
+3. **`clickup`** — uses `upsertIntegrationConnection` so vault dual-writes on next save; flip read after re-save
+4. **`gohighlevel`** — same as clickup
+5. **`higgsfield`** — same as clickup
 
-### Out of scope for Phase 3
-- No edge function read changes (youtube, clickup, ghl, etc. keep reading metadata)
-- No removal of plaintext metadata
+After step 1, you re-test YouTube end-to-end. If green, we proceed down the list. Each step is one function + one re-save + one verify.
+
+### Out of scope (still)
+- No metadata removal
+- No `descript` server-side dual-write patch yet (do only if you want descript on the vault before flip)
 - No key rotation
+- Keep `debug_roundtrip` action in `vault-store` as a diagnostic
 
-### Files touched
-- None modified — Step 1 is pure verification (SQL queries + UI re-save)
-- Step 2 is a one-shot backfill script run via the already-deployed `vault-store` function, no code changes
+### Files touched (Step 1 only — youtube cutover)
+- `supabase/functions/youtube/index.ts` — add vault-first lookup in the existing key resolver, fallback to current metadata path
 
-After you approve, I'll start with Step 1 verification.
+Approve and I'll execute Step 1 (youtube read cutover) in default mode, then we test before moving to the next function.
