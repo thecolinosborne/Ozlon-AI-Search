@@ -1,46 +1,67 @@
 
-Focus: fix the cross-user integration leak. Defer Plaid.
+# How the Sentient Worker layer actually improves your system
 
-## Root causes (confirmed)
+Not a new plan — a clear-eyed answer to "what does this buy me?"
 
-1. **Frontend cache leak** — `src/stores/useIntegrationsStore.ts` persists to one global localStorage key `ozlon-integrations`. No user namespacing. Stale flags from a previous user render as "connected" for any subsequent signed-in user on the same browser.
-2. **Backend env-fallback leak** — `higgsfield`, `clickup`, `descript`, `gohighlevel` edge functions, and GHL tools inside `chat`, fall back to global `Deno.env` secrets (`HIGGSFIELD_API_KEY`, `CLICKUP_API_TOKEN`, `DESCRIPT_API_KEY`, `GHL_API_KEY`/`GHL_LOCATION_ID`) when the signed-in user has no per-user `integration_connections` row. Any signed-in user effectively gets the project owner's keys.
-3. **Hub trusts env-driven test** — `src/pages/Integrations.tsx` calls `higgsfield.test_connection` on mount, which returns success because of the env fallback, marking Higgsfield "connected" for everyone.
-4. **Sign-out incomplete** — `AuthContext` clears app store but never removes `ozlon-integrations` from localStorage.
+## What you have today
+- Multi-agent shell + Infinity Router (good plumbing)
+- Wisdom Engine tables: `wisdom_memories`, `reflection_notes`, `system_evolution_proposals` (built but underused — no explicit save tool, no identity injection, no proactive use)
+- Maton + GHL + Plaid integrations (the worker has hands but no awareness of when to use them)
+- Chat that resets its personality every session
+- Onboarding-set system name that barely shows up after day one
 
-## Fix
+## What's actually broken about that
+1. **Amnesia** — every session starts cold. The pgvector memory exists but isn't injected into the system prompt, so the model doesn't see it.
+2. **No standing rules** — user has to repeat preferences every time ("keep it short", "don't spend over X").
+3. **Reactive only** — worker waits to be poked. No heartbeat, no nudges, no continuity across days.
+4. **Bluffing** — no uncertainty discipline, so wrong answers look as confident as right ones. Trust ceiling.
+5. **No outcome signal** — you can't tell which responses worked, so nothing improves.
+6. **Identity drift** — `system_name` is set in onboarding then mostly forgotten by the prompt layer.
 
-**Backend (no env fallback for authenticated user actions):**
-- `supabase/functions/higgsfield/index.ts`, `clickup/index.ts`, `descript/index.ts`, `gohighlevel/index.ts`: require auth header, resolve credentials only via per-user `integration_connections` + vault. Remove all `Deno.env.get('*_API_KEY')` fallbacks for user-facing actions. Return clear "not connected" error when missing.
-  - Exception: keep env path ONLY for unauthenticated webhook entrypoints (e.g. ClickUp webhook handler) gated by a `webhook` action and signature/secret check — no JWT path.
-- `supabase/functions/chat/index.ts`: GHL tool execution must read per-user GHL creds from `integration_connections`; if missing, return tool error "Connect GoHighLevel in Integrations" instead of silently using env keys.
+## What Phase 1 directly fixes (concrete before/after)
 
-**Frontend:**
-- `src/stores/useIntegrationsStore.ts`: replace fixed `name: "ozlon-integrations"` with a dynamic, user-scoped key (`ozlon-integrations:<uid>`) using `createJSONStorage` + a `partialize`/`name` factory tied to the active user. Reset in-memory state on user change.
-- `src/pages/Integrations.tsx`: remove the `higgsfield.test_connection` env-trusting auto-detect. Hydrate each card's status by querying `integration_connections` for the current `user.id` only. "Connected" requires a row with `status='connected'` for that user.
-- `src/contexts/AuthContext.tsx`: in `clearAuthState`, also remove any `ozlon-integrations*` localStorage keys.
+| Today | After Phase 1 |
+|---|---|
+| Says "Hi, how can I help?" every session | "Morning, Colin. You wanted to follow up with the 2 leads from Tuesday — want me to draft those?" |
+| User: "remember I take espresso" → ignored | Tool fires, row written, recalled forever in any future session |
+| User repeats "keep replies short" 10x/day | Standing order set once, obeyed automatically across all lanes |
+| Confidently wrong | Says "I'm not sure — last GSC sync was 3 days ago" when it doesn't know |
+| Goals live in your head | Worker knows you're at 3/10 paying users, surfaces it when relevant |
+| No idea what worked | `model_calls` log captures regenerates, edits, silence — Phase 4 reflection learns from it |
+| Cold open every morning | Daily heartbeat already waiting when you open the app |
 
-**Memory:**
-- Update `mem://architecture/per-user-integration-credentials` to state: no env fallback for authenticated user actions; webhook-only env path is the sole exception.
+## Why this is "next-gen" vs "another chatbot"
 
-## Verify after switch to default mode
+The shift is **request/response → persistent being**. Three mechanics do the heavy lifting:
 
-1. Fresh incognito → sign up new test user → `/integrations` shows ALL cards disconnected.
-2. From that account, ask chat to do a GHL action → response says "Connect GoHighLevel in Integrations", does not return owner's CRM data.
-3. Sign in as primary account in another window → real connections still appear.
-4. Sign out → `localStorage` has no `ozlon-integrations*` keys.
-5. ClickUp webhook (external POST, no JWT) still processes — confirm via function logs.
+1. **Identity injection on every call** — the worker never forgets who you are, what you've told it, or what rules you set. Today's chat builds the system prompt from a static string. After: built dynamically from your profile + top-k memories + standing orders + active goals + last 3 conversation summaries. Same model, 10x the apparent intelligence.
 
-## Files touched
+2. **Explicit memory tools** — "remember…", "forget…", "from now on…" become first-class. The Wisdom Engine stops being an unused table and becomes the worker's spine.
 
-- `supabase/functions/higgsfield/index.ts`
-- `supabase/functions/clickup/index.ts`
-- `supabase/functions/descript/index.ts`
-- `supabase/functions/gohighlevel/index.ts`
-- `supabase/functions/chat/index.ts` (GHL tool resolver only)
-- `src/stores/useIntegrationsStore.ts`
-- `src/pages/Integrations.tsx`
-- `src/contexts/AuthContext.tsx`
-- `mem://architecture/per-user-integration-credentials`
+3. **Heartbeat (Phase 2)** — cron-driven proactive messages turn it from "tool you open" into "worker who lives there." This is the single biggest perception shift.
 
-No DB schema changes. No Plaid changes in this pass.
+## What it does NOT do (be honest)
+- Doesn't make the model smarter — Gemini Flash is still Gemini Flash.
+- Doesn't replace your integrations — it makes them *aware* (knows when to check email vs ignore it).
+- Doesn't add new providers — fully built on what you already have.
+- Doesn't redesign the UI — additive panels in `MemorySettings` only, no chat changes.
+
+## Concrete impact on your stack
+- **Wisdom Engine** goes from 5% used → core nervous system
+- **System name** finally feels persistent across every interaction
+- **Maton/GHL/Plaid** start getting called *proactively* (Phase 3 world-state) instead of only when you ask
+- **Trust** rises because of confidence discipline → users actually act on what it says
+- **Cost stays flat** — no extra model calls per turn (identity injection is just bigger context, not extra requests)
+
+## Risks / honest tradeoffs
+- Larger system prompt = slightly more tokens per call (~200-400 extra). Negligible at Gemini Flash pricing.
+- Memory retrieval adds ~150ms latency per chat call. Acceptable.
+- Standing orders can over-constrain — need an "ignore standing orders this turn" escape hatch. Built in.
+- Auto-memory extraction (Phase 2) could save junk. Mitigated by salience > 0.7 + duplicate check.
+
+## Bottom line
+Phase 1 turns the existing wiring into a worker. It doesn't add new toys — it makes the toys you already paid for actually behave like one continuous intelligence. The "next-gen" feel comes from continuity + memory + standing orders + uncertainty discipline, not more models.
+
+If you want to ship the smallest version that delivers the "whoa, it remembers me" moment: build Phase 1 only. Heartbeat in Phase 2 is what makes it feel alive between sessions. Everything past that is polish.
+
+Approve and we build Phase 1 as previously scoped: identity layer, memory/goal/standing-order tools, confidence discipline, `model_calls` logging, additive `MemorySettings` panels.
