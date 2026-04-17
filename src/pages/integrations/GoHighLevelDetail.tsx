@@ -19,6 +19,7 @@ interface GHLSettings {
   locationId?: string;       // active/default sub-account id
   subAccounts?: SubAccount[];
   syncData?: Record<string, boolean>;
+  [key: string]: unknown;
 }
 
 const dataSyncOptions = [
