@@ -455,11 +455,15 @@ async function fetchGoogleMeetData(): Promise<string> {
 // ---------- ClickUp (via dedicated edge function) ----------
 async function callClickUpEdge(action: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clickupUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/clickup`;
+  // Forward the end-user's JWT so the clickup function's vault-first resolver can identify them.
+  // Fall back to service role only if no user context is available (e.g. background tasks).
+  const userAuthHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+  const authHeader = userAuthHeader || `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`;
   const res = await fetch(clickupUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      'Authorization': authHeader,
     },
     body: JSON.stringify({ action, params }),
   });
