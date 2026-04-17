@@ -284,44 +284,36 @@ export function useConversations() {
         return;
       }
 
-      const loadedSessions = data || [];
-      console.log("[useConversations] Loaded", loadedSessions.length, "sessions");
-      setSessions(loadedSessions);
+      const rawSessions = data || [];
+      console.log("[useConversations] Loaded", rawSessions.length, "sessions");
 
-      if (loadedSessions.length === 0) {
-        console.log("[useConversations] No sessions, creating first one");
-        const { data: newSession, error: createError } = await supabase
-          .from("chat_sessions")
-          .insert({ user_id: user.id, title: "New conversation" })
-          .select("id, title, created_at, updated_at")
-          .single();
-
-        if (!mountedRef.current) return;
-
-        if (createError || !newSession) {
-          console.error("[useConversations] Auto-create session failed:", createError);
-        } else {
-          console.log("[useConversations] Auto-created session:", newSession.id);
-          setSessions([newSession]);
-          setActiveSession(newSession.id);
-          setMessages([]);
-        }
-      } else {
-        setActiveSession(loadedSessions[0].id);
-        const { data: msgs } = await supabase
+      // Garbage-collect empty "New conversation" shells from prior aborted logins
+      const emptyDefaults = rawSessions.filter((s) => (s.title === "New conversation" || !s.title));
+      let kept = rawSessions;
+      if (emptyDefaults.length > 0) {
+        const ids = emptyDefaults.map((s) => s.id);
+        const { data: counts } = await supabase
           .from("chat_messages")
-          .select("id, role, content, created_at")
-          .eq("session_id", loadedSessions[0].id)
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: true });
-
-        if (!mountedRef.current) return;
-
-        if (msgs) {
-          setMessages(msgs.map((m) => ({ ...m, role: m.role as "user" | "assistant" })));
+          .select("session_id")
+          .in("session_id", ids)
+          .eq("user_id", user.id);
+        const withMessages = new Set((counts || []).map((c: { session_id: string }) => c.session_id));
+        const toDelete = ids.filter((id) => !withMessages.has(id));
+        if (toDelete.length > 0) {
+          console.log("[useConversations] GC", toDelete.length, "empty sessions");
+          await supabase.from("chat_sessions").delete().in("id", toDelete).eq("user_id", user.id);
+          kept = rawSessions.filter((s) => !toDelete.includes(s.id));
         }
       }
 
+      if (!mountedRef.current) return;
+      setSessions(kept);
+
+      // Phase 1.5: do NOT auto-select last session. Show empty hero so each
+      // sign-in is a fresh conversation. User clicks a past session OR types
+      // → ensureSession creates a new one on first message.
+      setActiveSession(null);
+      setMessages([]);
       setSessionsLoaded(true);
     };
 
