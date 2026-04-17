@@ -336,6 +336,32 @@ export function useConversations() {
   }, [user]);
 
   /**
+   * Close the active session: if it has ≥2 messages and no summary, fire
+   * the summarizer (also writes a real title). If empty, delete it.
+   * Fire-and-forget — caller doesn't await.
+   */
+  const closeActiveSession = useCallback(async () => {
+    const sid = activeSessionIdRef.current;
+    if (!sid || !user) return;
+    const localCount = messagesRef.current.length;
+    try {
+      if (localCount === 0) {
+        // Empty shell — delete it
+        await supabase.from("chat_sessions").delete().eq("id", sid).eq("user_id", user.id);
+        return;
+      }
+      if (localCount >= 2) {
+        // Fire-and-forget summarization (don't block sign-out)
+        supabase.functions.invoke("summarize-session", { body: { session_id: sid } }).catch((e) => {
+          console.error("[useConversations] summarize-session error:", e);
+        });
+      }
+    } catch (e) {
+      console.error("[useConversations] closeActiveSession error:", e);
+    }
+  }, [user]);
+
+  /**
    * Public contract — consumed by Index.tsx and session UI.
    * Internal mutation helpers (setMessages, updateMessageContent) are NOT
    * exposed. All message mutations flow through saveMessage / finalizeMessage.
@@ -351,5 +377,6 @@ export function useConversations() {
     finalizeMessage,
     deleteSession,
     loadSessions,
+    closeActiveSession,
   };
 }
