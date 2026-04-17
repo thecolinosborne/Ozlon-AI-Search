@@ -5766,6 +5766,7 @@ serve(async (req) => {
     // Native connection discovery + per-user GHL credential resolution
     let GHL_API_KEY_RESOLVED: string | undefined;
     let GHL_LOCATION_ID_RESOLVED: string | undefined;
+    let GHL_SUB_ACCOUNTS_RESOLVED: { id: string; name: string; api_key?: string }[] | undefined;
 
     // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
@@ -5793,10 +5794,14 @@ serve(async (req) => {
           .eq('provider', 'gohighlevel');
         if (conns) {
           for (const c of conns) {
-            const meta = c.metadata as Record<string, string> | null;
-            if (meta?.api_key) {
-              GHL_API_KEY_RESOLVED = meta.api_key;
-              GHL_LOCATION_ID_RESOLVED = meta.location_id;
+            const meta = (c.metadata as Record<string, unknown>) || {};
+            if (typeof meta.api_key === 'string' && meta.api_key) {
+              GHL_API_KEY_RESOLVED = meta.api_key as string;
+              GHL_LOCATION_ID_RESOLVED = (meta.location_id as string) || undefined;
+              if (Array.isArray(meta.sub_accounts)) {
+                GHL_SUB_ACCOUNTS_RESOLVED = (meta.sub_accounts as { id: string; name: string; api_key?: string }[])
+                  .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string');
+              }
             }
           }
         }
