@@ -1806,10 +1806,140 @@ const ACTION_TOOLS: ToolDef[] = [
   },
   {
     type: 'function',
-    function: {
+     function: {
       name: 'ghl_get_business',
       description: 'Get details for a specific business in GoHighLevel.',
       parameters: { type: 'object', properties: { business_id: { type: 'string', description: 'Business ID' } }, required: ['business_id'] },
+    },
+  },
+  // ============ Edit 1: Previously-unexposed GHL endpoints ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_conversation',
+      description: 'Fetch a single GoHighLevel conversation thread by ID.',
+      parameters: { type: 'object', properties: { conversation_id: { type: 'string' } }, required: ['conversation_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_invoice',
+      description: 'Fetch a single GoHighLevel invoice by ID.',
+      parameters: { type: 'object', properties: { invoice_id: { type: 'string' } }, required: ['invoice_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_opportunity',
+      description: 'Fetch a single GoHighLevel opportunity by ID.',
+      parameters: { type: 'object', properties: { opportunity_id: { type: 'string' } }, required: ['opportunity_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_social_post',
+      description: 'Fetch a single scheduled GoHighLevel social media post.',
+      parameters: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_edit_social_post',
+      description: 'Edit a scheduled GoHighLevel social post (text, schedule, media).',
+      parameters: { type: 'object', properties: { post_id: { type: 'string' }, summary: { type: 'string' }, scheduled_at: { type: 'string' }, media_urls: { type: 'string', description: 'Comma-separated media URLs' } }, required: ['post_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_link',
+      description: 'Update an existing GoHighLevel tracking/short link.',
+      parameters: { type: 'object', properties: { link_id: { type: 'string' }, name: { type: 'string' }, redirectTo: { type: 'string' } }, required: ['link_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_import_courses',
+      description: 'Bulk import courses into GoHighLevel.',
+      parameters: { type: 'object', properties: { payload: { type: 'object', description: 'Course import payload' } }, required: ['payload'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_appointment',
+      description: 'Create a raw GoHighLevel calendar appointment (lower-level than ghl_book_appointment).',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string' }, contact_id: { type: 'string' }, start_time: { type: 'string' }, end_time: { type: 'string' }, title: { type: 'string' } }, required: ['calendar_id', 'contact_id', 'start_time'] },
+    },
+  },
+  // ============ Tier A: New GHL endpoints ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_opportunity',
+      description: 'Delete a GoHighLevel opportunity by ID.',
+      parameters: { type: 'object', properties: { opportunity_id: { type: 'string' } }, required: ['opportunity_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_opportunity_status',
+      description: 'Update a GoHighLevel opportunity status (open, won, lost, abandoned).',
+      parameters: { type: 'object', properties: { opportunity_id: { type: 'string' }, status: { type: 'string', enum: ['open', 'won', 'lost', 'abandoned'] } }, required: ['opportunity_id', 'status'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_contact_note',
+      description: 'Update a contact note in GoHighLevel.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, note_id: { type: 'string' }, body: { type: 'string' } }, required: ['contact_id', 'note_id', 'body'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_contact_note',
+      description: 'Delete a contact note in GoHighLevel.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, note_id: { type: 'string' } }, required: ['contact_id', 'note_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_contact_task',
+      description: 'Update a contact task in GoHighLevel (title, body, due date, completion status).',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, task_id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, dueDate: { type: 'string' }, completed: { type: 'boolean' } }, required: ['contact_id', 'task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_complete_contact_task',
+      description: 'Mark a GoHighLevel contact task as completed.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, task_id: { type: 'string' } }, required: ['contact_id', 'task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_contact_task',
+      description: 'Delete a contact task in GoHighLevel.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, task_id: { type: 'string' } }, required: ['contact_id', 'task_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_remove_from_workflow',
+      description: 'Remove a contact from a GoHighLevel workflow.',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string' }, workflow_id: { type: 'string' } }, required: ['contact_id', 'workflow_id'] },
     },
   },
   // ============ GSC / SEO Intelligence Tools ============
