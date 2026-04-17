@@ -9,24 +9,31 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
-
-const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clickup`;
-const HEADERS = {
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-};
+import { supabase } from "@/integrations/supabase/client";
 
 async function callClickUp(action: string, params?: Record<string, unknown>) {
-  const res = await fetch(FUNCTION_URL, {
-    method: "POST",
-    headers: HEADERS,
-    body: JSON.stringify({ action, params }),
+  // Use supabase.functions.invoke so the authenticated user's JWT is automatically
+  // attached as the Authorization header. The clickup edge function needs this to
+  // resolve the per-user vault credential.
+  const { data, error } = await supabase.functions.invoke("clickup", {
+    body: { action, params },
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
+  if (error) {
+    // FunctionsHttpError exposes the response body via context.json()
+    let serverMsg: string | null = null;
+    try {
+      const ctx = (error as unknown as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+      if (ctx?.json) {
+        const parsed = await ctx.json();
+        serverMsg = parsed?.error ?? null;
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(serverMsg || error.message || "Request failed");
   }
-  return res.json();
+  if (data?.error) throw new Error(data.error);
+  return data;
 }
 
 const DEFAULT_TRIGGERS = ["@ai", "@pm", "@wisdom"];
