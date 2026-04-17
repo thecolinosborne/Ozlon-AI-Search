@@ -1887,6 +1887,83 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Standing Orders (Durable Rules) ============
+  {
+    type: 'function',
+    function: {
+      name: 'add_standing_order',
+      description: 'Create a durable RULE the assistant will obey on every future turn (e.g. "always answer in 2 sentences", "never spend over $200 without asking"). Use when the user says "from now on", "always", "never", or sets a durable behavioral rule.',
+      parameters: {
+        type: 'object',
+        properties: {
+          rule: { type: 'string', description: 'The rule text (imperative, short)' },
+          scope: { type: 'string', description: 'global | finance | email | creative | research', enum: ['global', 'finance', 'email', 'creative', 'research'] },
+          priority: { type: 'number', description: '1 (highest) to 10 (lowest); default 5' },
+        },
+        required: ['rule'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_standing_order',
+      description: 'Deactivate an existing standing order by id. Use when the user says "stop doing X" or "ignore that rule".',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_id: { type: 'string', description: 'The standing order id to deactivate' },
+        },
+        required: ['order_id'],
+      },
+    },
+  },
+  // ============ User Goals ============
+  {
+    type: 'function',
+    function: {
+      name: 'add_goal',
+      description: 'Track a goal for the user. Call when the user states an outcome they want over time (e.g. "I want 10 paying users by March").',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short goal title' },
+          description: { type: 'string', description: 'Optional detail / context' },
+          target_date: { type: 'string', description: 'Optional target date (YYYY-MM-DD)' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_goal_progress',
+      description: 'Append a progress note to an existing goal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal id' },
+          note: { type: 'string', description: 'Short progress note' },
+        },
+        required: ['goal_id', 'note'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'complete_goal',
+      description: 'Mark a goal complete.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal id' },
+        },
+        required: ['goal_id'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
