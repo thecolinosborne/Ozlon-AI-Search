@@ -37,8 +37,10 @@ const DescriptDetail = () => {
   const [loadingJobs, setLoadingJobs] = useState(false);
 
   const callDescript = async (action: string, params: Record<string, unknown> = {}) => {
+    // Do NOT pass apiKey from the client — let the edge function resolve via vault → metadata.
+    // This ensures the vault-first read path is exercised and audit logs / last_used_at update.
     const { data, error } = await supabase.functions.invoke("descript", {
-      body: { action, ...params, apiKey: settings.apiKey || undefined },
+      body: { action, ...params },
     });
     if (error) throw new Error(error.message);
     return data;
