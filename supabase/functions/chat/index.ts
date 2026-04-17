@@ -2610,7 +2610,7 @@ async function executeToolCall(
   _connMap: MultiConnMap,
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
-  ghlCreds?: { apiKey?: string; locationId?: string },
+  ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
 ): Promise<{ success: boolean; result: string }> {
   try {
     switch (toolName) {
