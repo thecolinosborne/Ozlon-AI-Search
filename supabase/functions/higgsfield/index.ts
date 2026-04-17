@@ -9,34 +9,99 @@ const corsHeaders = {
 
 const BASE_URL = "https://platform.higgsfield.ai";
 
-async function resolveCredentials(req: Request, paramAppId?: string, paramApiKey?: string): Promise<{ appId: string; apiKey: string }> {
+async function tryVaultRead(
+  adminClient: ReturnType<typeof createClient>,
+  connectionId: string,
+  userId: string,
+  secretName: string,
+): Promise<string | null> {
+  try {
+    const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
+    if (!vaultKey) return null;
+    const keyBytes = new TextEncoder().encode(vaultKey);
+    if (keyBytes.length !== 32) {
+      console.warn(`[higgsfield/vault] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
+      return null;
+    }
+    const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data, error } = await adminClient.rpc("get_user_secret", {
+      _connection_id: connectionId,
+      _user_id: userId,
+      _secret_name: secretName,
+      _encryption_key: hexKey,
+    });
+    if (error) {
+      console.warn(`[higgsfield/vault] get_user_secret(${secretName}) error:`, error.message);
+      return null;
+    }
+    const plain = typeof data === "string" ? data.trim() : null;
+    if (plain && plain.length > 0) {
+      adminClient
+        .from("credential_audit_log")
+        .insert({
+          user_id: userId,
+          connection_id: connectionId,
+          provider: "higgsfield",
+          action: "vault_read",
+          detail: secretName,
+        })
+        .then(() => {})
+        .catch(() => {});
+      return plain;
+    }
+    return null;
+  } catch (e) {
+    console.warn("[higgsfield/vault] threw:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function resolveCredentials(
+  req: Request,
+  paramAppId?: string,
+  paramApiKey?: string,
+): Promise<{ appId: string; apiKey: string }> {
   // 1. Explicit params
   if (paramAppId && paramApiKey) return { appId: paramAppId, apiKey: paramApiKey };
 
-  // 2. Per-user lookup
-  const authHeader = req.headers.get('Authorization');
+  // 2. Per-user lookup (vault-first, metadata fallback)
+  const authHeader = req.headers.get("Authorization");
   if (authHeader) {
     try {
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: authHeader } },
       });
       const { data: { user } } = await userClient.auth.getUser();
       if (user) {
-        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const adminClient = createClient(supabaseUrl, serviceKey);
-        const { data } = await adminClient
-          .from('integration_connections')
-          .select('metadata')
-          .eq('user_id', user.id)
-          .eq('provider', 'higgsfield')
-          .eq('status', 'connected')
+        const { data: conn } = await adminClient
+          .from("integration_connections")
+          .select("id, metadata")
+          .eq("user_id", user.id)
+          .eq("provider", "higgsfield")
+          .eq("status", "connected")
           .single();
-        const meta = data?.metadata as Record<string, string> | null;
-        if (meta?.api_key && meta?.app_id) return { appId: meta.app_id, apiKey: meta.api_key };
+
+        if (conn?.id) {
+          const meta = (conn.metadata as Record<string, string>) || {};
+          // Vault-first for each secret, metadata fallback per-secret
+          const apiKey =
+            (await tryVaultRead(adminClient, conn.id, user.id, "api_key")) ||
+            meta.api_key ||
+            "";
+          const appId =
+            (await tryVaultRead(adminClient, conn.id, user.id, "app_id")) ||
+            meta.app_id ||
+            "";
+          if (apiKey && appId) return { appId, apiKey };
+        }
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
 
   // 3. Env fallback
@@ -58,7 +123,7 @@ serve(async (req) => {
 
     if (action === "test_connection") {
       try {
-        const creds = await resolveCredentials(req, paramAppId, paramApiKey);
+        await resolveCredentials(req, paramAppId, paramApiKey);
         return new Response(
           JSON.stringify({ success: true, data: { connected: true, note: "Dual-auth credentials configured" } }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
