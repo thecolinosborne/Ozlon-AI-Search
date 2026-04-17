@@ -36,7 +36,8 @@ async function tryVaultRead(
     }
     const plain = typeof data === "string" ? data.trim() : null;
     if (plain && plain.length > 0) {
-      adminClient
+      console.log(`[higgsfield/vault] read OK secret=${secretName} len=${plain.length}`);
+      const { error: auditErr } = await adminClient
         .from("credential_audit_log")
         .insert({
           user_id: userId,
@@ -44,11 +45,11 @@ async function tryVaultRead(
           provider: "higgsfield",
           action: "vault_read",
           detail: secretName,
-        })
-        .then(() => {})
-        .catch(() => {});
+        });
+      if (auditErr) console.warn(`[higgsfield/vault] audit insert failed:`, auditErr.message);
       return plain;
     }
+    console.log(`[higgsfield/vault] read empty secret=${secretName}`);
     return null;
   } catch (e) {
     console.warn("[higgsfield/vault] threw:", e instanceof Error ? e.message : e);
