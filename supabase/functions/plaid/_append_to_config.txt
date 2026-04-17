@@ -1,2 +1,0 @@
-[functions.plaid]
-verify_jwt = false
