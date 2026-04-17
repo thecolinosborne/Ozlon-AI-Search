@@ -2055,6 +2055,111 @@ const ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { user_id: { type: 'string' }, firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, role: { type: 'string' } }, required: ['user_id'] },
     },
   },
+  // ============ Tier C: SaaS/agency, snapshots, payments, prices, media ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_locations',
+      description: 'Agency-level: list sub-account locations the user has access to in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number' }, skip: { type: 'number' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_location',
+      description: 'Get details for a GoHighLevel location (sub-account).',
+      parameters: { type: 'object', properties: { location_id: { type: 'string', description: 'Optional. Defaults to the connected location.' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_location',
+      description: 'Update settings on a GoHighLevel location (sub-account).',
+      parameters: { type: 'object', properties: { location_id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, address: { type: 'string' }, city: { type: 'string' }, state: { type: 'string' }, country: { type: 'string' }, postalCode: { type: 'string' }, website: { type: 'string' }, timezone: { type: 'string' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_snapshots',
+      description: 'List GoHighLevel snapshots available to the agency/company.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_order',
+      description: 'Get a single GoHighLevel payment order by ID.',
+      parameters: { type: 'object', properties: { order_id: { type: 'string' } }, required: ['order_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_transaction',
+      description: 'Get a single GoHighLevel payment transaction by ID.',
+      parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_subscriptions',
+      description: 'List GoHighLevel payment subscriptions for the location.',
+      parameters: { type: 'object', properties: { limit: { type: 'number' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_subscription',
+      description: 'Get a single GoHighLevel payment subscription by ID.',
+      parameters: { type: 'object', properties: { subscription_id: { type: 'string' } }, required: ['subscription_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_prices',
+      description: 'List prices for a GoHighLevel product.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, limit: { type: 'number' } }, required: ['product_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_price',
+      description: 'Create a price for a GoHighLevel product (amount in smallest currency unit, e.g., cents).',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, name: { type: 'string' }, amount: { type: 'number' }, currency: { type: 'string', description: 'ISO currency code, e.g., USD' }, type: { type: 'string', enum: ['one_time', 'recurring'] }, recurringInterval: { type: 'string', enum: ['day', 'week', 'month', 'year'] } }, required: ['product_id', 'name', 'amount', 'currency', 'type'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_price',
+      description: 'Update a price on a GoHighLevel product.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, price_id: { type: 'string' }, name: { type: 'string' }, amount: { type: 'number' } }, required: ['product_id', 'price_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_upload_media_file',
+      description: 'Upload a file to the GoHighLevel media library by URL (the GHL endpoint hosted-file mode).',
+      parameters: { type: 'object', properties: { hosted: { type: 'boolean', description: 'true if uploading via URL' }, file_url: { type: 'string' }, name: { type: 'string' }, parent_id: { type: 'string', description: 'Optional folder ID' } }, required: ['file_url', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_media_file',
+      description: 'Delete a file from the GoHighLevel media library.',
+      parameters: { type: 'object', properties: { file_id: { type: 'string' } }, required: ['file_id'] },
+    },
+  },
   // ============ GSC / SEO Intelligence Tools ============
   {
     type: 'function',
