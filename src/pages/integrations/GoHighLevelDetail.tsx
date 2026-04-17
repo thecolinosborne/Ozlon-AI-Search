@@ -136,6 +136,8 @@ const GoHighLevelDetail = () => {
       setTesting(false);
     }
   };
+
+  const toggleSyncData = (key: string) => {
     const updated = { ...syncData, [key]: !syncData[key] };
     updateSettings("gohighlevel", { ...settings, syncData: updated });
   };
