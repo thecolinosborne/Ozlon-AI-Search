@@ -3509,6 +3509,8 @@ async function executeToolCall(
           return { success: true, result: `Memory saved: "${memorySummary}"` };
         } catch (e) {
           console.error('[save_memory] Error:', e);
+          return { success: false, result: `Memory error: ${e instanceof Error ? e.message : String(e)}` };
+        }
       }
 
       case 'add_standing_order': {
