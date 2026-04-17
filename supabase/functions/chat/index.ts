@@ -1942,6 +1942,119 @@ const ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { contact_id: { type: 'string' }, workflow_id: { type: 'string' } }, required: ['contact_id', 'workflow_id'] },
     },
   },
+  // ============ Tier B: Custom fields, custom values, tags, calendar groups, users ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_custom_field',
+      description: 'Create a custom field in GoHighLevel for the location.',
+      parameters: { type: 'object', properties: { name: { type: 'string' }, dataType: { type: 'string', description: 'TEXT, NUMERICAL, PHONE, MONETARY, CHECKBOX, SINGLE_OPTIONS, MULTIPLE_OPTIONS, DATE, TEXTAREA, RADIO, FILE_UPLOAD, SIGNATURE' }, position: { type: 'number' }, model: { type: 'string', description: 'contact or opportunity', enum: ['contact', 'opportunity'] } }, required: ['name', 'dataType'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_custom_field',
+      description: 'Update a custom field in GoHighLevel.',
+      parameters: { type: 'object', properties: { field_id: { type: 'string' }, name: { type: 'string' }, position: { type: 'number' } }, required: ['field_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_custom_field',
+      description: 'Delete a custom field in GoHighLevel.',
+      parameters: { type: 'object', properties: { field_id: { type: 'string' } }, required: ['field_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_custom_value',
+      description: 'Create a custom value (mergeable variable) in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_custom_value',
+      description: 'Update a custom value in GoHighLevel.',
+      parameters: { type: 'object', properties: { value_id: { type: 'string' }, name: { type: 'string' }, value: { type: 'string' } }, required: ['value_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_custom_value',
+      description: 'Delete a custom value in GoHighLevel.',
+      parameters: { type: 'object', properties: { value_id: { type: 'string' } }, required: ['value_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_tag',
+      description: 'Create a location-level tag in GoHighLevel.',
+      parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_tag',
+      description: 'Delete a location-level tag in GoHighLevel by tag ID.',
+      parameters: { type: 'object', properties: { tag_id: { type: 'string' } }, required: ['tag_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_calendar_groups',
+      description: 'List calendar groups in GoHighLevel for the location.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_calendar_resources',
+      description: 'List calendar resources (rooms or equipment) in GoHighLevel.',
+      parameters: { type: 'object', properties: { resource_type: { type: 'string', enum: ['rooms', 'equipments'], description: 'rooms or equipments' } }, required: ['resource_type'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_block_calendar_slot',
+      description: 'Block a time slot on a GoHighLevel calendar.',
+      parameters: { type: 'object', properties: { calendar_id: { type: 'string' }, start_time: { type: 'string' }, end_time: { type: 'string' }, title: { type: 'string' } }, required: ['calendar_id', 'start_time', 'end_time'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_user',
+      description: 'Get a single GoHighLevel user by ID.',
+      parameters: { type: 'object', properties: { user_id: { type: 'string' } }, required: ['user_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_user',
+      description: 'Create a new user in GoHighLevel.',
+      parameters: { type: 'object', properties: { firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, password: { type: 'string' }, phone: { type: 'string' }, type: { type: 'string', description: 'account or agency' }, role: { type: 'string', description: 'admin or user' } }, required: ['firstName', 'lastName', 'email', 'password'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_user',
+      description: 'Update a GoHighLevel user.',
+      parameters: { type: 'object', properties: { user_id: { type: 'string' }, firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, role: { type: 'string' } }, required: ['user_id'] },
+    },
+  },
   // ============ GSC / SEO Intelligence Tools ============
   {
     type: 'function',
@@ -3544,6 +3657,135 @@ async function executeToolCall(
         return { success: true, result: `Contact ${args.contact_id} removed from workflow ${args.workflow_id}.` };
       }
 
+      // ============ Tier B: handlers ============
+      case 'ghl_create_custom_field': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = { name: args.name, dataType: args.dataType };
+        if (args.position !== undefined) body.position = args.position;
+        if (args.model) body.model = args.model;
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'POST', body, ghlCreds?.apiKey) as { id?: string; customField?: { id?: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom field "${args.name}" created (ID: ${res.id || res.customField?.id || 'created'}).` };
+      }
+      case 'ghl_update_custom_field': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = {};
+        if (args.name !== undefined) body.name = args.name;
+        if (args.position !== undefined) body.position = args.position;
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields/${args.field_id}`, 'PUT', body, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom field ${args.field_id} updated.` };
+      }
+      case 'ghl_delete_custom_field': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields/${args.field_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom field ${args.field_id} deleted.` };
+      }
+      case 'ghl_create_custom_value': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues`, 'POST', { name: args.name, value: args.value }, ghlCreds?.apiKey) as { id?: string; customValue?: { id?: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom value "${args.name}" created (ID: ${res.id || res.customValue?.id || 'created'}).` };
+      }
+      case 'ghl_update_custom_value': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = {};
+        if (args.name !== undefined) body.name = args.name;
+        if (args.value !== undefined) body.value = args.value;
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues/${args.value_id}`, 'PUT', body, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom value ${args.value_id} updated.` };
+      }
+      case 'ghl_delete_custom_value': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues/${args.value_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Custom value ${args.value_id} deleted.` };
+      }
+      case 'ghl_create_tag': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/tags`, 'POST', { name: args.name }, ghlCreds?.apiKey) as { id?: string; tag?: { id?: string }; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Tag "${args.name}" created (ID: ${res.id || res.tag?.id || 'created'}).` };
+      }
+      case 'ghl_delete_tag': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/locations/${GHL_LOCATION_ID}/tags/${args.tag_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Tag ${args.tag_id} deleted.` };
+      }
+      case 'ghl_list_calendar_groups': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/calendars/groups?locationId=${GHL_LOCATION_ID}`, 'GET', undefined, ghlCreds?.apiKey) as { groups?: { id: string; name?: string; description?: string }[]; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const groups = data.groups || [];
+        if (!groups.length) return { success: true, result: 'No calendar groups found.' };
+        return { success: true, result: `Calendar groups:\n${groups.map(g => `- ${g.name || '?'} | ${g.description || ''} | ID: ${g.id}`).join('\n')}` };
+      }
+      case 'ghl_list_calendar_resources': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/calendars/resources/${args.resource_type}?locationId=${GHL_LOCATION_ID}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Calendar ${args.resource_type}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_block_calendar_slot': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          calendarId: args.calendar_id,
+          startTime: args.start_time,
+          endTime: args.end_time,
+        };
+        if (args.title) body.title = args.title;
+        const res = await callGHL(`/calendars/events/block-slots`, 'POST', body, ghlCreds?.apiKey) as { id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Calendar slot blocked (ID: ${res.id || 'blocked'}).` };
+      }
+      case 'ghl_get_user': {
+        const data = await callGHL(`/users/${args.user_id}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `User ${args.user_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_create_user': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        const body: Record<string, unknown> = {
+          firstName: args.firstName,
+          lastName: args.lastName,
+          email: args.email,
+          password: args.password,
+          type: args.type || 'account',
+          role: args.role || 'user',
+        };
+        if (args.phone) body.phone = args.phone;
+        if (GHL_LOCATION_ID) body.locationIds = [GHL_LOCATION_ID];
+        const res = await callGHL(`/users/`, 'POST', body, ghlCreds?.apiKey) as { id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `User created: ${args.email} (ID: ${res.id || 'created'}).` };
+      }
+      case 'ghl_update_user': {
+        const body: Record<string, unknown> = {};
+        if (args.firstName !== undefined) body.firstName = args.firstName;
+        if (args.lastName !== undefined) body.lastName = args.lastName;
+        if (args.email !== undefined) body.email = args.email;
+        if (args.phone !== undefined) body.phone = args.phone;
+        if (args.role !== undefined) body.role = args.role;
+        const res = await callGHL(`/users/${args.user_id}`, 'PUT', body, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `User ${args.user_id} updated.` };
+      }
+
       // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
         try {
@@ -4714,6 +4956,21 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'ghl_complete_contact_task': 'ghl',
     'ghl_delete_contact_task': 'ghl',
     'ghl_remove_from_workflow': 'ghl',
+    // Tier B
+    'ghl_create_custom_field': 'ghl',
+    'ghl_update_custom_field': 'ghl',
+    'ghl_delete_custom_field': 'ghl',
+    'ghl_create_custom_value': 'ghl',
+    'ghl_update_custom_value': 'ghl',
+    'ghl_delete_custom_value': 'ghl',
+    'ghl_create_tag': 'ghl',
+    'ghl_delete_tag': 'ghl',
+    'ghl_list_calendar_groups': 'ghl',
+    'ghl_list_calendar_resources': 'ghl',
+    'ghl_block_calendar_slot': 'ghl',
+    'ghl_get_user': 'ghl',
+    'ghl_create_user': 'ghl',
+    'ghl_update_user': 'ghl',
     // GSC / SEO tools
     'gsc_list_sites': 'google-search-console',
     'gsc_query': 'google-search-console',
