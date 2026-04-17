@@ -37,7 +37,53 @@ function getToken(tokenOverride?: string): string {
   return token;
 }
 
-/** Resolve ClickUp token from per-user DB first, then env fallback */
+async function tryVaultRead(
+  adminClient: ReturnType<typeof createClient>,
+  connectionId: string,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
+    if (!vaultKey) return null;
+    const keyBytes = new TextEncoder().encode(vaultKey);
+    if (keyBytes.length !== 32) {
+      console.warn(`[clickup/vault] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
+      return null;
+    }
+    const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data, error } = await adminClient.rpc("get_user_secret", {
+      _connection_id: connectionId,
+      _user_id: userId,
+      _secret_name: "api_key",
+      _encryption_key: hexKey,
+    });
+    if (error) {
+      console.warn("[clickup/vault] get_user_secret error:", error.message);
+      return null;
+    }
+    const plain = typeof data === "string" ? data.trim() : null;
+    if (plain && plain.length > 0) {
+      adminClient
+        .from("credential_audit_log")
+        .insert({
+          user_id: userId,
+          connection_id: connectionId,
+          provider: "clickup",
+          action: "vault_read",
+          detail: "api_key",
+        })
+        .then(() => {})
+        .catch(() => {});
+      return plain;
+    }
+    return null;
+  } catch (e) {
+    console.warn("[clickup/vault] threw:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/** Resolve ClickUp token: override → vault → metadata fallback → env fallback */
 async function resolveClickUpToken(req: Request, tokenOverride?: string): Promise<string> {
   if (tokenOverride) return tokenOverride;
 
@@ -53,14 +99,22 @@ async function resolveClickUpToken(req: Request, tokenOverride?: string): Promis
       if (user) {
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminClient = createClient(supabaseUrl, serviceKey);
-        const { data } = await adminClient
+        const { data: conn } = await adminClient
           .from('integration_connections')
-          .select('metadata')
+          .select('id, metadata')
           .eq('user_id', user.id)
           .eq('provider', 'clickup')
           .eq('status', 'connected')
           .single();
-        const key = (data?.metadata as Record<string, string>)?.api_key;
+
+        if (conn?.id) {
+          // 1. Vault-first
+          const vaultKey = await tryVaultRead(adminClient, conn.id, user.id);
+          if (vaultKey) return vaultKey;
+        }
+
+        // 2. Legacy metadata fallback
+        const key = (conn?.metadata as Record<string, string>)?.api_key;
         if (key) return key;
       }
     } catch { /* fall through */ }

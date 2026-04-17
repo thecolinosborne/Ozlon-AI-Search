@@ -60,9 +60,9 @@ const ClickUpDetail = () => {
   const [newTrigger, setNewTrigger] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
 
-  const getAuthParams = (): Record<string, unknown> => ({
-    apiToken: storedSettings.apiToken || undefined,
-  });
+  // Don't send apiToken on the wire — let the edge function resolve via vault-first path.
+  // storedSettings.apiToken is kept locally only for the masked-hint display.
+  const getAuthParams = (): Record<string, unknown> => ({});
 
   // Check connection on mount
   useEffect(() => {
