@@ -1,56 +1,83 @@
 
-## GHL coverage audit
+User wants the two GHL improvements: (1) multi-account resolver and (2) smart_search tool. Let me check current GHL credential resolution to plan accurately.
 
-### Endpoints in the GHL edge function but NOT exposed as chat tools (gaps to fix)
-1. `get_conversation` — fetch a single conversation thread
-2. `get_invoice` — fetch a single invoice
-3. `get_opportunity` — fetch a single opportunity
-4. `get_social_post` — fetch a single scheduled social post
-5. `edit_social_post` — modify a scheduled social post
-6. `update_link` — edit a tracking/short link
-7. `import_courses` — bulk import courses
-8. `create_appointment` — booking is currently routed through `book_appointment`; the raw `create_appointment` action is unexposed (minor — covered)
+Key facts from memory + audit:
+- Per-user creds live in `integration_connections` (metadata.api_key, metadata.location_id)
+- Currently single location per user — no sub-account concept yet
+- Maton resolver pattern: explicit → contextual → inferred (from `identity-context-resolution-rules`)
+- Chat function calls GHL via `callGHL(action, params)` helper
 
-### What's missing from the GHL function entirely (should be added next)
-These are commonly used GHL v2 endpoints not implemented at all:
-- **Notes/Tasks updates**: `update_contact_note`, `delete_contact_note`, `update_contact_task`, `complete_contact_task`, `delete_contact_task`
-- **Opportunity lifecycle**: `delete_opportunity`, `update_opportunity_status`
-- **Calendar groups & resources**: `list_calendar_groups`, `list_calendar_resources`, `block_calendar_slot`
-- **Conversations**: `update_message_status` (mark read/unread), `upload_attachment`
-- **Workflows**: `remove_from_workflow`
-- **Forms**: `upload_form_file`
-- **Custom fields**: `create_custom_field`, `update_custom_field`, `delete_custom_field`
-- **Custom values**: `create_custom_value`, `update_custom_value`, `delete_custom_value`
-- **Tags (location)**: `create_tag`, `delete_tag`
-- **Users**: `get_user`, `create_user`, `update_user`
-- **Locations**: `get_location`, `update_location`
-- **SaaS / Sub-accounts**: `list_locations` (agency view)
-- **Snapshots**: `list_snapshots`
-- **Payments**: `get_order`, `get_transaction`, `list_subscriptions`, `get_subscription`
-- **Products**: `list_prices`, `create_price`, `update_price`
-- **Media**: `upload_media_file`, `delete_media_file`
+## Plan — GHL multi-account resolver + smart_search
 
-### Plan (two surgical edits, no UI/redesign)
+### Part A — Multi-account (sub-account) resolver
 
-**Edit 1 — `supabase/functions/chat/index.ts`**
-Wire the 8 unexposed-but-already-implemented actions as chat tools (one-line tool defs + routing entries). Zero new HTTP code, just exposes what's already there. Highest ROI, ~10 min of edits.
+**Data model change**
+Today `integration_connections` for `gohighlevel` stores one `{api_key, location_id}` pair. Add support for an array of sub-accounts in `metadata.sub_accounts`:
+```
+metadata: {
+  api_key: "...",                    // agency or default key
+  location_id: "abc",                // default/primary
+  sub_accounts: [
+    { id: "abc", name: "Main Biz", api_key?: "..." },
+    { id: "xyz", name: "Client B", api_key?: "..." }
+  ]
+}
+```
+Per-sub-account `api_key` is optional — falls back to top-level key (covers agency-key-with-many-locations + per-location-key both).
 
-**Edit 2 — `supabase/functions/gohighlevel/index.ts` + `chat/index.ts`**
-Add the missing endpoint coverage above in priority order:
-- **Tier A (do now)**: opportunity status update + delete, contact note/task update/delete/complete, conversation upload_attachment, workflow remove
-- **Tier B (later)**: custom fields/values CRUD, tags create/delete, calendar groups/resources, users CRUD
-- **Tier C (skip unless asked)**: SaaS/agency, snapshots, payments subscriptions, prices, media upload
+**Backend resolver (in `chat/index.ts` GHL helper)**
+New `resolveGHLContext({ userId, hint })`:
+1. **Explicit** — if tool args include `location_id`, use it (validate it exists in sub_accounts list)
+2. **Contextual** — if hint matches a sub-account name (fuzzy: "main biz", "client b"), use it
+3. **Inferred** — if only one sub-account, use it; else use `location_id` (default)
+4. **Ambiguous** — return structured error listing available accounts so the model can ask the user (List-Confirm-Act protocol)
 
-I recommend shipping **Edit 1 + Tier A** in this pass — it closes the obvious gaps without bloating the tool list (tool count matters for model performance).
+Every `callGHL` call goes through resolver → injects correct `location_id` + auth header.
+
+**Tool surface**
+- Add `location_id` (optional) param to ~all GHL tools so the model can pass it when known
+- Add `ghl_list_sub_accounts` tool (lists configured sub-accounts so model can pick)
+- Add `ghl_set_active_sub_account` (session-scoped switch — stored in conversation context, not DB)
+
+**Frontend (`GoHighLevelDetail.tsx`)**
+The page already renders a `subAccounts` UI but it's stubbed to a single "default". Wire it up:
+- "Add sub-account" button → modal: name + location_id + optional api_key → `upsertIntegrationConnection` with full sub_accounts array
+- Edit/remove existing sub-accounts
+- "Active" pill marks the default (stored as `location_id` at top level)
+
+### Part B — `ghl_smart_search` tool
+
+Single tool that fans out across contacts + opportunities + conversations + appointments + invoices in parallel and returns a unified ranked result.
+
+**Tool def**
+```
+ghl_smart_search(query: string, types?: string[], limit?: number, location_id?: string)
+```
+- `types` defaults to `["contacts","opportunities","conversations","appointments"]`
+- `limit` per-type, default 5
+
+**Implementation in `chat/index.ts`**
+Single handler that runs `Promise.allSettled` of the existing GHL search/list endpoints with the query, normalizes results into a uniform shape:
+```
+{ type, id, title, subtitle, snippet, url_hint, score, raw }
+```
+Returns `{ results: [...], errors: [{type, message}] }` so partial failures don't break the whole thing (per `error-reporting-policy`).
+
+**Why this matters**
+Current pattern forces the model to call `ghl_list_contacts` + `ghl_list_opportunities` + `ghl_list_conversations` separately when user asks "find anything about John Smith" — 3 round trips. Smart search collapses to 1.
 
 ### Files touched
-- `supabase/functions/chat/index.ts` — add ~13 tool definitions + routing
-- `supabase/functions/gohighlevel/index.ts` — add ~9 new action cases
+- `supabase/functions/chat/index.ts` — add resolver helper, inject location into all GHL tools, add `ghl_list_sub_accounts`, `ghl_set_active_sub_account`, `ghl_smart_search`
+- `src/pages/integrations/GoHighLevelDetail.tsx` — sub-account CRUD UI
+- `src/services/integrationConnectionService.ts` — helper to upsert sub_accounts array (if not already supported)
+- No DB migration needed — `metadata` is JSONB
 
 ### Verify after
-1. Ask "show me opportunity {id}" → returns single opportunity
-2. Ask "delete that note" after creating one → completes
-3. Ask "mark opportunity won" → status updates
-4. Ask "remove contact from workflow X" → succeeds
+1. Add 2 sub-accounts in `/integrations/gohighlevel`, set one as default
+2. Ask "list contacts" → uses default
+3. Ask "list contacts in Client B" → resolver picks Client B
+4. Ask "search GHL for Sarah" → smart_search returns contacts + opps + convos in one call
+5. Remove a sub-account → chat falls back cleanly
 
-Approve and I'll ship Edit 1 + Tier A.
+### Recommendation
+Ship in this order: smart_search first (zero schema risk, immediate UX win), then multi-account resolver (needs the UI work). Or both in one pass — your call.
