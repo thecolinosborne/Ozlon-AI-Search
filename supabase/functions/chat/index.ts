@@ -3470,7 +3470,111 @@ async function executeToolCall(
           return { success: true, result: `Memory saved: "${memorySummary}"` };
         } catch (e) {
           console.error('[save_memory] Error:', e);
-          return { success: false, result: `Memory save error: ${e instanceof Error ? e.message : 'Unknown'}` };
+      }
+
+      case 'add_standing_order': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('standing_orders').insert({
+            user_id: userId,
+            rule: args.rule as string,
+            scope: (args.scope as string) || 'global',
+            priority: (args.priority as number) || 5,
+          }).select('id').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Standing order saved (id: ${data?.id}). I will obey this from now on.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'remove_standing_order': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('standing_orders')
+            .update({ active: false })
+            .eq('id', args.order_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Standing order removed.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'add_goal': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('user_goals').insert({
+            user_id: userId,
+            title: args.title as string,
+            description: (args.description as string) || null,
+            target_date: (args.target_date as string) || null,
+          }).select('id').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Goal added (id: ${data?.id}). I'll track it for you.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'update_goal_progress': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data: g } = await admin.from('user_goals')
+            .select('progress_notes')
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId)
+            .single();
+          const notes = Array.isArray(g?.progress_notes) ? g!.progress_notes : [];
+          notes.push({ at: new Date().toISOString(), note: args.note as string });
+          const { error } = await admin.from('user_goals')
+            .update({ progress_notes: notes })
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Progress logged.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'complete_goal': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('user_goals')
+            .update({ status: 'completed' })
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Goal completed. Well done.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
       }
 
