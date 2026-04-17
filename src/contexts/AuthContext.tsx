@@ -142,6 +142,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     console.log("Signing out...");
+    // Phase 1.5: notify listeners (useConversations) to close/summarize the
+    // active session BEFORE we clear auth state (JWT still valid for the call).
+    try {
+      window.dispatchEvent(new CustomEvent("ozlon:before-signout"));
+      await new Promise((r) => setTimeout(r, 80));
+    } catch (e) {
+      console.error("before-signout dispatch error:", e);
+    }
     clearAuthState();
     try {
       const { error } = await supabase.auth.signOut({ scope: 'global' });
