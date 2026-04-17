@@ -3,6 +3,7 @@ import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { handleError } from "@/lib/handleError";
 import { toast } from "sonner";
+import { clearAllIntegrationCaches, setActiveIntegrationsUser } from "@/stores/useIntegrationsStore";
 
 const STORAGE_KEY = "ozlon_system_name";
 const ONBOARDED_KEY = "ozlon_onboarded";
@@ -47,6 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthLoading(false);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(ONBOARDED_KEY);
+    // Wipe per-user integration caches so the next signed-in user starts clean.
+    clearAllIntegrationCaches();
   }, []);
 
   const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
@@ -94,6 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextSession.user);
     setAuthLoading(false);
     setProfileLoaded(false);
+
+    // Switch the integrations store namespace to this user, isolating from any previous user's cache.
+    setActiveIntegrationsUser(nextSession.user.id);
 
     void loadUserProfile(nextSession.user.id, isNewSignup);
   }, [loadUserProfile]);

@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
-
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const integrations = [
   {
@@ -50,41 +51,57 @@ const integrations = [
   },
 ];
 
+// Map UI ids to provider names in integration_connections.
+const PROVIDER_BY_ID: Record<string, string> = {
+  gohighlevel: "gohighlevel",
+  descript: "descript",
+  higgsfield: "higgsfield",
+  clickup: "clickup",
+  youtube: "youtube",
+};
+
 const Integrations = () => {
   const navigate = useNavigate();
-  const { getIntegration, setStatus, setApiKeyConfigured, setLastSync, setSyncDirection } = useIntegrationsStore();
+  const { user } = useAuth();
+  const { getIntegration, setStatus, setApiKeyConfigured, setLastSync, disconnect } = useIntegrationsStore();
 
-  // Auto-detect Higgsfield connection on hub mount
+  // Hydrate connection status STRICTLY from per-user integration_connections (no env-trusting probes).
   useEffect(() => {
     let cancelled = false;
-    const detect = async () => {
+    const hydrate = async () => {
+      if (!user) {
+        // Signed out — force everything to disconnected.
+        for (const i of integrations) disconnect(i.id);
+        return;
+      }
       try {
-        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ action: "test_connection" }),
-        });
-        const data = await res.json();
-        if (cancelled) return;
-        if (data?.success) {
-          setStatus("higgsfield", "connected");
-          setApiKeyConfigured("higgsfield", true);
-          setLastSync("higgsfield", new Date().toISOString());
-          if (getIntegration("higgsfield").syncDirection !== "two-way") {
-            setSyncDirection("higgsfield", "two-way");
+        const { data, error } = await supabase
+          .from("integration_connections")
+          .select("provider, status, last_validated_at")
+          .eq("user_id", user.id);
+        if (cancelled || error) return;
+        const byProvider = new Map<string, { status: string; last_validated_at: string | null }>();
+        for (const row of data || []) {
+          byProvider.set(row.provider, { status: row.status, last_validated_at: row.last_validated_at });
+        }
+        for (const i of integrations) {
+          const provider = PROVIDER_BY_ID[i.id];
+          const row = provider ? byProvider.get(provider) : undefined;
+          if (row && row.status === "connected") {
+            setStatus(i.id, "connected");
+            setApiKeyConfigured(i.id, true);
+            if (row.last_validated_at) setLastSync(i.id, row.last_validated_at);
+          } else {
+            disconnect(i.id);
           }
         }
       } catch {
-        // silent
+        /* silent */
       }
     };
-    detect();
+    hydrate();
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.id, setStatus, setApiKeyConfigured, setLastSync, disconnect]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">
