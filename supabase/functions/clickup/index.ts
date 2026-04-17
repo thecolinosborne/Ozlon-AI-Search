@@ -575,17 +575,20 @@ serve(async (req) => {
     const body = await req.json();
     const { action, params } = body;
     const tokenFromParams = typeof params?.apiToken === 'string' ? params.apiToken : undefined;
-    const resolvedToken = await resolveClickUpToken(req, tokenFromParams);
-    const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
-      clickupFetch(path, method, payload, resolvedToken);
 
-    // ClickUp webhooks send the payload directly (no action field)
+    // ClickUp webhooks send the payload directly (no action field, no JWT).
+    // This is the ONE allowed env-key path — gated by absence of `action` + presence of `body.event`.
     if (!action && body.event) {
       const result = await handleWebhook(body);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    // All other (authenticated) paths require per-user credentials.
+    const resolvedToken = await resolveClickUpToken(req, tokenFromParams);
+    const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
+      clickupFetch(path, method, payload, resolvedToken);
 
     // Action-based routing for frontend calls
     switch (action) {
