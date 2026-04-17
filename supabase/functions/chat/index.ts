@@ -2318,18 +2318,18 @@ async function executeToolCall(
 
       // ============ GoHighLevel tools ============
       case 'ghl_list_contacts': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const limit = (args.limit as number) || 20;
         const query = args.query ? `&query=${encodeURIComponent(args.query as string)}` : '';
-        const data = await callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=${limit}${query}`) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; tags?: string[] }[] };
+        const data = await callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=${limit}${query}`, ghlCreds?.apiKey) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string; tags?: string[] }[] };
         const contacts = data.contacts || [];
         if (!contacts.length) return { success: true, result: 'No contacts found.' };
         return { success: true, result: `Found ${contacts.length} contacts:\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || 'no email'} | ${c.phone || 'no phone'} | ID: ${c.id}${c.tags?.length ? ' | Tags: ' + c.tags.join(', ') : ''}`).join('\n')}` };
       }
 
       case 'ghl_create_contact': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const contactData: Record<string, unknown> = {
           locationId: GHL_LOCATION_ID,
@@ -2340,7 +2340,7 @@ async function executeToolCall(
         if (args.phone) contactData.phone = args.phone;
         if (args.source) contactData.source = args.source;
         if (args.tags) contactData.tags = (args.tags as string).split(',').map(t => t.trim());
-        const res = await callGHL('/contacts/', 'POST', contactData) as { contact?: { id: string; firstName?: string; lastName?: string }; error?: string; message?: string };
+        const res = await callGHL('/contacts/', 'POST', contactData, ghlCreds?.apiKey) as { contact?: { id: string; firstName?: string; lastName?: string }; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
         return { success: true, result: `Contact created: ${res.contact?.firstName} ${res.contact?.lastName} (ID: ${res.contact?.id})` };
       }
@@ -2354,25 +2354,25 @@ async function executeToolCall(
           status: args.status || 'open',
         };
         if (args.monetary_value) data.monetaryValue = args.monetary_value;
-        const res = await callGHL('/opportunities/', 'POST', data) as { opportunity?: { id: string; name: string }; error?: string; message?: string };
+        const res = await callGHL('/opportunities/', 'POST', data, ghlCreds?.apiKey) as { opportunity?: { id: string; name: string }; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
         return { success: true, result: `Opportunity created: "${res.opportunity?.name}" (ID: ${res.opportunity?.id})` };
       }
 
       case 'ghl_list_opportunities': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const limit = (args.limit as number) || 20;
-        const data = await callGHL(`/opportunities/search?locationId=${GHL_LOCATION_ID}&pipelineId=${args.pipeline_id}&limit=${limit}`) as { opportunities?: { id: string; name: string; monetaryValue?: number; status?: string; pipelineStageId?: string; contact?: { name?: string } }[] };
+        const data = await callGHL(`/opportunities/search?locationId=${GHL_LOCATION_ID}&pipelineId=${args.pipeline_id}&limit=${limit}`, ghlCreds?.apiKey) as { opportunities?: { id: string; name: string; monetaryValue?: number; status?: string; pipelineStageId?: string; contact?: { name?: string } }[] };
         const opps = data.opportunities || [];
         if (!opps.length) return { success: true, result: 'No opportunities found in this pipeline.' };
         return { success: true, result: `Found ${opps.length} opportunities:\n${opps.map(o => `- ${o.name} | $${o.monetaryValue || 0} | Status: ${o.status || '?'} | ID: ${o.id}`).join('\n')}` };
       }
 
       case 'ghl_list_pipelines': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as { pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] };
+        const data = await callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] };
         const pipelines = data.pipelines || [];
         if (!pipelines.length) return { success: true, result: 'No pipelines found.' };
         return { success: true, result: `Pipelines:\n${pipelines.map(p => `- ${p.name} (ID: ${p.id})\n  Stages: ${(p.stages || []).map(s => `${s.name} (ID: ${s.id})`).join(' → ')}`).join('\n')}` };
@@ -2386,15 +2386,15 @@ async function executeToolCall(
           message: args.message,
         };
         if (type === 'Email' && args.subject) msgData.subject = args.subject;
-        const res = await callGHL('/conversations/messages', 'POST', msgData) as { messageId?: string; message?: string; error?: string };
+        const res = await callGHL('/conversations/messages', 'POST', msgData, ghlCreds?.apiKey) as { messageId?: string; message?: string; error?: string };
         if (res.error) return { success: false, result: `GHL message error: ${res.error}` };
         return { success: true, result: `${type} sent to contact ${args.contact_id}: "${(args.message as string).substring(0, 100)}"` };
       }
 
       case 'ghl_list_calendars': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as { calendars?: { id: string; name: string; description?: string }[] };
+        const data = await callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { calendars?: { id: string; name: string; description?: string }[] };
         const cals = data.calendars || [];
         if (!cals.length) return { success: true, result: 'No calendars found.' };
         return { success: true, result: `Calendars:\n${cals.map(c => `- ${c.name} (ID: ${c.id})${c.description ? ' - ' + c.description : ''}`).join('\n')}` };
@@ -2408,31 +2408,31 @@ async function executeToolCall(
           endTime: args.end_time,
         };
         if (args.title) apptData.title = args.title;
-        const res = await callGHL('/calendars/events/appointments', 'POST', apptData) as { id?: string; error?: string; message?: string };
+        const res = await callGHL('/calendars/events/appointments', 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL appointment error: ${res.error || res.message}` };
         return { success: true, result: `Appointment booked: ${args.start_time} to ${args.end_time} (ID: ${res.id})` };
       }
 
       case 'ghl_add_tags': {
         const tags = (args.tags as string).split(',').map(t => t.trim());
-        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'POST', { tags }) as { tags?: string[]; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'POST', { tags }, ghlCreds?.apiKey) as { tags?: string[]; error?: string };
         if (res.error) return { success: false, result: `GHL tag error: ${res.error}` };
         return { success: true, result: `Tags added to contact ${args.contact_id}: ${tags.join(', ')}` };
       }
 
       case 'ghl_list_workflows': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`) as { workflows?: { id: string; name: string; status?: string }[] };
+        const data = await callGHL(`/workflows/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { workflows?: { id: string; name: string; status?: string }[] };
         const workflows = data.workflows || [];
         if (!workflows.length) return { success: true, result: 'No workflows found.' };
         return { success: true, result: `Workflows:\n${workflows.map(w => `- ${w.name} (${w.status || 'unknown'}) | ID: ${w.id}`).join('\n')}` };
       }
 
       case 'ghl_list_campaigns': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`) as { campaigns?: { id: string; name: string; status?: string }[] };
+        const data = await callGHL(`/campaigns/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { campaigns?: { id: string; name: string; status?: string }[] };
         const camps = data.campaigns || [];
         if (!camps.length) return { success: true, result: 'No campaigns found.' };
         return { success: true, result: `Campaigns:\n${camps.map(c => `- ${c.name} (${c.status || 'unknown'}) | ID: ${c.id}`).join('\n')}` };
@@ -2440,7 +2440,7 @@ async function executeToolCall(
 
       // ============ Tier 1: New GHL tool handlers ============
       case 'ghl_get_contact': {
-        const data = await callGHL(`/contacts/${args.contact_id}`) as { contact?: Record<string, unknown>; error?: string };
+        const data = await callGHL(`/contacts/${args.contact_id}`, ghlCreds?.apiKey) as { contact?: Record<string, unknown>; error?: string };
         if (data.error) return { success: false, result: `GHL error: ${data.error}` };
         const c = data.contact as Record<string, unknown> | undefined;
         if (!c) return { success: false, result: 'Contact not found.' };
@@ -2455,18 +2455,18 @@ async function executeToolCall(
         if (args.phone) updateData.phone = args.phone;
         if (args.tags) updateData.tags = (args.tags as string).split(',').map(t => t.trim());
         if (args.customFields) { try { updateData.customFields = JSON.parse(args.customFields as string); } catch { /* ignore */ } }
-        const res = await callGHL(`/contacts/${args.contact_id}`, 'PUT', updateData) as { contact?: { id: string }; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { contact?: { id: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Contact ${args.contact_id} updated successfully.` };
       }
 
       case 'ghl_search_contacts': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageSize: (args.limit as number) || 20 };
         if (args.query) searchBody.query = args.query;
         if (args.filters) { try { Object.assign(searchBody, JSON.parse(args.filters as string)); } catch { /* ignore */ } }
-        const data = await callGHL('/contacts/search', 'POST', searchBody) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
+        const data = await callGHL('/contacts/search', 'POST', searchBody, ghlCreds?.apiKey) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
         const contacts = data.contacts || [];
         if (!contacts.length) return { success: true, result: 'No contacts found matching search.' };
         return { success: true, result: `Found ${contacts.length} contacts:\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}` };
@@ -2478,17 +2478,17 @@ async function executeToolCall(
         if (args.monetary_value) updateData.monetaryValue = args.monetary_value;
         if (args.status) updateData.status = args.status;
         if (args.name) updateData.name = args.name;
-        const res = await callGHL(`/opportunities/${args.opportunity_id}`, 'PUT', updateData) as { opportunity?: { id: string }; error?: string };
+        const res = await callGHL(`/opportunities/${args.opportunity_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { opportunity?: { id: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Opportunity ${args.opportunity_id} updated successfully.` };
       }
 
       case 'ghl_get_calendar_events': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const startTime = (args.start_time as string) || new Date().toISOString();
         const endTime = (args.end_time as string) || new Date(Date.now() + 7 * 86400000).toISOString();
-        const data = await callGHL(`/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${args.calendar_id}&startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}`) as { events?: { id: string; title?: string; startTime?: string; endTime?: string; contactId?: string; status?: string }[] };
+        const data = await callGHL(`/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${args.calendar_id}&startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}`, ghlCreds?.apiKey) as { events?: { id: string; title?: string; startTime?: string; endTime?: string; contactId?: string; status?: string }[] };
         const events = data.events || [];
         if (!events.length) return { success: true, result: 'No events found in this time range.' };
         return { success: true, result: `Found ${events.length} events:\n${events.map(e => `- ${e.title || '(untitled)'} | ${e.startTime} → ${e.endTime} | Status: ${e.status || '?'} | ID: ${e.id}`).join('\n')}` };
@@ -2497,7 +2497,7 @@ async function executeToolCall(
       case 'ghl_get_free_slots': {
         const startDate = (args.start_date as string) || new Date().toISOString().split('T')[0];
         const endDate = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?startDate=${startDate}&endDate=${endDate}`) as Record<string, { slots?: string[] }>;
+        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?startDate=${startDate}&endDate=${endDate}`, ghlCreds?.apiKey) as Record<string, { slots?: string[] }>;
         const allSlots: string[] = [];
         for (const [date, info] of Object.entries(data)) {
           if (info?.slots?.length) { allSlots.push(`${date}: ${info.slots.join(', ')}`); }
@@ -2507,119 +2507,119 @@ async function executeToolCall(
       }
 
       case 'ghl_list_conversations': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const limit = (args.limit as number) || 20;
-        const data = await callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=${limit}`) as { conversations?: { id: string; contactId?: string; type?: string; lastMessageDate?: string; fullName?: string }[] };
+        const data = await callGHL(`/conversations/search?locationId=${GHL_LOCATION_ID}&limit=${limit}`, ghlCreds?.apiKey) as { conversations?: { id: string; contactId?: string; type?: string; lastMessageDate?: string; fullName?: string }[] };
         const convos = data.conversations || [];
         if (!convos.length) return { success: true, result: 'No conversations found.' };
         return { success: true, result: `Found ${convos.length} conversations:\n${convos.map(c => `- ${c.fullName || 'Unknown'} | Type: ${c.type || '?'} | Last: ${c.lastMessageDate || '?'} | ID: ${c.id}`).join('\n')}` };
       }
 
       case 'ghl_get_conversation_messages': {
-        const data = await callGHL(`/conversations/${args.conversation_id}/messages`) as { messages?: { id: string; body?: string; type?: string; direction?: string; dateAdded?: string }[] };
+        const data = await callGHL(`/conversations/${args.conversation_id}/messages`, ghlCreds?.apiKey) as { messages?: { id: string; body?: string; type?: string; direction?: string; dateAdded?: string }[] };
         const msgs = data.messages || [];
         if (!msgs.length) return { success: true, result: 'No messages in this conversation.' };
         return { success: true, result: `Messages (${msgs.length}):\n${msgs.slice(0, 30).map(m => `- [${m.direction || '?'}] ${m.body?.substring(0, 200) || '(empty)'} (${m.dateAdded || ''})`).join('\n')}` };
       }
 
       case 'ghl_list_invoices': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const limit = (args.limit as number) || 20;
-        const data = await callGHL(`/invoices/?altId=${GHL_LOCATION_ID}&altType=location&limit=${limit}`) as { invoices?: { _id: string; name?: string; total?: number; status?: string; createdAt?: string }[] };
+        const data = await callGHL(`/invoices/?altId=${GHL_LOCATION_ID}&altType=location&limit=${limit}`, ghlCreds?.apiKey) as { invoices?: { _id: string; name?: string; total?: number; status?: string; createdAt?: string }[] };
         const invoices = data.invoices || [];
         if (!invoices.length) return { success: true, result: 'No invoices found.' };
         return { success: true, result: `Invoices (${invoices.length}):\n${invoices.map(i => `- ${i.name || 'Untitled'} | $${i.total || 0} | ${i.status || '?'} | ID: ${i._id}`).join('\n')}` };
       }
 
       case 'ghl_create_invoice': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const invoiceData: Record<string, unknown> = { altId: GHL_LOCATION_ID, altType: 'location', name: args.name, contactId: args.contact_id };
         if (args.items) { try { invoiceData.items = JSON.parse(args.items as string); } catch { /* ignore */ } }
-        const res = await callGHL('/invoices/', 'POST', invoiceData) as { invoice?: { _id: string }; error?: string };
+        const res = await callGHL('/invoices/', 'POST', invoiceData, ghlCreds?.apiKey) as { invoice?: { _id: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Invoice created: "${args.name}" (ID: ${res.invoice?._id})` };
       }
 
       case 'ghl_list_orders': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`) as { data?: { id: string; name?: string; amount?: number; status?: string }[] };
+        const data = await callGHL(`/payments/orders?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { data?: { id: string; name?: string; amount?: number; status?: string }[] };
         const orders = data.data || [];
         if (!orders.length) return { success: true, result: 'No orders found.' };
         return { success: true, result: `Orders (${orders.length}):\n${orders.map(o => `- ${o.name || 'Order'} | $${o.amount || 0} | ${o.status || '?'} | ID: ${o.id}`).join('\n')}` };
       }
 
       case 'ghl_list_transactions': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/payments/transactions?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`) as { data?: { id: string; amount?: number; status?: string; createdAt?: string }[] };
+        const data = await callGHL(`/payments/transactions?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { data?: { id: string; amount?: number; status?: string; createdAt?: string }[] };
         const txns = data.data || [];
         if (!txns.length) return { success: true, result: 'No transactions found.' };
         return { success: true, result: `Transactions (${txns.length}):\n${txns.map(t => `- $${t.amount || 0} | ${t.status || '?'} | ${t.createdAt || ''} | ID: ${t.id}`).join('\n')}` };
       }
 
       case 'ghl_list_forms': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/forms/?locationId=${GHL_LOCATION_ID}`) as { forms?: { id: string; name: string }[] };
+        const data = await callGHL(`/forms/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { forms?: { id: string; name: string }[] };
         const forms = data.forms || [];
         if (!forms.length) return { success: true, result: 'No forms found.' };
         return { success: true, result: `Forms:\n${forms.map(f => `- ${f.name} | ID: ${f.id}`).join('\n')}` };
       }
 
       case 'ghl_get_form_submissions': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const limit = (args.limit as number) || 20;
-        const data = await callGHL(`/forms/submissions?locationId=${GHL_LOCATION_ID}&formId=${args.form_id}&limit=${limit}`) as { submissions?: { id: string; contactId?: string; createdAt?: string; data?: Record<string, string> }[] };
+        const data = await callGHL(`/forms/submissions?locationId=${GHL_LOCATION_ID}&formId=${args.form_id}&limit=${limit}`, ghlCreds?.apiKey) as { submissions?: { id: string; contactId?: string; createdAt?: string; data?: Record<string, string> }[] };
         const subs = data.submissions || [];
         if (!subs.length) return { success: true, result: 'No submissions found for this form.' };
         return { success: true, result: `Submissions (${subs.length}):\n${subs.map(s => `- Contact: ${s.contactId || '?'} | ${s.createdAt || ''} | Data: ${JSON.stringify(s.data || {}).substring(0, 200)}`).join('\n')}` };
       }
 
       case 'ghl_list_funnels': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/funnels/funnel/list?locationId=${GHL_LOCATION_ID}`) as { funnels?: { id: string; name: string; steps?: number }[] };
+        const data = await callGHL(`/funnels/funnel/list?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { funnels?: { id: string; name: string; steps?: number }[] };
         const funnels = data.funnels || [];
         if (!funnels.length) return { success: true, result: 'No funnels found.' };
         return { success: true, result: `Funnels:\n${funnels.map(f => `- ${f.name} | ID: ${f.id}`).join('\n')}` };
       }
 
       case 'ghl_list_custom_fields': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`) as { customFields?: { id: string; name: string; fieldKey?: string; dataType?: string }[] };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, ghlCreds?.apiKey) as { customFields?: { id: string; name: string; fieldKey?: string; dataType?: string }[] };
         const fields = data.customFields || [];
         if (!fields.length) return { success: true, result: 'No custom fields found.' };
         return { success: true, result: `Custom Fields:\n${fields.map(f => `- ${f.name} (${f.dataType || '?'}) | Key: ${f.fieldKey || f.id}`).join('\n')}` };
       }
 
       case 'ghl_list_custom_values': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues`) as { customValues?: { id: string; name: string; value?: string }[] };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/customValues`, ghlCreds?.apiKey) as { customValues?: { id: string; name: string; value?: string }[] };
         const values = data.customValues || [];
         if (!values.length) return { success: true, result: 'No custom values found.' };
         return { success: true, result: `Custom Values:\n${values.map(v => `- ${v.name}: ${v.value || '(empty)'} | ID: ${v.id}`).join('\n')}` };
       }
 
       case 'ghl_list_users': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/users/?locationId=${GHL_LOCATION_ID}`) as { users?: { id: string; name?: string; email?: string; role?: string }[] };
+        const data = await callGHL(`/users/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { users?: { id: string; name?: string; email?: string; role?: string }[] };
         const users = data.users || [];
         if (!users.length) return { success: true, result: 'No users found.' };
         return { success: true, result: `Users:\n${users.map(u => `- ${u.name || 'Unknown'} | ${u.email || ''} | ${u.role || '?'} | ID: ${u.id}`).join('\n')}` };
       }
 
       case 'ghl_list_tags': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/tags`) as { tags?: { id: string; name: string }[] };
+        const data = await callGHL(`/locations/${GHL_LOCATION_ID}/tags`, ghlCreds?.apiKey) as { tags?: { id: string; name: string }[] };
         const tags = data.tags || [];
         if (!tags.length) return { success: true, result: 'No tags found.' };
         return { success: true, result: `Tags:\n${tags.map(t => `- ${t.name} | ID: ${t.id}`).join('\n')}` };
@@ -2627,19 +2627,19 @@ async function executeToolCall(
 
       // ============ Tier 2: New GHL action handlers ============
       case 'ghl_delete_contact': {
-        const res = await callGHL(`/contacts/${args.contact_id}`, 'DELETE') as { succeded?: boolean; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}`, 'DELETE', ghlCreds?.apiKey) as { succeded?: boolean; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Contact ${args.contact_id} deleted.` };
       }
 
       case 'ghl_add_contact_note': {
-        const res = await callGHL(`/contacts/${args.contact_id}/notes`, 'POST', { body: args.body }) as { id?: string; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}/notes`, 'POST', { body: args.body }, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Note added to contact ${args.contact_id}.` };
       }
 
       case 'ghl_list_contact_notes': {
-        const data = await callGHL(`/contacts/${args.contact_id}/notes`) as { notes?: { id: string; body?: string; dateAdded?: string }[] };
+        const data = await callGHL(`/contacts/${args.contact_id}/notes`, ghlCreds?.apiKey) as { notes?: { id: string; body?: string; dateAdded?: string }[] };
         const notes = data.notes || [];
         if (!notes.length) return { success: true, result: 'No notes found for this contact.' };
         return { success: true, result: `Notes (${notes.length}):\n${notes.map(n => `- ${n.body?.substring(0, 200) || '(empty)'} (${n.dateAdded || ''})`).join('\n')}` };
@@ -2649,13 +2649,13 @@ async function executeToolCall(
         const taskData: Record<string, unknown> = { title: args.title };
         if (args.body) taskData.body = args.body;
         if (args.dueDate) taskData.dueDate = args.dueDate;
-        const res = await callGHL(`/contacts/${args.contact_id}/tasks`, 'POST', taskData) as { id?: string; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}/tasks`, 'POST', taskData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}.` };
       }
 
       case 'ghl_list_contact_tasks': {
-        const data = await callGHL(`/contacts/${args.contact_id}/tasks`) as { tasks?: { id: string; title?: string; body?: string; completed?: boolean; dueDate?: string }[] };
+        const data = await callGHL(`/contacts/${args.contact_id}/tasks`, ghlCreds?.apiKey) as { tasks?: { id: string; title?: string; body?: string; completed?: boolean; dueDate?: string }[] };
         const tasks = data.tasks || [];
         if (!tasks.length) return { success: true, result: 'No tasks found for this contact.' };
         return { success: true, result: `Tasks (${tasks.length}):\n${tasks.map(t => `- ${t.completed ? '✅' : '⬜'} ${t.title || '(untitled)'} | Due: ${t.dueDate || 'N/A'} | ID: ${t.id}`).join('\n')}` };
@@ -2663,19 +2663,19 @@ async function executeToolCall(
 
       case 'ghl_remove_tags': {
         const tags = (args.tags as string).split(',').map(t => t.trim());
-        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'DELETE', { tags }) as { tags?: string[]; error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}/tags`, 'DELETE', { tags }, ghlCreds?.apiKey) as { tags?: string[]; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Tags removed from contact ${args.contact_id}: ${tags.join(', ')}` };
       }
 
       case 'ghl_cancel_appointment': {
-        const res = await callGHL(`/calendars/events/appointments/${args.event_id}`, 'DELETE') as { error?: string };
+        const res = await callGHL(`/calendars/events/appointments/${args.event_id}`, 'DELETE', ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Appointment ${args.event_id} cancelled.` };
       }
 
       case 'ghl_trigger_workflow': {
-        const res = await callGHL(`/contacts/${args.contact_id}/workflow/${args.workflow_id}`, 'POST') as { error?: string };
+        const res = await callGHL(`/contacts/${args.contact_id}/workflow/${args.workflow_id}`, 'POST', ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Workflow ${args.workflow_id} triggered for contact ${args.contact_id}.` };
       }
@@ -3000,9 +3000,9 @@ async function executeToolCall(
 
 
       case 'ghl_list_social_accounts': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/accounts`) as { accounts?: { id: string; name?: string; type?: string; platform?: string }[] };
+        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/accounts`, ghlCreds?.apiKey) as { accounts?: { id: string; name?: string; type?: string; platform?: string }[] };
         const accounts = (data as unknown as { id: string; name?: string; type?: string; platform?: string }[]) || [];
         const list = Array.isArray(data) ? data : (data.accounts || []);
         if (!list.length) return { success: true, result: 'No social accounts connected.' };
@@ -3010,56 +3010,56 @@ async function executeToolCall(
       }
 
       case 'ghl_list_social_posts': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts`) as { posts?: { id: string; status?: string; summary?: string; scheduledAt?: string }[] };
+        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts`, ghlCreds?.apiKey) as { posts?: { id: string; status?: string; summary?: string; scheduledAt?: string }[] };
         const posts = data.posts || (Array.isArray(data) ? data : []);
         if (!posts.length) return { success: true, result: 'No social posts found.' };
         return { success: true, result: `Social posts (${posts.length}):\n${(posts as Record<string, unknown>[]).slice(0, 20).map((p) => `- ${(p.summary as string)?.substring(0, 100) || '(no text)'} | Status: ${p.status || '?'} | ID: ${p.id}`).join('\n')}` };
       }
 
       case 'ghl_create_social_post': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const postData: Record<string, unknown> = { summary: args.post_text };
         if (args.account_ids) postData.accountIds = (args.account_ids as string).split(',').map(s => s.trim());
         if (args.scheduled_at) postData.scheduledAt = args.scheduled_at;
         if (args.media_urls) postData.media = (args.media_urls as string).split(',').map(url => ({ url: url.trim() }));
-        const res = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts`, 'POST', postData) as { id?: string; error?: string };
+        const res = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts`, 'POST', postData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Social post created${args.scheduled_at ? ' (scheduled)' : ''} (ID: ${res.id || 'created'})` };
       }
 
       case 'ghl_delete_social_post': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const res = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts/${args.post_id}`, 'DELETE') as { error?: string };
+        const res = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts/${args.post_id}`, 'DELETE', ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Social post ${args.post_id} deleted.` };
       }
 
       case 'ghl_list_products': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/products/?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`) as { products?: { id: string; name?: string; price?: number; currency?: string }[] };
+        const data = await callGHL(`/products/?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { products?: { id: string; name?: string; price?: number; currency?: string }[] };
         const products = data.products || [];
         if (!products.length) return { success: true, result: 'No products found.' };
         return { success: true, result: `Products (${products.length}):\n${products.map(p => `- ${p.name || 'Untitled'} | $${((p.price || 0) / 100).toFixed(2)} | ID: ${p.id}`).join('\n')}` };
       }
 
       case 'ghl_get_product': {
-        const data = await callGHL(`/products/${args.product_id}`) as { id?: string; name?: string; description?: string; price?: number; error?: string };
+        const data = await callGHL(`/products/${args.product_id}`, ghlCreds?.apiKey) as { id?: string; name?: string; description?: string; price?: number; error?: string };
         if (data.error) return { success: false, result: `GHL error: ${data.error}` };
         return { success: true, result: `Product: ${data.name || '?'}\nDescription: ${data.description || 'N/A'}\nPrice: $${((data.price || 0) / 100).toFixed(2)}\nID: ${data.id}` };
       }
 
       case 'ghl_create_product': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const productData: Record<string, unknown> = { locationId: GHL_LOCATION_ID, name: args.name };
         if (args.description) productData.description = args.description;
         if (args.price) productData.price = args.price;
-        const res = await callGHL('/products/', 'POST', productData) as { id?: string; error?: string };
+        const res = await callGHL('/products/', 'POST', productData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Product created: "${args.name}" (ID: ${res.id || 'created'})` };
       }
@@ -3069,120 +3069,120 @@ async function executeToolCall(
         if (args.name) updateData.name = args.name;
         if (args.description) updateData.description = args.description;
         if (args.price) updateData.price = args.price;
-        const res = await callGHL(`/products/${args.product_id}`, 'PUT', updateData) as { error?: string };
+        const res = await callGHL(`/products/${args.product_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Product ${args.product_id} updated.` };
       }
 
       case 'ghl_delete_product': {
-        const res = await callGHL(`/products/${args.product_id}`, 'DELETE') as { error?: string };
+        const res = await callGHL(`/products/${args.product_id}`, 'DELETE', ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Product ${args.product_id} deleted.` };
       }
 
       case 'ghl_list_courses': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/courses/?locationId=${GHL_LOCATION_ID}`) as { courses?: { id: string; title?: string; status?: string }[] };
+        const data = await callGHL(`/courses/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { courses?: { id: string; title?: string; status?: string }[] };
         const courses = data.courses || [];
         if (!courses.length) return { success: true, result: 'No courses found.' };
         return { success: true, result: `Courses:\n${courses.map(c => `- ${c.title || 'Untitled'} | Status: ${c.status || '?'} | ID: ${c.id}`).join('\n')}` };
       }
 
       case 'ghl_list_surveys': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/surveys/?locationId=${GHL_LOCATION_ID}`) as { surveys?: { id: string; name: string }[] };
+        const data = await callGHL(`/surveys/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { surveys?: { id: string; name: string }[] };
         const surveys = data.surveys || [];
         if (!surveys.length) return { success: true, result: 'No surveys found.' };
         return { success: true, result: `Surveys:\n${surveys.map(s => `- ${s.name} | ID: ${s.id}`).join('\n')}` };
       }
 
       case 'ghl_get_survey_submissions': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/surveys/submissions?locationId=${GHL_LOCATION_ID}&surveyId=${args.survey_id}&limit=${(args.limit as number) || 20}`) as { submissions?: { id: string; contactId?: string; createdAt?: string; data?: Record<string, string> }[] };
+        const data = await callGHL(`/surveys/submissions?locationId=${GHL_LOCATION_ID}&surveyId=${args.survey_id}&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { submissions?: { id: string; contactId?: string; createdAt?: string; data?: Record<string, string> }[] };
         const subs = data.submissions || [];
         if (!subs.length) return { success: true, result: 'No survey submissions found.' };
         return { success: true, result: `Survey submissions (${subs.length}):\n${subs.map(s => `- Contact: ${s.contactId || '?'} | ${s.createdAt || ''} | Data: ${JSON.stringify(s.data || {}).substring(0, 200)}`).join('\n')}` };
       }
 
       case 'ghl_list_blog_posts': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/blogs/posts?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`) as { posts?: { id: string; title?: string; status?: string; createdAt?: string }[] };
+        const data = await callGHL(`/blogs/posts?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { posts?: { id: string; title?: string; status?: string; createdAt?: string }[] };
         const posts = data.posts || [];
         if (!posts.length) return { success: true, result: 'No blog posts found.' };
         return { success: true, result: `Blog posts (${posts.length}):\n${posts.map(p => `- ${p.title || 'Untitled'} | ${p.status || '?'} | ${p.createdAt || ''} | ID: ${p.id}`).join('\n')}` };
       }
 
       case 'ghl_get_blog_post': {
-        const data = await callGHL(`/blogs/posts/${args.post_id}`) as { id?: string; title?: string; content?: string; status?: string; error?: string };
+        const data = await callGHL(`/blogs/posts/${args.post_id}`, ghlCreds?.apiKey) as { id?: string; title?: string; content?: string; status?: string; error?: string };
         if (data.error) return { success: false, result: `GHL error: ${data.error}` };
         return { success: true, result: `Blog post: ${data.title || '?'}\nStatus: ${data.status || '?'}\nContent preview: ${(data.content || '').substring(0, 500)}\nID: ${data.id}` };
       }
 
       case 'ghl_create_blog_post': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
         const postData: Record<string, unknown> = { locationId: GHL_LOCATION_ID, title: args.title, content: args.content, status: (args.status as string) || 'draft' };
-        const res = await callGHL('/blogs/posts', 'POST', postData) as { id?: string; error?: string };
+        const res = await callGHL('/blogs/posts', 'POST', postData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Blog post created: "${args.title}" (${(args.status as string) || 'draft'}) (ID: ${res.id || 'created'})` };
       }
 
       case 'ghl_list_media_files': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/medias/files?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 50}`) as { files?: { id: string; name?: string; url?: string; type?: string }[] };
+        const data = await callGHL(`/medias/files?altId=${GHL_LOCATION_ID}&altType=location&limit=${(args.limit as number) || 50}`, ghlCreds?.apiKey) as { files?: { id: string; name?: string; url?: string; type?: string }[] };
         const files = data.files || [];
         if (!files.length) return { success: true, result: 'No media files found.' };
         return { success: true, result: `Media files (${files.length}):\n${files.slice(0, 30).map(f => `- ${f.name || 'Untitled'} (${f.type || '?'}) | ID: ${f.id}`).join('\n')}` };
       }
 
       case 'ghl_list_companies': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/companies/?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`) as { companies?: { id: string; name?: string; email?: string; phone?: string }[] };
+        const data = await callGHL(`/companies/?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`, ghlCreds?.apiKey) as { companies?: { id: string; name?: string; email?: string; phone?: string }[] };
         const companies = data.companies || [];
         if (!companies.length) return { success: true, result: 'No companies found.' };
         return { success: true, result: `Companies (${companies.length}):\n${companies.map(c => `- ${c.name || '?'} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}` };
       }
 
       case 'ghl_get_company': {
-        const data = await callGHL(`/companies/${args.company_id}`) as { id?: string; name?: string; email?: string; phone?: string; website?: string; error?: string };
+        const data = await callGHL(`/companies/${args.company_id}`, ghlCreds?.apiKey) as { id?: string; name?: string; email?: string; phone?: string; website?: string; error?: string };
         if (data.error) return { success: false, result: `GHL error: ${data.error}` };
         return { success: true, result: `Company: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
 
       case 'ghl_list_links': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/links/?locationId=${GHL_LOCATION_ID}`) as { links?: { id: string; name?: string; url?: string; clicks?: number }[] };
+        const data = await callGHL(`/links/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { links?: { id: string; name?: string; url?: string; clicks?: number }[] };
         const links = data.links || [];
         if (!links.length) return { success: true, result: 'No links found.' };
         return { success: true, result: `Links:\n${links.map(l => `- ${l.name || '?'} | ${l.url || ''} | Clicks: ${l.clicks || 0} | ID: ${l.id}`).join('\n')}` };
       }
 
       case 'ghl_create_link': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const res = await callGHL('/links/', 'POST', { locationId: GHL_LOCATION_ID, name: args.name, redirectTo: args.redirectTo }) as { id?: string; error?: string };
+        const res = await callGHL('/links/', 'POST', { locationId: GHL_LOCATION_ID, name: args.name, redirectTo: args.redirectTo }, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Link created: "${args.name}" → ${args.redirectTo} (ID: ${res.id || 'created'})` };
       }
 
       case 'ghl_list_businesses': {
-        const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/businesses/?locationId=${GHL_LOCATION_ID}`) as { businesses?: { id: string; name?: string; email?: string; phone?: string }[] };
+        const data = await callGHL(`/businesses/?locationId=${GHL_LOCATION_ID}`, ghlCreds?.apiKey) as { businesses?: { id: string; name?: string; email?: string; phone?: string }[] };
         const businesses = data.businesses || [];
         if (!businesses.length) return { success: true, result: 'No businesses found.' };
         return { success: true, result: `Businesses:\n${businesses.map(b => `- ${b.name || '?'} | ${b.email || ''} | ${b.phone || ''} | ID: ${b.id}`).join('\n')}` };
       }
 
       case 'ghl_get_business': {
-        const data = await callGHL(`/businesses/${args.business_id}`) as { id?: string; name?: string; email?: string; phone?: string; website?: string; error?: string };
+        const data = await callGHL(`/businesses/${args.business_id}`, ghlCreds?.apiKey) as { id?: string; name?: string; email?: string; phone?: string; website?: string; error?: string };
         if (data.error) return { success: false, result: `GHL error: ${data.error}` };
         return { success: true, result: `Business: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
