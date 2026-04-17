@@ -54,11 +54,55 @@ Deno.serve(async (req) => {
     const userId = userData.user.id;
 
     const body = await req.json().catch(() => ({}));
-    const { connection_id, plaintext, secret_name } = body as {
+    const { connection_id, plaintext, secret_name, action } = body as {
       connection_id?: string;
       plaintext?: string;
       secret_name?: string;
+      action?: string;
     };
+
+    // --- Debug round-trip: decrypts via get_user_secret and returns last4 only ---
+    if (action === "debug_roundtrip") {
+      if (!connection_id) {
+        return new Response(JSON.stringify({ error: "connection_id required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const keyBytesDbg = keyToBytes(vaultKeyB64);
+      if (keyBytesDbg.length !== 32) {
+        return new Response(JSON.stringify({ error: `VAULT_ENCRYPTION_KEY must be exactly 32 bytes (got ${keyBytesDbg.length})` }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const adminDbg = createClient(supabaseUrl, serviceKey);
+      const { data: secretData, error: getErr } = await adminDbg.rpc("get_user_secret", {
+        _connection_id: connection_id,
+        _user_id: userId,
+        _secret_name: secret_name || "api_key",
+        _encryption_key: bytesToHex(keyBytesDbg),
+      });
+      if (getErr) {
+        console.error("get_user_secret error:", getErr);
+        return new Response(JSON.stringify({ error: getErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const plain = typeof secretData === "string" ? secretData : null;
+      const last4 = plain && plain.length >= 4 ? plain.slice(-4) : plain;
+      const length = plain ? plain.length : 0;
+      await adminDbg.from("credential_audit_log").insert({
+        user_id: userId,
+        connection_id,
+        action: "vault_debug_roundtrip",
+        detail: secret_name || "api_key",
+      });
+      return new Response(JSON.stringify({ success: true, found: plain !== null, last4, length }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (!connection_id || !plaintext || typeof plaintext !== "string" || plaintext.length === 0) {
       return new Response(JSON.stringify({ error: "connection_id and plaintext required" }), {
