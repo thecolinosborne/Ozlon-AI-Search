@@ -1,42 +1,29 @@
 
-User has two asks:
-1. Confirm it's safe to regenerate (rotate) the ClickUp API token. Old one isn't retrievable (correct — vault is one-way, ClickUp itself only shows tokens once).
-2. Ensure all ClickUp edge function hooks (the AI tools that talk to ClickUp from chat) work bidirectionally — AI → ClickUp actions and ClickUp → AI (webhooks/inbound).
+User is mid-flow on the integration vault cutover. Higgsfield edge function was just patched server-side, but the frontend (`HiggsFieldDetail.tsx`) is still writing the api_key/app_id into `metadata` only — meaning the new vault resolver has nothing to read until the page is patched too. That's the next logical step.
 
-Quick context check:
-- We just patched `supabase/functions/clickup/index.ts` with vault-first resolver. Need to confirm chat function's ClickUp tools route through the same resolver (or invoke the `clickup` function with proper auth so vault read works).
-- Also need to verify webhook callback path still works after the resolver change (it uses `tokenOverride` from stored config — already kept for back-compat per memory).
+After Higgsfield is fully cut over, the remaining integration is GoHighLevel (still env/metadata only, no vault). Then we can clean up legacy `metadata.api_key` rows for the now-vaulted providers.
 
-Plan:
+## Recommended next step: finish Higgsfield (frontend) + verify
 
-### 1. Answer the rotation question (chat reply, no code)
-Yes — rotate freely. ClickUp only shows tokens at creation. Our vault stores it encrypted and we can't decrypt for display either (only `last4` is shown). After rotating in ClickUp, paste the new token in `/integrations/clickup` → it dual-writes to vault + metadata, and `vault_store` audit row + new `last4` will appear.
+### 1. Patch `src/pages/integrations/HiggsFieldDetail.tsx`
+- On save, call the `vault-store` edge function twice (once with `secret_name: "api_key"`, once with `secret_name: "app_id"`) — same pattern ClickUp/Descript use.
+- Keep writing a non-secret marker into `metadata` (e.g. `last4`, `app_id_last4`, `connected_at`) so the UI can show connection state without exposing secrets.
+- Stop writing the raw `api_key` / `app_id` into `metadata`.
+- Also switch any test/validation calls to `supabase.functions.invoke("higgsfield", ...)` so the user JWT is forwarded (same fix we just applied to ClickUp).
 
-### 2. Audit ClickUp hooks for bidirectional AI access
+### 2. Verify end-to-end
+- User saves Higgsfield credentials in `/integrations/higgsfield`.
+- Query `credential_audit_log` for two new `vault_store` rows (`api_key` + `app_id`) for provider `higgsfield`.
+- User clicks Test Connection → query for a `vault_read` row.
+- Confirm `integration_credentials.last_used_at` advances.
 
-Read-only inspection of:
-- `supabase/functions/chat/index.ts` — find every ClickUp tool handler. Confirm each one either:
-  (a) invokes the `clickup` edge function with the user's `Authorization` header forwarded (so vault resolver runs), OR
-  (b) reads the token directly via the same vault-first chain.
-- `supabase/functions/clickup/index.ts` — confirm webhook inbound path (ClickUp → us) still resolves credentials via `tokenOverride` from stored webhook config (no user JWT available on inbound webhooks).
-- `src/core/agents/index.ts` and any ClickUp tool registration — confirm tool schemas are wired to chat.
+### Files touched
+- `src/pages/integrations/HiggsFieldDetail.tsx` — vault dual-write + invoke() switch
 
-### 3. Fix any gaps found
+### Then (separate follow-ups, your call which order)
+- **GHL cutover** — apply the same vault-first resolver to `supabase/functions/gohighlevel/index.ts` and patch `GoHighLevelDetail.tsx` to dual-write `api_key` + `location_id` to vault.
+- **Legacy cleanup** — once all four providers are vault-live and verified, drop `metadata.api_key` from `clickup` / `descript` / `higgsfield` rows and remove the metadata fallback branch from each edge function.
 
-Likely fixes (will confirm during audit):
-- If chat function's ClickUp tools call `clickup` edge function without forwarding the user's JWT → patch to forward `Authorization` header so vault read works for that user.
-- If any ClickUp tool still reads `Deno.env.get("CLICKUP_API_TOKEN")` directly → route through the unified `resolveClickUpToken` path.
-- If webhook handler path lost its `tokenOverride` lookup during the recent patch → restore it.
-
-### 4. Verify end-to-end after fixes
-- User rotates token in ClickUp → pastes in `/integrations/clickup` → I query `credential_audit_log` for new `vault_store` + new `last4`.
-- User asks the AI in chat: "list my ClickUp spaces" → I check chat edge logs + `credential_audit_log` for a `vault_read` row triggered by the chat function.
-- Inbound webhook (if configured) → confirm webhook path still resolves via stored config.
-
-### Files likely touched
-- `supabase/functions/chat/index.ts` — forward JWT to clickup invocation, or inline vault resolver for ClickUp tools
-- (Possibly) `supabase/functions/clickup/index.ts` — only if webhook path regressed
-
-### Out of scope
-- No UI changes
-- No changes to other integrations (Descript/YouTube already done; Higgsfield/GHL still pending in their own steps)
+### Out of scope right now
+- No changes to chat function, webhook paths, or other integrations
+- No removal of env var fallbacks yet (kept as last-resort safety net)
