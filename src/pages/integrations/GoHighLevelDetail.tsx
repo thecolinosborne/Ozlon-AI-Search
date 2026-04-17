@@ -27,6 +27,7 @@ const GoHighLevelDetail = () => {
   const [loading, setLoading] = useState(true);
   const [savingApiKey, setSavingApiKey] = useState(false);
   const [savingLocationId, setSavingLocationId] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const [selectedAccount, setSelectedAccount] = useState<string | null>(
     (settings.subAccounts?.[0]?.id) || null
