@@ -5,6 +5,7 @@ import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
+import { supabase } from "@/integrations/supabase/client";
 
 const HiggsFieldDetail = () => {
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } = useIntegrationsStore();
