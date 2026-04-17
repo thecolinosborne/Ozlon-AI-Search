@@ -12,21 +12,58 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PLAID_ENV = (Deno.env.get("PLAID_ENV") || "sandbox").toLowerCase();
+const PLAID_ENV = (Deno.env.get("PLAID_ENV") || "sandbox").trim().toLowerCase();
 const PLAID_HOST =
   PLAID_ENV === "production"
     ? "https://production.plaid.com"
     : PLAID_ENV === "development"
     ? "https://development.plaid.com"
     : "https://sandbox.plaid.com";
-const PLAID_CLIENT_ID = Deno.env.get("PLAID_CLIENT_ID")!;
-const PLAID_SECRET = Deno.env.get("PLAID_SECRET")!;
+const PLAID_CLIENT_ID = (Deno.env.get("PLAID_CLIENT_ID") || "").trim();
+
+// Pick the right secret based on environment.
+// sandbox -> PLAID_SANDBOX_SECRET, production -> PLAID_PRODUCTION_SECRET.
+// Falls back to legacy PLAID_SECRET so nothing breaks mid-rollout.
+const SANDBOX_SECRET = (Deno.env.get("PLAID_SANDBOX_SECRET") || "").trim();
+const PRODUCTION_SECRET = (Deno.env.get("PLAID_PRODUCTION_SECRET") || "").trim();
+const LEGACY_SECRET = (Deno.env.get("PLAID_SECRET") || "").trim();
+
+let PLAID_SECRET = "";
+let SECRET_SOURCE = "none";
+if (PLAID_ENV === "production") {
+  if (PRODUCTION_SECRET) { PLAID_SECRET = PRODUCTION_SECRET; SECRET_SOURCE = "PLAID_PRODUCTION_SECRET"; }
+  else if (LEGACY_SECRET) { PLAID_SECRET = LEGACY_SECRET; SECRET_SOURCE = "PLAID_SECRET (legacy)"; }
+} else {
+  if (SANDBOX_SECRET) { PLAID_SECRET = SANDBOX_SECRET; SECRET_SOURCE = "PLAID_SANDBOX_SECRET"; }
+  else if (LEGACY_SECRET) { PLAID_SECRET = LEGACY_SECRET; SECRET_SOURCE = "PLAID_SECRET (legacy)"; }
+}
+
 const VAULT_KEY_RAW = Deno.env.get("VAULT_ENCRYPTION_KEY")!;
+
+function diagnostics() {
+  return {
+    env: PLAID_ENV,
+    host: PLAID_HOST,
+    client_id_len: PLAID_CLIENT_ID.length,
+    secret_len: PLAID_SECRET.length,
+    secret_source: SECRET_SOURCE,
+  };
+}
 
 function keyToHex(raw: string): string {
   const bytes = new TextEncoder().encode(raw);
   if (bytes.length !== 32) throw new Error(`VAULT_ENCRYPTION_KEY must be 32 bytes (got ${bytes.length})`);
   return "\\x" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+class PlaidError extends Error {
+  request_id?: string;
+  error_code?: string;
+  constructor(message: string, request_id?: string, error_code?: string) {
+    super(message);
+    this.request_id = request_id;
+    this.error_code = error_code;
+  }
 }
 
 async function plaidFetch(path: string, body: Record<string, unknown>) {
@@ -35,10 +72,10 @@ async function plaidFetch(path: string, body: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: PLAID_CLIENT_ID, secret: PLAID_SECRET, ...body }),
   });
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = json?.error_message || json?.error_code || `Plaid ${res.status}`;
-    throw new Error(msg);
+    throw new PlaidError(msg, json?.request_id, json?.error_code);
   }
   return json;
 }
@@ -353,7 +390,15 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error("[plaid] fatal:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
-    return json({ error: message }, 500);
+    const diag = diagnostics();
+    const extra: Record<string, unknown> = {};
+    if (err instanceof PlaidError) {
+      if (err.request_id) extra.request_id = err.request_id;
+      if (err.error_code) extra.error_code = err.error_code;
+    }
+    // Return HTTP 200 with structured envelope so the client can surface the real error
+    // instead of the generic "non-2xx" transport error from supabase.functions.invoke.
+    return json({ ok: false, error: message, diagnostics: diag, ...extra }, 200);
   }
 });
 
