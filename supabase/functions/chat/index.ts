@@ -656,15 +656,15 @@ async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?:
   return { raw: await res.text() };
 }
 
-async function fetchGHLData(): Promise<string> {
-  const GHL_LOCATION_ID = Deno.env.get('GHL_LOCATION_ID');
-  if (!GHL_LOCATION_ID) return 'GHL location not configured.';
+async function fetchGHLData(ghlApiKey?: string, ghlLocationId?: string): Promise<string> {
+  if (!ghlApiKey) return 'GoHighLevel not connected for this user.';
+  if (!ghlLocationId) return 'GHL location not configured for this user.';
   const sections: string[] = [];
   try {
     const [contactsData, pipelinesData, calendarsData] = await Promise.all([
-      callGHL(`/contacts/?locationId=${GHL_LOCATION_ID}&limit=10`) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
-      callGHL(`/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
-      callGHL(`/calendars/?locationId=${GHL_LOCATION_ID}`) as Promise<{ calendars?: { id: string; name: string }[] }>,
+      callGHL(`/contacts/?locationId=${ghlLocationId}&limit=10`, 'GET', undefined, ghlApiKey) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
+      callGHL(`/opportunities/pipelines?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
+      callGHL(`/calendars/?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ calendars?: { id: string; name: string }[] }>,
     ]);
     const contacts = contactsData.contacts || [];
     if (contacts.length) sections.push(`**Recent Contacts (${contacts.length}):**\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}`);
