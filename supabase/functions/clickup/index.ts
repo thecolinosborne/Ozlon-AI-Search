@@ -1071,10 +1071,10 @@ serve(async (req) => {
 
       // ============ DISCOVERY ============
       case 'list_spaces': {
-        const token = getToken();
+        const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
-        const data = await clickupFetch(`/team/${teamId}/space?archived=false`);
+        const data = await clickupFetch(`/team/${teamId}/space?archived=false`, 'GET', undefined, token);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
