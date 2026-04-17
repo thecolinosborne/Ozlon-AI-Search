@@ -2160,6 +2160,49 @@ const ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { file_id: { type: 'string' } }, required: ['file_id'] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_sub_accounts',
+      description: 'List all configured GoHighLevel sub-accounts (locations) for the current user. Use this when the user references multiple businesses/clients, or when you need to disambiguate which sub-account to act on.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_set_active_sub_account',
+      description: 'Set the active GoHighLevel sub-account for the remainder of this conversation. Pass either the sub-account id (location_id) or its friendly name. Subsequent GHL tool calls without an explicit location_id will use this one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          location_id: { type: 'string', description: 'GHL location/sub-account id' },
+          name: { type: 'string', description: 'Friendly name of the sub-account (fuzzy match)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_smart_search',
+      description: 'Unified search across GoHighLevel contacts, opportunities, conversations, and appointments in a single call. Use this when the user asks to "find" or "search for" something in GHL without specifying the resource type — it collapses what would otherwise be 3-4 separate tool calls.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Free-text search term (name, email, phone, deal name, etc.)' },
+          types: {
+            type: 'array',
+            items: { type: 'string', enum: ['contacts', 'opportunities', 'conversations', 'appointments'] },
+            description: 'Resource types to search. Defaults to all four.',
+          },
+          limit: { type: 'number', description: 'Max results per type (default 5)' },
+          location_id: { type: 'string', description: 'Optional sub-account override' },
+        },
+        required: ['query'],
+      },
+    },
+  },
   // ============ GSC / SEO Intelligence Tools ============
   {
     type: 'function',
