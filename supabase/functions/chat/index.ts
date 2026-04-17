@@ -3434,6 +3434,116 @@ async function executeToolCall(
         return { success: true, result: `Business: ${data.name || '?'}\nEmail: ${data.email || 'N/A'}\nPhone: ${data.phone || 'N/A'}\nWebsite: ${data.website || 'N/A'}\nID: ${data.id}` };
       }
 
+      // ============ Edit 1: Previously-unexposed GHL endpoints ============
+      case 'ghl_get_conversation': {
+        const data = await callGHL(`/conversations/${args.conversation_id}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Conversation ${args.conversation_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_get_invoice': {
+        const data = await callGHL(`/invoices/${args.invoice_id}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Invoice ${args.invoice_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_get_opportunity': {
+        const data = await callGHL(`/opportunities/${args.opportunity_id}`, 'GET', undefined, ghlCreds?.apiKey) as { opportunity?: Record<string, unknown>; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const opp = data.opportunity || data;
+        return { success: true, result: `Opportunity:\n${JSON.stringify(opp, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_get_social_post': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts/${args.post_id}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Social post ${args.post_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_edit_social_post': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const update: Record<string, unknown> = {};
+        if (args.summary) update.summary = args.summary;
+        if (args.scheduled_at) update.scheduledAt = args.scheduled_at;
+        if (args.media_urls) update.media = (args.media_urls as string).split(',').map(u => ({ url: u.trim() }));
+        const res = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts/${args.post_id}`, 'PUT', update, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Social post ${args.post_id} updated.` };
+      }
+      case 'ghl_update_link': {
+        const update: Record<string, unknown> = {};
+        if (args.name) update.name = args.name;
+        if (args.redirectTo) update.redirectTo = args.redirectTo;
+        const res = await callGHL(`/links/${args.link_id}`, 'PUT', update, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Link ${args.link_id} updated.` };
+      }
+      case 'ghl_import_courses': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/courses/courses-exporter/public/import`, 'POST', { locationId: GHL_LOCATION_ID, ...(args.payload as Record<string, unknown>) }, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Courses imported.` };
+      }
+      case 'ghl_create_appointment': {
+        const apptData: Record<string, unknown> = {
+          calendarId: args.calendar_id,
+          contactId: args.contact_id,
+          startTime: args.start_time,
+        };
+        if (args.end_time) apptData.endTime = args.end_time;
+        if (args.title) apptData.title = args.title;
+        const res = await callGHL(`/calendars/events/appointments`, 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Appointment created (ID: ${res.id || 'created'}).` };
+      }
+
+      // ============ Tier A: New GHL endpoints ============
+      case 'ghl_delete_opportunity': {
+        const res = await callGHL(`/opportunities/${args.opportunity_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Opportunity ${args.opportunity_id} deleted.` };
+      }
+      case 'ghl_update_opportunity_status': {
+        const res = await callGHL(`/opportunities/${args.opportunity_id}/status`, 'PUT', { status: args.status }, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Opportunity ${args.opportunity_id} status set to ${args.status}.` };
+      }
+      case 'ghl_update_contact_note': {
+        const res = await callGHL(`/contacts/${args.contact_id}/notes/${args.note_id}`, 'PUT', { body: args.body }, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Note updated.` };
+      }
+      case 'ghl_delete_contact_note': {
+        const res = await callGHL(`/contacts/${args.contact_id}/notes/${args.note_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Note ${args.note_id} deleted.` };
+      }
+      case 'ghl_update_contact_task': {
+        const update: Record<string, unknown> = {};
+        if (args.title !== undefined) update.title = args.title;
+        if (args.body !== undefined) update.body = args.body;
+        if (args.dueDate !== undefined) update.dueDate = args.dueDate;
+        if (args.completed !== undefined) update.completed = args.completed;
+        const res = await callGHL(`/contacts/${args.contact_id}/tasks/${args.task_id}`, 'PUT', update, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Task updated.` };
+      }
+      case 'ghl_complete_contact_task': {
+        const res = await callGHL(`/contacts/${args.contact_id}/tasks/${args.task_id}/completed`, 'PUT', { completed: true }, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Task ${args.task_id} marked complete.` };
+      }
+      case 'ghl_delete_contact_task': {
+        const res = await callGHL(`/contacts/${args.contact_id}/tasks/${args.task_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Task ${args.task_id} deleted.` };
+      }
+      case 'ghl_remove_from_workflow': {
+        const res = await callGHL(`/contacts/${args.contact_id}/workflow/${args.workflow_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Contact ${args.contact_id} removed from workflow ${args.workflow_id}.` };
+      }
+
       // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
         try {
