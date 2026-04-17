@@ -25,10 +25,13 @@ async function vaultStore(connectionId: string, plaintext: string, secretName: s
  * Upsert an integration connection for the current user.
  * Stores API keys in the per-user integration_connections table (RLS-protected)
  * AND mirrors any secret material into the encrypted integration_credentials vault.
+ *
+ * `metadata` may include arbitrary JSON-serialisable structures (e.g. sub_accounts arrays).
+ * Only top-level string values whose keys appear in SECRET_METADATA_KEYS are mirrored to the vault.
  */
 export async function upsertIntegrationConnection(
   provider: string,
-  metadata: Record<string, string>,
+  metadata: Record<string, unknown>,
   authType = "api_key"
 ): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -44,11 +47,11 @@ export async function upsertIntegrationConnection(
   let connectionId: string;
 
   if (existing) {
-    const merged = { ...(existing.metadata as Record<string, unknown> || {}), ...metadata } as Record<string, string>;
+    const merged = { ...(existing.metadata as Record<string, unknown> || {}), ...metadata };
     await supabase
       .from("integration_connections")
       .update({
-        metadata: merged as unknown as Record<string, string>,
+        metadata: merged as never,
         status: "connected",
         auth_type: authType,
         last_validated_at: new Date().toISOString(),
@@ -63,7 +66,7 @@ export async function upsertIntegrationConnection(
         provider,
         auth_type: authType,
         status: "connected",
-        metadata,
+        metadata: metadata as never,
         last_validated_at: new Date().toISOString(),
       })
       .select("id")
