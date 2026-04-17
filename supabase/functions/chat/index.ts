@@ -1887,6 +1887,83 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Standing Orders (Durable Rules) ============
+  {
+    type: 'function',
+    function: {
+      name: 'add_standing_order',
+      description: 'Create a durable RULE the assistant will obey on every future turn (e.g. "always answer in 2 sentences", "never spend over $200 without asking"). Use when the user says "from now on", "always", "never", or sets a durable behavioral rule.',
+      parameters: {
+        type: 'object',
+        properties: {
+          rule: { type: 'string', description: 'The rule text (imperative, short)' },
+          scope: { type: 'string', description: 'global | finance | email | creative | research', enum: ['global', 'finance', 'email', 'creative', 'research'] },
+          priority: { type: 'number', description: '1 (highest) to 10 (lowest); default 5' },
+        },
+        required: ['rule'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_standing_order',
+      description: 'Deactivate an existing standing order by id. Use when the user says "stop doing X" or "ignore that rule".',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_id: { type: 'string', description: 'The standing order id to deactivate' },
+        },
+        required: ['order_id'],
+      },
+    },
+  },
+  // ============ User Goals ============
+  {
+    type: 'function',
+    function: {
+      name: 'add_goal',
+      description: 'Track a goal for the user. Call when the user states an outcome they want over time (e.g. "I want 10 paying users by March").',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short goal title' },
+          description: { type: 'string', description: 'Optional detail / context' },
+          target_date: { type: 'string', description: 'Optional target date (YYYY-MM-DD)' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_goal_progress',
+      description: 'Append a progress note to an existing goal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal id' },
+          note: { type: 'string', description: 'Short progress note' },
+        },
+        required: ['goal_id', 'note'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'complete_goal',
+      description: 'Mark a goal complete.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal id' },
+        },
+        required: ['goal_id'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -3393,7 +3470,111 @@ async function executeToolCall(
           return { success: true, result: `Memory saved: "${memorySummary}"` };
         } catch (e) {
           console.error('[save_memory] Error:', e);
-          return { success: false, result: `Memory save error: ${e instanceof Error ? e.message : 'Unknown'}` };
+      }
+
+      case 'add_standing_order': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('standing_orders').insert({
+            user_id: userId,
+            rule: args.rule as string,
+            scope: (args.scope as string) || 'global',
+            priority: (args.priority as number) || 5,
+          }).select('id').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Standing order saved (id: ${data?.id}). I will obey this from now on.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'remove_standing_order': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('standing_orders')
+            .update({ active: false })
+            .eq('id', args.order_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Standing order removed.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'add_goal': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('user_goals').insert({
+            user_id: userId,
+            title: args.title as string,
+            description: (args.description as string) || null,
+            target_date: (args.target_date as string) || null,
+          }).select('id').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Goal added (id: ${data?.id}). I'll track it for you.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'update_goal_progress': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data: g } = await admin.from('user_goals')
+            .select('progress_notes')
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId)
+            .single();
+          const notes = Array.isArray(g?.progress_notes) ? g!.progress_notes : [];
+          notes.push({ at: new Date().toISOString(), note: args.note as string });
+          const { error } = await admin.from('user_goals')
+            .update({ progress_notes: notes })
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Progress logged.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'complete_goal': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('user_goals')
+            .update({ status: 'completed' })
+            .eq('id', args.goal_id as string)
+            .eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: 'Goal completed. Well done.' };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
       }
 
@@ -4240,6 +4421,11 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'gsc_compare_snapshots': 'google-search-console',
     'web_search_google': '_always_',
     'save_memory': '_always_',
+    'add_standing_order': '_always_',
+    'remove_standing_order': '_always_',
+    'add_goal': '_always_',
+    'update_goal_progress': '_always_',
+    'complete_goal': '_always_',
     'deep_research': '_always_',
     'scrape_events': '_always_',
     'list_events': '_always_',
@@ -4293,6 +4479,11 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_compare_snapshots': 'Loading SEO snapshots',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
+  'add_standing_order': 'Setting standing order',
+  'remove_standing_order': 'Removing standing order',
+  'add_goal': 'Tracking new goal',
+  'update_goal_progress': 'Logging goal progress',
+  'complete_goal': 'Completing goal',
   'deep_research': 'Researching the web',
   'scrape_events': 'Searching for events',
   'list_events': 'Loading your events',
@@ -4380,7 +4571,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -4723,6 +4914,7 @@ serve(async (req) => {
   }
 
   try {
+    const requestStart = Date.now();
     const body = await req.json();
     // Support both { messages: [...] } and { message: "..." } formats
     let messages = body.messages;
@@ -5001,6 +5193,81 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       }
     }
 
+    // ================================================================
+    // SENTIENT WORKER — Identity Layer
+    // Profile + active standing orders + active goals + last conversation summaries
+    // Injected on EVERY call. Single biggest perception upgrade.
+    // ================================================================
+    if (credUserId) {
+      try {
+        const { createClient: ccId } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const adminId = ccId(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+        const sessionIdForId = (body.sessionId as string) || null;
+
+        const [profileRes, ordersRes, goalsRes, summariesRes] = await Promise.all([
+          adminId.from('profiles').select('first_name, full_name, system_name').eq('user_id', credUserId).maybeSingle(),
+          adminId.from('standing_orders').select('id, rule, scope, priority').eq('user_id', credUserId).eq('active', true).order('priority', { ascending: true }).limit(20),
+          adminId.from('user_goals').select('id, title, status, target_date, progress_notes').eq('user_id', credUserId).eq('status', 'active').order('updated_at', { ascending: false }).limit(8),
+          adminId.from('chat_sessions').select('id, summary, updated_at').eq('user_id', credUserId).not('summary', 'is', null).order('updated_at', { ascending: false }).limit(3),
+        ]);
+
+        const profile = profileRes.data as { first_name?: string; full_name?: string; system_name?: string } | null;
+        const firstName = profile?.first_name || profile?.full_name?.split(' ')[0] || 'friend';
+        const osName = profile?.system_name || systemName || 'Ozlon';
+
+        const now = new Date();
+        const timeStr = now.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+        let identityBlock = `\n\n===========================================================
+WHO YOU ARE & WHO YOU SERVE
+===========================================================
+You are ${osName}, ${firstName}'s personal worker. You exist to serve them with continuity, memory, and judgment.
+Address them as ${firstName}. Be confident. Decide, then justify briefly.
+
+# World state
+- Local time: ${timeStr}
+`;
+
+        const orders = (ordersRes.data || []) as Array<{ id: string; rule: string; scope: string; priority: number }>;
+        if (orders.length > 0) {
+          identityBlock += `\n# Standing orders (always obey unless user says "ignore standing orders this turn")\n`;
+          for (const o of orders) {
+            identityBlock += `- [${o.scope}] ${o.rule}\n`;
+          }
+        }
+
+        const goals = (goalsRes.data || []) as Array<{ id: string; title: string; target_date: string | null; progress_notes: unknown[] }>;
+        if (goals.length > 0) {
+          identityBlock += `\n# Active goals (reference when relevant)\n`;
+          for (const g of goals) {
+            const progress = Array.isArray(g.progress_notes) ? g.progress_notes.length : 0;
+            identityBlock += `- ${g.title}${g.target_date ? ` (by ${g.target_date})` : ''} — ${progress} progress note(s)\n`;
+          }
+        }
+
+        const summaries = (summariesRes.data || []) as Array<{ id: string; summary: string }>;
+        if (summaries.length > 0) {
+          identityBlock += `\n# Recent conversations (continuity)\n`;
+          for (const s of summaries) {
+            if (s.id !== sessionIdForId) {
+              identityBlock += `- ${s.summary}\n`;
+            }
+          }
+        }
+
+        identityBlock += `\n# Uncertainty discipline
+When you do not know something or your data is stale, prepend a hidden tag in this exact format on its own line:
+[uncertain: <one-line reason>]
+The UI will strip this from the user's view but it trains you to admit gaps instead of bluff. Never bluff.
+`;
+
+        systemPrompt += identityBlock;
+        console.log(`[Identity] Injected: ${orders.length} orders, ${goals.length} goals, ${summaries.length} summaries`);
+      } catch (e) {
+        console.error('[Identity] Injection failed:', e);
+      }
+    }
+
     // Build OpenAI messages
     const openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[] = [
       { role: 'system', content: systemPrompt },
@@ -5062,11 +5329,23 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
             })}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
 
-            // Fire-and-forget: post-turn memory extraction
+            // Fire-and-forget: post-turn memory extraction + telemetry
             if (wisdomUserId) {
               extractPostTurnMemories(messages, result.content, wisdomUserId).catch(e =>
                 console.error('[PostTurnMemory] Error:', e)
               );
+              try {
+                const { createClient: ccLog } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminLog = ccLog(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                adminLog.from('model_calls').insert({
+                  user_id: wisdomUserId,
+                  session_id: (body.sessionId as string) || null,
+                  model: modelConfig.name,
+                  lane: 'tools',
+                  latency_ms: Date.now() - requestStart,
+                  tool_used: result.toolsUsed?.join(',') || null,
+                }).then(() => {});
+              } catch { /* ignore */ }
             }
           } catch (e) {
             console.error('Tool loop error:', e);

@@ -257,7 +257,9 @@ export async function streamChat({
           // Handle content delta
           const deltaContent = choice.delta?.content;
           if (deltaContent) {
-            onDelta(deltaContent);
+            // Strip hidden uncertainty tags from user-facing text
+            const cleaned = deltaContent.replace(/\[uncertain:[^\]]*\]\s*/gi, '');
+            if (cleaned) onDelta(cleaned);
           }
 
           // Handle tool calls (OpenAI format)
