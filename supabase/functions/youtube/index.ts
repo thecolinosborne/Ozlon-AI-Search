@@ -63,7 +63,59 @@ function maskKey(apiKey: string): string {
   return `***${tail}`;
 }
 
+async function tryVaultRead(
+  adminClient: any,
+  connectionId: string,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
+    if (!vaultKey) return null;
+    const keyBytes = new TextEncoder().encode(vaultKey);
+    if (keyBytes.length !== 32) {
+      console.warn(`[youtube/vault] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
+      return null;
+    }
+    const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data, error } = await adminClient.rpc("get_user_secret", {
+      _connection_id: connectionId,
+      _user_id: userId,
+      _secret_name: "api_key",
+      _encryption_key: hexKey,
+    });
+    if (error) {
+      console.warn("[youtube/vault] get_user_secret error:", error.message);
+      return null;
+    }
+    const plain = typeof data === "string" ? data.trim() : null;
+    if (plain && plain.length > 0) {
+      // Best-effort audit log
+      adminClient
+        .from("credential_audit_log")
+        .insert({
+          user_id: userId,
+          connection_id: connectionId,
+          provider: "youtube",
+          action: "vault_read",
+          detail: "api_key",
+        })
+        .then(() => {})
+        .catch(() => {});
+      return plain;
+    }
+    return null;
+  } catch (e) {
+    console.warn("[youtube/vault] threw:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 async function getStoredApiKey(adminClient: any, connectionId: string, userId: string): Promise<string> {
+  // 1. Vault-first
+  const vaultKey = await tryVaultRead(adminClient, connectionId, userId);
+  if (vaultKey) return vaultKey;
+
+  // 2. Fallback: legacy metadata.api_key
   const { data } = await adminClient
     .from("integration_connections")
     .select("metadata")
