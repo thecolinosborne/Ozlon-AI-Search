@@ -2055,6 +2055,111 @@ const ACTION_TOOLS: ToolDef[] = [
       parameters: { type: 'object', properties: { user_id: { type: 'string' }, firstName: { type: 'string' }, lastName: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, role: { type: 'string' } }, required: ['user_id'] },
     },
   },
+  // ============ Tier C: SaaS/agency, snapshots, payments, prices, media ============
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_locations',
+      description: 'Agency-level: list sub-account locations the user has access to in GoHighLevel.',
+      parameters: { type: 'object', properties: { limit: { type: 'number' }, skip: { type: 'number' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_location',
+      description: 'Get details for a GoHighLevel location (sub-account).',
+      parameters: { type: 'object', properties: { location_id: { type: 'string', description: 'Optional. Defaults to the connected location.' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_location',
+      description: 'Update settings on a GoHighLevel location (sub-account).',
+      parameters: { type: 'object', properties: { location_id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, address: { type: 'string' }, city: { type: 'string' }, state: { type: 'string' }, country: { type: 'string' }, postalCode: { type: 'string' }, website: { type: 'string' }, timezone: { type: 'string' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_snapshots',
+      description: 'List GoHighLevel snapshots available to the agency/company.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_order',
+      description: 'Get a single GoHighLevel payment order by ID.',
+      parameters: { type: 'object', properties: { order_id: { type: 'string' } }, required: ['order_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_transaction',
+      description: 'Get a single GoHighLevel payment transaction by ID.',
+      parameters: { type: 'object', properties: { transaction_id: { type: 'string' } }, required: ['transaction_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_subscriptions',
+      description: 'List GoHighLevel payment subscriptions for the location.',
+      parameters: { type: 'object', properties: { limit: { type: 'number' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_get_subscription',
+      description: 'Get a single GoHighLevel payment subscription by ID.',
+      parameters: { type: 'object', properties: { subscription_id: { type: 'string' } }, required: ['subscription_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_prices',
+      description: 'List prices for a GoHighLevel product.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, limit: { type: 'number' } }, required: ['product_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_create_price',
+      description: 'Create a price for a GoHighLevel product (amount in smallest currency unit, e.g., cents).',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, name: { type: 'string' }, amount: { type: 'number' }, currency: { type: 'string', description: 'ISO currency code, e.g., USD' }, type: { type: 'string', enum: ['one_time', 'recurring'] }, recurringInterval: { type: 'string', enum: ['day', 'week', 'month', 'year'] } }, required: ['product_id', 'name', 'amount', 'currency', 'type'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_update_price',
+      description: 'Update a price on a GoHighLevel product.',
+      parameters: { type: 'object', properties: { product_id: { type: 'string' }, price_id: { type: 'string' }, name: { type: 'string' }, amount: { type: 'number' } }, required: ['product_id', 'price_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_upload_media_file',
+      description: 'Upload a file to the GoHighLevel media library by URL (the GHL endpoint hosted-file mode).',
+      parameters: { type: 'object', properties: { hosted: { type: 'boolean', description: 'true if uploading via URL' }, file_url: { type: 'string' }, name: { type: 'string' }, parent_id: { type: 'string', description: 'Optional folder ID' } }, required: ['file_url', 'name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_media_file',
+      description: 'Delete a file from the GoHighLevel media library.',
+      parameters: { type: 'object', properties: { file_id: { type: 'string' } }, required: ['file_id'] },
+    },
+  },
   // ============ GSC / SEO Intelligence Tools ============
   {
     type: 'function',
@@ -3786,6 +3891,130 @@ async function executeToolCall(
         return { success: true, result: `User ${args.user_id} updated.` };
       }
 
+      // ============ Tier C: handlers ============
+      case 'ghl_list_locations': {
+        const limit = args.limit || 20;
+        const skip = args.skip || 0;
+        const data = await callGHL(`/locations/search?limit=${limit}&skip=${skip}`, 'GET', undefined, ghlCreds?.apiKey) as { locations?: { id: string; name?: string; email?: string }[]; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const locs = data.locations || [];
+        if (!locs.length) return { success: true, result: 'No locations found.' };
+        return { success: true, result: `Locations (${locs.length}):\n${locs.map(l => `- ${l.name || '?'} | ${l.email || ''} | ID: ${l.id}`).join('\n')}` };
+      }
+      case 'ghl_get_location': {
+        const locId = (args.location_id as string) || (ghlCreds?.locationId || '');
+        if (!locId) return { success: false, result: 'No location ID available.' };
+        const data = await callGHL(`/locations/${locId}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Location ${locId}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_update_location': {
+        const locId = (args.location_id as string) || (ghlCreds?.locationId || '');
+        if (!locId) return { success: false, result: 'No location ID available.' };
+        const body: Record<string, unknown> = {};
+        for (const k of ['name', 'email', 'phone', 'address', 'city', 'state', 'country', 'postalCode', 'website', 'timezone']) {
+          if (args[k] !== undefined) body[k] = args[k];
+        }
+        const res = await callGHL(`/locations/${locId}`, 'PUT', body, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Location ${locId} updated.` };
+      }
+      case 'ghl_list_snapshots': {
+        const data = await callGHL(`/snapshots/`, 'GET', undefined, ghlCreds?.apiKey) as { snapshots?: { id: string; name?: string; type?: string }[]; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const snaps = data.snapshots || [];
+        if (!snaps.length) return { success: true, result: 'No snapshots found.' };
+        return { success: true, result: `Snapshots (${snaps.length}):\n${snaps.map(s => `- ${s.name || '?'} | ${s.type || ''} | ID: ${s.id}`).join('\n')}` };
+      }
+      case 'ghl_get_order': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/payments/orders/${args.order_id}?altId=${GHL_LOCATION_ID}&altType=location`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Order ${args.order_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_get_transaction': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/payments/transactions/${args.transaction_id}?altId=${GHL_LOCATION_ID}&altType=location`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Transaction ${args.transaction_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_list_subscriptions': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = args.limit || 20;
+        const data = await callGHL(`/payments/subscriptions?altId=${GHL_LOCATION_ID}&altType=location&limit=${limit}`, 'GET', undefined, ghlCreds?.apiKey) as { data?: { _id?: string; id?: string; status?: string; amount?: number }[]; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const subs = data.data || [];
+        if (!subs.length) return { success: true, result: 'No subscriptions found.' };
+        return { success: true, result: `Subscriptions (${subs.length}):\n${subs.map(s => `- Status: ${s.status || '?'} | Amount: ${s.amount ?? '?'} | ID: ${s._id || s.id}`).join('\n')}` };
+      }
+      case 'ghl_get_subscription': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const data = await callGHL(`/payments/subscriptions/${args.subscription_id}?altId=${GHL_LOCATION_ID}&altType=location`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, unknown> & { error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        return { success: true, result: `Subscription ${args.subscription_id}:\n${JSON.stringify(data, null, 2).substring(0, 2000)}` };
+      }
+      case 'ghl_list_prices': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = args.limit || 50;
+        const data = await callGHL(`/products/${args.product_id}/price?locationId=${GHL_LOCATION_ID}&limit=${limit}`, 'GET', undefined, ghlCreds?.apiKey) as { prices?: { _id?: string; id?: string; name?: string; amount?: number; currency?: string; type?: string }[]; error?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}` };
+        const prices = data.prices || [];
+        if (!prices.length) return { success: true, result: 'No prices found.' };
+        return { success: true, result: `Prices (${prices.length}):\n${prices.map(p => `- ${p.name || '?'} | ${p.amount ?? '?'} ${p.currency || ''} | ${p.type || ''} | ID: ${p._id || p.id}`).join('\n')}` };
+      }
+      case 'ghl_create_price': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          name: args.name,
+          amount: args.amount,
+          currency: args.currency,
+          type: args.type,
+        };
+        if (args.recurringInterval) body.recurring = { interval: args.recurringInterval };
+        const res = await callGHL(`/products/${args.product_id}/price`, 'POST', body, ghlCreds?.apiKey) as { _id?: string; id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Price "${args.name}" created (ID: ${res._id || res.id || 'created'}).` };
+      }
+      case 'ghl_update_price': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = { locationId: GHL_LOCATION_ID };
+        if (args.name !== undefined) body.name = args.name;
+        if (args.amount !== undefined) body.amount = args.amount;
+        const res = await callGHL(`/products/${args.product_id}/price/${args.price_id}`, 'PUT', body, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Price ${args.price_id} updated.` };
+      }
+      case 'ghl_upload_media_file': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const body: Record<string, unknown> = {
+          hosted: args.hosted !== false,
+          fileUrl: args.file_url,
+          name: args.name,
+          altType: 'location',
+          altId: GHL_LOCATION_ID,
+        };
+        if (args.parent_id) body.parentId = args.parent_id;
+        const res = await callGHL(`/medias/upload-file`, 'POST', body, ghlCreds?.apiKey) as { fileId?: string; id?: string; error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Media file "${args.name}" uploaded (ID: ${res.fileId || res.id || 'uploaded'}).` };
+      }
+      case 'ghl_delete_media_file': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const res = await callGHL(`/medias/${args.file_id}?altType=location&altId=${GHL_LOCATION_ID}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        return { success: true, result: `Media file ${args.file_id} deleted.` };
+      }
+
       // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
         try {
@@ -4971,6 +5200,20 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'ghl_get_user': 'ghl',
     'ghl_create_user': 'ghl',
     'ghl_update_user': 'ghl',
+    // Tier C
+    'ghl_list_locations': 'ghl',
+    'ghl_get_location': 'ghl',
+    'ghl_update_location': 'ghl',
+    'ghl_list_snapshots': 'ghl',
+    'ghl_get_order': 'ghl',
+    'ghl_get_transaction': 'ghl',
+    'ghl_list_subscriptions': 'ghl',
+    'ghl_get_subscription': 'ghl',
+    'ghl_list_prices': 'ghl',
+    'ghl_create_price': 'ghl',
+    'ghl_update_price': 'ghl',
+    'ghl_upload_media_file': 'ghl',
+    'ghl_delete_media_file': 'ghl',
     // GSC / SEO tools
     'gsc_list_sites': 'google-search-console',
     'gsc_query': 'google-search-console',
