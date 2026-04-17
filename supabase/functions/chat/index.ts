@@ -1609,6 +1609,27 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_update_appointment',
+      description: 'Update/reschedule an existing GoHighLevel appointment. Use to change the time, title, status, address, or assigned user of an appointment. Only include fields you want to change.',
+      parameters: {
+        type: 'object',
+        properties: {
+          event_id: { type: 'string', description: 'Appointment/event ID to update' },
+          start_time: { type: 'string', description: 'New start time ISO 8601 (optional)' },
+          end_time: { type: 'string', description: 'New end time ISO 8601 (optional)' },
+          title: { type: 'string', description: 'New appointment title (optional)' },
+          appointment_status: { type: 'string', description: 'New status: confirmed, cancelled, showed, noshow, invalid (optional)' },
+          address: { type: 'string', description: 'New address/location (optional)' },
+          assigned_user_id: { type: 'string', description: 'New assigned user ID (optional)' },
+          calendar_id: { type: 'string', description: 'Move to a different calendar (optional)' },
+        },
+        required: ['event_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_trigger_workflow',
       description: 'Trigger a workflow for a specific contact in GoHighLevel.',
       parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, workflow_id: { type: 'string', description: 'Workflow ID' } }, required: ['contact_id', 'workflow_id'] },
@@ -2750,6 +2771,24 @@ async function executeToolCall(
         const res = await callGHL(`/calendars/events/appointments/${args.event_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
         return { success: true, result: `Appointment ${args.event_id} cancelled.` };
+      }
+
+      case 'ghl_update_appointment': {
+        const updateBody: Record<string, unknown> = {};
+        if (args.start_time) updateBody.startTime = args.start_time;
+        if (args.end_time) updateBody.endTime = args.end_time;
+        if (args.title) updateBody.title = args.title;
+        if (args.appointment_status) updateBody.appointmentStatus = args.appointment_status;
+        if (args.address) updateBody.address = args.address;
+        if (args.assigned_user_id) updateBody.assignedUserId = args.assigned_user_id;
+        if (args.calendar_id) updateBody.calendarId = args.calendar_id;
+        if (Object.keys(updateBody).length === 0) {
+          return { success: false, result: 'No fields provided to update. Specify at least one of: start_time, end_time, title, appointment_status, address, assigned_user_id, calendar_id.' };
+        }
+        const res = await callGHL(`/calendars/events/appointments/${args.event_id}`, 'PUT', updateBody, ghlCreds?.apiKey) as { id?: string; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL update appointment error: ${res.error || res.message}` };
+        const changed = Object.keys(updateBody).join(', ');
+        return { success: true, result: `Appointment ${args.event_id} updated (${changed}).` };
       }
 
       case 'ghl_trigger_workflow': {
