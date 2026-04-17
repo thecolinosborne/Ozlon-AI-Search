@@ -4429,6 +4429,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'ghl_list_contact_tasks': 'ghl',
     'ghl_remove_tags': 'ghl',
     'ghl_cancel_appointment': 'ghl',
+    'ghl_update_appointment': 'ghl',
     'ghl_trigger_workflow': 'ghl',
     // Tier 3 GHL tools
     'ghl_list_social_accounts': 'ghl',
