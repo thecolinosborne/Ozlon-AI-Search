@@ -1255,6 +1255,16 @@ export type Database = {
           updated_at: string
         }[]
       }
+      store_user_secret: {
+        Args: {
+          _connection_id: string
+          _encryption_key: string
+          _plaintext: string
+          _secret_name?: string
+          _user_id: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
