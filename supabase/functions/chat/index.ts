@@ -4863,7 +4863,7 @@ CONNECTED SERVICES (you can read data and take actions on these)
       if (ghlDetected) {
         try {
           console.log('Fetching GoHighLevel data...');
-          const ghlData = await fetchGHLData();
+          const ghlData = await fetchGHLData(GHL_API_KEY_RESOLVED, GHL_LOCATION_ID_RESOLVED);
           systemPrompt += `\n\n===========================================================
 GOHIGHLEVEL CRM DATA
 ===========================================================
