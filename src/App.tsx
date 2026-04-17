@@ -25,6 +25,8 @@ import AIProcessorDetail from "@/pages/integrations/AIProcessorDetail";
 import ClickUpDetail from "@/pages/integrations/ClickUpDetail";
 import YouTubeDetail from "@/pages/integrations/YouTubeDetail";
 import Events from "@/pages/Events";
+import Finance from "@/pages/Finance";
+import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
 
 import NotFound from "@/pages/NotFound";
 
@@ -66,6 +68,8 @@ const AppRoutes = () => {
         <Route path="/integrations/clickup" element={<ClickUpDetail />} />
         <Route path="/integrations/youtube" element={<YouTubeDetail />} />
         <Route path="/events" element={<Events />} />
+        <Route path="/finance" element={<Finance />} />
+        <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
