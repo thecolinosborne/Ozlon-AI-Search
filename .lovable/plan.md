@@ -1,28 +1,21 @@
 
-User wants the Finance entry point in the top-right user menu (UserMenu dropdown), NOT the bottom nav. Everything else from the prior plan stands.
+Edge function logs show: `invalid client_id or secret provided` from Plaid. Secrets `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` are all set in Supabase, but Plaid is rejecting them. This is a credential value problem, not a code problem.
 
-## Updated plan: Plaid-powered Finance layer
+Most common causes (in order):
+1. `PLAID_CLIENT_ID` or `PLAID_SECRET` has a stray space / newline / wrong value pasted.
+2. `PLAID_ENV` is set to `sandbox` but the secret pasted is the **production** secret (Plaid issues a different secret per environment — sandbox, development, production each have their own).
+3. Values were swapped (client_id pasted into secret slot or vice versa).
 
-### Single entry point (revised)
-- Add a **"Finance"** item to `src/components/UserMenu.tsx` dropdown (between Profile and Settings, with a wallet icon), linking to `/finance`.
-- Do NOT touch BottomNav. No other placements anywhere.
+I can't read secret values, so I can't diff them myself. Fastest path: re-enter the three values, making sure the secret matches the env.
 
-### Everything else unchanged from prior plan
-- **DB migration:** `plaid_items`, `plaid_accounts`, `plaid_transactions` — RLS scoped to `auth.uid() = user_id`.
-- **Edge function** `supabase/functions/plaid/index.ts` with action router: `create_link_token`, `exchange_public_token`, `accounts`, `balances`, `transactions`, `sync_transactions`, `update_link_token`, `disconnect_item`. Access tokens stored encrypted via existing `store_user_secret` / `get_user_secret` vault. Audit-logs every connect/sync/repair/disconnect/failure.
-- **Frontend (new files only):**
-  - `src/pages/Finance.tsx` — Apple-minimal dashboard: Free-to-Spend hero, Overview stats, Accounts list, Transactions list, Connection management (refresh/repair/disconnect).
-  - `src/pages/PlaidOAuthReturn.tsx` at `/finance/oauth-return` — handles OAuth re-entry via `receivedRedirectUri`.
-  - `src/components/finance/{PlaidLinkButton,FreeToSpendCard,AccountsList,TransactionsList,ConnectionRow}.tsx`
-  - `src/hooks/useFinance.ts`, `src/services/financeService.ts`
-- **Free-to-Spend formula:** `available_checking - upcoming_bills_estimate - 200`. `estimateUpcomingBills()` returns 0 today; structured for later recurring detection without UI changes.
-- **Dependency:** `react-plaid-link`.
-- **Secrets requested after approval:** `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (default `sandbox`). Redirect URI derived from request origin + `/finance/oauth-return`. `VAULT_ENCRYPTION_KEY` already exists.
-- **Routes added in `src/App.tsx`:** `/finance` and `/finance/oauth-return`.
+## Plan
 
-### Files touched
-- **New:** migration, plaid edge function, Finance page + OAuth return page, 5 finance components, hook, service.
-- **Edited (minimal):** `src/components/UserMenu.tsx` (add Finance item), `src/App.tsx` (add 2 routes), `package.json` (add `react-plaid-link`).
-- **NOT touched:** BottomNav, chat, home, onboarding.
+1. Confirm in the Plaid dashboard (https://dashboard.plaid.com/developers/keys) which environment you intend to use and copy the matching **client_id** and **Sandbox secret** (the page shows separate secrets per env).
+2. Re-save the three secrets in Lovable Cloud:
+   - `PLAID_CLIENT_ID` — the one client_id from the keys page
+   - `PLAID_SECRET` — the secret matching `PLAID_ENV` (use the Sandbox secret if `PLAID_ENV=sandbox`)
+   - `PLAID_ENV` — `sandbox` (recommended for first test)
+3. Once re-saved, click **Connect an account** again on `/finance`. The edge function will pick up the new values on cold start.
+4. If it still fails, I'll switch to default mode, tail the edge function logs, and surface the precise Plaid error_code in the UI so we can pinpoint mismatch vs. allowlist vs. product scope.
 
-After approval I'll request the three Plaid secrets, then ship migration + edge function + UI in one pass and verify with a sandbox connection.
+No code changes needed yet — this is a secret-value fix. Want me to also add a small "Diagnostics" line to the Finance empty state that surfaces the raw Plaid error message instead of the generic 500, so future credential issues are obvious without checking logs?
