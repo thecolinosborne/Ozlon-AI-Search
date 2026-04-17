@@ -7,7 +7,11 @@ const corsHeaders = {
 };
 
 function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
+  // Tolerate whitespace/newlines and URL-safe base64 (-, _) and missing padding
+  let s = b64.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4 !== 0) s += "=";
+  console.log(`[vault-store] decoding key: rawLen=${b64.length} sanitizedLen=${s.length} firstChars=${s.slice(0, 4)} lastChars=${s.slice(-4)}`);
+  const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
@@ -44,15 +48,14 @@ Deno.serve(async (req) => {
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claims, error: claimsErr } = await userClient.auth.getClaims(token);
-    if (claimsErr || !claims?.claims?.sub) {
+    const { data: userData, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !userData?.user?.id) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const userId = claims.claims.sub as string;
+    const userId = userData.user.id;
 
     const body = await req.json().catch(() => ({}));
     const { connection_id, plaintext, secret_name } = body as {
