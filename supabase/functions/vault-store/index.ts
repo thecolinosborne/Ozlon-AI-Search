@@ -6,15 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function base64ToBytes(b64: string): Uint8Array {
-  // Tolerate whitespace/newlines and URL-safe base64 (-, _) and missing padding
-  let s = b64.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
-  while (s.length % 4 !== 0) s += "=";
-  console.log(`[vault-store] decoding key: rawLen=${b64.length} sanitizedLen=${s.length} firstChars=${s.slice(0, 4)} lastChars=${s.slice(-4)}`);
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+function keyToBytes(raw: string): Uint8Array {
+  // Treat VAULT_ENCRYPTION_KEY as a raw UTF-8 string (32 chars => 32 bytes for crypto_secretbox)
+  const bytes = new TextEncoder().encode(raw);
+  console.log(`[vault-store] key bytes: len=${bytes.length}`);
+  return bytes;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -71,10 +67,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Decode the base64 vault key into raw bytes, then pass as Postgres bytea hex literal
-    const keyBytes = base64ToBytes(vaultKeyB64);
+    // Use VAULT_ENCRYPTION_KEY as raw UTF-8 bytes (must be exactly 32 chars/bytes)
+    const keyBytes = keyToBytes(vaultKeyB64);
     if (keyBytes.length !== 32) {
-      return new Response(JSON.stringify({ error: "VAULT_ENCRYPTION_KEY must decode to 32 bytes" }), {
+      return new Response(JSON.stringify({ error: `VAULT_ENCRYPTION_KEY must be exactly 32 bytes (got ${keyBytes.length})` }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
