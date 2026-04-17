@@ -7,6 +7,7 @@ const SECRET_METADATA_KEYS: Record<string, string> = {
   app_id: "app_id",
   access_token: "access_token",
   refresh_token: "refresh_token",
+  location_id: "location_id",
 };
 
 async function vaultStore(connectionId: string, plaintext: string, secretName: string): Promise<void> {

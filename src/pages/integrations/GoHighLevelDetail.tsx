@@ -6,6 +6,7 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
+import { supabase } from "@/integrations/supabase/client";
 
 interface SubAccount {
   id: string;
@@ -32,25 +33,12 @@ const GoHighLevelDetail = () => {
   );
 
   const callGHL = async (action: string, params?: Record<string, unknown>) => {
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gohighlevel`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          action,
-          params: { ...params, apiKey: settings.apiKey || undefined, locationId: settings.locationId || undefined },
-        }),
-      }
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: "Request failed" }));
-      throw new Error(err.error || "Request failed");
-    }
-    return res.json();
+    const { data, error } = await supabase.functions.invoke("gohighlevel", {
+      body: { action, params: { ...params } },
+    });
+    if (error) throw new Error(error.message || "Request failed");
+    if (data?.error) throw new Error(data.error);
+    return data;
   };
 
   // Auto-detect GHL connection on mount
