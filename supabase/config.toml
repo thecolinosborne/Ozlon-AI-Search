@@ -78,3 +78,6 @@ verify_jwt = false
 [functions.vault-store]
 verify_jwt = false
 
+[functions.plaid]
+verify_jwt = false
+
