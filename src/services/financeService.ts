@@ -2,8 +2,16 @@ import { supabase } from "@/integrations/supabase/client";
 
 async function call<T = any>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await supabase.functions.invoke("plaid", { body: { action, ...body } });
+  // New: backend returns { ok: false, error, diagnostics } with HTTP 200 on failure.
+  const d = data as any;
+  if (d && d.ok === false) {
+    const diag = d.diagnostics
+      ? ` [${d.diagnostics.env} • secret:${d.diagnostics.secret_source} len:${d.diagnostics.secret_len} • client_id len:${d.diagnostics.client_id_len}]`
+      : "";
+    throw new Error(`${d.error || "Plaid request failed"}${diag}`);
+  }
   if (error) throw new Error(error.message);
-  if ((data as any)?.error) throw new Error((data as any).error);
+  if (d?.error) throw new Error(d.error);
   return data as T;
 }
 
