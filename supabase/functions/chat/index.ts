@@ -5192,6 +5192,81 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
       }
     }
 
+    // ================================================================
+    // SENTIENT WORKER — Identity Layer
+    // Profile + active standing orders + active goals + last conversation summaries
+    // Injected on EVERY call. Single biggest perception upgrade.
+    // ================================================================
+    if (credUserId) {
+      try {
+        const { createClient: ccId } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const adminId = ccId(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+        const sessionIdForId = (body.sessionId as string) || null;
+
+        const [profileRes, ordersRes, goalsRes, summariesRes] = await Promise.all([
+          adminId.from('profiles').select('first_name, full_name, system_name').eq('user_id', credUserId).maybeSingle(),
+          adminId.from('standing_orders').select('id, rule, scope, priority').eq('user_id', credUserId).eq('active', true).order('priority', { ascending: true }).limit(20),
+          adminId.from('user_goals').select('id, title, status, target_date, progress_notes').eq('user_id', credUserId).eq('status', 'active').order('updated_at', { ascending: false }).limit(8),
+          adminId.from('chat_sessions').select('id, summary, updated_at').eq('user_id', credUserId).not('summary', 'is', null).order('updated_at', { ascending: false }).limit(3),
+        ]);
+
+        const profile = profileRes.data as { first_name?: string; full_name?: string; system_name?: string } | null;
+        const firstName = profile?.first_name || profile?.full_name?.split(' ')[0] || 'friend';
+        const osName = profile?.system_name || systemName || 'Ozlon';
+
+        const now = new Date();
+        const timeStr = now.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+        let identityBlock = `\n\n===========================================================
+WHO YOU ARE & WHO YOU SERVE
+===========================================================
+You are ${osName}, ${firstName}'s personal worker. You exist to serve them with continuity, memory, and judgment.
+Address them as ${firstName}. Be confident. Decide, then justify briefly.
+
+# World state
+- Local time: ${timeStr}
+`;
+
+        const orders = (ordersRes.data || []) as Array<{ id: string; rule: string; scope: string; priority: number }>;
+        if (orders.length > 0) {
+          identityBlock += `\n# Standing orders (always obey unless user says "ignore standing orders this turn")\n`;
+          for (const o of orders) {
+            identityBlock += `- [${o.scope}] ${o.rule}\n`;
+          }
+        }
+
+        const goals = (goalsRes.data || []) as Array<{ id: string; title: string; target_date: string | null; progress_notes: unknown[] }>;
+        if (goals.length > 0) {
+          identityBlock += `\n# Active goals (reference when relevant)\n`;
+          for (const g of goals) {
+            const progress = Array.isArray(g.progress_notes) ? g.progress_notes.length : 0;
+            identityBlock += `- ${g.title}${g.target_date ? ` (by ${g.target_date})` : ''} — ${progress} progress note(s)\n`;
+          }
+        }
+
+        const summaries = (summariesRes.data || []) as Array<{ id: string; summary: string }>;
+        if (summaries.length > 0) {
+          identityBlock += `\n# Recent conversations (continuity)\n`;
+          for (const s of summaries) {
+            if (s.id !== sessionIdForId) {
+              identityBlock += `- ${s.summary}\n`;
+            }
+          }
+        }
+
+        identityBlock += `\n# Uncertainty discipline
+When you do not know something or your data is stale, prepend a hidden tag in this exact format on its own line:
+[uncertain: <one-line reason>]
+The UI will strip this from the user's view but it trains you to admit gaps instead of bluff. Never bluff.
+`;
+
+        systemPrompt += identityBlock;
+        console.log(`[Identity] Injected: ${orders.length} orders, ${goals.length} goals, ${summaries.length} summaries`);
+      } catch (e) {
+        console.error('[Identity] Injection failed:', e);
+      }
+    }
+
     // Build OpenAI messages
     const openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[] = [
       { role: 'system', content: systemPrompt },
