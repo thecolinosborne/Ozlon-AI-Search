@@ -17,16 +17,11 @@ const HiggsFieldDetail = () => {
   const [savingAppId, setSavingAppId] = useState(false);
 
   const callHiggsfield = async (action: string, params: Record<string, unknown> = {}) => {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/higgsfield`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify({ action, ...params, apiKey: settings.apiKey || undefined, appId: settings.appId || undefined }),
+    const { data, error } = await supabase.functions.invoke("higgsfield", {
+      body: { action, ...params },
     });
-    return res.json();
+    if (error) return { success: false, error: error.message };
+    return data;
   };
 
   // Auto-detect on mount
