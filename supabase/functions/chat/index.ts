@@ -4058,6 +4058,142 @@ async function executeToolCall(
         return { success: true, result: `Media file ${args.file_id} deleted.` };
       }
 
+      // ============ GHL multi-account + smart search ============
+      case 'ghl_list_sub_accounts': {
+        const subs = ghlCreds?.subAccounts || [];
+        const active = ghlCreds?.locationId || '';
+        if (subs.length === 0) {
+          return {
+            success: true,
+            result: JSON.stringify({
+              sub_accounts: active ? [{ id: active, name: 'Primary', active: true }] : [],
+              note: 'No sub-accounts configured. Add more in Integrations → Go High Level.',
+            }),
+          };
+        }
+        return {
+          success: true,
+          result: JSON.stringify({
+            sub_accounts: subs.map((s) => ({ id: s.id, name: s.name, active: s.id === active })),
+          }),
+        };
+      }
+      case 'ghl_set_active_sub_account': {
+        const subs = ghlCreds?.subAccounts || [];
+        const wantId = (args.location_id as string | undefined)?.trim();
+        const wantName = (args.name as string | undefined)?.trim().toLowerCase();
+        if (!wantId && !wantName) return { success: false, result: 'Provide either location_id or name.' };
+        let match = wantId ? subs.find((s) => s.id === wantId) : undefined;
+        if (!match && wantName) {
+          match = subs.find((s) => s.name.toLowerCase() === wantName)
+            || subs.find((s) => s.name.toLowerCase().includes(wantName));
+        }
+        if (!match && wantId && subs.length === 0) {
+          // No configured sub_accounts list — accept the raw id as best effort.
+          if (ghlCreds) ghlCreds.locationId = wantId;
+          return { success: true, result: `Active GHL location set to ${wantId} (no sub-account roster configured).` };
+        }
+        if (!match) {
+          return {
+            success: false,
+            result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
+          };
+        }
+        if (ghlCreds) {
+          ghlCreds.locationId = match.id;
+          if (match.api_key) ghlCreds.apiKey = match.api_key;
+        }
+        return { success: true, result: `Active GHL sub-account is now "${match.name}" (${match.id}).` };
+      }
+      case 'ghl_smart_search': {
+        const query = (args.query as string | undefined)?.trim();
+        if (!query) return { success: false, result: 'query is required.' };
+        const subs = ghlCreds?.subAccounts || [];
+        const explicit = (args.location_id as string | undefined)?.trim();
+        const targetSub = explicit ? subs.find((s) => s.id === explicit) : undefined;
+        const locId = explicit || ghlCreds?.locationId || '';
+        const apiKey = (targetSub?.api_key) || ghlCreds?.apiKey;
+        if (!locId) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        if (!apiKey) return { success: false, result: 'GoHighLevel not connected.' };
+        const types = (Array.isArray(args.types) && args.types.length > 0
+          ? args.types as string[]
+          : ['contacts', 'opportunities', 'conversations', 'appointments']);
+        const limit = Math.max(1, Math.min(20, (args.limit as number) || 5));
+        const enc = encodeURIComponent(query);
+
+        type Hit = { type: string; id: string; title: string; subtitle?: string; snippet?: string; raw?: unknown };
+        const tasks: Promise<{ type: string; hits: Hit[] }>[] = [];
+
+        if (types.includes('contacts')) {
+          tasks.push((async () => {
+            const data = await callGHL(`/contacts/?locationId=${locId}&query=${enc}&limit=${limit}`, 'GET', undefined, apiKey) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
+            const hits: Hit[] = (data.contacts || []).map((c) => ({
+              type: 'contact', id: c.id,
+              title: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || c.phone || c.id,
+              subtitle: c.email || c.phone, raw: c,
+            }));
+            return { type: 'contacts', hits };
+          })());
+        }
+        if (types.includes('opportunities')) {
+          tasks.push((async () => {
+            const data = await callGHL(`/opportunities/search?location_id=${locId}&q=${enc}&limit=${limit}`, 'GET', undefined, apiKey) as { opportunities?: { id: string; name: string; monetaryValue?: number; status?: string; pipelineStageId?: string }[] };
+            const hits: Hit[] = (data.opportunities || []).map((o) => ({
+              type: 'opportunity', id: o.id, title: o.name || o.id,
+              subtitle: o.status ? `${o.status}${o.monetaryValue ? ` · $${o.monetaryValue}` : ''}` : undefined,
+              raw: o,
+            }));
+            return { type: 'opportunities', hits };
+          })());
+        }
+        if (types.includes('conversations')) {
+          tasks.push((async () => {
+            const data = await callGHL(`/conversations/search?locationId=${locId}&query=${enc}&limit=${limit}`, 'GET', undefined, apiKey) as { conversations?: { id: string; contactId?: string; type?: string; lastMessageDate?: string; fullName?: string; lastMessageBody?: string }[] };
+            const hits: Hit[] = (data.conversations || []).map((c) => ({
+              type: 'conversation', id: c.id, title: c.fullName || c.contactId || c.id,
+              subtitle: c.type, snippet: c.lastMessageBody, raw: c,
+            }));
+            return { type: 'conversations', hits };
+          })());
+        }
+        if (types.includes('appointments')) {
+          tasks.push((async () => {
+            // GHL has no global appointment search; use contact-name search → fall back gracefully.
+            const data = await callGHL(`/contacts/?locationId=${locId}&query=${enc}&limit=${limit}`, 'GET', undefined, apiKey) as { contacts?: { id: string }[] };
+            const contactIds = (data.contacts || []).slice(0, 3).map((c) => c.id);
+            const hits: Hit[] = [];
+            for (const cid of contactIds) {
+              try {
+                const ev = await callGHL(`/contacts/${cid}/appointments`, 'GET', undefined, apiKey) as { events?: { id: string; title?: string; startTime?: string; status?: string }[] };
+                for (const e of (ev.events || []).slice(0, limit)) {
+                  hits.push({ type: 'appointment', id: e.id, title: e.title || 'Appointment', subtitle: e.startTime, raw: e });
+                }
+              } catch { /* ignore per-contact failure */ }
+            }
+            return { type: 'appointments', hits: hits.slice(0, limit) };
+          })());
+        }
+
+        const settled = await Promise.allSettled(tasks);
+        const results: Hit[] = [];
+        const errors: { type: string; message: string }[] = [];
+        settled.forEach((r, i) => {
+          if (r.status === 'fulfilled') results.push(...r.value.hits);
+          else errors.push({ type: types[i], message: (r.reason as Error)?.message || String(r.reason) });
+        });
+        return {
+          success: true,
+          result: JSON.stringify({
+            query,
+            location_id: locId,
+            sub_account: targetSub?.name,
+            count: results.length,
+            results,
+            errors: errors.length ? errors : undefined,
+          }),
+        };
+      }
+
       // ============ GSC / SEO Intelligence tool handlers (native edge) ============
       case 'gsc_list_sites': {
         try {
