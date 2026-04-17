@@ -90,7 +90,7 @@ const GoHighLevelDetail = () => {
     try {
       const next: GHLSettings = { ...settings, apiKey: key };
       await persistMetadata(next);
-      updateSettings("gohighlevel", next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       setApiKeyConfigured("gohighlevel", true);
       toast.success("API Key saved to your account");
     } catch (err) {
@@ -109,7 +109,7 @@ const GoHighLevelDetail = () => {
       const nextSubs = exists ? subs : [...subs, { id, name: "Primary" }];
       const next: GHLSettings = { ...settings, locationId: id, subAccounts: nextSubs };
       await persistMetadata(next);
-      updateSettings("gohighlevel", next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       toast.success("Location ID saved to your account");
     } catch (err) {
       toast.error((err as Error).message);
@@ -140,7 +140,7 @@ const GoHighLevelDetail = () => {
     };
     try {
       await persistMetadata(next);
-      updateSettings("gohighlevel", next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       setShowAddModal(false);
       setNewSub({ id: "", name: "", api_key: "" });
       toast.success(`Added sub-account "${name}"`);
@@ -155,7 +155,7 @@ const GoHighLevelDetail = () => {
     const next: GHLSettings = { ...settings, subAccounts: nextSubs, locationId: nextActive };
     try {
       await persistMetadata(next);
-      updateSettings("gohighlevel", next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       toast.success("Sub-account removed");
     } catch (err) {
       toast.error((err as Error).message);
@@ -166,7 +166,7 @@ const GoHighLevelDetail = () => {
     const next: GHLSettings = { ...settings, locationId: id };
     try {
       await persistMetadata(next);
-      updateSettings("gohighlevel", next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       toast.success("Default sub-account updated");
     } catch (err) {
       toast.error((err as Error).message);
