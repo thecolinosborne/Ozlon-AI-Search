@@ -322,6 +322,7 @@ export interface CallOptions {
   body?: Record<string, unknown>;       // extra fields like response_format, tools, max_tokens
   timeoutMs?: number;
   signal?: AbortSignal;
+  registry?: Record<string, ModelEntry>; // merged registry (static + custom). Defaults to MODEL_REGISTRY.
 }
 
 export interface CallResult {
@@ -343,7 +344,8 @@ export interface CallResult {
  */
 export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   const prefs = opts.prefs || DEFAULT_PREFS;
-  const route = pickModel(opts.agent, prefs);
+  const registry = opts.registry || MODEL_REGISTRY;
+  const route = pickModel(opts.agent, prefs, registry);
   const candidates = [route.primary, ...route.fallbackChain];
 
   let lastResult: CallResult | null = null;
