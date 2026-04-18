@@ -5967,18 +5967,16 @@ serve(async (req) => {
     // PERSONALITY & IDENTITY LAYER — user-authored persona override
     // Loaded BEFORE other prompt enrichment so user identity sits at top.
     // ================================================================
-    console.log('[Personality] credUserId resolved:', credUserId);
     if (credUserId) {
       try {
         const { createClient: ccP } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
         const srvKeyP = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminP = ccP(Deno.env.get('SUPABASE_URL')!, srvKeyP);
-        const { data: persona, error: personaErr } = await adminP
+        const { data: persona } = await adminP
           .from('user_personality')
           .select('identity, about_me, house_rules, tone_settings, reference_persona')
           .eq('user_id', credUserId)
           .maybeSingle();
-        console.log('[Personality] row found:', !!persona, 'err:', personaErr?.message);
         if (persona) {
           const parts: string[] = [];
           const identity = (persona.identity || {}) as Record<string, unknown>;
