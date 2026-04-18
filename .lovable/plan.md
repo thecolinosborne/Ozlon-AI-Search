@@ -1,68 +1,60 @@
 
-User wants:
-1. Add Gemini 3.x preview models to the Gauntlet
-2. Add image generation tool (Nano Banana / Gemini 3 Pro Image)
-3. Add image editing tool (Nano Banana 2)
-4. A "plug-in area" — UI to add/configure new LLM stones from the frontend
+User is asking for a summary, not new scope. Consolidate the three approved plans (humanize Brain page, live API key sync, video generation) into one clear list.
 
-Currently the registry is hardcoded in `_shared/model-registry.ts`. To make it truly pluggable from the UI, we need a DB-backed custom models table that merges with the static registry at request time.
+# What We're Building — One Pass
 
-Keep it tight.
+## 1. Clean up Integrations
+- Remove **AI Processor** card from `/integrations` (redundant)
+- Remove its route from `App.tsx`
+- Drop default entry from `useIntegrationsStore`
 
-# Build Plan — Expand the Gauntlet + Stone Socket
+## 2. Rebuild "Intelligence Routing" as the **Brain** page (`/settings/routing`)
+Drop everything technical. Four sections:
 
-## 1. Expand the registry (Gemini 3.x + image models)
-File: `supabase/functions/_shared/model-registry.ts`
-- Add `google/gemini-3.1-pro-preview`, `google/gemini-3-flash-preview` to MODEL_REGISTRY (text/reasoning tier)
-- Add `google/gemini-2.5-flash-image`, `google/gemini-3-pro-image-preview`, `google/gemini-3.1-flash-image-preview` with new capability `image_gen`
-- Add new agent: `image_artist` → preferred `gemini-3.1-flash-image-preview`, fallback chain to other image models
+**A. Connected Brains** (auto-detected)
+- Gemini · OpenAI · Veo 3 → Connected via Lovable AI (masked key shown)
+- Higgsfield → Connected (masked `HIGGSFIELD_API_KEY`) with Manage link
+- Any custom stones the user has plugged in
 
-## 2. Image generation + editing tools
-New edge function: `supabase/functions/image-gen/index.ts`
-- Accepts `{prompt, model?, inputImageUrl?}` 
-- Routes via `callWithFallback('image_artist', ...)` to Lovable AI Gateway
-- Returns image URL (uploaded to Supabase Storage `generated-images` bucket)
-- Wire as two tools in `chat/index.ts`: `generate_image(prompt)` and `edit_image(prompt, image_url)`
+**B. Add a Brain** (provider catalog with inline key input)
+- Grok (xAI) · Claude (Anthropic) · Mistral · DeepSeek
+- Each: paste API key → Connect → key stored as Supabase secret + row inserted in `custom_models` → instantly joins the Infinity Router via existing `loadCustomModels` + `mergeRegistry`
+- "+ Custom OpenAI-compatible endpoint" → existing Stone Socket form
 
-New storage bucket: `generated-images` (public read)
+**C. What handles what?** (humanized, replaces per-agent dropdowns)
+Plain English rows, each with Auto + every connected model:
+- Quick thinking & routing
+- Deep reasoning & tool use
+- Image creation
+- **Video creation** (new)
+- Summaries
 
-## 3. The Stone Socket — pluggable LLM UI
-This is the real "Infinity Gauntlet socket" the user is asking for.
+**D. How it's been performing**
+24h telemetry — avg response time + reliability per role.
 
-**DB migration** — new table `custom_models`:
-```
-id, user_id, model_id (e.g. 'anthropic/claude-opus-4'),
-display_name, gateway_url, api_key_secret_name,
-context_window, cost_per_1k_in/out, capabilities text[],
-fallback_model_id, enabled, created_at
-```
-RLS: own rows only.
+**Removed:** Speed/Balanced/Quality selector, raw "Available Models" toggles, cost-per-turn numbers.
 
-**Registry merge logic** (`model-registry.ts`):
-- New `loadCustomModels(supabase, userId)` fetches user's custom entries
-- `pickModel()` accepts merged registry = static + custom
-- `callWithFallback()` reads gateway URL from entry (defaults to Lovable AI Gateway), pulls API key from named secret if provided
+## 3. Video Generation (new capability)
+- New `video_gen` capability + `video_director` agent in registry
+- Models: `google/veo-3-fast`, `google/veo-3` (Lovable AI), `higgsfield/dop-standard` (existing edge function)
+- New edge function `video-gen/index.ts` — Veo wrapper + storage upload
+- New chat tool `generate_video(prompt, duration?, aspect_ratio?)` wired into `chat/index.ts` with userId injection
+- New public storage bucket `generated-videos`
 
-**UI — extend `src/pages/ModelRouting.tsx`**
-New "Stone Socket" section at bottom:
-- Card list of custom models with enable toggle, edit, delete
-- "Add a Stone" button → modal with form:
-  - Model ID, display name, gateway URL (default: Lovable AI), capabilities multiselect, context window, cost fields, fallback dropdown
-  - Optional: API key secret name (for non-Lovable gateways like Anthropic direct)
-- Once added, the model appears in agent override dropdowns automatically
-
-## 4. Settings entry already exists
-"Intelligence Routing" row in Settings.tsx — no change needed, just richer page.
+## 4. New edge function `connect-brain`
+- Stores user-provided API keys as Supabase secrets
+- Inserts matching `custom_models` row with provider preset (gateway URL, capabilities)
+- Returns success → frontend refreshes → router picks it up next request
 
 ## Files
-- New: `supabase/functions/image-gen/index.ts`, migration for `custom_models` + `generated-images` bucket
-- Edited: `supabase/functions/_shared/model-registry.ts` (add models + custom merge), `supabase/functions/chat/index.ts` (image tools + image_artist agent), `src/pages/ModelRouting.tsx` (Stone Socket section)
+- New: `supabase/functions/connect-brain/index.ts`, `supabase/functions/video-gen/index.ts`, migration for `generated-videos` bucket
+- Edited: `src/pages/ModelRouting.tsx` (full rewrite, same route), `src/pages/Integrations.tsx`, `src/App.tsx`, `src/stores/useIntegrationsStore.ts`, `supabase/functions/_shared/model-registry.ts` (add Veo + Higgsfield + video_director), `supabase/functions/chat/index.ts` (generate_video tool)
 
 ## Safety
-- All additions opt-in. Defaults unchanged.
-- Custom models with no API key fall back to Lovable AI Gateway (uses `LOVABLE_API_KEY`)
-- Image tools only fire when AI explicitly calls them
-- RLS protects custom_models per user
+- All additive. Existing chat/voice/integrations untouched.
+- Custom keys are per-user (RLS on `custom_models`).
+- Failed brains just sit unused — fallback chain protects executor.
+- Video tool only fires on explicit AI call.
 
 ## Effort
-~1 session.
+One session.
