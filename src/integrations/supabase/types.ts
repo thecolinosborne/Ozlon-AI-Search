@@ -281,6 +281,7 @@ export type Database = {
           fallback_model_id: string | null
           gateway_url: string
           id: string
+          metadata: Json
           model_id: string
           tier: string
           updated_at: string
@@ -299,6 +300,7 @@ export type Database = {
           fallback_model_id?: string | null
           gateway_url?: string
           id?: string
+          metadata?: Json
           model_id: string
           tier?: string
           updated_at?: string
@@ -317,6 +319,7 @@ export type Database = {
           fallback_model_id?: string | null
           gateway_url?: string
           id?: string
+          metadata?: Json
           model_id?: string
           tier?: string
           updated_at?: string
