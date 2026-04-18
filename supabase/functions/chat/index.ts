@@ -7131,6 +7131,18 @@ Execute these in order. Be decisive — the user has already been shown this pla
             await writer.write(encoder.encode(`data: ${JSON.stringify({
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
+
+            // Emit which brain handled this turn (for UI attribution)
+            try {
+              const usedModel = (result as any).modelUsed || modelConfig.name;
+              const isInline = !!(gauntletRegistry as any)?.[usedModel]?._apiKeySecret?.toString().startsWith('inline:');
+              await writer.write(encoder.encode(`event: provider_used\ndata: ${JSON.stringify({
+                model: usedModel,
+                source: isInline ? 'your_key' : 'ozlon',
+                platform: inferPlatformFromModel(usedModel),
+              })}\n\n`));
+            } catch { /* best-effort */ }
+
             await writer.write(encoder.encode('data: [DONE]\n\n'));
 
             // Fire-and-forget: post-turn memory extraction + telemetry
