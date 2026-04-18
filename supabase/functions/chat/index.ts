@@ -5852,12 +5852,37 @@ async function runToolLoop(
         ? Math.floor(budget / namedIntegrations.size)
         : Infinity;
 
+      // Semantic relevance booster — token overlap between user message and tool name+description.
+      // Cheap, no embeddings needed. Adds 0-50 bonus points so semantically relevant tools
+      // bubble up *within* their tier, and Tier C tools that match strongly can outscore unmatched Tier C.
+      const STOPWORDS = new Set([
+        'the','a','an','and','or','but','of','in','on','at','to','for','with','by','from','as','is','are',
+        'was','were','be','been','being','have','has','had','do','does','did','will','would','should','could',
+        'can','may','might','must','shall','my','me','i','you','your','our','we','it','its','this','that',
+        'these','those','what','which','who','how','when','where','why','show','get','give','tell','list','make','please',
+      ]);
+      const tokenize = (s: string): string[] =>
+        s.toLowerCase().replace(/[^a-z0-9_\s]/g, ' ').split(/\s+/).filter(t => t.length > 2 && !STOPWORDS.has(t));
+      const queryTokens = new Set(tokenize(hint));
+      const semanticBoost = (name: string, description: string): number => {
+        if (queryTokens.size === 0) return 0;
+        const toolTokens = new Set([...tokenize(name.replace(/_/g, ' ')), ...tokenize(description)]);
+        let overlap = 0;
+        for (const t of queryTokens) if (toolTokens.has(t)) overlap++;
+        // Cap bonus at 50 — enough to lift a strong-match Tier C tool to ~Tier B level,
+        // but not enough to displace a true Tier A integration tool.
+        return Math.min(50, overlap * 12);
+      };
+
       const scored = tools.map((t) => {
-        const name = (t as { function?: { name?: string } }).function?.name || '';
+        const fn = (t as { function?: { name?: string; description?: string } }).function;
+        const name = fn?.name || '';
+        const description = fn?.description || '';
         const bucket = integrationOf(name);
         let score = 10; // Tier C baseline
         if (CORE_TOOLS.has(name)) score = 100; // Tier B
         if (namedIntegrations.has(bucket)) score = 1000; // Tier A
+        score += semanticBoost(name, description);
         return { tool: t, name, bucket, score };
       });
       scored.sort((a, b) => b.score - a.score);
