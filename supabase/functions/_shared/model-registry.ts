@@ -6,9 +6,9 @@
 // ============================================================================
 
 export type ChatMessage = { role: string; content?: string; [k: string]: unknown };
-export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer';
+export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer' | 'image_artist';
 export type RoutingMode = 'speed' | 'balanced' | 'quality';
-export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning';
+export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning' | 'image_gen';
 
 export interface ModelEntry {
   id: string;                 // Lovable AI gateway model id
