@@ -1670,8 +1670,8 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_list_social_posts',
-      description: 'List social media posts in GoHighLevel Social Planner.',
-      parameters: { type: 'object', properties: {} },
+      description: 'List social media posts in GoHighLevel Social Planner. Optional filters: type (all|scheduled|posted|failed|in_review), account_ids (comma-separated from ghl_list_social_accounts), limit, skip.',
+      parameters: { type: 'object', properties: { type: { type: 'string', description: 'all|scheduled|posted|failed|in_review (default all)' }, account_ids: { type: 'string', description: 'Comma-separated social account IDs' }, limit: { type: 'number' }, skip: { type: 'number' } } },
     },
   },
   {
@@ -1757,9 +1757,17 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_list_blog_sites',
+      description: 'List blog sites for the GoHighLevel location. Returns blog IDs needed by ghl_list_blog_posts and ghl_create_blog_post. Always call this first when working with blogs.',
+      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' }, skip: { type: 'number', description: 'Offset' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_list_blog_posts',
-      description: 'List blog posts in GoHighLevel.',
-      parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 20)' } } },
+      description: 'List blog posts for a specific blog site in GoHighLevel. Requires blog_id from ghl_list_blog_sites.',
+      parameters: { type: 'object', properties: { blog_id: { type: 'string', description: 'Blog site ID from ghl_list_blog_sites' }, limit: { type: 'number', description: 'Max results (default 20)' }, offset: { type: 'number' } }, required: ['blog_id'] },
     },
   },
   {
@@ -1774,8 +1782,8 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_create_blog_post',
-      description: 'Create a new blog post in GoHighLevel.',
-      parameters: { type: 'object', properties: { title: { type: 'string', description: 'Blog post title' }, content: { type: 'string', description: 'Blog post HTML content' }, status: { type: 'string', description: 'Status: draft or published (default: draft)' } }, required: ['title', 'content'] },
+      description: 'Create a new blog post in GoHighLevel under a specific blog site. Requires blog_id from ghl_list_blog_sites.',
+      parameters: { type: 'object', properties: { blog_id: { type: 'string', description: 'Blog site ID from ghl_list_blog_sites' }, title: { type: 'string' }, content: { type: 'string', description: 'Blog post HTML body' }, status: { type: 'string', description: 'DRAFT | PUBLISHED | SCHEDULED | ARCHIVED (default DRAFT)' }, url_slug: { type: 'string' }, description: { type: 'string', description: 'SEO meta description' }, image_url: { type: 'string' }, author: { type: 'string' }, categories: { type: 'string', description: 'Comma-separated category IDs' }, tags: { type: 'string', description: 'Comma-separated tags' }, published_at: { type: 'string', description: 'ISO timestamp for SCHEDULED status' } }, required: ['blog_id', 'title', 'content'] },
     },
   },
   {
