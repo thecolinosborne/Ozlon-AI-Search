@@ -4612,6 +4612,16 @@ async function executeToolCall(
           if (!resp.ok) {
             const errText = await resp.text().catch(() => '');
             return { success: false, result: `Image ${toolName === 'edit_image' ? 'edit' : 'generation'} failed: ${resp.status} ${errText}` };
+          }
+          const data = await resp.json();
+          if (!data?.url) return { success: false, result: 'Image service returned no URL.' };
+          return {
+            success: true,
+            result: `Image ${toolName === 'edit_image' ? 'edited' : 'generated'} with ${data.model}. URL: ${data.url}\n\nDisplay it to the user as: ![](${data.url})`,
+          };
+        } catch (e) {
+          return { success: false, result: `Image error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
       }
 
       case 'generate_video': {
@@ -4656,16 +4666,6 @@ async function executeToolCall(
           };
         } catch (e) {
           return { success: false, result: `Video error: ${e instanceof Error ? e.message : 'Unknown'}` };
-        }
-      }
-          const data = await resp.json();
-          if (!data?.url) return { success: false, result: 'Image service returned no URL.' };
-          return {
-            success: true,
-            result: `Image ${toolName === 'edit_image' ? 'edited' : 'generated'} with ${data.model}. URL: ${data.url}\n\nDisplay it to the user as: ![](${data.url})`,
-          };
-        } catch (e) {
-          return { success: false, result: `Image error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
       }
 
