@@ -392,7 +392,17 @@ serve(async (req) => {
         break;
       }
       case 'list_social_posts': {
-        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts`;
+        // GHL requires POST with a filter body. Defaults pull recent posts across all accounts.
+        endpoint = `${GHL_BASE_URL}/social-media-posting/${GHL_LOCATION_ID}/posts/list`;
+        method = 'POST';
+        const socialBody = {
+          type: (reqBody as Record<string, unknown>)?.type ?? 'all', // all | scheduled | posted | failed | in_review
+          accountIds: (reqBody as Record<string, unknown>)?.accountIds ?? [],
+          skip: (reqBody as Record<string, unknown>)?.skip ?? 0,
+          limit: (reqBody as Record<string, unknown>)?.limit ?? (params?.limit as number | undefined) ?? 20,
+          ...(reqBody as Record<string, unknown> | undefined),
+        };
+        fetchBody = JSON.stringify(socialBody);
         break;
       }
       case 'get_social_post': {
@@ -474,8 +484,21 @@ serve(async (req) => {
       }
 
       // ============ BLOGS ============
+      case 'list_blog_sites': {
+        // Discover blog sites for the location. blogId from here is required for list_blog_posts.
+        const blogLimit = (params?.limit as number | undefined) || 20;
+        const blogSkip = (params?.skip as number | undefined) || 0;
+        endpoint = `${GHL_BASE_URL}/blogs/site/all?locationId=${GHL_LOCATION_ID}&limit=${blogLimit}&skip=${blogSkip}`;
+        break;
+      }
       case 'list_blog_posts': {
-        endpoint = `${GHL_BASE_URL}/blogs/posts?locationId=${GHL_LOCATION_ID}&limit=${params?.limit || 20}`;
+        // GHL requires blogId. If not provided, return a helpful error so the AI calls list_blog_sites first.
+        if (!params?.blogId) {
+          throw new Error('blogId required. Call list_blog_sites first to discover blog IDs for this location.');
+        }
+        const blogLimit = (params?.limit as number | undefined) || 20;
+        const blogSkip = (params?.skip as number | undefined) || 0;
+        endpoint = `${GHL_BASE_URL}/blogs/posts/all?locationId=${GHL_LOCATION_ID}&blogId=${params.blogId}&limit=${blogLimit}&offset=${blogSkip}`;
         break;
       }
       case 'get_blog_post': {
@@ -484,6 +507,10 @@ serve(async (req) => {
         break;
       }
       case 'create_blog_post': {
+        // blogId is required by GHL to create a post under a specific blog site.
+        if (!reqBody || !(reqBody as Record<string, unknown>).blogId) {
+          throw new Error('blogId required in body. Call list_blog_sites first to discover blog IDs.');
+        }
         endpoint = `${GHL_BASE_URL}/blogs/posts`;
         method = 'POST';
         fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
