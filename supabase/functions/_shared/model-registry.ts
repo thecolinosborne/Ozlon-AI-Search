@@ -288,20 +288,22 @@ export function pickModel(
   };
 }
 
-function buildFallbackChain(primary: string, spec: AgentSpec, eligible: ModelEntry[]): string[] {
+function buildFallbackChain(
+  primary: string,
+  spec: AgentSpec,
+  eligible: ModelEntry[],
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
+): string[] {
   const chain: string[] = [];
   const seen = new Set<string>([primary]);
-  // Walk primary.fallback links.
-  let cursor: string | undefined = MODEL_REGISTRY[primary]?.fallback;
+  let cursor: string | undefined = registry[primary]?.fallback;
   while (cursor && !seen.has(cursor) && chain.length < 3) {
-    if (MODEL_REGISTRY[cursor]
-        && eligible.some((e) => e.id === cursor)) {
+    if (registry[cursor] && eligible.some((e) => e.id === cursor)) {
       chain.push(cursor);
       seen.add(cursor);
     }
-    cursor = MODEL_REGISTRY[cursor]?.fallback;
+    cursor = registry[cursor]?.fallback;
   }
-  // Always end with hardFallback if not already present.
   if (!seen.has(spec.hardFallback)) chain.push(spec.hardFallback);
   return chain;
 }
