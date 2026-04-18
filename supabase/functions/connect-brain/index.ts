@@ -161,7 +161,8 @@ serve(async (req) => {
     if (body.action === "list_presets") {
       return json({
         platforms: Object.values(PLATFORMS).map((p) => ({
-          id: p.id, label: p.label, blurb: p.blurb, capabilities: p.capabilities,
+          id: p.id, label: p.label, blurb: p.blurb, human_blurb: p.human_blurb,
+          capabilities: p.capabilities, console_url: p.console_url, key_prefix: p.key_prefix,
         })),
       });
     }
@@ -172,13 +173,14 @@ serve(async (req) => {
         .from("custom_models")
         .select("model_id, api_key_secret_name, metadata")
         .eq("user_id", userId);
-      const byPlatform = new Map<string, { last4: string }>();
+      const byPlatform = new Map<string, { last4: string; label: string | null }>();
       for (const r of (rows || []) as Array<{ model_id: string; api_key_secret_name: string | null; metadata: Record<string, unknown> | null }>) {
         const pid = (r.metadata?.platform_id as string) || inferPlatformIdFromModelId(r.model_id);
         if (!pid) continue;
         const secret = r.api_key_secret_name || "";
         const last4 = secret.startsWith("inline:") ? secret.slice(-4) : "••••";
-        byPlatform.set(pid, { last4 });
+        const label = (r.metadata?.label as string) || null;
+        byPlatform.set(pid, { last4, label });
       }
       // Higgsfield is special — stored in integration_connections
       const { data: hf } = await admin
@@ -195,9 +197,13 @@ serve(async (req) => {
           id: p.id,
           label: p.label,
           blurb: p.blurb,
+          human_blurb: p.human_blurb,
           capabilities: p.capabilities,
+          console_url: p.console_url,
+          key_prefix: p.key_prefix,
           connected: !!c,
           last4: c?.last4 || null,
+          nickname: c?.label || null,
         };
       });
       // Append higgsfield virtual entry
@@ -205,9 +211,13 @@ serve(async (req) => {
         id: "higgsfield",
         label: "Higgsfield AI",
         blurb: "Cinematic AI video & image generation.",
+        human_blurb: "Cinematic brain. Creates filmlike video and image clips.",
         capabilities: ["video", "image"],
+        console_url: "https://higgsfield.ai",
+        key_prefix: "",
         connected: !!hf,
         last4: hf ? "••••" : null,
+        nickname: null,
       });
       return json({ platforms: status });
     }
