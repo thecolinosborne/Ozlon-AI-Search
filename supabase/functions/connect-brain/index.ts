@@ -131,6 +131,7 @@ interface ReqBody {
   // legacy alias
   preset_id?: string;
   api_key?: string;
+  label?: string; // optional user-facing nickname for this connection
 }
 
 serve(async (req) => {
