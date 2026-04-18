@@ -109,6 +109,12 @@ export interface InfinityRouterDebugEvent {
   fallback: boolean;
 }
 
+export interface ProviderUsedEvent {
+  model: string;
+  source: 'your_key' | 'ozlon';
+  platform: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -123,6 +129,7 @@ export interface StreamChatOptions {
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
   onTaskUpdate?: (update: TaskUpdate) => void;
   onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
+  onProviderUsed?: (data: ProviderUsedEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
