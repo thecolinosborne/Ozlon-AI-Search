@@ -3542,9 +3542,18 @@ async function executeToolCall(
       case 'ghl_list_social_posts': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts`, 'GET', undefined, ghlCreds?.apiKey) as { posts?: { id: string; status?: string; summary?: string; scheduledAt?: string }[] };
+        const body = {
+          type: (args.type as string) || 'all', // all | scheduled | posted | failed | in_review
+          accountIds: Array.isArray(args.account_ids)
+            ? args.account_ids
+            : (args.account_ids ? String(args.account_ids).split(',').map(s => s.trim()).filter(Boolean) : []),
+          skip: (args.skip as number) || 0,
+          limit: (args.limit as number) || 20,
+        };
+        const data = await callGHL(`/social-media-posting/${GHL_LOCATION_ID}/posts/list`, 'POST', body, ghlCreds?.apiKey) as { posts?: { id: string; status?: string; summary?: string; scheduledAt?: string }[]; error?: string; message?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}${data.message ? ' — ' + data.message : ''}` };
         const posts = data.posts || (Array.isArray(data) ? data : []);
-        if (!posts.length) return { success: true, result: 'No social posts found.' };
+        if (!posts.length) return { success: true, result: 'No social posts found. Tip: pass account_ids (comma-separated) from ghl_list_social_accounts to scope the search.' };
         return { success: true, result: `Social posts (${posts.length}):\n${(posts as Record<string, unknown>[]).slice(0, 20).map((p) => `- ${(p.summary as string)?.substring(0, 100) || '(no text)'} | Status: ${p.status || '?'} | ID: ${p.id}`).join('\n')}` };
       }
 
@@ -3637,13 +3646,29 @@ async function executeToolCall(
         return { success: true, result: `Survey submissions (${subs.length}):\n${subs.map(s => `- Contact: ${s.contactId || '?'} | ${s.createdAt || ''} | Data: ${JSON.stringify(s.data || {}).substring(0, 200)}`).join('\n')}` };
       }
 
+      case 'ghl_list_blog_sites': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        const limit = (args.limit as number) || 20;
+        const skip = (args.skip as number) || 0;
+        const data = await callGHL(`/blogs/site/all?locationId=${GHL_LOCATION_ID}&limit=${limit}&skip=${skip}`, 'GET', undefined, ghlCreds?.apiKey) as { data?: { _id?: string; id?: string; name?: string; urlSlug?: string }[]; sites?: { _id?: string; id?: string; name?: string }[]; error?: string; message?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}${data.message ? ' — ' + data.message : ''}` };
+        const sites = data.data || data.sites || [];
+        if (!sites.length) return { success: true, result: 'No blog sites found for this location. Create one in the GHL UI under Sites → Blogs first.' };
+        return { success: true, result: `Blog sites (${sites.length}):\n${sites.map(s => `- ${s.name || 'Untitled'} | ID: ${s._id || s.id}`).join('\n')}` };
+      }
+
       case 'ghl_list_blog_posts': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const data = await callGHL(`/blogs/posts?locationId=${GHL_LOCATION_ID}&limit=${(args.limit as number) || 20}`, 'GET', undefined, ghlCreds?.apiKey) as { posts?: { id: string; title?: string; status?: string; createdAt?: string }[] };
-        const posts = data.posts || [];
-        if (!posts.length) return { success: true, result: 'No blog posts found.' };
-        return { success: true, result: `Blog posts (${posts.length}):\n${posts.map(p => `- ${p.title || 'Untitled'} | ${p.status || '?'} | ${p.createdAt || ''} | ID: ${p.id}`).join('\n')}` };
+        if (!args.blog_id) return { success: false, result: 'blog_id required. Call ghl_list_blog_sites first to discover blog IDs for this location.' };
+        const limit = (args.limit as number) || 20;
+        const offset = (args.offset as number) || 0;
+        const data = await callGHL(`/blogs/posts/all?locationId=${GHL_LOCATION_ID}&blogId=${encodeURIComponent(String(args.blog_id))}&limit=${limit}&offset=${offset}`, 'GET', undefined, ghlCreds?.apiKey) as { blogPosts?: { _id?: string; id?: string; title?: string; status?: string; createdAt?: string }[]; data?: unknown[]; error?: string; message?: string };
+        if (data.error) return { success: false, result: `GHL error: ${data.error}${data.message ? ' — ' + data.message : ''}` };
+        const posts = (data.blogPosts || (data.data as { _id?: string; id?: string; title?: string; status?: string; createdAt?: string }[]) || []);
+        if (!posts.length) return { success: true, result: 'No blog posts found in this blog site.' };
+        return { success: true, result: `Blog posts (${posts.length}):\n${posts.map(p => `- ${p.title || 'Untitled'} | ${p.status || '?'} | ${p.createdAt || ''} | ID: ${p._id || p.id}`).join('\n')}` };
       }
 
       case 'ghl_get_blog_post': {
@@ -3655,10 +3680,25 @@ async function executeToolCall(
       case 'ghl_create_blog_post': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const postData: Record<string, unknown> = { locationId: GHL_LOCATION_ID, title: args.title, content: args.content, status: (args.status as string) || 'draft' };
-        const res = await callGHL('/blogs/posts', 'POST', postData, ghlCreds?.apiKey) as { id?: string; error?: string };
-        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Blog post created: "${args.title}" (${(args.status as string) || 'draft'}) (ID: ${res.id || 'created'})` };
+        if (!args.blog_id) return { success: false, result: 'blog_id required. Call ghl_list_blog_sites first to discover blog IDs.' };
+        const postData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          blogId: args.blog_id,
+          title: args.title,
+          rawHTML: args.content, // GHL expects rawHTML for body content
+          status: (args.status as string) || 'DRAFT', // DRAFT | PUBLISHED | SCHEDULED | ARCHIVED
+        };
+        if (args.url_slug) postData.urlSlug = args.url_slug;
+        if (args.description) postData.description = args.description;
+        if (args.image_url) postData.imageUrl = args.image_url;
+        if (args.author) postData.author = args.author;
+        if (args.categories) postData.categories = Array.isArray(args.categories) ? args.categories : String(args.categories).split(',').map(s => s.trim());
+        if (args.tags) postData.tags = Array.isArray(args.tags) ? args.tags : String(args.tags).split(',').map(s => s.trim());
+        if (args.published_at) postData.publishedAt = args.published_at;
+        const res = await callGHL('/blogs/posts', 'POST', postData, ghlCreds?.apiKey) as { data?: { _id?: string }; _id?: string; id?: string; error?: string; message?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}${res.message ? ' — ' + res.message : ''}` };
+        const newId = res.data?._id || res._id || res.id;
+        return { success: true, result: `Blog post created: "${args.title}" (${(args.status as string) || 'DRAFT'}) (ID: ${newId || 'created'})` };
       }
 
       case 'ghl_list_media_files': {
