@@ -3733,6 +3733,37 @@ async function executeToolCall(
         return { success: true, result: `Blog post created: "${args.title}" (${(args.status as string) || 'DRAFT'}) (ID: ${newId || 'created'})` };
       }
 
+      case 'ghl_update_blog_post': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        if (!args.post_id) return { success: false, result: 'post_id required.' };
+        if (!args.blog_id) return { success: false, result: 'blog_id required (the blog site this post belongs to).' };
+        const updateData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
+          blogId: args.blog_id,
+        };
+        if (args.title) updateData.title = args.title;
+        if (args.content) updateData.rawHTML = args.content;
+        if (args.status) updateData.status = args.status;
+        if (args.url_slug) updateData.urlSlug = args.url_slug;
+        if (args.description) updateData.description = args.description;
+        if (args.image_url) updateData.imageUrl = args.image_url;
+        if (args.author) updateData.author = args.author;
+        if (args.categories) updateData.categories = Array.isArray(args.categories) ? args.categories : String(args.categories).split(',').map(s => s.trim());
+        if (args.tags) updateData.tags = Array.isArray(args.tags) ? args.tags : String(args.tags).split(',').map(s => s.trim());
+        if (args.published_at) updateData.publishedAt = args.published_at;
+        const res = await callGHL(`/blogs/posts/${args.post_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { error?: string; message?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}${res.message ? ' — ' + res.message : ''}` };
+        return { success: true, result: `Blog post updated (ID: ${args.post_id})` };
+      }
+
+      case 'ghl_delete_blog_post': {
+        if (!args.post_id) return { success: false, result: 'post_id required.' };
+        const res = await callGHL(`/blogs/posts/${args.post_id}`, 'DELETE', undefined, ghlCreds?.apiKey) as { error?: string; message?: string };
+        if (res.error) return { success: false, result: `GHL error: ${res.error}${res.message ? ' — ' + res.message : ''}` };
+        return { success: true, result: `Blog post deleted (ID: ${args.post_id})` };
+      }
+
       case 'ghl_list_media_files': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
@@ -3740,6 +3771,31 @@ async function executeToolCall(
         const files = data.files || [];
         if (!files.length) return { success: true, result: 'No media files found.' };
         return { success: true, result: `Media files (${files.length}):\n${files.slice(0, 30).map(f => `- ${f.name || 'Untitled'} (${f.type || '?'}) | ID: ${f.id}`).join('\n')}` };
+      }
+
+      case 'ghl_upload_media_file': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
+        if (!args.file_url) return { success: false, result: 'file_url required (public URL of file to upload).' };
+        const srcRes = await fetch(args.file_url as string);
+        if (!srcRes.ok) return { success: false, result: `Failed to fetch source file: HTTP ${srcRes.status}` };
+        const blob = await srcRes.blob();
+        const inferredName = (args.file_name as string) || (args.file_url as string).split('/').pop()?.split('?')[0] || 'upload';
+        const form = new FormData();
+        form.append('file', blob, inferredName);
+        form.append('hosted', 'false');
+        form.append('name', inferredName);
+        if (args.parent_id) form.append('parentId', String(args.parent_id));
+        const apiKey = ghlCreds?.apiKey;
+        if (!apiKey) return { success: false, result: 'GoHighLevel not connected.' };
+        const uploadRes = await fetch(`https://services.leadconnectorhq.com/medias/upload-file?altId=${GHL_LOCATION_ID}&altType=location`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, Version: '2021-07-28' },
+          body: form,
+        });
+        const uploadData = await uploadRes.json().catch(() => ({})) as { fileId?: string; id?: string; url?: string; message?: string; error?: string };
+        if (!uploadRes.ok) return { success: false, result: `GHL upload error (${uploadRes.status}): ${uploadData.message || uploadData.error || 'unknown'}` };
+        return { success: true, result: `Media uploaded: ${inferredName} (ID: ${uploadData.fileId || uploadData.id || '?'})${uploadData.url ? ' | URL: ' + uploadData.url : ''}` };
       }
 
       case 'ghl_list_companies': {
