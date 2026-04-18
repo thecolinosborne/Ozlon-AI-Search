@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Globe, Video, Sparkles, Cpu, CheckSquare, Youtube } from "lucide-react";
+import { ArrowLeft, Globe, Video, Sparkles, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,13 +27,6 @@ const integrations = [
     description: "AI-powered video generation and creative content platform.",
     icon: Sparkles,
     path: "/integrations/higgsfield",
-  },
-  {
-    id: "ai-processor",
-    name: "AI Processor",
-    description: "Configure AI providers, models, and routing logic for processing.",
-    icon: Cpu,
-    path: "/integrations/ai-processor",
   },
   {
     id: "clickup",

@@ -2367,6 +2367,23 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Video Generation (Veo 3 / Higgsfield fallback) ============
+  {
+    type: 'function',
+    function: {
+      name: 'generate_video',
+      description: 'Generate a short AI video from a text prompt using Veo 3 (Google) with automatic fallback to Higgsfield AI if the user has it connected. Use when the user asks to create, generate, or make a video clip. Returns a public URL to the generated video (or a request_id when Higgsfield is used asynchronously).',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed description of the video to generate.' },
+          duration: { type: 'number', description: 'Video length in seconds — 5 or 10 (default 5).' },
+          aspect_ratio: { type: 'string', description: 'Aspect ratio: 16:9, 9:16, or 1:1 (default 16:9).' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
   // ============ Memory / Learning Tool ============
   {
     type: 'function',
@@ -4607,6 +4624,51 @@ async function executeToolCall(
         }
       }
 
+      case 'generate_video': {
+        try {
+          const userIdForVid = (args as Record<string, unknown>).__user_id as string;
+          if (!userIdForVid) {
+            return { success: false, result: 'Authentication required for video generation.' };
+          }
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          if (!supabaseUrl || !serviceKey) return { success: false, result: 'Video service not configured.' };
+          const prompt = args.prompt as string;
+          if (!prompt) return { success: false, result: 'prompt is required.' };
+          const resp = await fetch(`${supabaseUrl}/functions/v1/video-gen`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              prompt,
+              duration: args.duration as number | undefined,
+              aspect_ratio: args.aspect_ratio as string | undefined,
+              userId: userIdForVid,
+            }),
+          });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            return { success: false, result: `Video generation failed: ${resp.status} ${errText}` };
+          }
+          const data = await resp.json();
+          if (data?.pending && data?.request_id) {
+            return {
+              success: true,
+              result: `Video generation queued via Higgsfield (request_id: ${data.request_id}). Poll with higgsfield_get_job_status to retrieve when ready.`,
+            };
+          }
+          if (!data?.url) return { success: false, result: 'Video service returned no URL.' };
+          return {
+            success: true,
+            result: `Video generated with ${data.model}. URL: ${data.url}\n\nDisplay it to the user as: <video controls src="${data.url}"></video>`,
+          };
+        } catch (e) {
+          return { success: false, result: `Video error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       case 'save_memory': {
         try {
           const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
@@ -5756,6 +5818,9 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'higgsfield_generate_video': '_always_',
     'higgsfield_get_job_status': '_always_',
     'higgsfield_cancel_job': '_always_',
+    'generate_image': '_always_',
+    'edit_image': '_always_',
+    'generate_video': '_always_',
   };
 
   return ACTION_TOOLS.filter(tool => {
@@ -6177,7 +6242,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
