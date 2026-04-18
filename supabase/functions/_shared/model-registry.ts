@@ -6,9 +6,9 @@
 // ============================================================================
 
 export type ChatMessage = { role: string; content?: string; [k: string]: unknown };
-export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer' | 'image_artist';
+export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer' | 'image_artist' | 'video_director';
 export type RoutingMode = 'speed' | 'balanced' | 'quality';
-export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning' | 'image_gen';
+export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning' | 'image_gen' | 'video_gen';
 
 export interface ModelEntry {
   id: string;                 // Lovable AI gateway model id
@@ -165,6 +165,29 @@ export const MODEL_REGISTRY: Record<string, ModelEntry> = {
     enabled: true,
     fallback: 'google/gemini-3.1-flash-image-preview',
   },
+  // ----- Video generation -----
+  'google/veo-3-fast': {
+    id: 'google/veo-3-fast',
+    tier: 'flash',
+    costPer1kIn: 0.001,
+    costPer1kOut: 0.01,
+    avgLatencyMs: 30000,
+    contextWindow: 32_000,
+    capabilities: ['video_gen'],
+    enabled: true,
+    fallback: 'google/veo-3',
+  },
+  'google/veo-3': {
+    id: 'google/veo-3',
+    tier: 'pro',
+    costPer1kIn: 0.003,
+    costPer1kOut: 0.025,
+    avgLatencyMs: 60000,
+    contextWindow: 32_000,
+    capabilities: ['video_gen'],
+    enabled: true,
+    fallback: 'google/veo-3-fast',
+  },
 };
 
 // Per-agent specs. Defaults match current hardcoded behavior.
@@ -197,6 +220,12 @@ export const AGENT_REGISTRY: Record<AgentName, AgentSpec> = {
     defaultModel: 'google/gemini-3.1-flash-image-preview',
     requires: ['image_gen'],
     hardFallback: 'google/gemini-2.5-flash-image',
+    preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
+  },
+  video_director: {
+    defaultModel: 'google/veo-3-fast',
+    requires: ['video_gen'],
+    hardFallback: 'google/veo-3',
     preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
   },
 };
@@ -370,8 +399,13 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
       const gatewayUrl = entry?._gatewayUrl || GATEWAY_URL;
       let authKey = opts.apiKey;
       if (entry?._apiKeySecret) {
-        const fromEnv = Deno.env.get(entry._apiKeySecret);
-        if (fromEnv) authKey = fromEnv;
+        // Inline keys (per-user keys stored in custom_models) start with "inline:"
+        if (entry._apiKeySecret.startsWith('inline:')) {
+          authKey = entry._apiKeySecret.slice('inline:'.length);
+        } else {
+          const fromEnv = Deno.env.get(entry._apiKeySecret);
+          if (fromEnv) authKey = fromEnv;
+        }
       }
 
       const resp = await fetch(gatewayUrl, {
