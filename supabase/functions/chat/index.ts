@@ -4566,11 +4566,12 @@ async function executeToolCall(
       case 'edit_image': {
         try {
           const userIdForImg = (args as Record<string, unknown>).__user_id as string;
-          const userJwt = (args as Record<string, unknown>).__user_jwt as string;
-          if (!userIdForImg || !userJwt) {
+          if (!userIdForImg) {
             return { success: false, result: 'Authentication required for image generation.' };
           }
           const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          if (!supabaseUrl || !serviceKey) return { success: false, result: 'Image service not configured.' };
           const prompt = args.prompt as string;
           const imageUrl = args.image_url as string | undefined;
           const modelOverride = args.model as string | undefined;
@@ -4581,13 +4582,14 @@ async function executeToolCall(
           const resp = await fetch(`${supabaseUrl}/functions/v1/image-gen`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${userJwt}`,
+              'Authorization': `Bearer ${serviceKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               prompt,
               model: modelOverride,
               inputImageUrl: toolName === 'edit_image' ? imageUrl : undefined,
+              userId: userIdForImg,
             }),
           });
           if (!resp.ok) {
