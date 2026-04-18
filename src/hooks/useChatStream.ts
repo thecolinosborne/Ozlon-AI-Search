@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  provider?: ProviderUsedEvent;
 };
 
 /**
