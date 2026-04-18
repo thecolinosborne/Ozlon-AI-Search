@@ -6,9 +6,9 @@
 // ============================================================================
 
 export type ChatMessage = { role: string; content?: string; [k: string]: unknown };
-export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer';
+export type AgentName = 'planner' | 'executor' | 'classifier' | 'summarizer' | 'image_artist';
 export type RoutingMode = 'speed' | 'balanced' | 'quality';
-export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning';
+export type Capability = 'tools' | 'json' | 'vision' | 'long_context' | 'reasoning' | 'image_gen';
 
 export interface ModelEntry {
   id: string;                 // Lovable AI gateway model id
@@ -108,6 +108,63 @@ export const MODEL_REGISTRY: Record<string, ModelEntry> = {
     enabled: true,
     fallback: 'openai/gpt-5',
   },
+  // ----- Gemini 3.x preview line -----
+  'google/gemini-3.1-pro-preview': {
+    id: 'google/gemini-3.1-pro-preview',
+    tier: 'pro',
+    costPer1kIn: 0.0015,
+    costPer1kOut: 0.012,
+    avgLatencyMs: 1900,
+    contextWindow: 2_000_000,
+    capabilities: ['tools', 'json', 'vision', 'long_context', 'reasoning'],
+    enabled: true,
+    fallback: 'google/gemini-2.5-pro',
+  },
+  'google/gemini-3-flash-preview': {
+    id: 'google/gemini-3-flash-preview',
+    tier: 'flash',
+    costPer1kIn: 0.0004,
+    costPer1kOut: 0.003,
+    avgLatencyMs: 650,
+    contextWindow: 1_000_000,
+    capabilities: ['tools', 'json', 'vision', 'long_context'],
+    enabled: true,
+    fallback: 'google/gemini-2.5-flash',
+  },
+  // ----- Image generation / editing -----
+  'google/gemini-2.5-flash-image': {
+    id: 'google/gemini-2.5-flash-image',
+    tier: 'flash',
+    costPer1kIn: 0.0003,
+    costPer1kOut: 0.003,
+    avgLatencyMs: 4000,
+    contextWindow: 32_000,
+    capabilities: ['image_gen', 'vision'],
+    enabled: true,
+    fallback: 'google/gemini-3.1-flash-image-preview',
+  },
+  'google/gemini-3.1-flash-image-preview': {
+    id: 'google/gemini-3.1-flash-image-preview',
+    tier: 'flash',
+    costPer1kIn: 0.0004,
+    costPer1kOut: 0.004,
+    avgLatencyMs: 5000,
+    contextWindow: 32_000,
+    capabilities: ['image_gen', 'vision'],
+    enabled: true,
+    fallback: 'google/gemini-2.5-flash-image',
+  },
+  'google/gemini-3-pro-image-preview': {
+    id: 'google/gemini-3-pro-image-preview',
+    tier: 'pro',
+    costPer1kIn: 0.002,
+    costPer1kOut: 0.015,
+    avgLatencyMs: 8000,
+    contextWindow: 32_000,
+    capabilities: ['image_gen', 'vision'],
+    enabled: true,
+    fallback: 'google/gemini-3.1-flash-image-preview',
+  },
 };
 
 // Per-agent specs. Defaults match current hardcoded behavior.
@@ -134,6 +191,12 @@ export const AGENT_REGISTRY: Record<AgentName, AgentSpec> = {
     defaultModel: 'google/gemini-2.5-flash',
     requires: ['long_context'],
     hardFallback: 'google/gemini-2.5-flash-lite',
+    preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
+  },
+  image_artist: {
+    defaultModel: 'google/gemini-3.1-flash-image-preview',
+    requires: ['image_gen'],
+    hardFallback: 'google/gemini-2.5-flash-image',
     preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
   },
 };
@@ -437,3 +500,45 @@ export async function loadUserPrefs(supabase: any, userId: string): Promise<User
     return DEFAULT_PREFS;
   }
 }
+
+// ----------------------------------------------------------------------------
+// STONE SOCKET — Load user-defined custom models and merge into the registry.
+// Custom rows in `custom_models` table can override or extend MODEL_REGISTRY.
+// ----------------------------------------------------------------------------
+
+export async function loadCustomModels(supabase: any, userId: string): Promise<Record<string, ModelEntry>> {
+  if (!userId) return {};
+  try {
+    const { data, error } = await supabase
+      .from('custom_models')
+      .select('model_id, gateway_url, api_key_secret_name, context_window, cost_per_1k_in, cost_per_1k_out, avg_latency_ms, capabilities, tier, fallback_model_id, enabled')
+      .eq('user_id', userId)
+      .eq('enabled', true);
+    if (error || !data) return {};
+    const out: Record<string, ModelEntry> = {};
+    for (const row of data as any[]) {
+      out[row.model_id] = {
+        id: row.model_id,
+        tier: (row.tier as ModelEntry['tier']) || 'standard',
+        costPer1kIn: Number(row.cost_per_1k_in) || 0,
+        costPer1kOut: Number(row.cost_per_1k_out) || 0,
+        avgLatencyMs: row.avg_latency_ms || 1000,
+        contextWindow: row.context_window || 128000,
+        capabilities: (row.capabilities as Capability[]) || [],
+        enabled: true,
+        fallback: row.fallback_model_id || undefined,
+        // Custom-only fields stashed via cast for use in callWithFallback
+        ...({ _gatewayUrl: row.gateway_url, _apiKeySecret: row.api_key_secret_name } as any),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Merge static registry with user's custom models (custom overrides static). */
+export function mergeRegistry(custom: Record<string, ModelEntry>): Record<string, ModelEntry> {
+  return { ...MODEL_REGISTRY, ...custom };
+}
+

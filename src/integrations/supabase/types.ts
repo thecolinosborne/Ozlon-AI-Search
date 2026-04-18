@@ -267,6 +267,63 @@ export type Database = {
           },
         ]
       }
+      custom_models: {
+        Row: {
+          api_key_secret_name: string | null
+          avg_latency_ms: number
+          capabilities: string[]
+          context_window: number
+          cost_per_1k_in: number
+          cost_per_1k_out: number
+          created_at: string
+          display_name: string
+          enabled: boolean
+          fallback_model_id: string | null
+          gateway_url: string
+          id: string
+          model_id: string
+          tier: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key_secret_name?: string | null
+          avg_latency_ms?: number
+          capabilities?: string[]
+          context_window?: number
+          cost_per_1k_in?: number
+          cost_per_1k_out?: number
+          created_at?: string
+          display_name: string
+          enabled?: boolean
+          fallback_model_id?: string | null
+          gateway_url?: string
+          id?: string
+          model_id: string
+          tier?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key_secret_name?: string | null
+          avg_latency_ms?: number
+          capabilities?: string[]
+          context_window?: number
+          cost_per_1k_in?: number
+          cost_per_1k_out?: number
+          created_at?: string
+          display_name?: string
+          enabled?: boolean
+          fallback_model_id?: string | null
+          gateway_url?: string
+          id?: string
+          model_id?: string
+          tier?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       descript_jobs: {
         Row: {
           created_at: string

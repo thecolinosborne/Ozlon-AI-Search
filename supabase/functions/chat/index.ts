@@ -2336,6 +2336,37 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Image Generation / Editing (Gemini Nano Banana) ============
+  {
+    type: 'function',
+    function: {
+      name: 'generate_image',
+      description: 'Generate a brand-new image from a text prompt using Gemini image models (Nano Banana family). Use when the user asks for an illustration, mockup, diagram, logo, or visual concept. Returns a public URL to the generated image.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed visual description of the image to generate.' },
+          model: { type: 'string', description: 'Optional model override (e.g. google/gemini-3-pro-image-preview for higher quality).' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_image',
+      description: 'Edit an existing image based on a text instruction (e.g. "make the sky purple", "remove the background", "add a hat"). Requires both the source image URL and the editing instruction. Returns a public URL to the edited image.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Editing instruction.' },
+          image_url: { type: 'string', description: 'URL of the image to edit (https or data URL).' },
+        },
+        required: ['prompt', 'image_url'],
+      },
+    },
+  },
   // ============ Memory / Learning Tool ============
   {
     type: 'function',
@@ -4529,6 +4560,51 @@ async function executeToolCall(
           const content = searchData.choices?.[0]?.message?.content || '';
           return { success: true, result: `**Live Google SERP Results for "${keyword}":**\n\n${content}\n\nCross-reference these positions with GSC data to validate ranking accuracy.` };
         } catch (e) { return { success: false, result: `Search error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
+      }
+
+      case 'generate_image':
+      case 'edit_image': {
+        try {
+          const userIdForImg = (args as Record<string, unknown>).__user_id as string;
+          if (!userIdForImg) {
+            return { success: false, result: 'Authentication required for image generation.' };
+          }
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          if (!supabaseUrl || !serviceKey) return { success: false, result: 'Image service not configured.' };
+          const prompt = args.prompt as string;
+          const imageUrl = args.image_url as string | undefined;
+          const modelOverride = args.model as string | undefined;
+          if (!prompt) return { success: false, result: 'prompt is required.' };
+          if (toolName === 'edit_image' && !imageUrl) {
+            return { success: false, result: 'image_url is required for edit_image.' };
+          }
+          const resp = await fetch(`${supabaseUrl}/functions/v1/image-gen`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              prompt,
+              model: modelOverride,
+              inputImageUrl: toolName === 'edit_image' ? imageUrl : undefined,
+              userId: userIdForImg,
+            }),
+          });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            return { success: false, result: `Image ${toolName === 'edit_image' ? 'edit' : 'generation'} failed: ${resp.status} ${errText}` };
+          }
+          const data = await resp.json();
+          if (!data?.url) return { success: false, result: 'Image service returned no URL.' };
+          return {
+            success: true,
+            result: `Image ${toolName === 'edit_image' ? 'edited' : 'generated'} with ${data.model}. URL: ${data.url}\n\nDisplay it to the user as: ![](${data.url})`,
+          };
+        } catch (e) {
+          return { success: false, result: `Image error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
       }
 
       case 'save_memory': {
