@@ -648,31 +648,53 @@ async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?:
       'Authorization': `Bearer ${ghlApiKey}`,
       'Content-Type': 'application/json',
       'Version': '2021-07-28',
+      'Accept': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return { raw: await res.text() };
+  const payload: unknown = ct.includes('application/json')
+    ? await res.json().catch(() => ({}))
+    : { raw: await res.text() };
+  if (!res.ok) {
+    const detail = typeof payload === 'object' && payload !== null
+      ? JSON.stringify(payload).slice(0, 500)
+      : String(payload).slice(0, 500);
+    console.error(`[callGHL] ${method} ${path} failed: ${res.status} ${detail}`);
+    throw new Error(`GHL ${method} ${path} failed [${res.status}]: ${detail}`);
+  }
+  return payload;
 }
 
 async function fetchGHLData(ghlApiKey?: string, ghlLocationId?: string): Promise<string> {
   if (!ghlApiKey) return 'GoHighLevel not connected for this user.';
   if (!ghlLocationId) return 'GHL location not configured for this user.';
   const sections: string[] = [];
-  try {
-    const [contactsData, pipelinesData, calendarsData] = await Promise.all([
-      callGHL(`/contacts/?locationId=${ghlLocationId}&limit=10`, 'GET', undefined, ghlApiKey) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
-      callGHL(`/opportunities/pipelines?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
-      callGHL(`/calendars/?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ calendars?: { id: string; name: string }[] }>,
-    ]);
-    const contacts = contactsData.contacts || [];
+  const errors: string[] = [];
+  const [contactsRes, pipelinesRes, calendarsRes] = await Promise.allSettled([
+    callGHL(`/contacts/?locationId=${ghlLocationId}&limit=10`, 'GET', undefined, ghlApiKey) as Promise<{ contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] }>,
+    callGHL(`/opportunities/pipelines?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>,
+    callGHL(`/calendars/?locationId=${ghlLocationId}`, 'GET', undefined, ghlApiKey) as Promise<{ calendars?: { id: string; name: string }[] }>,
+  ]);
+  if (contactsRes.status === 'fulfilled') {
+    const contacts = contactsRes.value.contacts || [];
     if (contacts.length) sections.push(`**Recent Contacts (${contacts.length}):**\n${contacts.map(c => `- ${c.firstName || ''} ${c.lastName || ''} | ${c.email || ''} | ${c.phone || ''} | ID: ${c.id}`).join('\n')}`);
-    const pipelines = pipelinesData.pipelines || [];
+  } else {
+    errors.push(`Contacts: ${contactsRes.reason instanceof Error ? contactsRes.reason.message : String(contactsRes.reason)}`);
+  }
+  if (pipelinesRes.status === 'fulfilled') {
+    const pipelines = pipelinesRes.value.pipelines || [];
     if (pipelines.length) sections.push(`**Pipelines:**\n${pipelines.map(p => `- ${p.name} (ID: ${p.id}) — Stages: ${(p.stages || []).map(s => s.name).join(' → ')}`).join('\n')}`);
-    const calendars = calendarsData.calendars || [];
+  } else {
+    errors.push(`Pipelines: ${pipelinesRes.reason instanceof Error ? pipelinesRes.reason.message : String(pipelinesRes.reason)}`);
+  }
+  if (calendarsRes.status === 'fulfilled') {
+    const calendars = calendarsRes.value.calendars || [];
     if (calendars.length) sections.push(`**Calendars:**\n${calendars.map(c => `- ${c.name} (ID: ${c.id})`).join('\n')}`);
-  } catch (e) { sections.push(`Error: ${e instanceof Error ? e.message : 'Unknown'}`); }
+  } else {
+    errors.push(`Calendars: ${calendarsRes.reason instanceof Error ? calendarsRes.reason.message : String(calendarsRes.reason)}`);
+  }
+  if (errors.length) sections.push(`**Errors fetching some GHL data:**\n${errors.join('\n')}`);
   return sections.join('\n\n') || 'No GHL data found.';
 }
 
