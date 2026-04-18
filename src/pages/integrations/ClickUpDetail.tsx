@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { upsertIntegrationConnection, disconnectIntegration } from "@/services/integrationConnectionService";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 async function callClickUp(action: string, params?: Record<string, unknown>) {
   // Use supabase.functions.invoke so the authenticated user's JWT is automatically
@@ -39,6 +40,7 @@ async function callClickUp(action: string, params?: Record<string, unknown>) {
 const DEFAULT_TRIGGERS = ["@ai", "@pm", "@wisdom"];
 
 const ClickUpDetail = () => {
+  const { session, authLoading } = useAuth();
   const { getIntegration, setStatus, setLastSync, updateSettings, setApiKeyConfigured } =
     useIntegrationsStore();
   const integration = getIntegration("clickup");
@@ -71,51 +73,83 @@ const ClickUpDetail = () => {
   // storedSettings.apiToken is kept locally only for the masked-hint display.
   const getAuthParams = (): Record<string, unknown> => ({});
 
+  const loadConnection = useCallback(async () => {
+    if (authLoading) return;
+    if (!session) {
+      setStatus("clickup", "disconnected");
+      setApiKeyConfigured("clickup", false);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await callClickUp("test_connection", getAuthParams());
+      if (result.connected) {
+        setStatus("clickup", "connected");
+        setApiKeyConfigured("clickup", true);
+        setLastSync("clickup", new Date().toISOString());
+        updateSettings("clickup", {
+          ...storedSettings,
+          team_id: result.team_id,
+          list_id: result.list_id,
+        });
+        try {
+          const config = await callClickUp("get_config", getAuthParams());
+          if (config) {
+            setWebhookStatus(config.webhook_status || "not_registered");
+            setAutoReplyEnabled(config.auto_reply_enabled ?? true);
+            setReplyMode(config.ai_reply_mode || "standard");
+            if (config.custom_triggers?.length > 0) {
+              setTriggers(config.custom_triggers);
+            }
+          }
+        } catch {
+          /* best effort */
+        }
+      } else {
+        setStatus("clickup", "disconnected");
+        setApiKeyConfigured("clickup", false);
+      }
+    } catch {
+      setStatus("clickup", "disconnected");
+      setApiKeyConfigured("clickup", false);
+    } finally {
+      setLoading(false);
+    }
+  }, [authLoading, session, setApiKeyConfigured, setLastSync, setStatus, storedSettings, updateSettings]);
+
   // Check connection on mount
   useEffect(() => {
-    const check = async () => {
-      try {
-        const result = await callClickUp("test_connection", getAuthParams());
-        if (result.connected) {
-          setStatus("clickup", "connected");
-          setApiKeyConfigured("clickup", true);
-          setLastSync("clickup", new Date().toISOString());
-          updateSettings("clickup", {
-            ...storedSettings,
-            team_id: result.team_id,
-            list_id: result.list_id,
-          });
-          // Load config
-          try {
-            const config = await callClickUp("get_config", getAuthParams());
-            if (config) {
-              setWebhookStatus(config.webhook_status || "not_registered");
-              setAutoReplyEnabled(config.auto_reply_enabled ?? true);
-              setReplyMode(config.ai_reply_mode || "standard");
-              if (config.custom_triggers?.length > 0) {
-                setTriggers(config.custom_triggers);
-              }
-            }
-          } catch { /* config load is best-effort */ }
-        }
-      } catch {
-        // stays disconnected
-      } finally {
-        setLoading(false);
-      }
-    };
-    check();
-  }, []);
+    void loadConnection();
+  }, [loadConnection]);
 
   const handleSaveApiToken = async (token: string) => {
     setSavingKey(true);
     try {
       await upsertIntegrationConnection("clickup", { api_key: token });
+      const result = await callClickUp("connect", getAuthParams());
+      if (!result.connected) {
+        setStatus("clickup", "error");
+        toast.error("Connection failed — check your API token");
+        return false;
+      }
       updateSettings("clickup", { ...storedSettings, apiToken: token });
+      setStatus("clickup", "connected");
       setApiKeyConfigured("clickup", true);
-      toast.success("API Token saved to your account");
+      setLastSync("clickup", new Date().toISOString());
+      updateSettings("clickup", {
+        ...storedSettings,
+        apiToken: token,
+        team_id: result.team_id,
+        list_id: result.list_id,
+      });
+      toast.success("ClickUp connected");
+      return true;
     } catch (err) {
+      setStatus("clickup", "error");
       toast.error((err as Error).message);
+      return false;
     } finally {
       setSavingKey(false);
     }
@@ -136,9 +170,11 @@ const ClickUpDetail = () => {
         });
         toast.success("ClickUp connected");
       } else {
+        setStatus("clickup", "error");
         toast.error("Connection failed — check your API token");
       }
     } catch (err) {
+      setStatus("clickup", "error");
       toast.error((err as Error).message);
     } finally {
       setTesting(false);
@@ -300,6 +336,21 @@ const ClickUpDetail = () => {
 
   const isConnected = integration.status === "connected";
   const isWebhookRegistered = webhookStatus === "registered" || webhookStatus === "active";
+
+  if (loading || authLoading) {
+    return (
+      <IntegrationDetailLayout
+        name="ClickUp"
+        description="AI Project Manager inside ClickUp task comments"
+        icon={CheckSquare}
+        status={integration.status}
+      >
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+        </div>
+      </IntegrationDetailLayout>
+    );
+  }
 
   return (
     <IntegrationDetailLayout
