@@ -2367,6 +2367,23 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Video Generation (Veo 3 / Higgsfield fallback) ============
+  {
+    type: 'function',
+    function: {
+      name: 'generate_video',
+      description: 'Generate a short AI video from a text prompt using Veo 3 (Google) with automatic fallback to Higgsfield AI if the user has it connected. Use when the user asks to create, generate, or make a video clip. Returns a public URL to the generated video (or a request_id when Higgsfield is used asynchronously).',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed description of the video to generate.' },
+          duration: { type: 'number', description: 'Video length in seconds — 5 or 10 (default 5).' },
+          aspect_ratio: { type: 'string', description: 'Aspect ratio: 16:9, 9:16, or 1:1 (default 16:9).' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
   // ============ Memory / Learning Tool ============
   {
     type: 'function',
