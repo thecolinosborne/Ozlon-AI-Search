@@ -2336,6 +2336,37 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Image Generation / Editing (Gemini Nano Banana) ============
+  {
+    type: 'function',
+    function: {
+      name: 'generate_image',
+      description: 'Generate a brand-new image from a text prompt using Gemini image models (Nano Banana family). Use when the user asks for an illustration, mockup, diagram, logo, or visual concept. Returns a public URL to the generated image.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed visual description of the image to generate.' },
+          model: { type: 'string', description: 'Optional model override (e.g. google/gemini-3-pro-image-preview for higher quality).' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_image',
+      description: 'Edit an existing image based on a text instruction (e.g. "make the sky purple", "remove the background", "add a hat"). Requires both the source image URL and the editing instruction. Returns a public URL to the edited image.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Editing instruction.' },
+          image_url: { type: 'string', description: 'URL of the image to edit (https or data URL).' },
+        },
+        required: ['prompt', 'image_url'],
+      },
+    },
+  },
   // ============ Memory / Learning Tool ============
   {
     type: 'function',
