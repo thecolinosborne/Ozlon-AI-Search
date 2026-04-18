@@ -111,15 +111,15 @@ const PersonalitySettings = () => {
     setSaving(true);
     const payload = {
       user_id: user.id,
-      identity: { statement: identityStatement.trim() },
+      identity: { statement: identityStatement.trim() } as unknown as Record<string, unknown>,
       about_me: aboutMe.trim() || null,
       house_rules: houseRules.filter(r => r.trim()),
-      tone_settings: tone,
+      tone_settings: tone as unknown as Record<string, unknown>,
       reference_persona: referencePersona.trim() || null,
     };
     const { error } = await supabase
       .from("user_personality")
-      .upsert(payload, { onConflict: "user_id" });
+      .upsert([payload], { onConflict: "user_id" });
     setSaving(false);
     if (error) {
       console.error("[Personality] save error", error);
