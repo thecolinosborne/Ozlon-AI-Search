@@ -146,7 +146,7 @@ async function resolveTeamId(
   return { teamId: teams[0].id, teams };
 }
 
-async function getListId(params?: Record<string, unknown>): Promise<string> {
+async function getListId(params?: Record<string, unknown>, resolvedToken?: string): Promise<string> {
   // Priority: explicit param → defaultListId param → DB config → env var → auto-discover
   if (params?.listId) return String(params.listId);
   if (params?.defaultListId) return String(params.defaultListId);
@@ -169,9 +169,10 @@ async function getListId(params?: Record<string, unknown>): Promise<string> {
   const envList = Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
   if (envList) return envList;
 
-  // Auto-discover: get first list from first space
+  // Auto-discover: get first list from first space.
+  // Prefer the already-resolved per-user token; fall back to env-only getToken.
   try {
-    const token = getToken(params?.apiToken as string | undefined);
+    const token = resolvedToken || getToken(params?.apiToken as string | undefined);
     const { teamId } = await resolveTeamId(token, params?.teamId as string | undefined);
     const spacesRes = await fetch(`${CLICKUP_BASE}/team/${teamId}/space?archived=false`, {
       headers: { 'Authorization': token },
@@ -643,8 +644,8 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params);
-        if (!listId) throw new Error('listId required (no default list configured)');
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken);
+        if (!listId) throw new Error('No ClickUp list configured. Ask the user to either pick a default list in Integrations → ClickUp, or call list_clickup_spaces / list_clickup_lists to choose one and pass listId explicitly.');
         const {
           name, description, priority, status, due_date, due_date_time,
           start_date, start_date_time, assignees, tags, parent,
@@ -668,7 +669,7 @@ serve(async (req) => {
 
       case 'list_tasks': {
         // If listId provided, scope to that list; otherwise search whole workspace
-        const listId = params?.listId ? String(params.listId) : await getListId(params).catch(() => '');
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken).catch(() => '');
         if (listId) {
           const qs = new URLSearchParams();
           if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
@@ -743,7 +744,7 @@ serve(async (req) => {
             listId = parentTask?.list?.id || '';
           } catch { /* fall through */ }
         }
-        if (!listId) listId = await getListId(params);
+        if (!listId) listId = await getListId(params, resolvedToken);
         if (!listId) throw new Error('Could not resolve listId for subtask — provide listId or ensure parent task is accessible');
         const { name, description, parentId: _pid, parent: _p, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', {
@@ -980,7 +981,7 @@ serve(async (req) => {
 
       // ============ CUSTOM FIELDS ============
       case 'get_custom_fields': {
-        const listId = params?.listId || await getListId(params);
+        const listId = params?.listId || await getListId(params, resolvedToken);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}/field`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1048,7 +1049,7 @@ serve(async (req) => {
 
       // ============ LIST STATUSES ============
       case 'get_list_statuses': {
-        const listId = params?.listId || await getListId(params);
+        const listId = params?.listId || await getListId(params, resolvedToken);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}`);
         return new Response(JSON.stringify({ statuses: data.statuses || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
