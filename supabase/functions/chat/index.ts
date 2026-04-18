@@ -6175,7 +6175,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
