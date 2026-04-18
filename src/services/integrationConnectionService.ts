@@ -37,12 +37,24 @@ export async function upsertIntegrationConnection(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  const { data: existing } = await supabase
+  // Defensive read: if multiple rows somehow exist for one (user, provider), reuse the newest
+  // and skip creating yet another duplicate. The new unique index prevents future duplicates.
+  const { data: existingRows } = await supabase
     .from("integration_connections")
-    .select("id, metadata")
+    .select("id, metadata, updated_at")
     .eq("user_id", user.id)
     .eq("provider", provider)
-    .maybeSingle();
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  const existing = existingRows?.[0];
+
+  // Trim any whitespace/newlines from incoming string secret values to avoid "Token invalid" caused by
+  // a stray space/newline pasted with the token. Operates on top-level string values only.
+  const cleanedMetadata: Record<string, unknown> = { ...metadata };
+  for (const [k, v] of Object.entries(cleanedMetadata)) {
+    if (typeof v === "string") cleanedMetadata[k] = v.trim();
+  }
+  metadata = cleanedMetadata;
 
   let connectionId: string;
 

@@ -99,13 +99,16 @@ async function resolveClickUpToken(req: Request, tokenOverride?: string): Promis
       if (user) {
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminClient = createClient(supabaseUrl, serviceKey);
-        const { data: conn } = await adminClient
+        // Defensive: if duplicate rows exist for this user+provider, always pick the most recently
+        // updated one. Avoids "Token invalid" errors caused by stale rows surviving a key rotation.
+        const { data: conns } = await adminClient
           .from('integration_connections')
-          .select('id, metadata')
+          .select('id, metadata, status, updated_at')
           .eq('user_id', user.id)
           .eq('provider', 'clickup')
-          .eq('status', 'connected')
-          .single();
+          .order('updated_at', { ascending: false })
+          .limit(5);
+        const conn = (conns || []).find((c) => c.status === 'connected') || (conns || [])[0];
 
         if (conn?.id) {
           // 1. Vault-first
