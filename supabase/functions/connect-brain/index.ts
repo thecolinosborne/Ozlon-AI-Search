@@ -1,16 +1,8 @@
 // ============================================================================
-// CONNECT-BRAIN — Plug a new LLM provider into the user's Infinity Router.
-// Stores the API key as a Supabase secret-style env var (via custom_models row)
-// and inserts a custom_models entry that mergeRegistry() will pick up on the
-// next chat request.
-//
-// Note on secret storage: Supabase doesn't allow runtime creation of project
-// secrets from edge functions. Instead, we store the key encrypted in
-// `integration_credentials` (per-user, AES-GCM via the existing pgcrypto
-// helpers) and reference it via `api_key_secret_name = 'custom_brain:<id>'`.
-// The router's callWithFallback already supports `_apiKeySecret`, but for
-// per-user keys we resolve them at call time via a sibling lookup in
-// model-registry.ts (loadCustomModels embeds the encrypted key inline).
+// CONNECT-BRAIN — Plug whole AI platforms into the Infinity Router.
+// One API key per platform, but we expand it into multiple custom_models rows
+// (one per model the platform offers) all tagged with metadata.platform_id so
+// disconnect can wipe them in one shot.
 // ============================================================================
 
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
@@ -22,12 +14,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Provider presets — frontend just sends preset_id + api_key.
-// gateway_url, capabilities, tier, etc. are all server-side trusted.
-const PRESETS: Record<string, {
+interface ModelDef {
   model_id: string;
   display_name: string;
-  gateway_url: string;
   capabilities: string[];
   tier: string;
   context_window: number;
@@ -35,60 +24,91 @@ const PRESETS: Record<string, {
   cost_per_1k_out: number;
   avg_latency_ms: number;
   fallback_model_id: string | null;
-}> = {
-  xai: {
-    model_id: "xai/grok-4",
-    display_name: "Grok 4",
-    gateway_url: "https://api.x.ai/v1/chat/completions",
-    capabilities: ["tools", "json", "reasoning"],
-    tier: "standard",
-    context_window: 256_000,
-    cost_per_1k_in: 0.005,
-    cost_per_1k_out: 0.015,
-    avg_latency_ms: 1500,
-    fallback_model_id: "openai/gpt-5",
+}
+
+interface PlatformPreset {
+  id: string;
+  label: string;
+  blurb: string;
+  capabilities: string[];        // platform-level summary (text/image/video/tools/voice)
+  gateway_url: string;
+  models: ModelDef[];            // each becomes one custom_models row
+}
+
+const PLATFORMS: Record<string, PlatformPreset> = {
+  gemini: {
+    id: "gemini",
+    label: "Gemini",
+    blurb: "Google's multimodal family — text, image, and video in one key.",
+    capabilities: ["text", "image", "video", "tools"],
+    gateway_url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    models: [
+      { model_id: "google/gemini-2.5-pro", display_name: "Gemini 2.5 Pro", capabilities: ["tools","json","vision","long_context","reasoning"], tier: "pro", context_window: 2_000_000, cost_per_1k_in: 0.00125, cost_per_1k_out: 0.01, avg_latency_ms: 1800, fallback_model_id: "google/gemini-2.5-flash" },
+      { model_id: "google/gemini-2.5-flash", display_name: "Gemini 2.5 Flash", capabilities: ["tools","json","vision","long_context"], tier: "flash", context_window: 1_000_000, cost_per_1k_in: 0.0003, cost_per_1k_out: 0.0025, avg_latency_ms: 700, fallback_model_id: "google/gemini-2.5-pro" },
+      { model_id: "google/gemini-3-pro-image-preview", display_name: "Gemini 3 Pro (image)", capabilities: ["image_gen","vision"], tier: "pro", context_window: 32_000, cost_per_1k_in: 0.002, cost_per_1k_out: 0.015, avg_latency_ms: 8000, fallback_model_id: null },
+      { model_id: "google/veo-3-fast", display_name: "Veo 3 Fast", capabilities: ["video_gen"], tier: "flash", context_window: 32_000, cost_per_1k_in: 0.001, cost_per_1k_out: 0.01, avg_latency_ms: 30000, fallback_model_id: null },
+    ],
+  },
+  openai: {
+    id: "openai",
+    label: "OpenAI",
+    blurb: "GPT-5 family — strong tool use and reasoning.",
+    capabilities: ["text", "tools", "voice"],
+    gateway_url: "https://api.openai.com/v1/chat/completions",
+    models: [
+      { model_id: "openai/gpt-5", display_name: "GPT-5", capabilities: ["tools","json","vision","reasoning"], tier: "standard", context_window: 400_000, cost_per_1k_in: 0.005, cost_per_1k_out: 0.02, avg_latency_ms: 1500, fallback_model_id: "openai/gpt-5-mini" },
+      { model_id: "openai/gpt-5-mini", display_name: "GPT-5 Mini", capabilities: ["tools","json","reasoning"], tier: "flash", context_window: 256_000, cost_per_1k_in: 0.0008, cost_per_1k_out: 0.0032, avg_latency_ms: 900, fallback_model_id: "openai/gpt-5-nano" },
+      { model_id: "openai/gpt-5-nano", display_name: "GPT-5 Nano", capabilities: ["tools","json"], tier: "nano", context_window: 256_000, cost_per_1k_in: 0.0002, cost_per_1k_out: 0.0008, avg_latency_ms: 500, fallback_model_id: null },
+    ],
   },
   anthropic: {
-    model_id: "anthropic/claude-opus-4",
-    display_name: "Claude Opus 4",
+    id: "anthropic",
+    label: "Claude",
+    blurb: "Anthropic's deep-reasoning, long-context model.",
+    capabilities: ["text", "tools"],
     gateway_url: "https://api.anthropic.com/v1/messages",
-    capabilities: ["tools", "json", "vision", "reasoning", "long_context"],
-    tier: "pro",
-    context_window: 200_000,
-    cost_per_1k_in: 0.015,
-    cost_per_1k_out: 0.075,
-    avg_latency_ms: 1800,
-    fallback_model_id: "openai/gpt-5",
+    models: [
+      { model_id: "anthropic/claude-opus-4", display_name: "Claude Opus 4", capabilities: ["tools","json","vision","reasoning","long_context"], tier: "pro", context_window: 200_000, cost_per_1k_in: 0.015, cost_per_1k_out: 0.075, avg_latency_ms: 1800, fallback_model_id: "anthropic/claude-sonnet-4" },
+      { model_id: "anthropic/claude-sonnet-4", display_name: "Claude Sonnet 4", capabilities: ["tools","json","vision","reasoning","long_context"], tier: "standard", context_window: 200_000, cost_per_1k_in: 0.003, cost_per_1k_out: 0.015, avg_latency_ms: 1300, fallback_model_id: null },
+    ],
+  },
+  xai: {
+    id: "xai",
+    label: "Grok",
+    blurb: "xAI's witty, real-time reasoning model.",
+    capabilities: ["text", "tools"],
+    gateway_url: "https://api.x.ai/v1/chat/completions",
+    models: [
+      { model_id: "xai/grok-4", display_name: "Grok 4", capabilities: ["tools","json","reasoning"], tier: "standard", context_window: 256_000, cost_per_1k_in: 0.005, cost_per_1k_out: 0.015, avg_latency_ms: 1500, fallback_model_id: null },
+    ],
   },
   mistral: {
-    model_id: "mistral/mistral-large-latest",
-    display_name: "Mistral Large",
+    id: "mistral",
+    label: "Mistral",
+    blurb: "European open-weights frontier model.",
+    capabilities: ["text", "tools"],
     gateway_url: "https://api.mistral.ai/v1/chat/completions",
-    capabilities: ["tools", "json", "reasoning"],
-    tier: "standard",
-    context_window: 128_000,
-    cost_per_1k_in: 0.002,
-    cost_per_1k_out: 0.006,
-    avg_latency_ms: 1200,
-    fallback_model_id: "google/gemini-2.5-pro",
+    models: [
+      { model_id: "mistral/mistral-large-latest", display_name: "Mistral Large", capabilities: ["tools","json","reasoning"], tier: "standard", context_window: 128_000, cost_per_1k_in: 0.002, cost_per_1k_out: 0.006, avg_latency_ms: 1200, fallback_model_id: null },
+    ],
   },
   deepseek: {
-    model_id: "deepseek/deepseek-chat",
-    display_name: "DeepSeek Chat",
+    id: "deepseek",
+    label: "DeepSeek",
+    blurb: "Cost-efficient reasoning model.",
+    capabilities: ["text", "tools"],
     gateway_url: "https://api.deepseek.com/v1/chat/completions",
-    capabilities: ["tools", "json", "reasoning"],
-    tier: "flash",
-    context_window: 128_000,
-    cost_per_1k_in: 0.00014,
-    cost_per_1k_out: 0.00028,
-    avg_latency_ms: 1000,
-    fallback_model_id: "google/gemini-2.5-flash",
+    models: [
+      { model_id: "deepseek/deepseek-chat", display_name: "DeepSeek Chat", capabilities: ["tools","json","reasoning"], tier: "flash", context_window: 128_000, cost_per_1k_in: 0.00014, cost_per_1k_out: 0.00028, avg_latency_ms: 1000, fallback_model_id: null },
+    ],
   },
 };
 
 interface ReqBody {
-  action: "connect" | "list_presets";
-  preset_id?: keyof typeof PRESETS;
+  action: "connect" | "disconnect" | "list_presets" | "list_status";
+  platform_id?: string;
+  // legacy alias
+  preset_id?: string;
   api_key?: string;
 }
 
@@ -102,107 +122,160 @@ serve(async (req) => {
 
     const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Unauthorized" }, 401);
     }
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (userErr || !userData?.user) return json({ error: "Invalid token" }, 401);
     const userId = userData.user.id;
 
     const body = (await req.json().catch(() => ({}))) as ReqBody;
+    const platformId = body.platform_id || body.preset_id;
+    const admin = createClient(supabaseUrl, serviceKey);
 
-    if (body.action === "list_presets" || !body.action) {
-      return new Response(
-        JSON.stringify({
-          presets: Object.entries(PRESETS).map(([id, p]) => ({
-            id,
-            label: p.display_name,
-            model_id: p.model_id,
-            capabilities: p.capabilities,
-          })),
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+    // ---------------- list_presets ----------------
+    if (body.action === "list_presets") {
+      return json({
+        platforms: Object.values(PLATFORMS).map((p) => ({
+          id: p.id, label: p.label, blurb: p.blurb, capabilities: p.capabilities,
+        })),
+      });
     }
 
+    // ---------------- list_status ----------------
+    if (body.action === "list_status" || !body.action) {
+      const { data: rows } = await admin
+        .from("custom_models")
+        .select("model_id, api_key_secret_name, metadata")
+        .eq("user_id", userId);
+      const byPlatform = new Map<string, { last4: string }>();
+      for (const r of (rows || []) as Array<{ model_id: string; api_key_secret_name: string | null; metadata: Record<string, unknown> | null }>) {
+        const pid = (r.metadata?.platform_id as string) || inferPlatformIdFromModelId(r.model_id);
+        if (!pid) continue;
+        const secret = r.api_key_secret_name || "";
+        const last4 = secret.startsWith("inline:") ? secret.slice(-4) : "••••";
+        byPlatform.set(pid, { last4 });
+      }
+      // Higgsfield is special — stored in integration_connections
+      const { data: hf } = await admin
+        .from("integration_connections")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("provider", "higgsfield")
+        .eq("status", "connected")
+        .maybeSingle();
+
+      const status = Object.values(PLATFORMS).map((p) => {
+        const c = byPlatform.get(p.id);
+        return {
+          id: p.id,
+          label: p.label,
+          blurb: p.blurb,
+          capabilities: p.capabilities,
+          connected: !!c,
+          last4: c?.last4 || null,
+        };
+      });
+      // Append higgsfield virtual entry
+      status.push({
+        id: "higgsfield",
+        label: "Higgsfield AI",
+        blurb: "Cinematic AI video & image generation.",
+        capabilities: ["video", "image"],
+        connected: !!hf,
+        last4: hf ? "••••" : null,
+      });
+      return json({ platforms: status });
+    }
+
+    // ---------------- connect ----------------
     if (body.action === "connect") {
-      if (!body.preset_id || !PRESETS[body.preset_id]) {
-        return new Response(JSON.stringify({ error: "Unknown provider preset" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      if (!platformId || !PLATFORMS[platformId]) {
+        return json({ error: "Unknown platform" }, 400);
       }
       if (!body.api_key || body.api_key.length < 8) {
-        return new Response(JSON.stringify({ error: "API key required (min 8 chars)" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return json({ error: "API key required (min 8 chars)" }, 400);
       }
 
-      const preset = PRESETS[body.preset_id];
-      const admin = createClient(supabaseUrl, serviceKey);
-
-      // Store the API key in custom_models.api_key_secret_name as a sentinel,
-      // and stash the actual encrypted key in metadata via a parallel
-      // integration_credentials row (reusing existing AES helpers).
-      // For simplicity and zero schema changes, we store the API key
-      // directly into the custom_models row by using the api_key_secret_name
-      // column to point at an inline-stored value with prefix "inline:".
-      //
-      // Router resolution: callWithFallback reads `_apiKeySecret`. If it
-      // begins with "inline:", we treat the rest as the literal key.
-      // (See model-registry.ts loadCustomModels — we now embed the key in
-      // _apiKeySecret with the inline: prefix so the runtime can use it.)
+      const platform = PLATFORMS[platformId];
       const inlineSecret = `inline:${body.api_key}`;
 
-      const { error: upErr } = await admin.from("custom_models").upsert(
-        {
-          user_id: userId,
-          model_id: preset.model_id,
-          display_name: preset.display_name,
-          gateway_url: preset.gateway_url,
-          api_key_secret_name: inlineSecret,
-          context_window: preset.context_window,
-          cost_per_1k_in: preset.cost_per_1k_in,
-          cost_per_1k_out: preset.cost_per_1k_out,
-          avg_latency_ms: preset.avg_latency_ms,
-          capabilities: preset.capabilities,
-          tier: preset.tier,
-          fallback_model_id: preset.fallback_model_id,
-          enabled: true,
-        },
-        { onConflict: "user_id,model_id" },
-      );
+      // Wipe any existing rows for this platform first (so we don't leave stale models behind)
+      await admin
+        .from("custom_models")
+        .delete()
+        .eq("user_id", userId)
+        .eq("metadata->>platform_id", platform.id);
 
-      if (upErr) {
-        return new Response(JSON.stringify({ error: upErr.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      const rows = platform.models.map((m) => ({
+        user_id: userId,
+        model_id: m.model_id,
+        display_name: m.display_name,
+        gateway_url: platform.gateway_url,
+        api_key_secret_name: inlineSecret,
+        context_window: m.context_window,
+        cost_per_1k_in: m.cost_per_1k_in,
+        cost_per_1k_out: m.cost_per_1k_out,
+        avg_latency_ms: m.avg_latency_ms,
+        capabilities: m.capabilities,
+        tier: m.tier,
+        fallback_model_id: m.fallback_model_id,
+        enabled: true,
+        metadata: { platform_id: platform.id },
+      }));
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          model_id: preset.model_id,
-          display_name: preset.display_name,
-          last4: body.api_key.slice(-4),
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      const { error: upErr } = await admin
+        .from("custom_models")
+        .upsert(rows, { onConflict: "user_id,model_id" });
+
+      if (upErr) return json({ error: upErr.message }, 500);
+
+      return json({
+        success: true,
+        platform_id: platform.id,
+        label: platform.label,
+        capabilities: platform.capabilities,
+        last4: body.api_key.slice(-4),
+      });
     }
 
-    return new Response(JSON.stringify({ error: "Unknown action" }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // ---------------- disconnect ----------------
+    if (body.action === "disconnect") {
+      if (!platformId) return json({ error: "platform_id required" }, 400);
+      if (!PLATFORMS[platformId]) return json({ error: "Unknown platform" }, 400);
+
+      const { error: delErr } = await admin
+        .from("custom_models")
+        .delete()
+        .eq("user_id", userId)
+        .eq("metadata->>platform_id", platformId);
+
+      if (delErr) return json({ error: delErr.message }, 500);
+      return json({ success: true, platform_id: platformId });
+    }
+
+    return json({ error: "Unknown action" }, 400);
   } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
+
+function json(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function inferPlatformIdFromModelId(modelId: string): string | null {
+  const prefix = modelId.split("/")[0];
+  if (prefix === "google") return "gemini";
+  if (prefix === "openai") return "openai";
+  if (prefix === "anthropic") return "anthropic";
+  if (prefix === "xai") return "xai";
+  if (prefix === "mistral") return "mistral";
+  if (prefix === "deepseek") return "deepseek";
+  return null;
+}
