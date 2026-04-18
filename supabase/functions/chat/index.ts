@@ -7134,11 +7134,22 @@ Execute these in order. Be decisive — the user has already been shown this pla
 
             // Emit which brain handled this turn (for UI attribution)
             try {
-              const usedModel = (result as any).modelUsed || modelConfig.name;
-              const isInline = !!(gauntletRegistry as any)?.[usedModel]?._apiKeySecret?.toString().startsWith('inline:');
+              const usedModel = modelConfig.name;
+              let source: 'your_key' | 'ozlon' = 'ozlon';
+              if (credUserId) {
+                const { createClient: ccProv } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminProv = ccProv(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                const { data: row } = await adminProv
+                  .from('custom_models')
+                  .select('api_key_secret_name')
+                  .eq('user_id', credUserId)
+                  .eq('model_id', usedModel)
+                  .maybeSingle();
+                if (row?.api_key_secret_name?.startsWith('inline:')) source = 'your_key';
+              }
               await writer.write(encoder.encode(`event: provider_used\ndata: ${JSON.stringify({
                 model: usedModel,
-                source: isInline ? 'your_key' : 'ozlon',
+                source,
                 platform: inferPlatformFromModel(usedModel),
               })}\n\n`));
             } catch { /* best-effort */ }
