@@ -6889,6 +6889,54 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
             }
 
+            // PHASE 3 — Planner pass (two-pass agentic routing).
+            // Cheap planner produces a structured plan; integrations feed the prioritizer
+            // (Tier A signal), steps stream to the UI, and the plan is appended to the
+            // system message so the executor follows it. Any failure falls back silently.
+            const heuristicIntents = detectServiceIntents(messages);
+            let mergedIntents = heuristicIntents;
+            let planTaskId: string | null = null;
+            const plannerStart = Date.now();
+            if (!shouldSkipPlanner(userText)) {
+              const plan = await runPlannerPass(apiKey, userText, null);
+              console.log(`[Planner] ${Date.now() - plannerStart}ms ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
+              if (plan) {
+                const planIntents = planToServiceIntents(plan);
+                mergedIntents = [...new Set([...planIntents, ...heuristicIntents])];
+
+                if (plan.steps.length > 0) {
+                  planTaskId = crypto.randomUUID();
+                  for (const step of plan.steps) {
+                    try {
+                      await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify({
+                        taskId: planTaskId,
+                        title: plan.intent || 'Planning',
+                        step,
+                        status: 'in_progress',
+                      })}\n\n`));
+                    } catch { /* stream closed */ }
+                  }
+                }
+
+                if (plan.intent || plan.steps.length > 0) {
+                  const planText = `\n\n# Execution plan (from planner)
+Intent: ${plan.intent}
+Steps:
+${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+Execute these in order. Be decisive — the user has already been shown this plan.`;
+                  const sysIdx = openAIMessages.findIndex(m => m.role === 'system');
+                  if (sysIdx >= 0) {
+                    openAIMessages[sysIdx] = {
+                      ...openAIMessages[sysIdx],
+                      content: (openAIMessages[sysIdx].content || '') + planText,
+                    };
+                  }
+                }
+              }
+            } else {
+              console.log('[Planner] skipped (chitchat fast-path)');
+            }
+
             const result = await runToolLoop(
               modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
               async (event) => {
@@ -6900,8 +6948,20 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               aliasMap,
               wisdomUserId,
               { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
-              detectServiceIntents(messages),
+              mergedIntents,
             );
+
+            // Mark the planner task complete once the executor returns.
+            if (planTaskId) {
+              try {
+                await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify({
+                  taskId: planTaskId,
+                  title: 'Plan complete',
+                  step: 'Plan executed',
+                  status: 'done',
+                })}\n\n`));
+              } catch { /* stream closed */ }
+            }
 
             // Write final content as SSE
             await writer.write(encoder.encode(`data: ${JSON.stringify({
