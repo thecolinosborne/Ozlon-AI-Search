@@ -30,7 +30,10 @@ interface PlatformPreset {
   id: string;
   label: string;
   blurb: string;
+  human_blurb: string;           // friendly one-liner for consumer UI
   capabilities: string[];        // platform-level summary (text/image/video/tools/voice)
+  console_url: string;           // where user gets a key
+  key_prefix: string;            // expected prefix like "AIza" or "sk-"
   gateway_url: string;
   models: ModelDef[];            // each becomes one custom_models row
 }
