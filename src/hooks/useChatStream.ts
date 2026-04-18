@@ -245,6 +245,14 @@ export function useChatStream({
               updateStep(update.taskId, update.step, "error");
             }
           },
+          onProviderUsed: (info) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, provider: info } : m
+              )
+            );
+          },
           onDone: () => {
             if (!isCurrentRequest()) return;
             outcome = "success";
