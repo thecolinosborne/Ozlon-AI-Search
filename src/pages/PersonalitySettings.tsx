@@ -119,7 +119,8 @@ const PersonalitySettings = () => {
     };
     const { error } = await supabase
       .from("user_personality")
-      .upsert([payload], { onConflict: "user_id" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .upsert(payload as any, { onConflict: "user_id" });
     setSaving(false);
     if (error) {
       console.error("[Personality] save error", error);
