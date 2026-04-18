@@ -57,8 +57,19 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
           ) : isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
           ) : (
-            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0">
-              <ReactMarkdown>{message.text}</ReactMarkdown>
+            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-a:text-primary prose-a:underline hover:prose-a:opacity-80 break-words">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children, ...props }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
+                {linkifyPlainUrls(message.text)}
+              </ReactMarkdown>
             </div>
           )}
         </div>
