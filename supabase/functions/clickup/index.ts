@@ -644,8 +644,8 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params);
-        if (!listId) throw new Error('listId required (no default list configured)');
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken);
+        if (!listId) throw new Error('No ClickUp list configured. Ask the user to either pick a default list in Integrations → ClickUp, or call list_clickup_spaces / list_clickup_lists to choose one and pass listId explicitly.');
         const {
           name, description, priority, status, due_date, due_date_time,
           start_date, start_date_time, assignees, tags, parent,
@@ -669,7 +669,7 @@ serve(async (req) => {
 
       case 'list_tasks': {
         // If listId provided, scope to that list; otherwise search whole workspace
-        const listId = params?.listId ? String(params.listId) : await getListId(params).catch(() => '');
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken).catch(() => '');
         if (listId) {
           const qs = new URLSearchParams();
           if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
