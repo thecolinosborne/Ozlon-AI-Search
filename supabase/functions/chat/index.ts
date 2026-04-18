@@ -5173,6 +5173,54 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ Higgsfield AI Handlers (delegate to higgsfield edge function) ============
+      case 'higgsfield_generate_image':
+      case 'higgsfield_generate_video':
+      case 'higgsfield_get_job_status':
+      case 'higgsfield_cancel_job': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const a = args as Record<string, unknown>;
+          const actionMap: Record<string, string> = {
+            'higgsfield_generate_image': 'generate_image',
+            'higgsfield_generate_video': 'generate_video',
+            'higgsfield_get_job_status': 'get_job_status',
+            'higgsfield_cancel_job': 'cancel_job',
+          };
+          const params: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(a)) {
+            if (k.startsWith('__') || v === undefined) continue;
+            params[k] = v;
+          }
+          const res = await fetch(`${supabaseUrl}/functions/v1/higgsfield`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: actionMap[toolName], params }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.success === false) {
+            return { success: false, result: `Higgsfield error: ${data?.error || JSON.stringify(data).slice(0, 400)}` };
+          }
+          const d = data?.data || {};
+          if (toolName === 'higgsfield_generate_image' || toolName === 'higgsfield_generate_video') {
+            const reqId = d.request_id || d.id || 'unknown';
+            return { success: true, result: `Generation started (request_id: ${reqId}). Use higgsfield_get_job_status to poll for completion.` };
+          }
+          if (toolName === 'higgsfield_get_job_status') {
+            const status = d.status || 'unknown';
+            const output = d.result?.url || d.output_url || d.url || (Array.isArray(d.result) ? d.result[0]?.url : null);
+            return { success: true, result: `Status: ${status}${output ? `\nOutput: ${output}` : ''}\n\nFull: ${JSON.stringify(d).slice(0, 600)}` };
+          }
+          if (toolName === 'higgsfield_cancel_job') {
+            return { success: true, result: d.cancelled ? 'Job cancelled.' : `Result: ${JSON.stringify(d).slice(0, 200)}` };
+          }
+          return { success: true, result: JSON.stringify(d).slice(0, 600) };
+        } catch (e) {
+          return { success: false, result: `Higgsfield error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       // ============ YouTube Upload Handler (delegates to youtube edge function) ============
       case 'upload_youtube_video': {
         try {
