@@ -1,261 +1,288 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Scale, Sparkles, Activity, Plus, Trash2, Gem } from "lucide-react";
+import { ArrowLeft, Plus, Check, Loader2, Trash2, ExternalLink, Brain, Sparkles, Zap, FileText, Image as ImageIcon, Film, Wrench } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
-} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-type RoutingMode = "speed" | "balanced" | "quality";
-type AgentName = "planner" | "executor" | "classifier" | "summarizer" | "image_artist";
+// ----------------------------------------------------------------------------
+// Provider catalog — what users can connect.
+// "auto" providers are powered by Lovable AI (no key needed from user).
+// "byok" providers need the user to paste an API key.
+// ----------------------------------------------------------------------------
 
-const STATIC_MODELS = [
-  { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", tier: "Nano", caps: ["json"] },
-  { id: "google/gemini-2.5-flash",      label: "Gemini 2.5 Flash",      tier: "Flash", caps: ["tools", "json", "vision"] },
-  { id: "google/gemini-2.5-pro",        label: "Gemini 2.5 Pro",        tier: "Pro",  caps: ["tools", "vision", "reasoning"] },
-  { id: "google/gemini-3-flash-preview", label: "Gemini 3 Flash (preview)", tier: "Flash", caps: ["tools", "json", "vision"] },
-  { id: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (preview)", tier: "Pro",  caps: ["tools", "vision", "reasoning"] },
-  { id: "google/gemini-2.5-flash-image", label: "Nano Banana", tier: "Flash", caps: ["image_gen"] },
-  { id: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2", tier: "Flash", caps: ["image_gen"] },
-  { id: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image", tier: "Pro", caps: ["image_gen"] },
-  { id: "openai/gpt-5-nano",            label: "GPT-5 Nano",            tier: "Nano", caps: ["tools"] },
-  { id: "openai/gpt-5-mini",            label: "GPT-5 Mini",            tier: "Flash", caps: ["tools", "reasoning"] },
-  { id: "openai/gpt-5",                 label: "GPT-5",                 tier: "Standard", caps: ["tools", "vision", "reasoning"] },
-  { id: "openai/gpt-5.2",               label: "GPT-5.2",               tier: "Pro",  caps: ["tools", "vision", "reasoning"] },
-];
-
-const AGENTS: { id: AgentName; label: string; description: string }[] = [
-  { id: "planner",      label: "Planner",      description: "Routes requests, picks integrations" },
-  { id: "executor",     label: "Executor",     description: "Runs tool calls, drafts responses" },
-  { id: "classifier",   label: "Classifier",   description: "Quick intent detection" },
-  { id: "summarizer",   label: "Summarizer",   description: "Compresses long context" },
-  { id: "image_artist", label: "Image Artist", description: "Generates and edits images" },
-];
-
-const MODE_META: Record<RoutingMode, { icon: typeof Zap; label: string; tagline: string }> = {
-  speed:    { icon: Zap,      label: "Speed",    tagline: "Cheapest, fastest. Best for high-volume." },
-  balanced: { icon: Scale,    label: "Balanced", tagline: "Smart defaults. Recommended." },
-  quality:  { icon: Sparkles, label: "Quality",  tagline: "Frontier models on every turn." },
+type Provider = {
+  id: string;
+  label: string;
+  blurb: string;
+  models: string[];          // model IDs that count as "this provider connected"
+  capabilities: ("text" | "image" | "video" | "tools")[];
+  source: "lovable" | "byok" | "edge"; // how it's powered
+  presetId?: string;         // for byok providers, used by connect-brain
+  manageRoute?: string;      // for edge-managed (e.g. higgsfield) providers
 };
 
-const ALL_CAPS = ["tools", "json", "vision", "long_context", "reasoning", "image_gen"];
+const PROVIDERS: Provider[] = [
+  // --- Auto-connected via Lovable AI ---
+  {
+    id: "gemini",
+    label: "Gemini",
+    blurb: "Google's flagship multimodal models.",
+    models: ["google/gemini-2.5-flash", "google/gemini-2.5-pro", "google/gemini-3.1-pro-preview", "google/gemini-3-flash-preview"],
+    capabilities: ["text", "tools"],
+    source: "lovable",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    blurb: "GPT-5 family — strong tool use and reasoning.",
+    models: ["openai/gpt-5", "openai/gpt-5-mini", "openai/gpt-5.2"],
+    capabilities: ["text", "tools"],
+    source: "lovable",
+  },
+  {
+    id: "nano-banana",
+    label: "Nano Banana",
+    blurb: "Gemini image generation & editing.",
+    models: ["google/gemini-2.5-flash-image", "google/gemini-3.1-flash-image-preview", "google/gemini-3-pro-image-preview"],
+    capabilities: ["image"],
+    source: "lovable",
+  },
+  {
+    id: "veo",
+    label: "Veo 3",
+    blurb: "Google's text-to-video model.",
+    models: ["google/veo-3-fast", "google/veo-3"],
+    capabilities: ["video"],
+    source: "lovable",
+  },
+  // --- Edge-function-managed ---
+  {
+    id: "higgsfield",
+    label: "Higgsfield AI",
+    blurb: "Cinematic AI video & image generation.",
+    models: ["higgsfield/dop-standard"],
+    capabilities: ["video", "image"],
+    source: "edge",
+    manageRoute: "/integrations/higgsfield",
+  },
+  // --- BYOK custom brains ---
+  {
+    id: "anthropic",
+    label: "Claude",
+    blurb: "Anthropic's reasoning & long-context model.",
+    models: ["anthropic/claude-opus-4"],
+    capabilities: ["text", "tools"],
+    source: "byok",
+    presetId: "anthropic",
+  },
+  {
+    id: "xai",
+    label: "Grok",
+    blurb: "xAI's witty, real-time reasoning model.",
+    models: ["xai/grok-4"],
+    capabilities: ["text", "tools"],
+    source: "byok",
+    presetId: "xai",
+  },
+  {
+    id: "mistral",
+    label: "Mistral",
+    blurb: "European open-weights frontier model.",
+    models: ["mistral/mistral-large-latest"],
+    capabilities: ["text", "tools"],
+    source: "byok",
+    presetId: "mistral",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    blurb: "Cost-efficient reasoning model.",
+    models: ["deepseek/deepseek-chat"],
+    capabilities: ["text", "tools"],
+    source: "byok",
+    presetId: "deepseek",
+  },
+];
+
+// ----------------------------------------------------------------------------
+// Roles — humanized agent overrides ("what handles what?")
+// ----------------------------------------------------------------------------
+
+type RoleDef = {
+  id: "planner" | "executor" | "summarizer" | "image_artist" | "video_director";
+  label: string;
+  blurb: string;
+  Icon: typeof Brain;
+  filterCap: "text" | "image" | "video" | "tools";
+};
+
+const ROLES: RoleDef[] = [
+  { id: "planner",        label: "Quick thinking & routing",  blurb: "Decides which tool to run next.",     Icon: Zap,        filterCap: "text" },
+  { id: "executor",       label: "Deep reasoning & tool use", blurb: "Runs your integrations and drafts replies.", Icon: Wrench, filterCap: "tools" },
+  { id: "summarizer",     label: "Summaries",                 blurb: "Compresses long transcripts.",        Icon: FileText,   filterCap: "text" },
+  { id: "image_artist",   label: "Image creation",            blurb: "Generates and edits images.",         Icon: ImageIcon,  filterCap: "image" },
+  { id: "video_director", label: "Video creation",            blurb: "Generates short AI videos.",          Icon: Film,       filterCap: "video" },
+];
+
+interface CustomModelRow {
+  id: string;
+  model_id: string;
+  display_name: string;
+  api_key_secret_name: string | null;
+  capabilities: string[];
+  enabled: boolean;
+}
 
 interface RoutingLogRow {
   agent: string;
   model_used: string;
   latency_ms: number | null;
   success: boolean;
-  fallback_used: boolean;
-  created_at: string;
 }
 
-interface CustomModel {
-  id: string;
-  model_id: string;
-  display_name: string;
-  gateway_url: string;
-  api_key_secret_name: string | null;
-  context_window: number;
-  cost_per_1k_in: number;
-  cost_per_1k_out: number;
-  avg_latency_ms: number;
-  capabilities: string[];
-  tier: string;
-  fallback_model_id: string | null;
-  enabled: boolean;
-}
-
-const emptyStone: Omit<CustomModel, "id"> = {
-  model_id: "",
-  display_name: "",
-  gateway_url: "https://ai.gateway.lovable.dev/v1/chat/completions",
-  api_key_secret_name: null,
-  context_window: 128000,
-  cost_per_1k_in: 0,
-  cost_per_1k_out: 0,
-  avg_latency_ms: 1000,
-  capabilities: ["tools"],
-  tier: "standard",
-  fallback_model_id: null,
-  enabled: true,
-};
+// ----------------------------------------------------------------------------
 
 const ModelRouting = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<RoutingMode>("balanced");
+  const [connectedHF, setConnectedHF] = useState(false);
+  const [customModels, setCustomModels] = useState<CustomModelRow[]>([]);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
-  const [disabled, setDisabled] = useState<Set<string>>(new Set());
   const [logs, setLogs] = useState<RoutingLogRow[]>([]);
-  const [customModels, setCustomModels] = useState<CustomModel[]>([]);
-  const [stoneOpen, setStoneOpen] = useState(false);
-  const [draftStone, setDraftStone] = useState<Omit<CustomModel, "id">>(emptyStone);
 
-  const refreshCustomModels = async () => {
+  // Inline key input state per BYOK provider id
+  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+
+  const refresh = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from("custom_models")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    setCustomModels((data as CustomModel[]) || []);
+    const [customRes, hfRes, prefsRes, logsRes] = await Promise.all([
+      supabase.from("custom_models").select("id, model_id, display_name, api_key_secret_name, capabilities, enabled").eq("user_id", user.id),
+      supabase.from("integration_connections").select("id").eq("user_id", user.id).eq("provider", "higgsfield").eq("status", "connected").maybeSingle(),
+      supabase.from("user_model_preferences").select("agent_overrides").eq("user_id", user.id).maybeSingle(),
+      supabase.from("model_routing_log").select("agent, model_used, latency_ms, success").eq("user_id", user.id).order("created_at", { ascending: false }).limit(200),
+    ]);
+    setCustomModels((customRes.data as CustomModelRow[]) || []);
+    setConnectedHF(!!hfRes.data);
+    setOverrides((prefsRes.data?.agent_overrides as Record<string, string>) || {});
+    setLogs((logsRes.data as RoutingLogRow[]) || []);
   };
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const [prefsRes, logsRes, customRes] = await Promise.all([
-        supabase
-          .from("user_model_preferences")
-          .select("mode, agent_overrides, disabled_models")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("model_routing_log")
-          .select("agent, model_used, latency_ms, success, fallback_used, created_at")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(200),
-        supabase
-          .from("custom_models")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false }),
-      ]);
-      if (cancelled) return;
-      const prefs = prefsRes.data;
-      if (prefs) {
-        setMode((prefs.mode as RoutingMode) || "balanced");
-        setOverrides((prefs.agent_overrides as Record<string, string>) || {});
-        setDisabled(new Set((prefs.disabled_models as string[]) || []));
-      }
-      setLogs((logsRes.data as RoutingLogRow[]) || []);
-      setCustomModels((customRes.data as CustomModel[]) || []);
-      setLoading(false);
+      await refresh();
+      if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const allModels = useMemo(
-    () => [
-      ...STATIC_MODELS,
-      ...customModels.map((c) => ({
-        id: c.model_id,
-        label: c.display_name + " ✦",
-        tier: c.tier.charAt(0).toUpperCase() + c.tier.slice(1),
-        caps: c.capabilities,
-      })),
-    ],
-    [customModels],
-  );
+  // ---- Provider state derivation ----
+  const isProviderConnected = (p: Provider): boolean => {
+    if (p.source === "lovable") return true;
+    if (p.source === "edge" && p.id === "higgsfield") return connectedHF;
+    if (p.source === "byok") {
+      return customModels.some((c) => c.model_id === p.models[0] && c.enabled);
+    }
+    return false;
+  };
 
-  const save = async (next: {
-    mode?: RoutingMode;
-    agent_overrides?: Record<string, string>;
-    disabled_models?: string[];
-  }) => {
+  const getProviderKeyDisplay = (p: Provider): string => {
+    if (p.source === "lovable") return "LOVABLE_API_KEY ••••••••";
+    if (p.source === "edge" && p.id === "higgsfield" && connectedHF) return "HIGGSFIELD_API_KEY ••••••••";
+    if (p.source === "byok") {
+      const row = customModels.find((c) => c.model_id === p.models[0]);
+      const secret = row?.api_key_secret_name || "";
+      const last4 = secret.startsWith("inline:") ? secret.slice(-4) : "••••";
+      return `•••••••• ${last4}`;
+    }
+    return "";
+  };
+
+  const allConnectedModels = useMemo(() => {
+    const list: { id: string; label: string; cap: ("text" | "image" | "video" | "tools")[] }[] = [];
+    for (const p of PROVIDERS) {
+      if (!isProviderConnected(p)) continue;
+      for (const mid of p.models) {
+        list.push({ id: mid, label: `${prettyModelLabel(mid)} · ${p.label}`, cap: p.capabilities });
+      }
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectedHF, customModels]);
+
+  const connected = PROVIDERS.filter(isProviderConnected);
+  const notConnected = PROVIDERS.filter((p) => !isProviderConnected(p));
+
+  // ---- Actions ----
+  const handleConnect = async (provider: Provider) => {
+    const key = (keyInputs[provider.id] || "").trim();
+    if (!provider.presetId) return;
+    if (key.length < 8) {
+      toast.error("Please paste a valid API key");
+      return;
+    }
+    setConnectingId(provider.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("connect-brain", {
+        body: { action: "connect", preset_id: provider.presetId, api_key: key },
+      });
+      if (error || !data?.success) throw new Error(error?.message || data?.error || "Connect failed");
+      toast.success(`${provider.label} connected to your Infinity Router`);
+      setKeyInputs((s) => ({ ...s, [provider.id]: "" }));
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to connect");
+    } finally {
+      setConnectingId(null);
+    }
+  };
+
+  const handleDisconnect = async (p: Provider) => {
+    if (p.source !== "byok") return;
+    if (!confirm(`Disconnect ${p.label} from your Infinity Router?`)) return;
+    const row = customModels.find((c) => c.model_id === p.models[0]);
+    if (!row || !user) return;
+    await supabase.from("custom_models").delete().eq("id", row.id);
+    toast.success(`${p.label} disconnected`);
+    refresh();
+  };
+
+  const handleRoleChange = async (roleId: string, modelId: string) => {
     if (!user) return;
-    setSaving(true);
-    const payload = {
-      user_id: user.id,
-      mode: next.mode ?? mode,
-      agent_overrides: next.agent_overrides ?? overrides,
-      disabled_models: next.disabled_models ?? Array.from(disabled),
-    };
+    const next = { ...overrides };
+    if (modelId === "auto") delete next[roleId];
+    else next[roleId] = modelId;
+    setOverrides(next);
     const { error } = await supabase
       .from("user_model_preferences")
-      .upsert(payload, { onConflict: "user_id" });
-    setSaving(false);
-    if (error) {
-      toast.error("Failed to save preferences");
-      console.error(error);
-    }
+      .upsert({ user_id: user.id, agent_overrides: next, mode: "balanced" }, { onConflict: "user_id" });
+    if (error) toast.error("Couldn't save preference");
   };
 
-  const handleMode = (m: RoutingMode) => {
-    setMode(m);
-    save({ mode: m });
-    toast.success(`Routing mode: ${MODE_META[m].label}`);
-  };
-
-  const handleOverride = (agent: AgentName, modelId: string) => {
-    const next = { ...overrides };
-    if (modelId === "auto") delete next[agent];
-    else next[agent] = modelId;
-    setOverrides(next);
-    save({ agent_overrides: next });
-  };
-
-  const handleToggleModel = (id: string, enabled: boolean) => {
-    const next = new Set(disabled);
-    if (enabled) next.delete(id);
-    else next.add(id);
-    setDisabled(next);
-    save({ disabled_models: Array.from(next) });
-  };
-
-  const handleSaveStone = async () => {
-    if (!user) return;
-    if (!draftStone.model_id || !draftStone.display_name) {
-      toast.error("Model ID and display name required");
-      return;
-    }
-    const { error } = await supabase.from("custom_models").upsert(
-      { user_id: user.id, ...draftStone },
-      { onConflict: "user_id,model_id" },
-    );
-    if (error) {
-      toast.error(`Failed to add stone: ${error.message}`);
-      return;
-    }
-    toast.success(`Stone "${draftStone.display_name}" socketed`);
-    setStoneOpen(false);
-    setDraftStone(emptyStone);
-    refreshCustomModels();
-  };
-
-  const handleToggleStone = async (stone: CustomModel) => {
-    await supabase.from("custom_models").update({ enabled: !stone.enabled }).eq("id", stone.id);
-    refreshCustomModels();
-  };
-
-  const handleDeleteStone = async (stone: CustomModel) => {
-    if (!confirm(`Remove ${stone.display_name}?`)) return;
-    await supabase.from("custom_models").delete().eq("id", stone.id);
-    toast.success("Stone removed");
-    refreshCustomModels();
-  };
-
+  // ---- Telemetry ----
   const stats = useMemo(() => {
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const recent = logs.filter((l) => new Date(l.created_at).getTime() > dayAgo);
-    const byAgent: Record<string, { count: number; latencySum: number; fallbacks: number; successes: number }> = {};
-    const byModel: Record<string, number> = {};
-    for (const l of recent) {
-      byAgent[l.agent] ??= { count: 0, latencySum: 0, fallbacks: 0, successes: 0 };
-      byAgent[l.agent].count++;
-      byAgent[l.agent].latencySum += l.latency_ms || 0;
-      if (l.fallback_used) byAgent[l.agent].fallbacks++;
-      if (l.success) byAgent[l.agent].successes++;
-      byModel[l.model_used] = (byModel[l.model_used] || 0) + 1;
+    const byRole: Record<string, { count: number; latSum: number; ok: number }> = {};
+    for (const l of logs) {
+      byRole[l.agent] ??= { count: 0, latSum: 0, ok: 0 };
+      byRole[l.agent].count++;
+      byRole[l.agent].latSum += l.latency_ms || 0;
+      if (l.success) byRole[l.agent].ok++;
     }
-    return { totalCalls: recent.length, byAgent, byModel };
+    return byRole;
   }, [logs]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin" />
+        <Loader2 className="w-6 h-6 text-primary animate-spin" />
       </div>
     );
   }
@@ -268,66 +295,136 @@ const ModelRouting = () => {
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">Intelligence Routing</h1>
-            <p className="text-xs text-muted-foreground">
-              {saving ? "Saving…" : "Pick which models power your AI"}
-            </p>
+            <h1 className="text-lg font-semibold text-foreground">The Brain</h1>
+            <p className="text-xs text-muted-foreground">Connect AI models. Decide what handles what.</p>
           </div>
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 space-y-8 pt-6">
-        {/* Mode selector */}
+      <div className="max-w-2xl mx-auto px-4 space-y-10 pt-6">
+        {/* ============ Section A — Connected Brains ============ */}
         <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 px-1">Mode</h2>
-          <div className="grid grid-cols-3 gap-2">
-            {(Object.keys(MODE_META) as RoutingMode[]).map((m) => {
-              const meta = MODE_META[m];
-              const Icon = meta.icon;
-              const active = mode === m;
-              return (
-                <button
-                  key={m}
-                  onClick={() => handleMode(m)}
-                  className={cn(
-                    "p-4 rounded-2xl border transition-all text-left",
-                    active ? "bg-primary/10 border-primary/40 shadow-sm" : "bg-card/60 border-border/30 hover:bg-card/80",
-                  )}
-                >
-                  <Icon className={cn("w-5 h-5 mb-2", active ? "text-primary" : "text-foreground/70")} strokeWidth={1.5} />
-                  <p className="font-medium text-sm text-foreground">{meta.label}</p>
-                </button>
-              );
-            })}
+          <div className="px-1 mb-3">
+            <h2 className="text-sm font-semibold text-foreground">Connected Brains</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">These AIs are live and ready to think for you.</p>
           </div>
-          <p className="text-xs text-muted-foreground mt-2 px-1">{MODE_META[mode].tagline}</p>
+          <div className="space-y-2">
+            {connected.map((p) => (
+              <div key={p.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-medium text-sm text-foreground">{p.label}</p>
+                    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                      <Check className="w-2.5 h-2.5" /> Connected
+                    </span>
+                    {p.capabilities.map((c) => (
+                      <CapBadge key={c} cap={c} />
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">{p.blurb}</p>
+                  <p className="text-[10px] font-mono text-muted-foreground/70 mt-1">{getProviderKeyDisplay(p)}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  {p.manageRoute && (
+                    <Button size="sm" variant="ghost" className="h-8 text-xs gap-1" onClick={() => navigate(p.manageRoute!)}>
+                      Manage <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  )}
+                  {p.source === "byok" && (
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => handleDisconnect(p)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
-        {/* Per-agent overrides */}
+        {/* ============ Section B — Add a Brain ============ */}
+        {notConnected.length > 0 && (
+          <section>
+            <div className="px-1 mb-3">
+              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Plus className="w-4 h-4" /> Add a Brain
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Paste an API key to plug a new AI into your Infinity Router. It joins instantly.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {notConnected.map((p) => (
+                <div key={p.id} className="p-4 rounded-2xl bg-card/60 border border-border/30">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-sm text-foreground">{p.label}</p>
+                        {p.capabilities.map((c) => (
+                          <CapBadge key={c} cap={c} />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{p.blurb}</p>
+                    </div>
+                  </div>
+                  {p.source === "byok" && (
+                    <div className="flex gap-2">
+                      <Input
+                        type="password"
+                        placeholder={`Paste ${p.label} API key`}
+                        value={keyInputs[p.id] || ""}
+                        onChange={(e) => setKeyInputs((s) => ({ ...s, [p.id]: e.target.value }))}
+                        className="flex-1 h-9 text-sm font-mono"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => handleConnect(p)}
+                        disabled={connectingId === p.id || !(keyInputs[p.id] || "").trim()}
+                        className="h-9"
+                      >
+                        {connectingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
+                      </Button>
+                    </div>
+                  )}
+                  {p.source === "edge" && p.manageRoute && (
+                    <Button size="sm" variant="outline" className="h-9" onClick={() => navigate(p.manageRoute!)}>
+                      Set up {p.label}
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ============ Section C — What handles what? ============ */}
         <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 px-1">Per-Agent Override</h2>
+          <div className="px-1 mb-3">
+            <h2 className="text-sm font-semibold text-foreground">What handles what?</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Pick a specific brain for a job, or leave it on Auto.</p>
+          </div>
           <div className="space-y-2">
-            {AGENTS.map((agent) => {
-              const current = overrides[agent.id] || "auto";
-              const eligibleModels = allModels.filter((m) => {
-                if (agent.id === "executor") return m.caps.includes("tools");
-                if (agent.id === "image_artist") return m.caps.includes("image_gen");
-                if (agent.id === "planner" || agent.id === "classifier") return m.caps.includes("json") || m.caps.includes("tools");
-                return true;
-              });
+            {ROLES.map((role) => {
+              const eligible = allConnectedModels.filter((m) => m.cap.includes(role.filterCap));
+              const current = overrides[role.id] || "auto";
+              const Icon = role.Icon;
               return (
-                <div key={agent.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm text-foreground">{agent.label}</p>
-                    <p className="text-xs text-muted-foreground">{agent.description}</p>
+                <div key={role.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Icon className="w-4 h-4 text-primary" strokeWidth={1.5} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm text-foreground">{role.label}</p>
+                      <p className="text-xs text-muted-foreground">{role.blurb}</p>
+                    </div>
                   </div>
                   <select
                     value={current}
-                    onChange={(e) => handleOverride(agent.id, e.target.value)}
-                    className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[200px]"
+                    onChange={(e) => handleRoleChange(role.id, e.target.value)}
+                    className="bg-background border border-border rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[180px]"
                   >
-                    <option value="auto">Auto</option>
-                    {eligibleModels.map((m) => (
+                    <option value="auto">Auto (recommended)</option>
+                    {eligible.map((m) => (
                       <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
                   </select>
@@ -337,239 +434,71 @@ const ModelRouting = () => {
           </div>
         </section>
 
-        {/* Available models */}
-        <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 px-1">Available Models</h2>
-          <div className="space-y-2">
-            {STATIC_MODELS.map((m) => {
-              const enabled = !disabled.has(m.id);
-              return (
-                <div key={m.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-sm text-foreground">{m.label}</p>
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-                        {m.tier}
+        {/* ============ Section D — Performance ============ */}
+        {logs.length > 0 && (
+          <section>
+            <div className="px-1 mb-3">
+              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Sparkles className="w-4 h-4" /> How it's been performing
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Recent reliability and speed by role.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {ROLES.map((role) => {
+                const s = stats[role.id];
+                if (!s) return null;
+                const avgMs = Math.round(s.latSum / s.count);
+                const successPct = Math.round((s.ok / s.count) * 100);
+                return (
+                  <div key={role.id} className="p-3 rounded-xl bg-card/40 border border-border/20">
+                    <p className="text-xs font-medium text-foreground">{role.label}</p>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      <span className="text-[11px] text-muted-foreground">{avgMs} ms avg</span>
+                      <span className={cn("text-[11px]", successPct >= 95 ? "text-emerald-500" : successPct >= 80 ? "text-amber-500" : "text-destructive")}>
+                        {successPct}% reliable
                       </span>
-                    </div>
-                    <div className="flex gap-1 mt-1 flex-wrap">
-                      {m.caps.map((c) => (
-                        <span key={c} className="text-[10px] text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded">{c}</span>
-                      ))}
+                      <span className="text-[11px] text-muted-foreground/60 ml-auto">{s.count} calls</span>
                     </div>
                   </div>
-                  <Switch checked={enabled} onCheckedChange={(v) => handleToggleModel(m.id, v)} />
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* STONE SOCKET — pluggable custom LLMs */}
-        <section>
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-              <Gem className="w-3.5 h-3.5" />
-              Stone Socket · Custom Models
-            </h2>
-            <Dialog open={stoneOpen} onOpenChange={setStoneOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
-                  <Plus className="w-3 h-3" /> Add Stone
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Socket a new Stone</DialogTitle>
-                  <DialogDescription>
-                    Plug any model into Ozlon. Defaults to the Lovable AI Gateway — leave the API key blank to use it.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 py-2">
-                  <div>
-                    <Label htmlFor="model_id" className="text-xs">Model ID</Label>
-                    <Input id="model_id" placeholder="e.g. anthropic/claude-opus-4"
-                      value={draftStone.model_id}
-                      onChange={(e) => setDraftStone({ ...draftStone, model_id: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label htmlFor="display_name" className="text-xs">Display Name</Label>
-                    <Input id="display_name" placeholder="Claude Opus 4"
-                      value={draftStone.display_name}
-                      onChange={(e) => setDraftStone({ ...draftStone, display_name: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label htmlFor="gateway" className="text-xs">Gateway URL</Label>
-                    <Input id="gateway"
-                      value={draftStone.gateway_url}
-                      onChange={(e) => setDraftStone({ ...draftStone, gateway_url: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label htmlFor="secret" className="text-xs">API Key Secret Name (optional)</Label>
-                    <Input id="secret" placeholder="ANTHROPIC_API_KEY"
-                      value={draftStone.api_key_secret_name ?? ""}
-                      onChange={(e) => setDraftStone({ ...draftStone, api_key_secret_name: e.target.value || null })} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-xs">Tier</Label>
-                      <select
-                        value={draftStone.tier}
-                        onChange={(e) => setDraftStone({ ...draftStone, tier: e.target.value })}
-                        className="w-full bg-background border border-border rounded-md px-2 py-2 text-sm h-10"
-                      >
-                        <option value="nano">Nano</option>
-                        <option value="flash">Flash</option>
-                        <option value="standard">Standard</option>
-                        <option value="pro">Pro</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Context Window</Label>
-                      <Input type="number" value={draftStone.context_window}
-                        onChange={(e) => setDraftStone({ ...draftStone, context_window: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Cost / 1k in ($)</Label>
-                      <Input type="number" step="0.0001" value={draftStone.cost_per_1k_in}
-                        onChange={(e) => setDraftStone({ ...draftStone, cost_per_1k_in: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Cost / 1k out ($)</Label>
-                      <Input type="number" step="0.0001" value={draftStone.cost_per_1k_out}
-                        onChange={(e) => setDraftStone({ ...draftStone, cost_per_1k_out: Number(e.target.value) || 0 })} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Capabilities</Label>
-                    <div className="flex gap-1 flex-wrap mt-1">
-                      {ALL_CAPS.map((cap) => {
-                        const on = draftStone.capabilities.includes(cap);
-                        return (
-                          <button
-                            key={cap}
-                            type="button"
-                            onClick={() =>
-                              setDraftStone({
-                                ...draftStone,
-                                capabilities: on
-                                  ? draftStone.capabilities.filter((c) => c !== cap)
-                                  : [...draftStone.capabilities, cap],
-                              })
-                            }
-                            className={cn(
-                              "text-[11px] px-2 py-1 rounded-md border transition-colors",
-                              on ? "bg-primary/15 border-primary/40 text-foreground" : "bg-muted/30 border-border/40 text-muted-foreground",
-                            )}
-                          >
-                            {cap}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Fallback Model (optional)</Label>
-                    <select
-                      value={draftStone.fallback_model_id ?? ""}
-                      onChange={(e) => setDraftStone({ ...draftStone, fallback_model_id: e.target.value || null })}
-                      className="w-full bg-background border border-border rounded-md px-2 py-2 text-sm h-10"
-                    >
-                      <option value="">None</option>
-                      {STATIC_MODELS.map((m) => (
-                        <option key={m.id} value={m.id}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="ghost" onClick={() => setStoneOpen(false)}>Cancel</Button>
-                  <Button onClick={handleSaveStone}>Socket Stone</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-          {customModels.length === 0 ? (
-            <div className="p-4 rounded-2xl bg-card/40 border border-dashed border-border/40 text-sm text-muted-foreground">
-              No custom stones socketed. Add Anthropic, xAI, Mistral, or any OpenAI-compatible model — it appears in the agent dropdowns instantly.
+                );
+              })}
             </div>
-          ) : (
-            <div className="space-y-2">
-              {customModels.map((stone) => (
-                <div key={stone.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-sm text-foreground truncate">{stone.display_name}</p>
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-                        {stone.tier}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground truncate">{stone.model_id}</p>
-                    <div className="flex gap-1 mt-1 flex-wrap">
-                      {stone.capabilities.map((c) => (
-                        <span key={c} className="text-[10px] text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded">{c}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch checked={stone.enabled} onCheckedChange={() => handleToggleStone(stone)} />
-                    <button onClick={() => handleDeleteStone(stone)} className="p-2 hover:bg-destructive/10 rounded-md transition-colors">
-                      <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Telemetry */}
-        <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 px-1 flex items-center gap-2">
-            <Activity className="w-3.5 h-3.5" />
-            Last 24 Hours · {stats.totalCalls} calls
-          </h2>
-          {stats.totalCalls === 0 ? (
-            <div className="p-4 rounded-2xl bg-card/60 border border-border/30 text-sm text-muted-foreground">
-              No routing activity yet. Send a chat message to populate telemetry.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="p-4 rounded-2xl bg-card/60 border border-border/30">
-                <p className="text-xs text-muted-foreground mb-2">By Agent</p>
-                <div className="space-y-2">
-                  {Object.entries(stats.byAgent).map(([agent, s]) => (
-                    <div key={agent} className="flex items-center justify-between text-sm">
-                      <span className="text-foreground capitalize">{agent}</span>
-                      <span className="text-muted-foreground tabular-nums">
-                        {s.count} · avg {Math.round(s.latencySum / Math.max(s.count, 1))}ms
-                        {s.fallbacks > 0 && <span className="text-primary ml-2">· {s.fallbacks} fallback{s.fallbacks > 1 ? "s" : ""}</span>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="p-4 rounded-2xl bg-card/60 border border-border/30">
-                <p className="text-xs text-muted-foreground mb-2">Model Usage</p>
-                <div className="space-y-2">
-                  {Object.entries(stats.byModel)
-                    .sort(([, a], [, b]) => b - a)
-                    .map(([modelId, count]) => (
-                      <div key={modelId} className="flex items-center justify-between text-sm">
-                        <span className="text-foreground truncate">{modelId}</span>
-                        <span className="text-muted-foreground tabular-nums">{count}</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <Button variant="ghost" onClick={() => navigate("/settings")} className="w-full">Done</Button>
+          </section>
+        )}
       </div>
     </div>
   );
 };
+
+// ----------------------------------------------------------------------------
+// helpers
+// ----------------------------------------------------------------------------
+
+const CAP_META: Record<string, { label: string; cls: string }> = {
+  text:  { label: "text",  cls: "bg-blue-500/10 text-blue-500" },
+  tools: { label: "tools", cls: "bg-purple-500/10 text-purple-500" },
+  image: { label: "image", cls: "bg-pink-500/10 text-pink-500" },
+  video: { label: "video", cls: "bg-amber-500/10 text-amber-500" },
+};
+
+const CapBadge = ({ cap }: { cap: string }) => {
+  const m = CAP_META[cap];
+  if (!m) return null;
+  return (
+    <span className={cn("text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded", m.cls)}>
+      {m.label}
+    </span>
+  );
+};
+
+function prettyModelLabel(id: string): string {
+  // "google/gemini-2.5-pro" -> "Gemini 2.5 Pro"
+  const tail = id.split("/").pop() || id;
+  return tail
+    .split("-")
+    .map((w) => (w.length <= 2 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ")
+    .replace(/preview/gi, "(preview)");
+}
 
 export default ModelRouting;
