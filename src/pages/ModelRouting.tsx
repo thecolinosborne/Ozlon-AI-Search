@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Check, Loader2, Trash2, ExternalLink, Sparkles, Zap, FileText, Image as ImageIcon, Film, Wrench, Brain } from "lucide-react";
+import {
+  ArrowLeft, Plus, Check, Loader2, ExternalLink, Sparkles, Zap, FileText,
+  Image as ImageIcon, Film, Wrench, Brain, Bot, Rocket, Cpu, Star, AlertCircle,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ----------------------------------------------------------------------------
 // Platform catalog — one entry per AI platform (NOT per model).
-// `source` controls how the connection works:
-//   - "lovable" : auto-connected via the Lovable AI Gateway baseline
-//   - "byok"    : user pastes one API key, multiple models light up at once
-//   - "edge"    : managed by an existing integration page (Higgsfield)
 // ----------------------------------------------------------------------------
 
 type Capability = "text" | "image" | "video" | "tools" | "voice";
@@ -21,92 +24,118 @@ type Capability = "text" | "image" | "video" | "tools" | "voice";
 interface Platform {
   id: string;
   label: string;
-  blurb: string;
+  human_blurb: string;
   capabilities: Capability[];
   source: "lovable" | "byok" | "edge";
   manageRoute?: string;
-  // model_ids that count as "the user has connected this platform via BYOK"
+  console_url?: string;
+  key_prefix?: string;
+  Glyph: typeof Brain;
+  recommended?: boolean;
   byokModelIds?: string[];
 }
 
 const PLATFORMS: Platform[] = [
-  // Auto-connected via Lovable AI baseline. Cannot be disconnected.
+  // Auto-connected via Lovable AI baseline
   {
     id: "lovable-gemini",
-    label: "Gemini (via Lovable)",
-    blurb: "Google's multimodal family — text, image, and video.",
+    label: "Gemini",
+    human_blurb: "Powered by Ozlon. Handles chat, images, and video out of the box.",
     capabilities: ["text", "image", "video", "tools"],
     source: "lovable",
+    Glyph: Sparkles,
   },
   {
     id: "lovable-openai",
-    label: "OpenAI (via Lovable)",
-    blurb: "GPT-5 family — strong tool use and reasoning.",
+    label: "OpenAI",
+    human_blurb: "Powered by Ozlon. Strong at conversation and taking actions.",
     capabilities: ["text", "tools"],
     source: "lovable",
+    Glyph: Bot,
   },
   // Edge-managed
   {
     id: "higgsfield",
-    label: "Higgsfield AI",
-    blurb: "Cinematic AI video & image generation.",
+    label: "Higgsfield",
+    human_blurb: "Cinematic brain. Creates filmlike video and image clips.",
     capabilities: ["video", "image"],
     source: "edge",
     manageRoute: "/integrations/higgsfield",
+    console_url: "https://higgsfield.ai",
+    Glyph: Film,
   },
-  // BYOK — user-pasted API key plugs whole platform into the gauntlet.
+  // BYOK
   {
     id: "gemini",
     label: "Gemini (your key)",
-    blurb: "Power text + image + video with your own Google AI key.",
+    human_blurb: "Google's brain. Great at images, video, and reading long documents.",
     capabilities: ["text", "image", "video", "tools"],
     source: "byok",
+    console_url: "https://aistudio.google.com/apikey",
+    key_prefix: "AIza",
+    Glyph: Sparkles,
+    recommended: true,
     byokModelIds: ["google/gemini-2.5-pro", "google/gemini-2.5-flash", "google/gemini-3-pro-image-preview", "google/veo-3-fast"],
   },
   {
     id: "openai",
     label: "OpenAI (your key)",
-    blurb: "Bring your own OpenAI key for direct GPT-5 access.",
+    human_blurb: "OpenAI's brain. The all-rounder — chat, actions, voice.",
     capabilities: ["text", "tools", "voice"],
     source: "byok",
+    console_url: "https://platform.openai.com/api-keys",
+    key_prefix: "sk-",
+    Glyph: Bot,
     byokModelIds: ["openai/gpt-5", "openai/gpt-5-mini", "openai/gpt-5-nano"],
   },
   {
     id: "anthropic",
     label: "Claude",
-    blurb: "Anthropic's deep-reasoning, long-context model.",
+    human_blurb: "Anthropic's brain. Thoughtful, careful, great at long writing.",
     capabilities: ["text", "tools"],
     source: "byok",
+    console_url: "https://console.anthropic.com/settings/keys",
+    key_prefix: "sk-ant-",
+    Glyph: Brain,
     byokModelIds: ["anthropic/claude-opus-4", "anthropic/claude-sonnet-4"],
   },
   {
     id: "xai",
     label: "Grok",
-    blurb: "xAI's witty, real-time reasoning model.",
+    human_blurb: "xAI's brain. Witty and up to the minute on what's happening now.",
     capabilities: ["text", "tools"],
     source: "byok",
+    console_url: "https://console.x.ai",
+    key_prefix: "xai-",
+    Glyph: Rocket,
     byokModelIds: ["xai/grok-4"],
   },
   {
     id: "mistral",
     label: "Mistral",
-    blurb: "European open-weights frontier model.",
+    human_blurb: "European brain. Fast, capable, privacy-minded.",
     capabilities: ["text", "tools"],
     source: "byok",
+    console_url: "https://console.mistral.ai/api-keys",
+    key_prefix: "",
+    Glyph: Cpu,
     byokModelIds: ["mistral/mistral-large-latest"],
   },
   {
     id: "deepseek",
     label: "DeepSeek",
-    blurb: "Cost-efficient reasoning model.",
+    human_blurb: "Budget-friendly brain. Strong reasoning at a fraction of the cost.",
     capabilities: ["text", "tools"],
     source: "byok",
+    console_url: "https://platform.deepseek.com/api_keys",
+    key_prefix: "sk-",
+    Glyph: Zap,
     byokModelIds: ["deepseek/deepseek-chat"],
   },
 ];
 
 // ----------------------------------------------------------------------------
-// Roles for "What handles what?"
+// Roles
 // ----------------------------------------------------------------------------
 
 type RoleId = "planner" | "executor" | "summarizer" | "image_artist" | "video_director";
@@ -120,11 +149,11 @@ interface RoleDef {
 }
 
 const ROLES: RoleDef[] = [
-  { id: "planner",        label: "Quick thinking & routing",  blurb: "Decides which tool to run next.",            Icon: Zap,       filterCap: "text" },
-  { id: "executor",       label: "Deep reasoning & tool use", blurb: "Runs your integrations and drafts replies.", Icon: Wrench,    filterCap: "tools" },
-  { id: "summarizer",     label: "Summaries",                 blurb: "Compresses long transcripts.",               Icon: FileText,  filterCap: "text" },
-  { id: "image_artist",   label: "Image creation",            blurb: "Generates and edits images.",                Icon: ImageIcon, filterCap: "image" },
-  { id: "video_director", label: "Video creation",            blurb: "Generates short AI videos.",                 Icon: Film,      filterCap: "video" },
+  { id: "planner",        label: "Quick thinking",   blurb: "Decides what to do next.",                   Icon: Zap,       filterCap: "text" },
+  { id: "executor",       label: "Doing the work",   blurb: "Runs your integrations and writes replies.", Icon: Wrench,    filterCap: "tools" },
+  { id: "summarizer",     label: "Summaries",        blurb: "Compresses long transcripts.",               Icon: FileText,  filterCap: "text" },
+  { id: "image_artist",   label: "Making images",    blurb: "Generates and edits pictures.",              Icon: ImageIcon, filterCap: "image" },
+  { id: "video_director", label: "Making videos",    blurb: "Generates short AI clips.",                  Icon: Film,      filterCap: "video" },
 ];
 
 interface CustomModelRow {
@@ -156,7 +185,9 @@ const ModelRouting = () => {
   const [logs, setLogs] = useState<RoutingLogRow[]>([]);
 
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [labelInputs, setLabelInputs] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<Platform | null>(null);
 
   const refresh = async () => {
     if (!user) return;
@@ -183,59 +214,59 @@ const ModelRouting = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // ---- Platform connection state ----
-
-  // Did the user connect this BYOK platform (any of its models present)?
-  const byokConnectedRow = (p: Platform): CustomModelRow | undefined => {
+  const byokRow = (p: Platform): CustomModelRow | undefined => {
     if (p.source !== "byok" || !p.byokModelIds) return undefined;
     return customModels.find((c) =>
       ((c.metadata?.platform_id as string) === p.id) ||
-      p.byokModelIds!.includes(c.model_id)
+      p.byokModelIds!.includes(c.model_id),
     );
   };
 
   const isPlatformConnected = (p: Platform): boolean => {
     if (p.source === "lovable") return true;
     if (p.source === "edge" && p.id === "higgsfield") return connectedHF;
-    if (p.source === "byok") return !!byokConnectedRow(p);
+    if (p.source === "byok") return !!byokRow(p);
     return false;
   };
 
-  const platformKeyDisplay = (p: Platform): string => {
-    if (p.source === "lovable") return "Connected via Lovable AI";
-    if (p.source === "edge" && p.id === "higgsfield" && connectedHF) return "Connected via your key";
+  const platformNickname = (p: Platform): string | null => {
+    const row = byokRow(p);
+    return (row?.metadata?.label as string) || null;
+  };
+
+  const platformKeyTail = (p: Platform): string => {
+    if (p.source === "lovable") return "Powered by Ozlon";
+    if (p.source === "edge" && p.id === "higgsfield" && connectedHF) return "Using your key";
     if (p.source === "byok") {
-      const row = byokConnectedRow(p);
+      const row = byokRow(p);
       const secret = row?.api_key_secret_name || "";
       const last4 = secret.startsWith("inline:") ? secret.slice(-4) : "••••";
-      return `Connected via your key ••••${last4}`;
+      return `Using your key ••••${last4}`;
     }
     return "";
   };
 
   const connected = PLATFORMS.filter(isPlatformConnected);
   const notConnected = PLATFORMS.filter((p) => !isPlatformConnected(p));
+  const userHasPersonalBrain = customModels.length > 0 || connectedHF;
 
-  // ---- Models list for "What handles what?" dropdowns ----
+  // Models for "How your Brains work together" dropdowns
   const allConnectedModels = useMemo(() => {
-    // Start with Lovable AI baseline (every static model in the registry-equivalent map)
     const list: { id: string; label: string; cap: Capability[] }[] = [];
-    // Lovable AI baseline is implicitly available — surface a curated subset
-    if (isPlatformConnected(PLATFORMS[0])) { // lovable-gemini
+    if (isPlatformConnected(PLATFORMS[0])) {
       list.push(
-        { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro · Lovable", cap: ["text", "tools"] },
-        { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash · Lovable", cap: ["text", "tools"] },
-        { id: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image · Lovable", cap: ["image"] },
-        { id: "google/veo-3-fast", label: "Veo 3 Fast · Lovable", cap: ["video"] },
+        { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro · Ozlon", cap: ["text", "tools"] },
+        { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash · Ozlon", cap: ["text", "tools"] },
+        { id: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image · Ozlon", cap: ["image"] },
+        { id: "google/veo-3-fast", label: "Veo 3 Fast · Ozlon", cap: ["video"] },
       );
     }
-    if (isPlatformConnected(PLATFORMS[1])) { // lovable-openai
+    if (isPlatformConnected(PLATFORMS[1])) {
       list.push(
-        { id: "openai/gpt-5", label: "GPT-5 · Lovable", cap: ["text", "tools"] },
-        { id: "openai/gpt-5-mini", label: "GPT-5 Mini · Lovable", cap: ["text", "tools"] },
+        { id: "openai/gpt-5", label: "GPT-5 · Ozlon", cap: ["text", "tools"] },
+        { id: "openai/gpt-5-mini", label: "GPT-5 Mini · Ozlon", cap: ["text", "tools"] },
       );
     }
-    // BYOK custom_models rows
     for (const c of customModels) {
       if (!c.enabled) continue;
       const cap = (c.capabilities || []).map(normalizeCap).filter(Boolean) as Capability[];
@@ -252,18 +283,20 @@ const ModelRouting = () => {
   // ---- Actions ----
   const handleConnect = async (p: Platform) => {
     const key = (keyInputs[p.id] || "").trim();
+    const label = (labelInputs[p.id] || "").trim();
     if (key.length < 8) {
-      toast.error("Please paste a valid API key");
+      toast.error("That key looks too short");
       return;
     }
     setBusyId(p.id);
     try {
       const { data, error } = await supabase.functions.invoke("connect-brain", {
-        body: { action: "connect", platform_id: p.id, api_key: key },
+        body: { action: "connect", platform_id: p.id, api_key: key, label: label || undefined },
       });
-      if (error || !data?.success) throw new Error(error?.message || data?.error || "Connect failed");
-      toast.success(`${p.label} joined the gauntlet`);
+      if (error || !data?.success) throw new Error(error?.message || data?.error || "Couldn't plug it in");
+      toast.success(`${p.label} is now part of your gauntlet`);
       setKeyInputs((s) => ({ ...s, [p.id]: "" }));
+      setLabelInputs((s) => ({ ...s, [p.id]: "" }));
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to connect");
@@ -272,21 +305,22 @@ const ModelRouting = () => {
     }
   };
 
-  const handleDisconnect = async (p: Platform) => {
-    if (p.source !== "byok") return;
-    if (!confirm(`Remove ${p.label} from your gauntlet? Models from this platform will stop being available.`)) return;
+  const confirmDisconnect = async () => {
+    const p = pendingRemove;
+    if (!p || p.source !== "byok") { setPendingRemove(null); return; }
     setBusyId(p.id);
     try {
       const { data, error } = await supabase.functions.invoke("connect-brain", {
         body: { action: "disconnect", platform_id: p.id },
       });
-      if (error || !data?.success) throw new Error(error?.message || data?.error || "Disconnect failed");
-      toast.success(`${p.label} removed`);
+      if (error || !data?.success) throw new Error(error?.message || data?.error || "Couldn't remove");
+      toast.success(`${p.label} removed from the gauntlet`);
       await refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+      toast.error(e instanceof Error ? e.message : "Failed to remove");
     } finally {
       setBusyId(null);
+      setPendingRemove(null);
     }
   };
 
@@ -302,7 +336,6 @@ const ModelRouting = () => {
     if (error) toast.error("Couldn't save preference");
   };
 
-  // ---- Telemetry ----
   const stats = useMemo(() => {
     const byRole: Record<string, { count: number; latSum: number; ok: number }> = {};
     for (const l of logs) {
@@ -331,115 +364,210 @@ const ModelRouting = () => {
           </button>
           <div>
             <h1 className="text-lg font-semibold text-foreground">The Brain</h1>
-            <p className="text-xs text-muted-foreground">Plug in any AI. Snap it into the gauntlet.</p>
+            <p className="text-xs text-muted-foreground">The AI minds powering Ozlon.</p>
           </div>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-4 space-y-10 pt-6">
-        {/* ============ Section A — Connected Brains (Gauntlet) ============ */}
+        {/* Empty-state hero */}
+        {!userHasPersonalBrain && (
+          <div className="rounded-2xl bg-primary/5 border border-primary/20 p-5">
+            <p className="text-sm font-medium text-foreground">
+              Ozlon runs on multiple AI brains.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Add your own to unlock more — faster, cheaper, and tuned to you.
+            </p>
+          </div>
+        )}
+
+        {/* ============ Your Brains ============ */}
         <section>
           <div className="px-1 mb-3">
-            <h2 className="text-sm font-semibold text-foreground">Connected Brains</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Live in your gauntlet. Each platform powers everything its capabilities cover.</p>
+            <h2 className="text-sm font-semibold text-foreground">Your Brains</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              The minds active right now. Each one powers everything its skills cover.
+            </p>
           </div>
           <div className="space-y-2">
-            {connected.map((p) => (
-              <div key={p.id} className="p-4 rounded-2xl bg-card/60 border border-border/30 flex items-center justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-sm text-foreground">{p.label}</p>
-                    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                      <Check className="w-2.5 h-2.5" /> Connected
-                    </span>
+            {connected.map((p) => {
+              const nickname = platformNickname(p);
+              const Glyph = p.Glyph;
+              return (
+                <div key={p.id} className="p-4 rounded-2xl bg-card/60 border border-border/30">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Glyph className="w-5 h-5 text-primary" strokeWidth={1.5} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-sm text-foreground">
+                          {nickname || p.label}
+                        </p>
+                        {nickname && (
+                          <span className="text-[10px] text-muted-foreground">({p.label})</span>
+                        )}
+                        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                          <Check className="w-2.5 h-2.5" /> Active
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        Powering: <span className="text-foreground/80">{p.capabilities.map(humanizeCap).join(" · ")}</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground/70 mt-1">{platformKeyTail(p)}</p>
+
+                      <div className="flex items-center gap-3 mt-3">
+                        {p.console_url && p.source === "byok" && (
+                          <a
+                            href={p.console_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Manage at console <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                        {p.manageRoute && (
+                          <button
+                            onClick={() => navigate(p.manageRoute!)}
+                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Manage <ExternalLink className="w-3 h-3" />
+                          </button>
+                        )}
+                        {p.source === "byok" && (
+                          <button
+                            onClick={() => setPendingRemove(p)}
+                            disabled={busyId === p.id}
+                            className="ml-auto text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            {busyId === p.id ? "Removing…" : "Remove from Gauntlet"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                    {p.capabilities.map((c) => <CapBadge key={c} cap={c} />)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">{p.blurb}</p>
-                  <p className="text-[10px] font-mono text-muted-foreground/70 mt-1">{platformKeyDisplay(p)}</p>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {p.manageRoute && (
-                    <Button size="sm" variant="ghost" className="h-8 text-xs gap-1" onClick={() => navigate(p.manageRoute!)}>
-                      Manage <ExternalLink className="w-3 h-3" />
-                    </Button>
-                  )}
-                  {p.source === "byok" && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDisconnect(p)}
-                      disabled={busyId === p.id}
-                      title="Remove from gauntlet"
-                    >
-                      {busyId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
-        {/* ============ Section B — Add a Brain ============ */}
+        {/* ============ Add another Brain ============ */}
         {notConnected.length > 0 && (
           <section>
             <div className="px-1 mb-3">
               <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Plus className="w-4 h-4" /> Add a Brain
+                <Plus className="w-4 h-4" /> Add another Brain
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Paste an API key. The whole platform — every capability it offers — joins the Infinity Router instantly.
+                Bring your own keys to unlock more power.
               </p>
             </div>
             <div className="space-y-2">
-              {notConnected.map((p) => (
-                <div key={p.id} className="p-4 rounded-2xl bg-card/40 border border-dashed border-border/40">
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm text-foreground">{p.label}</p>
-                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5 opacity-70">
-                        {p.capabilities.map((c) => <CapBadge key={c} cap={c} muted />)}
+              {notConnected.map((p) => {
+                const Glyph = p.Glyph;
+                const inputVal = keyInputs[p.id] || "";
+                const validation = validateKey(inputVal, p.key_prefix);
+                return (
+                  <div key={p.id} className="p-4 rounded-2xl bg-card/40 border border-dashed border-border/40">
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-muted/40 flex items-center justify-center shrink-0">
+                        <Glyph className="w-5 h-5 text-muted-foreground" strokeWidth={1.5} />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">{p.blurb}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-sm text-foreground">{p.label}</p>
+                          {p.recommended && (
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                              <Star className="w-2.5 h-2.5" /> Recommended first
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{p.human_blurb}</p>
+                        <p className="text-[11px] text-muted-foreground/70 mt-1.5">
+                          Skills: {p.capabilities.map(humanizeCap).join(" · ")}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  {p.source === "byok" && (
-                    <div className="flex gap-2">
-                      <Input
-                        type="password"
-                        placeholder={`Paste ${p.label} API key`}
-                        value={keyInputs[p.id] || ""}
-                        onChange={(e) => setKeyInputs((s) => ({ ...s, [p.id]: e.target.value }))}
-                        className="flex-1 h-9 text-sm font-mono"
-                      />
-                      <Button
-                        size="sm"
-                        onClick={() => handleConnect(p)}
-                        disabled={busyId === p.id || !(keyInputs[p.id] || "").trim()}
-                        className="h-9"
-                      >
-                        {busyId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Snap in"}
+
+                    {p.source === "byok" && (
+                      <div className="space-y-2">
+                        {p.console_url && (
+                          <a
+                            href={p.console_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
+                          >
+                            Get a free key <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                        <div className="relative">
+                          <Input
+                            type="password"
+                            placeholder={p.key_prefix ? `${p.key_prefix}…` : "Paste your API key"}
+                            value={inputVal}
+                            onChange={(e) => setKeyInputs((s) => ({ ...s, [p.id]: e.target.value }))}
+                            className={cn(
+                              "h-10 text-sm font-mono pr-10",
+                              validation === "ok" && "border-emerald-500/40",
+                              validation === "warn" && "border-amber-500/40",
+                            )}
+                          />
+                          {validation === "ok" && (
+                            <Check className="w-4 h-4 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                          )}
+                          {validation === "warn" && (
+                            <AlertCircle className="w-4 h-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                          )}
+                        </div>
+                        {validation === "warn" && p.key_prefix && (
+                          <p className="text-[11px] text-amber-500">
+                            Doesn't look like a {p.label} key (usually starts with <span className="font-mono">{p.key_prefix}</span>) — double-check?
+                          </p>
+                        )}
+                        <Input
+                          type="text"
+                          placeholder="Nickname this brain (optional, e.g. Personal, Work)"
+                          value={labelInputs[p.id] || ""}
+                          onChange={(e) => setLabelInputs((s) => ({ ...s, [p.id]: e.target.value }))}
+                          className="h-9 text-xs"
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          We store this securely. Only you can see it.
+                        </p>
+                        <Button
+                          onClick={() => handleConnect(p)}
+                          disabled={busyId === p.id || inputVal.trim().length < 8}
+                          className="w-full h-10"
+                        >
+                          {busyId === p.id ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Plugging in…</>
+                          ) : (
+                            "Plug it in"
+                          )}
+                        </Button>
+                      </div>
+                    )}
+
+                    {p.source === "edge" && p.manageRoute && (
+                      <Button variant="outline" className="w-full h-10" onClick={() => navigate(p.manageRoute!)}>
+                        Set up {p.label}
                       </Button>
-                    </div>
-                  )}
-                  {p.source === "edge" && p.manageRoute && (
-                    <Button size="sm" variant="outline" className="h-9" onClick={() => navigate(p.manageRoute!)}>
-                      Set up {p.label}
-                    </Button>
-                  )}
-                </div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
         )}
 
-        {/* ============ Section C — What handles what? ============ */}
+        {/* ============ How your Brains work together ============ */}
         <section>
           <div className="px-1 mb-3">
-            <h2 className="text-sm font-semibold text-foreground">What handles what?</h2>
+            <h2 className="text-sm font-semibold text-foreground">How your Brains work together</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Pick a specific brain for a job, or leave it on Auto.</p>
           </div>
           <div className="space-y-2">
@@ -474,14 +602,14 @@ const ModelRouting = () => {
           </div>
         </section>
 
-        {/* ============ Section D — Performance ============ */}
+        {/* ============ This week's activity ============ */}
         {logs.length > 0 && (
           <section>
             <div className="px-1 mb-3">
               <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Sparkles className="w-4 h-4" /> How it's been performing
+                <Sparkles className="w-4 h-4" /> This week's activity
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Recent reliability and speed by role.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Recent reliability and speed by job.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {ROLES.map((role) => {
@@ -506,6 +634,27 @@ const ModelRouting = () => {
           </section>
         )}
       </div>
+
+      {/* Confirm remove dialog */}
+      <AlertDialog open={!!pendingRemove} onOpenChange={(open) => !open && setPendingRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {pendingRemove?.label} from the Gauntlet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This brain will stop powering Ozlon. You can plug it back in anytime.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDisconnect}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
@@ -514,31 +663,31 @@ const ModelRouting = () => {
 // helpers
 // ----------------------------------------------------------------------------
 
-const CAP_META: Record<string, { label: string; cls: string; mutedCls: string }> = {
-  text:  { label: "Text",  cls: "bg-blue-500/10 text-blue-500",     mutedCls: "bg-muted/40 text-muted-foreground" },
-  tools: { label: "Tools", cls: "bg-purple-500/10 text-purple-500", mutedCls: "bg-muted/40 text-muted-foreground" },
-  image: { label: "Image", cls: "bg-pink-500/10 text-pink-500",     mutedCls: "bg-muted/40 text-muted-foreground" },
-  video: { label: "Video", cls: "bg-amber-500/10 text-amber-500",   mutedCls: "bg-muted/40 text-muted-foreground" },
-  voice: { label: "Voice", cls: "bg-emerald-500/10 text-emerald-500", mutedCls: "bg-muted/40 text-muted-foreground" },
+const HUMAN_CAP: Record<string, string> = {
+  text: "Conversation",
+  tools: "Actions",
+  image: "Images",
+  video: "Video",
+  voice: "Voice",
 };
 
-const CapBadge = ({ cap, muted = false }: { cap: string; muted?: boolean }) => {
-  const m = CAP_META[cap];
-  if (!m) return null;
-  return (
-    <span className={cn("text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded", muted ? m.mutedCls : m.cls)}>
-      {m.label}
-    </span>
-  );
-};
+function humanizeCap(c: string): string {
+  return HUMAN_CAP[c] || c;
+}
 
-// Map registry capability names to Brain-page capability buckets used in dropdown filtering.
 function normalizeCap(c: string): Capability | "" {
   if (c === "tools") return "tools";
   if (c === "image_gen") return "image";
   if (c === "video_gen") return "video";
   if (c === "vision" || c === "json" || c === "long_context" || c === "reasoning") return "text";
   return "";
+}
+
+function validateKey(value: string, prefix?: string): "empty" | "ok" | "warn" {
+  const v = value.trim();
+  if (v.length < 4) return "empty";
+  if (!prefix) return v.length >= 8 ? "ok" : "empty";
+  return v.startsWith(prefix) ? "ok" : "warn";
 }
 
 export default ModelRouting;
