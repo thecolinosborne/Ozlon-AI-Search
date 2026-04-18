@@ -5519,6 +5519,7 @@ async function runToolLoop(
   aliasMap?: AliasEntry[],
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
+  serviceIntents?: string[],
 ): Promise<{ role: string; content: string }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
@@ -5528,30 +5529,128 @@ async function runToolLoop(
     iteration++;
     console.log(`Tool loop iteration ${iteration}`);
 
-    // OpenAI hard limit: 128 tools per request. Prioritize tools relevant to user message.
+    // OpenAI hard limit: 128 tools per request. Tier-based ranker.
+    const MAX_TOOLS = 128;
     let toolsForRequest: ToolDef[] = tools;
-    if (tools.length > 128) {
+    if (tools.length > MAX_TOOLS) {
       const hint = (userMessage || '').toLowerCase();
-      const prefixPriority: Array<{ match: (n: string) => boolean; weight: number }> = [
-        { match: (n) => hint.includes('ghl') || hint.includes('gohighlevel') || hint.includes('high level') ? n.startsWith('ghl_') : false, weight: 100 },
-        { match: (n) => hint.includes('clickup') ? n.includes('clickup') : false, weight: 100 },
-        { match: (n) => (hint.includes('email') || hint.includes('gmail') || hint.includes('inbox')) ? (n.includes('email') || n.includes('mail')) : false, weight: 100 },
-        { match: (n) => hint.includes('calendar') ? n.includes('calendar') : false, weight: 100 },
-        { match: (n) => (hint.includes('drive') || hint.includes('doc') || hint.includes('sheet') || hint.includes('slide')) ? (n.includes('drive') || n.includes('doc') || n.includes('sheet') || n.includes('presentation')) : false, weight: 100 },
-        { match: (n) => (hint.includes('youtube') || hint.includes('video')) ? n.includes('youtube') : false, weight: 100 },
-        { match: (n) => (hint.includes('seo') || hint.includes('search console') || hint.includes('gsc')) ? n.startsWith('gsc_') : false, weight: 100 },
-        // Always-useful core tools
-        { match: (n) => ['save_memory','add_goal','update_goal_progress','complete_goal','add_standing_order','remove_standing_order','create_work_task','update_work_task','deep_research','web_search_google'].includes(n), weight: 50 },
+
+      // Integration classifier — maps a tool name to a logical integration bucket.
+      const integrationOf = (name: string): string => {
+        if (name.startsWith('ghl_')) return 'ghl';
+        if (name.startsWith('gsc_')) return 'gsc';
+        if (name.includes('clickup')) return 'clickup';
+        if (name.includes('youtube')) return 'youtube';
+        if (name.includes('calendar') || name.includes('event')) return 'calendar';
+        if (name.includes('email') || name.includes('mail') || name.includes('gmail') || name.includes('thread')) return 'gmail';
+        if (name.includes('sheet') || name.includes('spreadsheet')) return 'sheets';
+        if (name.includes('slide') || name.includes('presentation')) return 'slides';
+        if (name.includes('doc')) return 'docs';
+        if (name.includes('drive')) return 'drive';
+        if (name.includes('analytics') || name.startsWith('ga_')) return 'analytics';
+        if (name.includes('meet')) return 'meet';
+        return 'other';
+      };
+
+      // Resolve which integrations are "named" this turn — from explicit serviceIntents
+      // (high-confidence) plus keyword fallback in the raw user message.
+      const namedIntegrations = new Set<string>();
+      const intentToBucket: Record<string, string> = {
+        'gohighlevel': 'ghl',
+        'google-mail': 'gmail',
+        'google-calendar': 'calendar',
+        'google-drive': 'drive',
+        'google-docs': 'docs',
+        'google-sheets': 'sheets',
+        'google-slides': 'slides',
+        'google-search-console': 'gsc',
+        'google-analytics-data': 'analytics',
+        'google-meet': 'meet',
+        'youtube': 'youtube',
+        'clickup': 'clickup',
+      };
+      for (const intent of serviceIntents || []) {
+        const bucket = intentToBucket[intent];
+        if (bucket) namedIntegrations.add(bucket);
+      }
+      // Keyword fallback (broader vocabulary)
+      const kwMap: Array<[RegExp, string]> = [
+        [/\b(ghl|gohighlevel|high\s*level|pipeline|opportunity|funnel|workflow|appointment|invoice|sub[- ]?account)\b/, 'ghl'],
+        [/\b(clickup|task|subtask|sprint|space|folder)\b/, 'clickup'],
+        [/\b(email|gmail|inbox|message|thread|reply|draft)\b/, 'gmail'],
+        [/\b(calendar|meeting|schedule|appointment)\b/, 'calendar'],
+        [/\b(drive|file|folder)\b/, 'drive'],
+        [/\b(doc|document)\b/, 'docs'],
+        [/\b(sheet|spreadsheet|csv|rows?)\b/, 'sheets'],
+        [/\b(slide|deck|presentation)\b/, 'slides'],
+        [/\b(youtube|video|channel)\b/, 'youtube'],
+        [/\b(seo|search\s*console|gsc|impressions|clicks)\b/, 'gsc'],
+        [/\b(analytics|ga4|sessions|pageview)\b/, 'analytics'],
+        [/\b(meet|google\s*meet)\b/, 'meet'],
       ];
+      for (const [re, bucket] of kwMap) if (re.test(hint)) namedIntegrations.add(bucket);
+
+      // Tier B core tools — always preserved.
+      const CORE_TOOLS = new Set([
+        'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
+        'add_standing_order', 'remove_standing_order',
+        'create_work_task', 'update_work_task',
+        'deep_research', 'web_search_google',
+      ]);
+
+      // Per-integration soft cap when 2+ named (proportional split).
+      const reservedCore = 10;
+      const budget = MAX_TOOLS - reservedCore;
+      const perIntegrationCap = namedIntegrations.size >= 2
+        ? Math.floor(budget / namedIntegrations.size)
+        : Infinity;
+
       const scored = tools.map((t) => {
         const name = (t as { function?: { name?: string } }).function?.name || '';
-        let score = 0;
-        for (const p of prefixPriority) if (p.match(name)) score += p.weight;
-        return { tool: t, score };
+        const bucket = integrationOf(name);
+        let score = 10; // Tier C baseline
+        if (CORE_TOOLS.has(name)) score = 100; // Tier B
+        if (namedIntegrations.has(bucket)) score = 1000; // Tier A
+        return { tool: t, name, bucket, score };
       });
       scored.sort((a, b) => b.score - a.score);
-      toolsForRequest = scored.slice(0, 128).map((s) => s.tool);
-      console.log(`Tools capped: ${tools.length} → 128 (hint: "${hint.slice(0,60)}")`);
+
+      // Apply per-integration soft cap (Tier A only) so multi-intent turns don't starve.
+      const perIntegrationCount: Record<string, number> = {};
+      const kept: typeof scored = [];
+      const overflow: typeof scored = [];
+      for (const s of scored) {
+        if (s.score === 1000 && perIntegrationCap !== Infinity) {
+          const c = perIntegrationCount[s.bucket] || 0;
+          if (c >= perIntegrationCap) {
+            overflow.push(s);
+            continue;
+          }
+          perIntegrationCount[s.bucket] = c + 1;
+        }
+        kept.push(s);
+        if (kept.length >= MAX_TOOLS) break;
+      }
+      // Backfill from overflow if there's still room.
+      if (kept.length < MAX_TOOLS) {
+        for (const s of overflow) {
+          kept.push(s);
+          if (kept.length >= MAX_TOOLS) break;
+        }
+      }
+      toolsForRequest = kept.slice(0, MAX_TOOLS).map((s) => s.tool);
+
+      // Telemetry: bucket distribution of what survived the cap.
+      const distribution: Record<string, number> = {};
+      for (const s of kept.slice(0, MAX_TOOLS)) {
+        const key = CORE_TOOLS.has(s.name) ? 'core' : s.bucket;
+        distribution[key] = (distribution[key] || 0) + 1;
+      }
+      console.log(
+        `Tools capped ${tools.length}→${toolsForRequest.length}. ` +
+        `Named: [${Array.from(namedIntegrations).join(',') || 'none'}]. ` +
+        `Kept: ${JSON.stringify(distribution)}`,
+      );
     }
 
     const response = await fetch(modelConfig.apiEndpoint, {
@@ -6408,6 +6507,7 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               aliasMap,
               wisdomUserId,
               { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
+              detectServiceIntents(messages),
             );
 
             // Write final content as SSE
