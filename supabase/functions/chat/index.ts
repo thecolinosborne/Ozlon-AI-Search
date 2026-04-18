@@ -7,6 +7,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Map a model id to a friendly platform label for UI attribution.
+function inferPlatformFromModel(modelId: string): string {
+  const m = (modelId || '').toLowerCase();
+  if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3') || m.includes('openai')) return 'OpenAI';
+  if (m.includes('gemini') || m.startsWith('google/')) return 'Gemini';
+  if (m.includes('claude') || m.includes('anthropic')) return 'Anthropic';
+  if (m.includes('grok') || m.includes('xai')) return 'xAI';
+  if (m.includes('mistral')) return 'Mistral';
+  if (m.includes('llama') || m.includes('groq')) return 'Groq';
+  if (m.includes('deepseek')) return 'DeepSeek';
+  return 'Ozlon';
+}
+
 // ============================================================================
 // MODEL ROUTER
 // ============================================================================
