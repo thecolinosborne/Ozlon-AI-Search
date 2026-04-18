@@ -2,7 +2,23 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
 import { AIOrb } from "@/components/AIOrb";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessagePlayButton } from "./MessagePlayButton";
+
+const linkifyPlainUrls = (text: string): string => {
+  const parts = text.split(/(```[\s\S]*?```|`[^`]*`)/g);
+  const urlRe = /(?<![\(\[`])((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?'"])/g;
+  return parts
+    .map((p, i) =>
+      i % 2 === 1
+        ? p
+        : p.replace(urlRe, (m) => {
+            const href = m.startsWith("www.") ? `https://${m}` : m;
+            return `[${m}](${href})`;
+          })
+    )
+    .join("");
+};
 
 interface MessageBubbleProps {
   message: Message;
@@ -41,8 +57,19 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
           ) : isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
           ) : (
-            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0">
-              <ReactMarkdown>{message.text}</ReactMarkdown>
+            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-a:text-primary prose-a:underline hover:prose-a:opacity-80 break-words">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children, ...props }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
+                {linkifyPlainUrls(message.text)}
+              </ReactMarkdown>
             </div>
           )}
         </div>
