@@ -5818,6 +5818,9 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'higgsfield_generate_video': '_always_',
     'higgsfield_get_job_status': '_always_',
     'higgsfield_cancel_job': '_always_',
+    'generate_image': '_always_',
+    'edit_image': '_always_',
+    'generate_video': '_always_',
   };
 
   return ACTION_TOOLS.filter(tool => {
