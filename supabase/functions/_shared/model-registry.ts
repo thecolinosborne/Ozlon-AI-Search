@@ -236,21 +236,22 @@ export interface PickedRoute {
 export function pickModel(
   agent: AgentName,
   prefs: UserPrefs = DEFAULT_PREFS,
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
 ): PickedRoute {
   const spec = AGENT_REGISTRY[agent];
   const disabled = new Set(prefs.disabled_models || []);
 
-  const eligible = Object.values(MODEL_REGISTRY).filter(
+  const eligible = Object.values(registry).filter(
     (m) => !disabled.has(m.id) && modelMeetsRequirements(m, spec.requires),
   );
 
   // 1. Explicit per-agent override wins.
   const override = prefs.agent_overrides?.[agent];
-  if (override && MODEL_REGISTRY[override] && !disabled.has(override)
-      && modelMeetsRequirements(MODEL_REGISTRY[override], spec.requires)) {
+  if (override && registry[override] && !disabled.has(override)
+      && modelMeetsRequirements(registry[override], spec.requires)) {
     return {
       primary: override,
-      fallbackChain: buildFallbackChain(override, spec, eligible),
+      fallbackChain: buildFallbackChain(override, spec, eligible, registry),
       reason: 'user_override',
     };
   }
@@ -259,23 +260,22 @@ export function pickModel(
   const targetTier = spec.preferredTier[prefs.mode];
   const tierMatches = eligible.filter((m) => m.tier === targetTier);
   if (tierMatches.length > 0) {
-    // Within tier, prefer cheapest by combined cost.
     tierMatches.sort((a, b) =>
       (a.costPer1kIn + a.costPer1kOut) - (b.costPer1kIn + b.costPer1kOut),
     );
     const primary = tierMatches[0].id;
     return {
       primary,
-      fallbackChain: buildFallbackChain(primary, spec, eligible),
+      fallbackChain: buildFallbackChain(primary, spec, eligible, registry),
       reason: `tier_${targetTier}_${prefs.mode}`,
     };
   }
 
   // 3. Agent default.
-  if (MODEL_REGISTRY[spec.defaultModel] && !disabled.has(spec.defaultModel)) {
+  if (registry[spec.defaultModel] && !disabled.has(spec.defaultModel)) {
     return {
       primary: spec.defaultModel,
-      fallbackChain: buildFallbackChain(spec.defaultModel, spec, eligible),
+      fallbackChain: buildFallbackChain(spec.defaultModel, spec, eligible, registry),
       reason: 'agent_default',
     };
   }
