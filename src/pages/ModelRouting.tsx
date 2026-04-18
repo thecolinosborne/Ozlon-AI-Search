@@ -297,7 +297,7 @@ const ModelRouting = () => {
                       <span className="text-foreground capitalize">{agent}</span>
                       <span className="text-muted-foreground tabular-nums">
                         {s.count} · avg {Math.round(s.latencySum / Math.max(s.count, 1))}ms
-                        {s.fallbacks > 0 && <span className="text-amber-500 ml-2">· {s.fallbacks} fallback{s.fallbacks > 1 ? "s" : ""}</span>}
+                        {s.fallbacks > 0 && <span className="text-primary ml-2">· {s.fallbacks} fallback{s.fallbacks > 1 ? "s" : ""}</span>}
                       </span>
                     </div>
                   ))}
