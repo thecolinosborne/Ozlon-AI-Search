@@ -2533,6 +2533,65 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Higgsfield AI Tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_generate_image',
+      description: 'Generate an image with Higgsfield AI (Soul models). Returns a request_id — poll with higgsfield_get_job_status. Use this when the user asks to create/generate/make an image, picture, or visual.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed visual description.' },
+          model: { type: 'string', description: 'Model ID. Defaults to "higgsfield-ai/soul/standard". Options: "higgsfield-ai/soul/standard", "higgsfield-ai/soul/pro", "higgsfield-ai/soul-id".' },
+          aspect_ratio: { type: 'string', description: 'e.g. "16:9", "9:16", "1:1", "4:5". Default "16:9".' },
+          resolution: { type: 'string', description: 'e.g. "720p", "1080p". Default "720p".' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_generate_video',
+      description: 'Generate a video from a source image using Higgsfield AI (DoP models). Returns a request_id — poll with higgsfield_get_job_status. Use when user asks to animate an image, create video from image, or generate motion.',
+      parameters: {
+        type: 'object',
+        properties: {
+          image_url: { type: 'string', description: 'Public URL of the source image.' },
+          prompt: { type: 'string', description: 'Optional motion / scene description.' },
+          model: { type: 'string', description: 'Model ID. Defaults to "higgsfield-ai/dop/standard". Options: "higgsfield-ai/dop/standard", "higgsfield-ai/dop/pro", "higgsfield-ai/dop/turbo", "higgsfield-ai/dop/lite".' },
+          duration: { type: 'number', description: 'Duration in seconds (default 5).' },
+        },
+        required: ['image_url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_get_job_status',
+      description: 'Check the status of a Higgsfield generation job. Returns status (queued/processing/completed/failed) and output URL when done.',
+      parameters: {
+        type: 'object',
+        properties: { request_id: { type: 'string', description: 'Job request ID returned by generate_image / generate_video.' } },
+        required: ['request_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_cancel_job',
+      description: 'Cancel a queued or running Higgsfield generation job by request_id.',
+      parameters: {
+        type: 'object',
+        properties: { request_id: { type: 'string', description: 'Job request ID to cancel.' } },
+        required: ['request_id'],
+      },
+    },
+  },
   // ============ YouTube Upload Tool ============
   {
     type: 'function',
@@ -5114,6 +5173,54 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ Higgsfield AI Handlers (delegate to higgsfield edge function) ============
+      case 'higgsfield_generate_image':
+      case 'higgsfield_generate_video':
+      case 'higgsfield_get_job_status':
+      case 'higgsfield_cancel_job': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const a = args as Record<string, unknown>;
+          const actionMap: Record<string, string> = {
+            'higgsfield_generate_image': 'generate_image',
+            'higgsfield_generate_video': 'generate_video',
+            'higgsfield_get_job_status': 'get_job_status',
+            'higgsfield_cancel_job': 'cancel_job',
+          };
+          const params: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(a)) {
+            if (k.startsWith('__') || v === undefined) continue;
+            params[k] = v;
+          }
+          const res = await fetch(`${supabaseUrl}/functions/v1/higgsfield`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: actionMap[toolName], params }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.success === false) {
+            return { success: false, result: `Higgsfield error: ${data?.error || JSON.stringify(data).slice(0, 400)}` };
+          }
+          const d = data?.data || {};
+          if (toolName === 'higgsfield_generate_image' || toolName === 'higgsfield_generate_video') {
+            const reqId = d.request_id || d.id || 'unknown';
+            return { success: true, result: `Generation started (request_id: ${reqId}). Use higgsfield_get_job_status to poll for completion.` };
+          }
+          if (toolName === 'higgsfield_get_job_status') {
+            const status = d.status || 'unknown';
+            const output = d.result?.url || d.output_url || d.url || (Array.isArray(d.result) ? d.result[0]?.url : null);
+            return { success: true, result: `Status: ${status}${output ? `\nOutput: ${output}` : ''}\n\nFull: ${JSON.stringify(d).slice(0, 600)}` };
+          }
+          if (toolName === 'higgsfield_cancel_job') {
+            return { success: true, result: d.cancelled ? 'Job cancelled.' : `Result: ${JSON.stringify(d).slice(0, 200)}` };
+          }
+          return { success: true, result: JSON.stringify(d).slice(0, 600) };
+        } catch (e) {
+          return { success: false, result: `Higgsfield error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       // ============ YouTube Upload Handler (delegates to youtube edge function) ============
       case 'upload_youtube_video': {
         try {
@@ -5568,6 +5675,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'create_work_task': '_always_',
     'update_work_task': '_always_',
     'upload_youtube_video': '_always_',
+    'higgsfield_generate_image': '_always_',
+    'higgsfield_generate_video': '_always_',
+    'higgsfield_get_job_status': '_always_',
+    'higgsfield_cancel_job': '_always_',
   };
 
   return ACTION_TOOLS.filter(tool => {
