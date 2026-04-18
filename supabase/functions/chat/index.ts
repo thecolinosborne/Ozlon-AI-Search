@@ -7290,8 +7290,6 @@ Execute these in order. Be decisive — the user has already been shown this pla
     return new Response(readable, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
     });
-      headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
-    });
 
   } catch (error) {
     console.error('Chat function error:', error);
