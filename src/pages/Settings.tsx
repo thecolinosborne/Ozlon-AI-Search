@@ -14,6 +14,7 @@ import {
   Phone,
   Plug,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -280,6 +281,16 @@ const Settings = () => {
             label="AI Identity & Persona"
             description="Author who your AI is, how it speaks, and what it knows about you"
             onClick={() => navigate("/settings/personality")}
+          />
+        </SettingsSection>
+
+        {/* Intelligence Routing */}
+        <SettingsSection title="Intelligence Routing">
+          <SettingsRow
+            icon={Zap}
+            label="Model Router"
+            description="Pick speed vs. quality, override per-agent models, view telemetry"
+            onClick={() => navigate("/settings/routing")}
           />
         </SettingsSection>
 
