@@ -236,21 +236,22 @@ export interface PickedRoute {
 export function pickModel(
   agent: AgentName,
   prefs: UserPrefs = DEFAULT_PREFS,
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
 ): PickedRoute {
   const spec = AGENT_REGISTRY[agent];
   const disabled = new Set(prefs.disabled_models || []);
 
-  const eligible = Object.values(MODEL_REGISTRY).filter(
+  const eligible = Object.values(registry).filter(
     (m) => !disabled.has(m.id) && modelMeetsRequirements(m, spec.requires),
   );
 
   // 1. Explicit per-agent override wins.
   const override = prefs.agent_overrides?.[agent];
-  if (override && MODEL_REGISTRY[override] && !disabled.has(override)
-      && modelMeetsRequirements(MODEL_REGISTRY[override], spec.requires)) {
+  if (override && registry[override] && !disabled.has(override)
+      && modelMeetsRequirements(registry[override], spec.requires)) {
     return {
       primary: override,
-      fallbackChain: buildFallbackChain(override, spec, eligible),
+      fallbackChain: buildFallbackChain(override, spec, eligible, registry),
       reason: 'user_override',
     };
   }
@@ -259,23 +260,22 @@ export function pickModel(
   const targetTier = spec.preferredTier[prefs.mode];
   const tierMatches = eligible.filter((m) => m.tier === targetTier);
   if (tierMatches.length > 0) {
-    // Within tier, prefer cheapest by combined cost.
     tierMatches.sort((a, b) =>
       (a.costPer1kIn + a.costPer1kOut) - (b.costPer1kIn + b.costPer1kOut),
     );
     const primary = tierMatches[0].id;
     return {
       primary,
-      fallbackChain: buildFallbackChain(primary, spec, eligible),
+      fallbackChain: buildFallbackChain(primary, spec, eligible, registry),
       reason: `tier_${targetTier}_${prefs.mode}`,
     };
   }
 
   // 3. Agent default.
-  if (MODEL_REGISTRY[spec.defaultModel] && !disabled.has(spec.defaultModel)) {
+  if (registry[spec.defaultModel] && !disabled.has(spec.defaultModel)) {
     return {
       primary: spec.defaultModel,
-      fallbackChain: buildFallbackChain(spec.defaultModel, spec, eligible),
+      fallbackChain: buildFallbackChain(spec.defaultModel, spec, eligible, registry),
       reason: 'agent_default',
     };
   }
@@ -288,20 +288,22 @@ export function pickModel(
   };
 }
 
-function buildFallbackChain(primary: string, spec: AgentSpec, eligible: ModelEntry[]): string[] {
+function buildFallbackChain(
+  primary: string,
+  spec: AgentSpec,
+  eligible: ModelEntry[],
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
+): string[] {
   const chain: string[] = [];
   const seen = new Set<string>([primary]);
-  // Walk primary.fallback links.
-  let cursor: string | undefined = MODEL_REGISTRY[primary]?.fallback;
+  let cursor: string | undefined = registry[primary]?.fallback;
   while (cursor && !seen.has(cursor) && chain.length < 3) {
-    if (MODEL_REGISTRY[cursor]
-        && eligible.some((e) => e.id === cursor)) {
+    if (registry[cursor] && eligible.some((e) => e.id === cursor)) {
       chain.push(cursor);
       seen.add(cursor);
     }
-    cursor = MODEL_REGISTRY[cursor]?.fallback;
+    cursor = registry[cursor]?.fallback;
   }
-  // Always end with hardFallback if not already present.
   if (!seen.has(spec.hardFallback)) chain.push(spec.hardFallback);
   return chain;
 }
@@ -320,6 +322,7 @@ export interface CallOptions {
   body?: Record<string, unknown>;       // extra fields like response_format, tools, max_tokens
   timeoutMs?: number;
   signal?: AbortSignal;
+  registry?: Record<string, ModelEntry>; // merged registry (static + custom). Defaults to MODEL_REGISTRY.
 }
 
 export interface CallResult {
@@ -341,7 +344,8 @@ export interface CallResult {
  */
 export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   const prefs = opts.prefs || DEFAULT_PREFS;
-  const route = pickModel(opts.agent, prefs);
+  const registry = opts.registry || MODEL_REGISTRY;
+  const route = pickModel(opts.agent, prefs, registry);
   const candidates = [route.primary, ...route.fallbackChain];
 
   let lastResult: CallResult | null = null;
@@ -361,10 +365,19 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
       const onAbort = () => ctrl.abort();
       if (opts.signal) opts.signal.addEventListener('abort', onAbort);
 
-      const resp = await fetch(GATEWAY_URL, {
+      // Allow per-model custom gateway + API key (Stone Socket).
+      const entry = registry[modelId] as (ModelEntry & { _gatewayUrl?: string; _apiKeySecret?: string }) | undefined;
+      const gatewayUrl = entry?._gatewayUrl || GATEWAY_URL;
+      let authKey = opts.apiKey;
+      if (entry?._apiKeySecret) {
+        const fromEnv = Deno.env.get(entry._apiKeySecret);
+        if (fromEnv) authKey = fromEnv;
+      }
+
+      const resp = await fetch(gatewayUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${opts.apiKey}`,
+          'Authorization': `Bearer ${authKey}`,
           'Content-Type': 'application/json',
         },
         signal: ctrl.signal,
