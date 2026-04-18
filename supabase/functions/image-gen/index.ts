@@ -8,7 +8,6 @@ const corsHeaders = {
 };
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const DEFAULT_MODEL = "google/gemini-3.1-flash-image-preview";
 const FALLBACK_CHAIN = [
   "google/gemini-3.1-flash-image-preview",
   "google/gemini-2.5-flash-image",
@@ -19,20 +18,14 @@ interface ReqBody {
   prompt: string;
   model?: string;
   inputImageUrl?: string;
+  userId?: string; // when called server-to-server with service role
+  serviceSecret?: string; // optional shared-secret for internal calls
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -43,25 +36,45 @@ serve(async (req) => {
       });
     }
 
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const body = (await req.json()) as ReqBody;
+    let userId = body.userId;
+
+    // Internal service-role call: trust userId if Authorization is the service key.
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "");
+    const isServiceCall = bearerToken && bearerToken === serviceKey;
+
+    if (!isServiceCall) {
+      // External call: must be a real user JWT.
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !userData?.user) {
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = userData.user.id;
+    }
+
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "userId required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const userId = userData.user.id;
 
-    const body = (await req.json()) as ReqBody;
     if (!body?.prompt || typeof body.prompt !== "string") {
       return new Response(JSON.stringify({ error: "prompt required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Build the chain: requested model first, then fall back through chain.
     const chain: string[] = [];
     if (body.model) chain.push(body.model);
     for (const m of FALLBACK_CHAIN) if (!chain.includes(m)) chain.push(m);
@@ -110,7 +123,6 @@ serve(async (req) => {
       });
     }
 
-    // Upload base64 → Storage
     const match = imageDataUrl.match(/^data:(image\/[a-z]+);base64,(.+)$/);
     if (!match) {
       return new Response(JSON.stringify({ error: "Unexpected image format" }), {
