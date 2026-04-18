@@ -43,9 +43,20 @@ export const ChatMessageList = ({
               )}
             >
               {message.role === "assistant" ? (
-                <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5">
+                <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5 prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-700 break-words">
                   {message.content ? (
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                    <ReactMarkdown
+                      components={{
+                        a: ({ href, children, ...props }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                            {children}
+                          </a>
+                        ),
+                ખ                      }}
+                      urlTransform={(url) => url}
+                    >
+                      {linkifyPlainUrls(message.content)}
+                    </ReactMarkdown>
                   ) : (
                     <span className="inline-flex items-center gap-1">
                       <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse" />
