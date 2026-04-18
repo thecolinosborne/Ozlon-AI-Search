@@ -256,6 +256,12 @@ export async function streamChat({
             currentEventType = 'message';
             continue;
           }
+          // Handle provider_used events (which AI brain answered)
+          if (currentEventType === 'provider_used' && onProviderUsed) {
+            onProviderUsed(parsed as ProviderUsedEvent);
+            currentEventType = 'message';
+            continue;
+          }
           currentEventType = 'message';
 
           const choice = parsed.choices?.[0];
