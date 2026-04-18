@@ -639,6 +639,48 @@ export type Database = {
         }
         Relationships: []
       }
+      model_routing_log: {
+        Row: {
+          agent: string
+          created_at: string
+          error_code: string | null
+          fallback_used: boolean
+          id: string
+          latency_ms: number | null
+          metadata: Json | null
+          model_used: string
+          primary_model: string | null
+          success: boolean
+          user_id: string
+        }
+        Insert: {
+          agent: string
+          created_at?: string
+          error_code?: string | null
+          fallback_used?: boolean
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          model_used: string
+          primary_model?: string | null
+          success?: boolean
+          user_id: string
+        }
+        Update: {
+          agent?: string
+          created_at?: string
+          error_code?: string | null
+          fallback_used?: boolean
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          model_used?: string
+          primary_model?: string | null
+          success?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
       plaid_accounts: {
         Row: {
           account_id: string
@@ -1093,6 +1135,36 @@ export type Database = {
           status?: string
           target_date?: string | null
           title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_model_preferences: {
+        Row: {
+          agent_overrides: Json
+          created_at: string
+          disabled_models: string[]
+          id: string
+          mode: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          agent_overrides?: Json
+          created_at?: string
+          disabled_models?: string[]
+          id?: string
+          mode?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          agent_overrides?: Json
+          created_at?: string
+          disabled_models?: string[]
+          id?: string
+          mode?: string
           updated_at?: string
           user_id?: string
         }
