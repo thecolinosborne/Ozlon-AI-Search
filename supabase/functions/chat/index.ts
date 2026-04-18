@@ -5675,6 +5675,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'create_work_task': '_always_',
     'update_work_task': '_always_',
     'upload_youtube_video': '_always_',
+    'higgsfield_generate_image': '_always_',
+    'higgsfield_generate_video': '_always_',
+    'higgsfield_get_job_status': '_always_',
+    'higgsfield_cancel_job': '_always_',
   };
 
   return ACTION_TOOLS.filter(tool => {
