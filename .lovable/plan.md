@@ -1,44 +1,68 @@
 
-User approved. Plan is already clear from prior turns — present concise build plan and stop.
+User wants:
+1. Add Gemini 3.x preview models to the Gauntlet
+2. Add image generation tool (Nano Banana / Gemini 3 Pro Image)
+3. Add image editing tool (Nano Banana 2)
+4. A "plug-in area" — UI to add/configure new LLM stones from the frontend
 
-Scope: one shared registry file, one router, wire into chat planner+executor, one settings page, one DB migration. Defaults preserve current behavior (zero regression).
+Currently the registry is hardcoded in `_shared/model-registry.ts`. To make it truly pluggable from the UI, we need a DB-backed custom models table that merges with the static registry at request time.
 
-# Infinity Gauntlet — Build Plan
+Keep it tight.
 
-## 1. Database (one migration)
-- `user_model_preferences` — `user_id`, `mode` ('speed'|'balanced'|'quality', default 'balanced'), `agent_overrides` jsonb, `disabled_models` text[]. RLS: own rows only.
-- `model_routing_log` — `user_id`, `agent`, `model_used`, `latency_ms`, `success`, `fallback_used`, `created_at`. RLS: own rows readable, insert via service role.
+# Build Plan — Expand the Gauntlet + Stone Socket
 
-## 2. Shared registry — `supabase/functions/_shared/model-registry.ts`
-- `MODEL_REGISTRY`: every model = `{id, gateway, contextWindow, costPer1kIn/Out, avgLatencyMs, capabilities[], enabled, fallback}`. Seeded with current Lovable AI models (Gemini family, GPT-5 family).
-- `AGENT_REGISTRY`: `planner`, `executor`, `classifier`, `summarizer` — each declares `preferredTier`, `requires[]`, hard fallback.
-- `pickModel(agent, userPrefs, disabledModels)` — scores eligible models, returns `{primary, fallbackChain[]}`.
-- `callWithFallback(messages, agent, userPrefs)` — tries primary → walks chain on 429/402/5xx/timeout → logs to `model_routing_log`.
+## 1. Expand the registry (Gemini 3.x + image models)
+File: `supabase/functions/_shared/model-registry.ts`
+- Add `google/gemini-3.1-pro-preview`, `google/gemini-3-flash-preview` to MODEL_REGISTRY (text/reasoning tier)
+- Add `google/gemini-2.5-flash-image`, `google/gemini-3-pro-image-preview`, `google/gemini-3.1-flash-image-preview` with new capability `image_gen`
+- Add new agent: `image_artist` → preferred `gemini-3.1-flash-image-preview`, fallback chain to other image models
 
-## 3. Wire into `supabase/functions/chat/index.ts`
-- Replace hardcoded planner model call with `callWithFallback(..., 'planner', prefs)`.
-- Replace hardcoded executor model call with `callWithFallback(..., 'executor', prefs)`.
-- Load `user_model_preferences` once per request (cached). Defaults = current models if no row.
-- ~30 lines changed. Existing prioritizer, two-pass routing, semantic booster — all untouched.
+## 2. Image generation + editing tools
+New edge function: `supabase/functions/image-gen/index.ts`
+- Accepts `{prompt, model?, inputImageUrl?}` 
+- Routes via `callWithFallback('image_artist', ...)` to Lovable AI Gateway
+- Returns image URL (uploaded to Supabase Storage `generated-images` bucket)
+- Wire as two tools in `chat/index.ts`: `generate_image(prompt)` and `edit_image(prompt, image_url)`
 
-## 4. Settings UI — new page `src/pages/ModelRouting.tsx` + route in `App.tsx`
-- Three-mode segmented control: **Speed / Balanced / Quality** (writes `mode`)
-- Per-agent override dropdowns (planner, executor, etc.) — "Auto" by default
-- Model toggle list with capability badges and live cost-per-turn estimate
-- Entry point: new `SettingsRow` in `Settings.tsx` under a new "Intelligence Routing" section, icon `Zap`
+New storage bucket: `generated-images` (public read)
 
-## 5. Telemetry visibility
-- Same page shows last 24h: avg latency per agent, fallback rate, model usage breakdown — feeds Phase 5 self-evolution later.
+## 3. The Stone Socket — pluggable LLM UI
+This is the real "Infinity Gauntlet socket" the user is asking for.
+
+**DB migration** — new table `custom_models`:
+```
+id, user_id, model_id (e.g. 'anthropic/claude-opus-4'),
+display_name, gateway_url, api_key_secret_name,
+context_window, cost_per_1k_in/out, capabilities text[],
+fallback_model_id, enabled, created_at
+```
+RLS: own rows only.
+
+**Registry merge logic** (`model-registry.ts`):
+- New `loadCustomModels(supabase, userId)` fetches user's custom entries
+- `pickModel()` accepts merged registry = static + custom
+- `callWithFallback()` reads gateway URL from entry (defaults to Lovable AI Gateway), pulls API key from named secret if provided
+
+**UI — extend `src/pages/ModelRouting.tsx`**
+New "Stone Socket" section at bottom:
+- Card list of custom models with enable toggle, edit, delete
+- "Add a Stone" button → modal with form:
+  - Model ID, display name, gateway URL (default: Lovable AI), capabilities multiselect, context window, cost fields, fallback dropdown
+  - Optional: API key secret name (for non-Lovable gateways like Anthropic direct)
+- Once added, the model appears in agent override dropdowns automatically
+
+## 4. Settings entry already exists
+"Intelligence Routing" row in Settings.tsx — no change needed, just richer page.
+
+## Files
+- New: `supabase/functions/image-gen/index.ts`, migration for `custom_models` + `generated-images` bucket
+- Edited: `supabase/functions/_shared/model-registry.ts` (add models + custom merge), `supabase/functions/chat/index.ts` (image tools + image_artist agent), `src/pages/ModelRouting.tsx` (Stone Socket section)
 
 ## Safety
-- Defaults match current behavior (planner=`gemini-2.5-flash-lite`, executor=`openai/gpt-5`)
-- Fallback chain is purely additive — today there is none
-- `requires: ['tools']` flag prevents weak-tool-calling models from ever being picked for executor
-- No integration code touched. No tool registry touched. Two-pass flow preserved.
-
-## Files touched
-- New: `supabase/migrations/<timestamp>.sql`, `supabase/functions/_shared/model-registry.ts`, `src/pages/ModelRouting.tsx`
-- Edited: `supabase/functions/chat/index.ts` (~30 lines), `src/App.tsx` (route), `src/pages/Settings.tsx` (one row)
+- All additions opt-in. Defaults unchanged.
+- Custom models with no API key fall back to Lovable AI Gateway (uses `LOVABLE_API_KEY`)
+- Image tools only fire when AI explicitly calls them
+- RLS protects custom_models per user
 
 ## Effort
-~1 session. Ship-ready.
+~1 session.
