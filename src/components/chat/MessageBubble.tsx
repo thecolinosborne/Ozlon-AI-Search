@@ -2,7 +2,23 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
 import { AIOrb } from "@/components/AIOrb";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { MessagePlayButton } from "./MessagePlayButton";
+
+const linkifyPlainUrls = (text: string): string => {
+  const parts = text.split(/(```[\s\S]*?```|`[^`]*`)/g);
+  const urlRe = /(?<![\(\[`])((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?'"])/g;
+  return parts
+    .map((p, i) =>
+      i % 2 === 1
+        ? p
+        : p.replace(urlRe, (m) => {
+            const href = m.startsWith("www.") ? `https://${m}` : m;
+            return `[${m}](${href})`;
+          })
+    )
+    .join("");
+};
 
 interface MessageBubbleProps {
   message: Message;
