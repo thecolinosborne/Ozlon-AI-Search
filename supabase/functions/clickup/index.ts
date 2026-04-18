@@ -744,7 +744,7 @@ serve(async (req) => {
             listId = parentTask?.list?.id || '';
           } catch { /* fall through */ }
         }
-        if (!listId) listId = await getListId(params);
+        if (!listId) listId = await getListId(params, resolvedToken);
         if (!listId) throw new Error('Could not resolve listId for subtask — provide listId or ensure parent task is accessible');
         const { name, description, parentId: _pid, parent: _p, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', {
@@ -981,7 +981,7 @@ serve(async (req) => {
 
       // ============ CUSTOM FIELDS ============
       case 'get_custom_fields': {
-        const listId = params?.listId || await getListId(params);
+        const listId = params?.listId || await getListId(params, resolvedToken);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}/field`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1049,7 +1049,7 @@ serve(async (req) => {
 
       // ============ LIST STATUSES ============
       case 'get_list_statuses': {
-        const listId = params?.listId || await getListId(params);
+        const listId = params?.listId || await getListId(params, resolvedToken);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}`);
         return new Response(JSON.stringify({ statuses: data.statuses || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
