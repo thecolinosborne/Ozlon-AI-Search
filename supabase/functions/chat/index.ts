@@ -1789,9 +1789,33 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_update_blog_post',
+      description: 'Update an existing blog post in GoHighLevel. Requires post_id and blog_id. Only include fields you want to change.',
+      parameters: { type: 'object', properties: { post_id: { type: 'string', description: 'Blog post ID' }, blog_id: { type: 'string', description: 'Blog site ID this post belongs to' }, title: { type: 'string' }, content: { type: 'string', description: 'Updated HTML body' }, status: { type: 'string', description: 'DRAFT | PUBLISHED | SCHEDULED | ARCHIVED' }, url_slug: { type: 'string' }, description: { type: 'string', description: 'SEO meta description' }, image_url: { type: 'string' }, author: { type: 'string' }, categories: { type: 'string', description: 'Comma-separated category IDs' }, tags: { type: 'string', description: 'Comma-separated tags' }, published_at: { type: 'string', description: 'ISO timestamp for SCHEDULED status' } }, required: ['post_id', 'blog_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_delete_blog_post',
+      description: 'Delete a blog post in GoHighLevel by post_id.',
+      parameters: { type: 'object', properties: { post_id: { type: 'string', description: 'Blog post ID' } }, required: ['post_id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_list_media_files',
       description: 'List files in GoHighLevel media library.',
       parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Max results (default 50)' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_upload_media_file',
+      description: 'Upload a file to the GoHighLevel media library by URL. Provide a public file_url (image, video, doc) and optional file_name.',
+      parameters: { type: 'object', properties: { file_url: { type: 'string', description: 'Public URL of the file to upload' }, file_name: { type: 'string', description: 'Desired file name (with extension)' }, parent_id: { type: 'string', description: 'Optional folder/parent ID' } }, required: ['file_url'] },
     },
   },
   {
