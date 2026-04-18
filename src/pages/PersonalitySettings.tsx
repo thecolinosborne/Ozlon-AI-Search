@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import ProposalInbox from "@/components/personality/ProposalInbox";
 
 interface ToneSettings {
   formality?: number;     // 0 casual ↔ 100 formal
@@ -188,6 +189,8 @@ const PersonalitySettings = () => {
       </header>
 
       <div className="max-w-2xl mx-auto px-4 pt-6">
+        <ProposalInbox userId={user.id} onApplied={() => window.location.reload()} />
+
         <Section
           icon={Sparkles}
           title="Core identity"
