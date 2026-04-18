@@ -6010,6 +6010,7 @@ ${parts.join('\n\n')}
 ===========================================================
 `;
             systemPrompt = personaBlock + '\n' + systemPrompt;
+            console.log('[Personality] INJECTED persona block, parts:', parts.length);
           }
         }
       } catch (e) {
