@@ -2,7 +2,25 @@ import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Loader2, Volume2, VolumeX } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@/hooks/useChatStream";
+
+// Auto-link bare URLs (http/https/www.) that aren't already inside a markdown link.
+const linkifyPlainUrls = (text: string): string => {
+  // Skip transformation inside fenced code blocks
+  const parts = text.split(/(```[\s\S]*?```|`[^`]*`)/g);
+  const urlRe = /(?<![\(\[`])((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,;:!?'"])/g;
+  return parts
+    .map((p, i) =>
+      i % 2 === 1
+        ? p
+        : p.replace(urlRe, (m) => {
+            const href = m.startsWith("www.") ? `https://${m}` : m;
+            return `[${m}](${href})`;
+          })
+    )
+    .join("");
+};
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
