@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { callWithFallback, loadUserPrefs, logRouting, DEFAULT_PREFS, type UserPrefs } from "../_shared/model-registry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -5796,6 +5797,9 @@ async function runPlannerPass(
   apiKey: string,
   userMessage: string,
   proactiveMemoryBlock: string | null,
+  prefs: UserPrefs = DEFAULT_PREFS,
+  supabaseClient?: any,
+  userId?: string,
 ): Promise<AgenticPlan | null> {
   const knownIntegrations = Object.keys(PLAN_INTEGRATION_TO_INTENT)
     .filter((k, i, arr) => arr.indexOf(k) === i)
@@ -5804,7 +5808,7 @@ async function runPlannerPass(
   const sys = `You are a fast routing planner for an AI personal assistant. Given a user request, output a compact JSON plan describing what the executor agent must do.
 
 Output ONLY valid JSON with this exact shape (no prose, no code fence):
-{"intent":"<one short phrase>","steps":["<step 1>","<step 2>"],"integrations":["<bucket>", ...],"needsTools":<true|false>}
+{"intent":"...","steps":["..."],"integrations":["..."],"needsTools":true|false}
 
 Rules:
 - "intent": 2-6 words describing the user's goal.
@@ -5818,29 +5822,31 @@ Rules:
     : `User request:\n${userMessage}`;
 
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
-    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: userBlock },
-        ],
+    const result = await callWithFallback({
+      apiKey,
+      agent: 'planner',
+      prefs,
+      timeoutMs: 4000,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: userBlock },
+      ],
+      body: {
         response_format: { type: 'json_object' },
         max_tokens: 300,
-      }),
+      },
     });
-    clearTimeout(timer);
-    if (!resp.ok) {
-      console.warn('[Planner] gateway not ok:', resp.status);
+
+    // Fire-and-forget telemetry
+    if (supabaseClient && userId) {
+      logRouting(supabaseClient, userId, 'planner', result, { mode: prefs.mode });
+    }
+
+    if (!result.ok || !result.data) {
+      console.warn('[Planner] gateway not ok:', result.status, result.errorCode);
       return null;
     }
-    const data = await resp.json();
-    const raw = data?.choices?.[0]?.message?.content;
+    const raw = result.data?.choices?.[0]?.message?.content;
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
