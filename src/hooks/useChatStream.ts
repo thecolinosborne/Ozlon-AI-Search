@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { streamChat, UserSettings, TaskUpdate } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  provider?: ProviderUsedEvent;
 };
 
 /**
@@ -243,6 +244,14 @@ export function useChatStream({
             } else if (update.status === "error") {
               updateStep(update.taskId, update.step, "error");
             }
+          },
+          onProviderUsed: (info) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, provider: info } : m
+              )
+            );
           },
           onDone: () => {
             if (!isCurrentRequest()) return;

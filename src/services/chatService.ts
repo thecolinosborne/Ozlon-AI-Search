@@ -109,6 +109,12 @@ export interface InfinityRouterDebugEvent {
   fallback: boolean;
 }
 
+export interface ProviderUsedEvent {
+  model: string;
+  source: 'your_key' | 'ozlon';
+  platform: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -123,6 +129,7 @@ export interface StreamChatOptions {
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
   onTaskUpdate?: (update: TaskUpdate) => void;
   onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
+  onProviderUsed?: (data: ProviderUsedEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -145,6 +152,7 @@ export async function streamChat({
   onToolCall,
   onTaskUpdate,
   onInfinityDebug,
+  onProviderUsed,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -245,6 +253,12 @@ export async function streamChat({
           // Handle infinity_router_debug events
           if (currentEventType === 'infinity_router_debug' && onInfinityDebug) {
             onInfinityDebug(parsed as InfinityRouterDebugEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle provider_used events (which AI brain answered)
+          if (currentEventType === 'provider_used' && onProviderUsed) {
+            onProviderUsed(parsed as ProviderUsedEvent);
             currentEventType = 'message';
             continue;
           }

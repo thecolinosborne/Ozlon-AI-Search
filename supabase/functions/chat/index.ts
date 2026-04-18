@@ -7,6 +7,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Map a model id to a friendly platform label for UI attribution.
+function inferPlatformFromModel(modelId: string): string {
+  const m = (modelId || '').toLowerCase();
+  if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3') || m.includes('openai')) return 'OpenAI';
+  if (m.includes('gemini') || m.startsWith('google/')) return 'Gemini';
+  if (m.includes('claude') || m.includes('anthropic')) return 'Anthropic';
+  if (m.includes('grok') || m.includes('xai')) return 'xAI';
+  if (m.includes('mistral')) return 'Mistral';
+  if (m.includes('llama') || m.includes('groq')) return 'Groq';
+  if (m.includes('deepseek')) return 'DeepSeek';
+  return 'Ozlon';
+}
+
 // ============================================================================
 // MODEL ROUTER
 // ============================================================================
@@ -7131,6 +7144,29 @@ Execute these in order. Be decisive — the user has already been shown this pla
             await writer.write(encoder.encode(`data: ${JSON.stringify({
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
+
+            // Emit which brain handled this turn (for UI attribution)
+            try {
+              const usedModel = modelConfig.name;
+              let source: 'your_key' | 'ozlon' = 'ozlon';
+              if (credUserId) {
+                const { createClient: ccProv } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminProv = ccProv(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                const { data: row } = await adminProv
+                  .from('custom_models')
+                  .select('api_key_secret_name')
+                  .eq('user_id', credUserId)
+                  .eq('model_id', usedModel)
+                  .maybeSingle();
+                if (row?.api_key_secret_name?.startsWith('inline:')) source = 'your_key';
+              }
+              await writer.write(encoder.encode(`event: provider_used\ndata: ${JSON.stringify({
+                model: usedModel,
+                source,
+                platform: inferPlatformFromModel(usedModel),
+              })}\n\n`));
+            } catch { /* best-effort */ }
+
             await writer.write(encoder.encode('data: [DONE]\n\n'));
 
             // Fire-and-forget: post-turn memory extraction + telemetry
@@ -7172,6 +7208,33 @@ Execute these in order. Be decisive — the user has already been shown this pla
     }
 
     // Standard streaming response (no tools needed)
+    // STONE SOCKET: if the user has plugged in their own key for this model,
+    // route the call through their gateway/key instead of the Lovable baseline.
+    let streamApiKey = apiKey;
+    let streamEndpoint = modelConfig.apiEndpoint;
+    let providerSource: 'your_key' | 'ozlon' = 'ozlon';
+    if (credUserId) {
+      try {
+        const { createClient: ccCustom } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const adminCustom = ccCustom(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+        const { data: customRow } = await adminCustom
+          .from('custom_models')
+          .select('api_key_secret_name, gateway_url, enabled')
+          .eq('user_id', credUserId)
+          .eq('model_id', modelConfig.name)
+          .eq('enabled', true)
+          .maybeSingle();
+        if (customRow?.api_key_secret_name?.startsWith('inline:')) {
+          streamApiKey = customRow.api_key_secret_name.slice('inline:'.length);
+          if (customRow.gateway_url) streamEndpoint = customRow.gateway_url;
+          providerSource = 'your_key';
+          console.log(`[StoneSocket] Using user's own key for ${modelConfig.name} via ${streamEndpoint}`);
+        }
+      } catch (e) {
+        console.warn('[StoneSocket] custom_models lookup failed:', e);
+      }
+    }
+
     const requestPayload: Record<string, unknown> = {
       model: modelConfig.name,
       messages: openAIMessages,
@@ -7179,15 +7242,15 @@ Execute these in order. Be decisive — the user has already been shown this pla
       stream: true,
     };
 
-    const response = await fetch(modelConfig.apiEndpoint, {
+    const response = await fetch(streamEndpoint, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${streamApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
+      console.error('Upstream API error:', response.status, errorText);
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
           status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -7198,30 +7261,33 @@ Execute these in order. Be decisive — the user has already been shown this pla
       });
     }
 
-    // If we have infinity debug data, prepend it to the stream
-    if (infinityDebug) {
-      const { readable, writable } = new TransformStream();
-      const writer = writable.getWriter();
-      const encoder = new TextEncoder();
-      (async () => {
-        try {
+    // Wrap upstream stream so we can prepend infinity-debug and append provider_used.
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+    const providerEvent = `event: provider_used\ndata: ${JSON.stringify({
+      model: modelConfig.name,
+      source: providerSource,
+      platform: inferPlatformFromModel(modelConfig.name),
+    })}\n\n`;
+    (async () => {
+      try {
+        if (infinityDebug) {
           await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
-          const reader = response.body!.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            await writer.write(value);
-          }
-        } finally {
-          await writer.close();
         }
-      })();
-      return new Response(readable, {
-        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
-      });
-    }
-
-    return new Response(response.body, {
+        // Emit provider_used up-front so the UI can attribute even if the user closes early.
+        await writer.write(encoder.encode(providerEvent));
+        const reader = response.body!.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await writer.write(value);
+        }
+      } finally {
+        await writer.close();
+      }
+    })();
+    return new Response(readable, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
     });
 
