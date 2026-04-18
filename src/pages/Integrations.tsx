@@ -55,15 +55,18 @@ const PROVIDER_BY_ID: Record<string, string> = {
 
 const Integrations = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authLoading } = useAuth();
   const { getIntegration, setStatus, setApiKeyConfigured, setLastSync, disconnect } = useIntegrationsStore();
 
   // Hydrate connection status STRICTLY from per-user integration_connections (no env-trusting probes).
   useEffect(() => {
+    // Wait until auth has actually resolved — otherwise we race and force-disconnect everything.
+    if (authLoading) return;
+
     let cancelled = false;
     const hydrate = async () => {
       if (!user) {
-        // Signed out — force everything to disconnected.
+        // Genuinely signed out — clear everything.
         for (const i of integrations) disconnect(i.id);
         return;
       }
@@ -75,7 +78,11 @@ const Integrations = () => {
         if (cancelled || error) return;
         const byProvider = new Map<string, { status: string; last_validated_at: string | null }>();
         for (const row of data || []) {
-          byProvider.set(row.provider, { status: row.status, last_validated_at: row.last_validated_at });
+          // If multiple rows exist for one provider, prefer the connected one.
+          const existing = byProvider.get(row.provider);
+          if (!existing || (row.status === "connected" && existing.status !== "connected")) {
+            byProvider.set(row.provider, { status: row.status, last_validated_at: row.last_validated_at });
+          }
         }
         for (const i of integrations) {
           const provider = PROVIDER_BY_ID[i.id];
@@ -94,7 +101,7 @@ const Integrations = () => {
     };
     hydrate();
     return () => { cancelled = true; };
-  }, [user?.id, setStatus, setApiKeyConfigured, setLastSync, disconnect]);
+  }, [authLoading, user?.id, setStatus, setApiKeyConfigured, setLastSync, disconnect]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">
