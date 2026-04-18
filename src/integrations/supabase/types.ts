@@ -1098,6 +1098,42 @@ export type Database = {
         }
         Relationships: []
       }
+      user_personality: {
+        Row: {
+          about_me: string | null
+          created_at: string
+          house_rules: string[]
+          id: string
+          identity: Json
+          reference_persona: string | null
+          tone_settings: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          about_me?: string | null
+          created_at?: string
+          house_rules?: string[]
+          id?: string
+          identity?: Json
+          reference_persona?: string | null
+          tone_settings?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          about_me?: string | null
+          created_at?: string
+          house_rules?: string[]
+          id?: string
+          identity?: Json
+          reference_persona?: string | null
+          tone_settings?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       video_tasks: {
         Row: {
           aspect_ratio: string
