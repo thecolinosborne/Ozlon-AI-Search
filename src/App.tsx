@@ -11,6 +11,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 // Pages
 import Index from "@/pages/Index";
 import Settings from "@/pages/Settings";
+import PersonalitySettings from "@/pages/PersonalitySettings";
 import Developer from "@/pages/Developer";
 import AuthPage from "@/pages/AuthPage";
 import Profile from "@/pages/Profile";
@@ -57,6 +58,7 @@ const AppRoutes = () => {
         <Route path="/profile" element={<Profile />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/personality" element={<PersonalitySettings />} />
         <Route path="/developer" element={<Developer />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/integrations" element={<Integrations />} />

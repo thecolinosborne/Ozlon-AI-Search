@@ -5963,6 +5963,58 @@ serve(async (req) => {
       } catch { /* no auth */ }
     }
 
+    // ================================================================
+    // PERSONALITY & IDENTITY LAYER — user-authored persona override
+    // Loaded BEFORE other prompt enrichment so user identity sits at top.
+    // ================================================================
+    if (credUserId) {
+      try {
+        const { createClient: ccP } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const srvKeyP = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const adminP = ccP(Deno.env.get('SUPABASE_URL')!, srvKeyP);
+        const { data: persona } = await adminP
+          .from('user_personality')
+          .select('identity, about_me, house_rules, tone_settings, reference_persona')
+          .eq('user_id', credUserId)
+          .maybeSingle();
+        if (persona) {
+          const parts: string[] = [];
+          const identity = (persona.identity || {}) as Record<string, unknown>;
+          if (identity.statement && typeof identity.statement === 'string') {
+            parts.push(`CORE IDENTITY:\n${identity.statement}`);
+          }
+          if (persona.reference_persona && typeof persona.reference_persona === 'string') {
+            parts.push(`REFERENCE PERSONA (channel this voice):\n${persona.reference_persona}`);
+          }
+          if (persona.about_me && typeof persona.about_me === 'string') {
+            parts.push(`ABOUT THE USER YOU SERVE:\n${persona.about_me}`);
+          }
+          const rules = Array.isArray(persona.house_rules) ? (persona.house_rules as string[]).filter(Boolean) : [];
+          if (rules.length) {
+            parts.push(`HOUSE RULES (these override defaults — never violate):\n${rules.map(r => `- ${r}`).join('\n')}`);
+          }
+          const tone = (persona.tone_settings || {}) as Record<string, unknown>;
+          const toneLines = Object.entries(tone)
+            .filter(([, v]) => typeof v === 'number')
+            .map(([k, v]) => `- ${k}: ${v}/100`);
+          if (toneLines.length) {
+            parts.push(`TONE CALIBRATION (0=left trait, 100=right trait):\n${toneLines.join('\n')}`);
+          }
+          if (parts.length) {
+            const personaBlock = `===========================================================
+USER-AUTHORED PERSONALITY (HIGHEST PRIORITY — overrides defaults)
+===========================================================
+${parts.join('\n\n')}
+===========================================================
+`;
+            systemPrompt = personaBlock + '\n' + systemPrompt;
+          }
+        }
+      } catch (e) {
+        console.error('[Personality] load failed:', e);
+      }
+    }
+
     if (credUserId) {
       try {
         const { createClient: cc2 } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
