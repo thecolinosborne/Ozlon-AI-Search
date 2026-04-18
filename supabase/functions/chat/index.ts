@@ -1,6 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callWithFallback, loadUserPrefs, logRouting, DEFAULT_PREFS, type UserPrefs } from "../_shared/model-registry.ts";
+import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -5876,6 +5876,7 @@ async function runPlannerPass(
   prefs: UserPrefs = DEFAULT_PREFS,
   supabaseClient?: any,
   userId?: string,
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
 ): Promise<AgenticPlan | null> {
   const knownIntegrations = Object.keys(PLAN_INTEGRATION_TO_INTENT)
     .filter((k, i, arr) => arr.indexOf(k) === i)
@@ -5902,6 +5903,7 @@ Rules:
       apiKey,
       agent: 'planner',
       prefs,
+      registry,
       timeoutMs: 4000,
       messages: [
         { role: 'system', content: sys },
@@ -6983,15 +6985,20 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               // Infinity Gauntlet: load user routing prefs + admin client for telemetry.
               let gauntletPrefs = DEFAULT_PREFS;
               let gauntletAdmin: any = null;
+              let gauntletRegistry: Record<string, ModelEntry> = MODEL_REGISTRY;
               try {
                 const { createClient: ccGaunt } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 gauntletAdmin = ccGaunt(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-                if (credUserId) gauntletPrefs = await loadUserPrefs(gauntletAdmin, credUserId);
+                if (credUserId) {
+                  gauntletPrefs = await loadUserPrefs(gauntletAdmin, credUserId);
+                  const customs = await loadCustomModels(gauntletAdmin, credUserId);
+                  gauntletRegistry = mergeRegistry(customs);
+                }
               } catch (e) {
-                console.warn('[Gauntlet] prefs load failed, using defaults:', e);
+                console.warn('[Gauntlet] prefs/registry load failed, using defaults:', e);
               }
-              const plan = await runPlannerPass(apiKey, userText, null, gauntletPrefs, gauntletAdmin, credUserId || undefined);
-              console.log(`[Planner] ${Date.now() - plannerStart}ms mode=${gauntletPrefs.mode} ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
+              const plan = await runPlannerPass(apiKey, userText, null, gauntletPrefs, gauntletAdmin, credUserId || undefined, gauntletRegistry);
+              console.log(`[Planner] ${Date.now() - plannerStart}ms mode=${gauntletPrefs.mode} customs=${Object.keys(gauntletRegistry).length - Object.keys(MODEL_REGISTRY).length} ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
               if (plan) {
                 const planIntents = planToServiceIntents(plan);
                 mergedIntents = [...new Set([...planIntents, ...heuristicIntents])];
