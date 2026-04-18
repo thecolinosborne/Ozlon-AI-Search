@@ -1,60 +1,69 @@
 
-User is asking for a summary, not new scope. Consolidate the three approved plans (humanize Brain page, live API key sync, video generation) into one clear list.
+User wants the Brain page restructured:
 
-# What We're Building — One Pass
+1. **Connected Brains** = only platforms where the user has actually plugged in a key (or are auto-connected via Lovable AI Gateway). Each card represents the **whole platform** (Gemini, OpenAI, Higgsfield, Anthropic, xAI, Mistral, DeepSeek) — NOT broken out by individual model (no separate Veo, Nano Banana, GPT-5 cards).
+2. Each connected platform card lists what it powers in plain English (e.g. Gemini → "Text · Image · Video", OpenAI → "Text · Tools · Voice", Higgsfield → "Image · Video").
+3. **Disconnect** button on each card — like removing a stone from the Gauntlet. Removes the key + custom_models row, platform falls back through router.
+4. **Add a Brain** = catalog of platforms NOT yet connected. Paste API key → platform jumps to Connected Brains section, all its capabilities (text/image/video) light up across the Infinity Router automatically.
+5. Drop per-model granularity in the UI. Platform-level only.
 
-## 1. Clean up Integrations
-- Remove **AI Processor** card from `/integrations` (redundant)
-- Remove its route from `App.tsx`
-- Drop default entry from `useIntegrationsStore`
+Currently `connect-brain/index.ts` only knows xai/anthropic/mistral/deepseek and inserts ONE custom_models row per provider. To make a platform connection light up multiple capabilities (e.g. Gemini key → text + image + video), the connect action needs to insert **multiple** custom_models rows under one platform key, and disconnect needs to remove them all.
 
-## 2. Rebuild "Intelligence Routing" as the **Brain** page (`/settings/routing`)
-Drop everything technical. Four sections:
+Plan is clear. Concise version below.
 
-**A. Connected Brains** (auto-detected)
-- Gemini · OpenAI · Veo 3 → Connected via Lovable AI (masked key shown)
-- Higgsfield → Connected (masked `HIGGSFIELD_API_KEY`) with Manage link
-- Any custom stones the user has plugged in
+# Plan — Platform-level Brain Gauntlet
 
-**B. Add a Brain** (provider catalog with inline key input)
-- Grok (xAI) · Claude (Anthropic) · Mistral · DeepSeek
-- Each: paste API key → Connect → key stored as Supabase secret + row inserted in `custom_models` → instantly joins the Infinity Router via existing `loadCustomModels` + `mergeRegistry`
-- "+ Custom OpenAI-compatible endpoint" → existing Stone Socket form
+## 1. Restructure `connect-brain` edge function
+Refactor PRESETS into **platform presets**. Each platform = one API key + N model rows.
 
-**C. What handles what?** (humanized, replaces per-agent dropdowns)
-Plain English rows, each with Auto + every connected model:
-- Quick thinking & routing
-- Deep reasoning & tool use
-- Image creation
-- **Video creation** (new)
-- Summaries
+Platforms:
+- `gemini` (Google) → key powers `google/gemini-2.5-pro`, `google/gemini-2.5-flash`, `google/gemini-3-pro-image-preview`, `google/veo-3-fast`
+- `openai` → `openai/gpt-5`, `openai/gpt-5-mini`, `openai/gpt-5-nano`
+- `anthropic` → `anthropic/claude-opus-4`, `anthropic/claude-sonnet-4`
+- `xai` → `xai/grok-4`
+- `mistral` → `mistral/mistral-large-latest`
+- `deepseek` → `deepseek/deepseek-chat`
+- `higgsfield` → `higgsfield/dop-standard`, `higgsfield/image-soul` (special: stored in integration_connections, not custom_models — already wired)
 
-**D. How it's been performing**
-24h telemetry — avg response time + reliability per role.
+Actions:
+- `action: "connect"` → upserts ALL model rows for that platform with same `inline:<key>` and a shared `metadata.platform_id` tag for grouping
+- `action: "disconnect"` → deletes all custom_models rows where `metadata.platform_id = <platform>` (and for higgsfield, marks integration_connections disconnected)
+- `action: "list_status"` → returns `{ platform, connected, last4, capabilities[] }[]` — auto-detected from custom_models + integration_connections + Lovable AI baseline (gemini + openai always shown as "Connected via Lovable AI" if no user key present)
 
-**Removed:** Speed/Balanced/Quality selector, raw "Available Models" toggles, cost-per-turn numbers.
+Migration: add `metadata jsonb` column to `custom_models` (or reuse existing fields — check schema). custom_models has no metadata column → add one.
 
-## 3. Video Generation (new capability)
-- New `video_gen` capability + `video_director` agent in registry
-- Models: `google/veo-3-fast`, `google/veo-3` (Lovable AI), `higgsfield/dop-standard` (existing edge function)
-- New edge function `video-gen/index.ts` — Veo wrapper + storage upload
-- New chat tool `generate_video(prompt, duration?, aspect_ratio?)` wired into `chat/index.ts` with userId injection
-- New public storage bucket `generated-videos`
+## 2. Rewrite Brain page UI (`src/pages/ModelRouting.tsx`)
 
-## 4. New edge function `connect-brain`
-- Stores user-provided API keys as Supabase secrets
-- Inserts matching `custom_models` row with provider preset (gateway URL, capabilities)
-- Returns success → frontend refreshes → router picks it up next request
+**Section A — Connected Brains** (Gauntlet-style)
+One card per platform with:
+- Platform name + logo glyph
+- Capability pills: Text · Image · Video · Voice · Tools (only those it provides)
+- Status: "Connected via your key ••••1a2b" OR "Connected via Lovable AI"
+- Disconnect button (only if user-keyed; Lovable AI baseline can't be disconnected)
+
+**Section B — Add a Brain**
+Cards for every platform NOT in Connected Brains. Each:
+- Platform name + capability pills (greyed)
+- Inline API key input + Connect button
+- On Connect → calls `connect-brain` → platform card animates over to Section A → all its capabilities join the Infinity Router immediately
+
+**Section C — What handles what?** (keep, simplified)
+Plain-English roles, dropdown shows only models from currently-connected platforms + Auto.
+
+**Section D — How it's been performing** (keep telemetry as-is)
+
+Removed from current page: per-model breakouts, Veo/Nano Banana as separate cards, anything technical.
+
+## 3. Backend wiring
+- `mergeRegistry` already picks up custom_models rows → no changes needed in chat function
+- Disconnect just removes rows → router falls back automatically
+- Lovable AI baseline (gemini + openai via LOVABLE_API_KEY) stays as the default when no user key present — already how `MODEL_REGISTRY` works
 
 ## Files
-- New: `supabase/functions/connect-brain/index.ts`, `supabase/functions/video-gen/index.ts`, migration for `generated-videos` bucket
-- Edited: `src/pages/ModelRouting.tsx` (full rewrite, same route), `src/pages/Integrations.tsx`, `src/App.tsx`, `src/stores/useIntegrationsStore.ts`, `supabase/functions/_shared/model-registry.ts` (add Veo + Higgsfield + video_director), `supabase/functions/chat/index.ts` (generate_video tool)
+- Edited: `supabase/functions/connect-brain/index.ts` (platform presets + disconnect + list_status), `src/pages/ModelRouting.tsx` (full UI rewrite, same route)
+- Migration: add `metadata jsonb default '{}'` to `custom_models` for platform grouping
 
 ## Safety
-- All additive. Existing chat/voice/integrations untouched.
-- Custom keys are per-user (RLS on `custom_models`).
-- Failed brains just sit unused — fallback chain protects executor.
-- Video tool only fires on explicit AI call.
-
-## Effort
-One session.
+- All additive. Lovable AI baseline untouched — disconnecting a user key just reverts that platform to baseline (or removes it if no baseline exists).
+- RLS already protects custom_models per user.
+- One session.
