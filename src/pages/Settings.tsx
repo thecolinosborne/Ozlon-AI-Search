@@ -13,6 +13,7 @@ import {
   PlayCircle,
   Phone,
   Plug,
+  Sparkles,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -269,6 +270,16 @@ const Settings = () => {
             value={voiceSettings?.auto_play_responses ?? false}
             onChange={handleAutoPlayToggle}
             disabled={isLoadingVoice}
+          />
+        </SettingsSection>
+
+        {/* Personality */}
+        <SettingsSection title="Personality">
+          <SettingsRow
+            icon={Sparkles}
+            label="AI Identity & Persona"
+            description="Author who your AI is, how it speaks, and what it knows about you"
+            onClick={() => navigate("/settings/personality")}
           />
         </SettingsSection>
 
