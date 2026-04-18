@@ -146,7 +146,7 @@ async function resolveTeamId(
   return { teamId: teams[0].id, teams };
 }
 
-async function getListId(params?: Record<string, unknown>): Promise<string> {
+async function getListId(params?: Record<string, unknown>, resolvedToken?: string): Promise<string> {
   // Priority: explicit param → defaultListId param → DB config → env var → auto-discover
   if (params?.listId) return String(params.listId);
   if (params?.defaultListId) return String(params.defaultListId);
@@ -169,9 +169,10 @@ async function getListId(params?: Record<string, unknown>): Promise<string> {
   const envList = Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
   if (envList) return envList;
 
-  // Auto-discover: get first list from first space
+  // Auto-discover: get first list from first space.
+  // Prefer the already-resolved per-user token; fall back to env-only getToken.
   try {
-    const token = getToken(params?.apiToken as string | undefined);
+    const token = resolvedToken || getToken(params?.apiToken as string | undefined);
     const { teamId } = await resolveTeamId(token, params?.teamId as string | undefined);
     const spacesRes = await fetch(`${CLICKUP_BASE}/team/${teamId}/space?archived=false`, {
       headers: { 'Authorization': token },
