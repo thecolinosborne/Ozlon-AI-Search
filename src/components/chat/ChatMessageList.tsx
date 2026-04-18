@@ -53,6 +53,16 @@ export const ChatMessageList = ({
                       <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
                     </span>
                   )}
+                  {message.provider && message.content && (
+                    <div className="mt-2 pt-2 border-t border-neutral-200/60 text-[11px] text-neutral-400 not-prose">
+                      via {message.provider.platform}
+                      {message.provider.source === "your_key" ? (
+                        <span className="ml-1 text-emerald-600">· your key</span>
+                      ) : (
+                        <span className="ml-1">· Ozlon</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <span className="whitespace-pre-wrap">{message.content}</span>
