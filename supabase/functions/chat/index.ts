@@ -2533,6 +2533,65 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Higgsfield AI Tools ============
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_generate_image',
+      description: 'Generate an image with Higgsfield AI (Soul models). Returns a request_id — poll with higgsfield_get_job_status. Use this when the user asks to create/generate/make an image, picture, or visual.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed visual description.' },
+          model: { type: 'string', description: 'Model ID. Defaults to "higgsfield-ai/soul/standard". Options: "higgsfield-ai/soul/standard", "higgsfield-ai/soul/pro", "higgsfield-ai/soul-id".' },
+          aspect_ratio: { type: 'string', description: 'e.g. "16:9", "9:16", "1:1", "4:5". Default "16:9".' },
+          resolution: { type: 'string', description: 'e.g. "720p", "1080p". Default "720p".' },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_generate_video',
+      description: 'Generate a video from a source image using Higgsfield AI (DoP models). Returns a request_id — poll with higgsfield_get_job_status. Use when user asks to animate an image, create video from image, or generate motion.',
+      parameters: {
+        type: 'object',
+        properties: {
+          image_url: { type: 'string', description: 'Public URL of the source image.' },
+          prompt: { type: 'string', description: 'Optional motion / scene description.' },
+          model: { type: 'string', description: 'Model ID. Defaults to "higgsfield-ai/dop/standard". Options: "higgsfield-ai/dop/standard", "higgsfield-ai/dop/pro", "higgsfield-ai/dop/turbo", "higgsfield-ai/dop/lite".' },
+          duration: { type: 'number', description: 'Duration in seconds (default 5).' },
+        },
+        required: ['image_url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_get_job_status',
+      description: 'Check the status of a Higgsfield generation job. Returns status (queued/processing/completed/failed) and output URL when done.',
+      parameters: {
+        type: 'object',
+        properties: { request_id: { type: 'string', description: 'Job request ID returned by generate_image / generate_video.' } },
+        required: ['request_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'higgsfield_cancel_job',
+      description: 'Cancel a queued or running Higgsfield generation job by request_id.',
+      parameters: {
+        type: 'object',
+        properties: { request_id: { type: 'string', description: 'Job request ID to cancel.' } },
+        required: ['request_id'],
+      },
+    },
+  },
   // ============ YouTube Upload Tool ============
   {
     type: 'function',
