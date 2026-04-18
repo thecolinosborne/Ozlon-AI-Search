@@ -1,58 +1,44 @@
 
-User wants to continue the roadmap. Phase 0 (tiered prioritizer) ✅, Phase 4 (proactive memory) ✅, Phase 1 (semantic routing booster) ✅. Remaining: Phase 2 (consolidation — deferred, risky), Phase 3 (two-pass agentic routing), Phase 5 (self-evolution).
+User approved. Plan is already clear from prior turns — present concise build plan and stop.
 
-Phase 3 is the highest-leverage next step — it's the actual "sentient feel" upgrade and builds directly on the prioritizer work we just shipped. Phase 2 is mechanical refactoring with regression risk; Phase 5 needs more behavioral data first.
+Scope: one shared registry file, one router, wire into chat planner+executor, one settings page, one DB migration. Defaults preserve current behavior (zero regression).
 
-Recommend Phase 3.
+# Infinity Gauntlet — Build Plan
 
-# Phase 3 — Two-Pass Agentic Routing
+## 1. Database (one migration)
+- `user_model_preferences` — `user_id`, `mode` ('speed'|'balanced'|'quality', default 'balanced'), `agent_overrides` jsonb, `disabled_models` text[]. RLS: own rows only.
+- `model_routing_log` — `user_id`, `agent`, `model_used`, `latency_ms`, `success`, `fallback_used`, `created_at`. RLS: own rows readable, insert via service role.
 
-## What it does
-Splits one bloated LLM call into two focused calls:
-1. **Planner** (gpt-5-mini, fast/cheap): sees user message + Wisdom memories. Outputs a short JSON plan: *"intent: X, steps: [check_email, cross_ref_calendar, draft_reply], integrations: [gmail, calendar]"*
-2. **Executor** (gpt-5.4): receives the plan + only tools matching the planned integrations. Executes, narrates, completes.
+## 2. Shared registry — `supabase/functions/_shared/model-registry.ts`
+- `MODEL_REGISTRY`: every model = `{id, gateway, contextWindow, costPer1kIn/Out, avgLatencyMs, capabilities[], enabled, fallback}`. Seeded with current Lovable AI models (Gemini family, GPT-5 family).
+- `AGENT_REGISTRY`: `planner`, `executor`, `classifier`, `summarizer` — each declares `preferredTier`, `requires[]`, hard fallback.
+- `pickModel(agent, userPrefs, disabledModels)` — scores eligible models, returns `{primary, fallbackChain[]}`.
+- `callWithFallback(messages, agent, userPrefs)` — tries primary → walks chain on 429/402/5xx/timeout → logs to `model_routing_log`.
 
-## Why it's the right next step
-- **Solves silent tool-drop permanently** — executor only ever sees ~30-40 relevant tools, far below the 128 cap, regardless of how many we add later
-- **Makes reasoning visible** — plan renders in existing `TaskActivityPortal` (already built)
-- **Enables long horizons** — 8+ tool calls per turn become reliable; today they get confused
-- **Compounds Phase 0/1/4** — planner consumes proactive memory, executor consumes prioritized tools
+## 3. Wire into `supabase/functions/chat/index.ts`
+- Replace hardcoded planner model call with `callWithFallback(..., 'planner', prefs)`.
+- Replace hardcoded executor model call with `callWithFallback(..., 'executor', prefs)`.
+- Load `user_model_preferences` once per request (cached). Defaults = current models if no row.
+- ~30 lines changed. Existing prioritizer, two-pass routing, semantic booster — all untouched.
 
-## Scope (one file: `supabase/functions/chat/index.ts`)
+## 4. Settings UI — new page `src/pages/ModelRouting.tsx` + route in `App.tsx`
+- Three-mode segmented control: **Speed / Balanced / Quality** (writes `mode`)
+- Per-agent override dropdowns (planner, executor, etc.) — "Auto" by default
+- Model toggle list with capability badges and live cost-per-turn estimate
+- Entry point: new `SettingsRow` in `Settings.tsx` under a new "Intelligence Routing" section, icon `Zap`
 
-**1. Add `runPlannerPass()` before `runToolLoop()`:**
-- Calls Lovable AI gateway with gpt-5-mini
-- System prompt: "Output JSON: {intent, steps[], integrations[], needsTools: bool}"
-- ~200 token response, <1s latency
-- If `needsTools: false` → skip planner, go direct to executor (chitchat fast path)
+## 5. Telemetry visibility
+- Same page shows last 24h: avg latency per agent, fallback rate, model usage breakdown — feeds Phase 5 self-evolution later.
 
-**2. Feed plan into existing prioritizer:**
-- Plan's `integrations[]` becomes the strongest Tier A signal (overrides keyword detection)
-- Plan's `intent` injected into executor system prompt as: *"Plan: [step1, step2, step3]. Execute in order."*
+## Safety
+- Defaults match current behavior (planner=`gemini-2.5-flash-lite`, executor=`openai/gpt-5`)
+- Fallback chain is purely additive — today there is none
+- `requires: ['tools']` flag prevents weak-tool-calling models from ever being picked for executor
+- No integration code touched. No tool registry touched. Two-pass flow preserved.
 
-**3. Stream plan to UI via existing SSE `task_update` events:**
-- `TaskActivityPortal` already renders these — zero UI work
-- Each step in plan emits a `task_update` with status `pending` → `in_progress` → `done`
-
-**4. Fast-path bypass:**
-- If user message <40 chars and matches conversational patterns ("hi", "thanks", "what can you do") → skip planner entirely, preserve current latency
-
-## What we don't touch
-- No DB changes
-- No UI changes (TaskActivityPortal already exists)
-- No new edge functions
-- Existing single-pass flow remains as fallback if planner fails
-
-## Verification
-After deploy, hit `/functions/v1/chat` for:
-- Complex multi-integration: "check my unread emails and add followups to my GHL pipeline" → plan should list `[gmail, ghl]`, executor only loads those tools
-- Simple chitchat: "hey" → planner skipped, latency unchanged
-- Single integration: "show my GSC traffic" → plan lists `[gsc]`, ~6 tools loaded
-- Failure mode: planner returns malformed JSON → falls back to current single-pass behavior
+## Files touched
+- New: `supabase/migrations/<timestamp>.sql`, `supabase/functions/_shared/model-registry.ts`, `src/pages/ModelRouting.tsx`
+- Edited: `supabase/functions/chat/index.ts` (~30 lines), `src/App.tsx` (route), `src/pages/Settings.tsx` (one row)
 
 ## Effort
-~150-200 lines in `chat/index.ts`. One session. Zero regression risk (graceful fallback to existing flow).
-
-## After Phase 3
-- **Phase 5 (self-evolution)** becomes viable because plans are now structured/loggable data the system can learn from
-- **Phase 2 (consolidation)** becomes optional — executor only sees ~30 tools per turn anyway
+~1 session. Ship-ready.
