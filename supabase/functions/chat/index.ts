@@ -6904,8 +6904,18 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
             let planTaskId: string | null = null;
             const plannerStart = Date.now();
             if (!shouldSkipPlanner(userText)) {
-              const plan = await runPlannerPass(apiKey, userText, null);
-              console.log(`[Planner] ${Date.now() - plannerStart}ms ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
+              // Infinity Gauntlet: load user routing prefs + admin client for telemetry.
+              let gauntletPrefs = DEFAULT_PREFS;
+              let gauntletAdmin: any = null;
+              try {
+                const { createClient: ccGaunt } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                gauntletAdmin = ccGaunt(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                if (credUserId) gauntletPrefs = await loadUserPrefs(gauntletAdmin, credUserId);
+              } catch (e) {
+                console.warn('[Gauntlet] prefs load failed, using defaults:', e);
+              }
+              const plan = await runPlannerPass(apiKey, userText, null, gauntletPrefs, gauntletAdmin, credUserId || undefined);
+              console.log(`[Planner] ${Date.now() - plannerStart}ms mode=${gauntletPrefs.mode} ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
               if (plan) {
                 const planIntents = planToServiceIntents(plan);
                 mergedIntents = [...new Set([...planIntents, ...heuristicIntents])];
