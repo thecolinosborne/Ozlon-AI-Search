@@ -642,6 +642,30 @@ serve(async (req) => {
       }
 
       // ============ TASKS ============
+      case 'create_task': {
+        const listId = params?.listId ? String(params.listId) : await getListId(params);
+        if (!listId) throw new Error('listId required (no default list configured)');
+        const {
+          name, description, priority, status, due_date, due_date_time,
+          start_date, start_date_time, assignees, tags, parent,
+          listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest
+        } = params || {};
+        if (!name) throw new Error('name required');
+        const payload: Record<string, unknown> = { name, ...rest };
+        if (description !== undefined) payload.description = description;
+        if (priority !== undefined) payload.priority = priority;
+        if (status !== undefined) payload.status = status;
+        if (due_date !== undefined) payload.due_date = due_date;
+        if (due_date_time !== undefined) payload.due_date_time = due_date_time;
+        if (start_date !== undefined) payload.start_date = start_date;
+        if (start_date_time !== undefined) payload.start_date_time = start_date_time;
+        if (assignees !== undefined) payload.assignees = assignees;
+        if (tags !== undefined) payload.tags = tags;
+        if (parent !== undefined) payload.parent = parent;
+        const data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       case 'list_tasks': {
         // If listId provided, scope to that list; otherwise search whole workspace
         const listId = params?.listId ? String(params.listId) : await getListId(params).catch(() => '');
