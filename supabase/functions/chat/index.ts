@@ -5406,6 +5406,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'ghl_list_courses': 'ghl',
     'ghl_list_surveys': 'ghl',
     'ghl_get_survey_submissions': 'ghl',
+    'ghl_list_blog_sites': 'ghl',
     'ghl_list_blog_posts': 'ghl',
     'ghl_get_blog_post': 'ghl',
     'ghl_create_blog_post': 'ghl',
