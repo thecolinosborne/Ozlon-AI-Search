@@ -648,12 +648,22 @@ async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?:
       'Authorization': `Bearer ${ghlApiKey}`,
       'Content-Type': 'application/json',
       'Version': '2021-07-28',
+      'Accept': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return res.json();
-  return { raw: await res.text() };
+  const payload: unknown = ct.includes('application/json')
+    ? await res.json().catch(() => ({}))
+    : { raw: await res.text() };
+  if (!res.ok) {
+    const detail = typeof payload === 'object' && payload !== null
+      ? JSON.stringify(payload).slice(0, 500)
+      : String(payload).slice(0, 500);
+    console.error(`[callGHL] ${method} ${path} failed: ${res.status} ${detail}`);
+    throw new Error(`GHL ${method} ${path} failed [${res.status}]: ${detail}`);
+  }
+  return payload;
 }
 
 async function fetchGHLData(ghlApiKey?: string, ghlLocationId?: string): Promise<string> {
