@@ -70,7 +70,8 @@ export const ChatMessageList = ({
                             {children}
                           </a>
                         ),
-                ખ                      }}
+                      }}
+                      remarkPlugins={[remarkGfm]}
                       urlTransform={(url) => url}
                     >
                       {linkifyPlainUrls(message.content)}
