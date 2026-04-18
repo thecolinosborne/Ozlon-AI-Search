@@ -1,54 +1,56 @@
 
-User wants the Brain page to feel less like a developer console and more like a consumer product. Combine the polish plan with consumer-friendly framing. Keep it tight.
+User wants to verify the end-to-end flow: paste API key on Brain page → key gets stored → that platform's models become part of the Infinity Router's selection pool → router actually picks them when appropriate.
 
-# Plan — Make Brain feel like a product
+This is a **testing/verification task**, not new build. I should plan a verification pass and surface gaps if any. Let me check what's actually wired up.
 
-## 1. Language overhaul (no jargon)
-Rename in UI only — backend unchanged:
-- "Connected Brains" → **"Your Brains"**
-- "Add a Brain" → **"Add another Brain"** with subtitle "Bring your own keys to unlock more power"
-- "What handles what?" → **"How your Brains work together"**
-- "How it's been performing" → **"This week's activity"**
-- Capability pills: `text` → "Conversation", `tools` → "Actions", `vision` → "Sees images", `image_gen` → "Creates images", `video_gen` → "Creates videos", `voice` → "Speaks & listens", `reasoning` → "Deep thinking", `long_context` → "Remembers a lot"
-- Tier labels: `pro` → "Premium", `flash` → "Fast", `nano` → "Lightweight" (only show if user expands)
+Key questions:
+1. Does `connect-brain` actually persist keys correctly?
+2. Does the chat function's `mergeRegistry` pick up custom_models rows?
+3. Does the router actually consider them when scoring?
+4. Is there visible feedback the user can see?
 
-## 2. Friendlier Add-a-Brain cards
-Each disconnected platform card:
-- Provider logo glyph (use lucide icons: Sparkles, Bot, Brain, Zap, etc. — no real logos to avoid trademark)
-- One-sentence description in human terms (e.g. Gemini → "Google's brain. Great at images, video, and reading long documents.")
-- "Get a free key →" link to the right console (aistudio.google.com etc.) — opens in new tab
-- Single input with smart placeholder showing prefix shape (`AIza…`, `sk-…`, etc.)
-- Optional "Nickname this brain" field underneath (e.g. "Personal", "Work") — stored in `metadata.label`
-- Big friendly **"Plug it in"** button (instead of "Connect")
-- Soft helper text on focus: "We store this securely. Only you can see it."
+User has zero custom_models right now (network logs confirm: `custom_models` returns `[]`). So nothing to test against — they need to plug a key first.
 
-## 3. Friendlier Connected Brain cards
-- Show nickname if set, else platform name
-- Status line: "Powering: Conversation · Images · Video" (humanized capabilities, comma-joined)
-- Source line: "Using your key ••••1a2b" or "Powered by Ozlon" (instead of "Lovable AI baseline")
-- "Manage at [console] ↗" small link
-- Disconnect button styled as soft ghost text "Remove from Gauntlet" with confirm dialog ("This brain will stop powering Ozlon. You can plug it back in anytime.")
+Plan: verification protocol + lightweight observability so the user can SEE routing decisions.
 
-## 4. Empty/first-run polish
-If user has zero personal brains:
-- Hero line at top: **"Ozlon runs on multiple AI brains. Add your own to unlock more, faster, and cheaper."**
-- Subtle "Recommended first" badge on Gemini card (free tier is generous)
+# Plan — Verify Brain key → Router integration
 
-## 5. Light validation feedback
-- After paste, show green check if prefix matches expected shape, soft amber hint if not ("This doesn't look like a Gemini key — double-check?") — never block submit
+## Phase 1: Inspect current wiring (read-only)
+Confirm three links in the chain:
+1. `connect-brain` insert path → `custom_models` row with `inline:<key>` and platform_id
+2. `chat` function `mergeRegistry()` reads custom_models and adds them to selection pool
+3. Router scoring actually considers user-keyed models (not just baseline)
 
-## 6. Skip for now (revisit later)
-- Per-response provider attribution badge in chat
-- Usage/cost dashboard
-- `extra_fields` scaffolding for Vertex/Azure/Bedrock
-Reason: ship the consumer feel first, layer power-user features later.
+Files to inspect: `supabase/functions/connect-brain/index.ts`, `supabase/functions/chat/index.ts`, `supabase/functions/_shared/model-registry.ts`
 
-## Files
-- Edited: `src/pages/ModelRouting.tsx` — language, layout, nickname input, validation, confirm dialog, hero line, recommended badge
-- Edited: `supabase/functions/connect-brain/index.ts` — add `console_url`, `key_prefix`, `human_blurb`, `humanized_capabilities` to each PLATFORM preset; accept optional `label` on connect; return these fields in `list_status`/`list_presets`
+## Phase 2: Live end-to-end test
+1. User plugs in their Gemini key on `/settings/routing`
+2. Verify a `custom_models` row appears (query DB)
+3. Send a chat message that should route to Gemini (e.g. "describe this image" or "summarize this long doc")
+4. Check `model_routing_log` to confirm the user's `inline:` key was used vs Lovable AI baseline
+5. Disconnect → verify rows removed → verify router falls back
+
+## Phase 3: Add visible "which brain handled this" indicator
+Right now the user has no way to SEE which brain answered. Without this, "did it route correctly?" is invisible. Add minimal observability:
+- Tiny footer line under each assistant message: "via Gemini (your key)" or "via Gemini (Ozlon)"
+- Sourced from a new `provider_used` field already partially logged in `model_routing_log`
+- Surface it through the existing SSE stream as a final metadata event
+
+Files touched (Phase 3 only):
+- `supabase/functions/chat/index.ts` — emit `event: provider_used` SSE before [DONE]
+- `src/services/chatService.ts` — parse new event into `onProviderUsed` callback
+- `src/hooks/useChatStream.ts` — store per-message provider info
+- `src/components/chat/MessageBubble.tsx` — render small grey footer line
+
+## Phase 4: Document the verification
+Add a short section to memory describing how to validate Brain plug-in works, so future tests are repeatable.
 
 ## Safety
-Pure UI/copy + additive backend fields. No schema change (label rides inside existing `metadata` jsonb). Existing connections keep working untouched.
+- Phases 1-2 are pure inspection/testing, no code changes
+- Phase 3 is additive (one new SSE event, one new UI line) — doesn't touch routing logic
+- Disconnecting any key reverts to baseline automatically (already wired)
 
 ## Effort
-One session.
+- Phases 1-2: 5 min inspection + live test
+- Phase 3: 15 min
+- Phase 4: 2 min
