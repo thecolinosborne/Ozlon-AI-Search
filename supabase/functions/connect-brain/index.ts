@@ -241,6 +241,10 @@ serve(async (req) => {
         .eq("user_id", userId)
         .eq("metadata->>platform_id", platform.id);
 
+      const labelTrim = (body.label || "").trim().slice(0, 60);
+      const meta: Record<string, unknown> = { platform_id: platform.id };
+      if (labelTrim) meta.label = labelTrim;
+
       const rows = platform.models.map((m) => ({
         user_id: userId,
         model_id: m.model_id,
@@ -255,7 +259,7 @@ serve(async (req) => {
         tier: m.tier,
         fallback_model_id: m.fallback_model_id,
         enabled: true,
-        metadata: { platform_id: platform.id },
+        metadata: meta,
       }));
 
       const { error: upErr } = await admin
