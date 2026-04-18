@@ -365,10 +365,19 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
       const onAbort = () => ctrl.abort();
       if (opts.signal) opts.signal.addEventListener('abort', onAbort);
 
-      const resp = await fetch(GATEWAY_URL, {
+      // Allow per-model custom gateway + API key (Stone Socket).
+      const entry = registry[modelId] as (ModelEntry & { _gatewayUrl?: string; _apiKeySecret?: string }) | undefined;
+      const gatewayUrl = entry?._gatewayUrl || GATEWAY_URL;
+      let authKey = opts.apiKey;
+      if (entry?._apiKeySecret) {
+        const fromEnv = Deno.env.get(entry._apiKeySecret);
+        if (fromEnv) authKey = fromEnv;
+      }
+
+      const resp = await fetch(gatewayUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${opts.apiKey}`,
+          'Authorization': `Bearer ${authKey}`,
           'Content-Type': 'application/json',
         },
         signal: ctrl.signal,
