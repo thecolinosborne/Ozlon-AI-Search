@@ -193,6 +193,12 @@ export const AGENT_REGISTRY: Record<AgentName, AgentSpec> = {
     hardFallback: 'google/gemini-2.5-flash-lite',
     preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
   },
+  image_artist: {
+    defaultModel: 'google/gemini-3.1-flash-image-preview',
+    requires: ['image_gen'],
+    hardFallback: 'google/gemini-2.5-flash-image',
+    preferredTier: { speed: 'flash', balanced: 'flash', quality: 'pro' },
+  },
 };
 
 export interface UserPrefs {
