@@ -5792,6 +5792,8 @@ async function runToolLoop(
         if (name.includes('drive')) return 'drive';
         if (name.includes('analytics') || name.startsWith('ga_')) return 'analytics';
         if (name.includes('meet')) return 'meet';
+        if (name.startsWith('higgsfield_') || name.includes('higgsfield')) return 'higgsfield';
+        if (name.startsWith('descript_') || name.includes('descript')) return 'descript';
         return 'other';
       };
 
@@ -5830,6 +5832,8 @@ async function runToolLoop(
         [/\b(seo|search\s*console|gsc|impressions|clicks)\b/, 'gsc'],
         [/\b(analytics|ga4|sessions|pageview)\b/, 'analytics'],
         [/\b(meet|google\s*meet)\b/, 'meet'],
+        [/\b(image|generate|render|animate|higgsfield|art|illustration|picture|photo)\b/, 'higgsfield'],
+        [/\b(descript|transcript|edit\s*video|voiceover)\b/, 'descript'],
       ];
       for (const [re, bucket] of kwMap) if (re.test(hint)) namedIntegrations.add(bucket);
 
