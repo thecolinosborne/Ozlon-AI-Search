@@ -5750,6 +5750,127 @@ function inferTaskTitle(toolNames: string[]): string {
   return 'Executing task';
 }
 
+// ============================================================================
+// PHASE 3 — PLANNER PASS (Two-Pass Agentic Routing)
+// Quick gpt-5-mini call that produces a structured plan {intent, steps[], integrations[]}.
+// The plan is fed back into the prioritizer (as serviceIntents) so the executor only
+// loads relevant tools, and steps are streamed to the UI as task_update events.
+// Fully optional — any failure falls back silently to the existing single-pass flow.
+// ============================================================================
+
+interface AgenticPlan {
+  intent: string;
+  steps: string[];
+  integrations: string[];
+  needsTools: boolean;
+}
+
+// Map planner integration labels to the same buckets the prioritizer uses.
+// Returned values match `intentToBucket` keys (serviceIntents) so they slot in directly.
+const PLAN_INTEGRATION_TO_INTENT: Record<string, string> = {
+  'ghl': 'gohighlevel', 'gohighlevel': 'gohighlevel', 'highlevel': 'gohighlevel',
+  'gmail': 'google-mail', 'mail': 'google-mail', 'email': 'google-mail',
+  'calendar': 'google-calendar', 'gcal': 'google-calendar',
+  'drive': 'google-drive',
+  'docs': 'google-docs', 'doc': 'google-docs',
+  'sheets': 'google-sheets', 'sheet': 'google-sheets',
+  'slides': 'google-slides',
+  'gsc': 'google-search-console', 'search-console': 'google-search-console', 'seo': 'google-search-console',
+  'analytics': 'google-analytics-data', 'ga4': 'google-analytics-data',
+  'meet': 'google-meet',
+  'youtube': 'youtube', 'yt': 'youtube',
+  'clickup': 'clickup',
+};
+
+// Conversational fast-path patterns — bypass planner entirely (zero added latency).
+const CHITCHAT_PATTERNS = /^(hi|hey|hello|yo|sup|thanks?|thank you|ty|cool|nice|ok|okay|got it|gotcha|good|great|lol|haha|bye|cya|gn|gm|good morning|good night|what'?s up|how are you|who are you|what can you do|help)[\s!?.]*$/i;
+
+function shouldSkipPlanner(userMessage: string): boolean {
+  const trimmed = (userMessage || '').trim();
+  if (trimmed.length === 0) return true;
+  if (trimmed.length < 40 && CHITCHAT_PATTERNS.test(trimmed)) return true;
+  return false;
+}
+
+async function runPlannerPass(
+  apiKey: string,
+  userMessage: string,
+  proactiveMemoryBlock: string | null,
+): Promise<AgenticPlan | null> {
+  const knownIntegrations = Object.keys(PLAN_INTEGRATION_TO_INTENT)
+    .filter((k, i, arr) => arr.indexOf(k) === i)
+    .join(', ');
+
+  const sys = `You are a fast routing planner for an AI personal assistant. Given a user request, output a compact JSON plan describing what the executor agent must do.
+
+Output ONLY valid JSON with this exact shape (no prose, no code fence):
+{"intent":"<one short phrase>","steps":["<step 1>","<step 2>"],"integrations":["<bucket>", ...],"needsTools":<true|false>}
+
+Rules:
+- "intent": 2-6 words describing the user's goal.
+- "steps": 1-5 short imperative phrases (max 8 words each). These render in the user's task panel.
+- "integrations": pick ONLY from this list: ${knownIntegrations}. Empty array if none needed.
+- "needsTools": true if the request requires calling external services or actions; false for pure conversation, opinion, recall.
+- Be conservative — only list integrations you're confident are required.`;
+
+  const userBlock = proactiveMemoryBlock
+    ? `Relevant memory:\n${proactiveMemoryBlock.slice(0, 1500)}\n\nUser request:\n${userMessage}`
+    : `User request:\n${userMessage}`;
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: userBlock },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 300,
+      }),
+    });
+    clearTimeout(timer);
+    if (!resp.ok) {
+      console.warn('[Planner] gateway not ok:', resp.status);
+      return null;
+    }
+    const data = await resp.json();
+    const raw = data?.choices?.[0]?.message?.content;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const plan: AgenticPlan = {
+      intent: String(parsed.intent || '').slice(0, 120),
+      steps: Array.isArray(parsed.steps) ? parsed.steps.map((s: unknown) => String(s).slice(0, 80)).slice(0, 6) : [],
+      integrations: Array.isArray(parsed.integrations)
+        ? parsed.integrations.map((s: unknown) => String(s).toLowerCase().trim()).filter(Boolean).slice(0, 8)
+        : [],
+      needsTools: parsed.needsTools !== false,
+    };
+    if (!plan.intent && plan.steps.length === 0 && plan.integrations.length === 0) return null;
+    return plan;
+  } catch (e) {
+    console.warn('[Planner] failed, falling back:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// Translate planner integration buckets into the same `serviceIntents` strings
+// the prioritizer already understands. Unknown buckets are dropped.
+function planToServiceIntents(plan: AgenticPlan): string[] {
+  const out = new Set<string>();
+  for (const bucket of plan.integrations) {
+    const intent = PLAN_INTEGRATION_TO_INTENT[bucket];
+    if (intent) out.add(intent);
+  }
+  return [...out];
+}
+
 async function runToolLoop(
   modelConfig: ModelConfig,
   apiKey: string,
@@ -6768,6 +6889,54 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
             }
 
+            // PHASE 3 — Planner pass (two-pass agentic routing).
+            // Cheap planner produces a structured plan; integrations feed the prioritizer
+            // (Tier A signal), steps stream to the UI, and the plan is appended to the
+            // system message so the executor follows it. Any failure falls back silently.
+            const heuristicIntents = detectServiceIntents(messages);
+            let mergedIntents = heuristicIntents;
+            let planTaskId: string | null = null;
+            const plannerStart = Date.now();
+            if (!shouldSkipPlanner(userText)) {
+              const plan = await runPlannerPass(apiKey, userText, null);
+              console.log(`[Planner] ${Date.now() - plannerStart}ms ${plan ? `intent="${plan.intent}" integrations=[${plan.integrations.join(',')}] needsTools=${plan.needsTools}` : 'null (fallback)'}`);
+              if (plan) {
+                const planIntents = planToServiceIntents(plan);
+                mergedIntents = [...new Set([...planIntents, ...heuristicIntents])];
+
+                if (plan.steps.length > 0) {
+                  planTaskId = crypto.randomUUID();
+                  for (const step of plan.steps) {
+                    try {
+                      await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify({
+                        taskId: planTaskId,
+                        title: plan.intent || 'Planning',
+                        step,
+                        status: 'in_progress',
+                      })}\n\n`));
+                    } catch { /* stream closed */ }
+                  }
+                }
+
+                if (plan.intent || plan.steps.length > 0) {
+                  const planText = `\n\n# Execution plan (from planner)
+Intent: ${plan.intent}
+Steps:
+${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+Execute these in order. Be decisive — the user has already been shown this plan.`;
+                  const sysIdx = openAIMessages.findIndex(m => m.role === 'system');
+                  if (sysIdx >= 0) {
+                    openAIMessages[sysIdx] = {
+                      ...openAIMessages[sysIdx],
+                      content: (openAIMessages[sysIdx].content || '') + planText,
+                    };
+                  }
+                }
+              }
+            } else {
+              console.log('[Planner] skipped (chitchat fast-path)');
+            }
+
             const result = await runToolLoop(
               modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
               async (event) => {
@@ -6779,8 +6948,20 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               aliasMap,
               wisdomUserId,
               { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
-              detectServiceIntents(messages),
+              mergedIntents,
             );
+
+            // Mark the planner task complete once the executor returns.
+            if (planTaskId) {
+              try {
+                await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify({
+                  taskId: planTaskId,
+                  title: 'Plan complete',
+                  step: 'Plan executed',
+                  status: 'done',
+                })}\n\n`));
+              } catch { /* stream closed */ }
+            }
 
             // Write final content as SSE
             await writer.write(encoder.encode(`data: ${JSON.stringify({
