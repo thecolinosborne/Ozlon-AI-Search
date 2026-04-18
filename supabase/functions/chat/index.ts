@@ -5528,6 +5528,32 @@ async function runToolLoop(
     iteration++;
     console.log(`Tool loop iteration ${iteration}`);
 
+    // OpenAI hard limit: 128 tools per request. Prioritize tools relevant to user message.
+    let toolsForRequest: ToolDef[] = tools;
+    if (tools.length > 128) {
+      const hint = (userMessage || '').toLowerCase();
+      const prefixPriority: Array<{ match: (n: string) => boolean; weight: number }> = [
+        { match: (n) => hint.includes('ghl') || hint.includes('gohighlevel') || hint.includes('high level') ? n.startsWith('ghl_') : false, weight: 100 },
+        { match: (n) => hint.includes('clickup') ? n.includes('clickup') : false, weight: 100 },
+        { match: (n) => (hint.includes('email') || hint.includes('gmail') || hint.includes('inbox')) ? (n.includes('email') || n.includes('mail')) : false, weight: 100 },
+        { match: (n) => hint.includes('calendar') ? n.includes('calendar') : false, weight: 100 },
+        { match: (n) => (hint.includes('drive') || hint.includes('doc') || hint.includes('sheet') || hint.includes('slide')) ? (n.includes('drive') || n.includes('doc') || n.includes('sheet') || n.includes('presentation')) : false, weight: 100 },
+        { match: (n) => (hint.includes('youtube') || hint.includes('video')) ? n.includes('youtube') : false, weight: 100 },
+        { match: (n) => (hint.includes('seo') || hint.includes('search console') || hint.includes('gsc')) ? n.startsWith('gsc_') : false, weight: 100 },
+        // Always-useful core tools
+        { match: (n) => ['save_memory','add_goal','update_goal_progress','complete_goal','add_standing_order','remove_standing_order','create_work_task','update_work_task','deep_research','web_search_google'].includes(n), weight: 50 },
+      ];
+      const scored = tools.map((t) => {
+        const name = (t as { function?: { name?: string } }).function?.name || '';
+        let score = 0;
+        for (const p of prefixPriority) if (p.match(name)) score += p.weight;
+        return { tool: t, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      toolsForRequest = scored.slice(0, 128).map((s) => s.tool);
+      console.log(`Tools capped: ${tools.length} → 128 (hint: "${hint.slice(0,60)}")`);
+    }
+
     const response = await fetch(modelConfig.apiEndpoint, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -5535,8 +5561,8 @@ async function runToolLoop(
         model: modelConfig.name,
         messages: openAIMessages,
         max_completion_tokens: modelConfig.maxTokens,
-        tools: tools.length > 0 ? tools : undefined,
-        tool_choice: tools.length > 0 ? 'auto' : undefined,
+        tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
+        tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
       }),
     });
 
