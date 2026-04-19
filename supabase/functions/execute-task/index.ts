@@ -174,7 +174,17 @@ async function executeThread(threadId: string, followUp?: string) {
       ...(followUp ? [{ role: 'user', content: followUp.trim() }] : []),
     ];
 
-    const output = await streamChat(msgs, thread.user_id, systemContext);
+    let output = await streamChat(msgs, thread.user_id, systemContext);
+
+    // Guard: if AI just acknowledged without delivering, retry once with a forcing nudge
+    if (output.length < 40 || /^(understood|got it|sure|okay|ok)[\s.!,]*$/i.test(output.trim())) {
+      const forcedMsgs = [
+        ...msgs,
+        { role: 'assistant', content: output },
+        { role: 'user', content: 'Do not just acknowledge. Produce the full deliverable now — the actual research, draft, list, or document. Output it directly.' },
+      ];
+      output = await streamChat(forcedMsgs, thread.user_id, systemContext);
+    }
 
     // Persist assistant message
     const { data: assistantMsg } = await admin.from('chat_messages').insert({
