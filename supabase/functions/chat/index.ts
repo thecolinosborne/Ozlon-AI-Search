@@ -5611,8 +5611,9 @@ CHAINING FLOW (mandatory for actionable work):
 1. create_work_task with smart defaults → get task_id
 2. update_work_task → status: "in_progress", ai_status: "executing", activity_entry: { action: "work_started", detail: "...", actor: "ai", status: "executing" }
 3. Execute the actual work tool (e.g. deep_research, send_email, etc.)
-4. update_work_task → status: "up_for_review", draft_output: <result>, ai_status: "completed", next_action: "needs_review", activity_entry: { action: "work_completed", detail: "...", actor: "ai", status: "completed" }
-5. On failure → ai_status: "failed", next_action: "waiting_on_human", activity_entry with status: "failed"
+4. update_work_task → status: "up_for_review", draft_output: <result>, ai_status: "waiting", next_action: "needs_review", activity_entry: { action: "work_completed", detail: "...", actor: "ai", status: "completed" }
+   • When fully done with no review needed → status: "completed", ai_status: "idle", next_action: "none"
+5. On failure → ai_status: "error", next_action: "waiting_on_human", activity_entry with status: "failed"
 
 IMPORTANT: Always reuse the task_id returned from create_work_task for all update_work_task calls in the same flow.
 
