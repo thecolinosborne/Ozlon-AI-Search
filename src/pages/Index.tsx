@@ -4,6 +4,7 @@ import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserSettings } from "@/services/chatService";
 import { UserMenu } from "@/components/UserMenu";
+import { TopNav } from "@/components/navigation/TopNav";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
