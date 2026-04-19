@@ -34,6 +34,7 @@ import {
   Circle,
   Clock,
   Eye,
+  ArrowLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -95,7 +96,10 @@ const STATUS_ICONS: Record<TaskStatus, typeof Circle> = {
 // ══════════════════════════════════════════════════════════════════
 
 function BoardCard({ task, onClick }: { task: WorkTask; onClick: (t: WorkTask) => void }) {
-  const isAI = task.ai_status === 'thinking' || task.ai_status === 'executing';
+  // Only show AI indicator when AI is actively working AND task is in progress
+  const isAI =
+    task.status === 'in_progress' &&
+    (task.ai_status === 'thinking' || task.ai_status === 'executing');
 
   return (
     <button
@@ -369,6 +373,13 @@ function TaskDetailSheet({
   return (
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 -ml-1"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
         <SheetHeader>
           {editingTitle ? (
             <Input
