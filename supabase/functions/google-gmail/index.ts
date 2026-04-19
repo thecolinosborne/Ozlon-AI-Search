@@ -41,6 +41,44 @@ function buildRawEmail(headers: Record<string, string>, body: string): string {
     .replace(/=+$/, "");
 }
 
+// Build a multipart/mixed RFC822 message with one or more attachments.
+// attachments: [{ filename, mimeType, dataBase64 }]
+function buildRawEmailWithAttachments(
+  headers: Record<string, string>,
+  body: string,
+  attachments: Array<{ filename: string; mimeType: string; dataBase64: string }>,
+): string {
+  const boundary = `=_ozlon_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+  const head: string[] = [];
+  for (const [k, v] of Object.entries(headers)) head.push(`${k}: ${v}`);
+  head.push("MIME-Version: 1.0");
+  head.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+  head.push("");
+  const parts: string[] = [];
+  // text body part
+  parts.push(`--${boundary}`);
+  parts.push("Content-Type: text/plain; charset=UTF-8");
+  parts.push("Content-Transfer-Encoding: 7bit");
+  parts.push("");
+  parts.push(body);
+  // attachments
+  for (const att of attachments) {
+    parts.push(`--${boundary}`);
+    parts.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
+    parts.push("Content-Transfer-Encoding: base64");
+    parts.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+    parts.push("");
+    // wrap base64 at 76 chars per RFC
+    parts.push(att.dataBase64.replace(/(.{76})/g, "$1\r\n"));
+  }
+  parts.push(`--${boundary}--`);
+  const raw = head.join("\r\n") + parts.join("\r\n");
+  return btoa(unescape(encodeURIComponent(raw)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
