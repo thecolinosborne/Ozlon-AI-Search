@@ -6047,10 +6047,11 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string }> {
+): Promise<{ role: string; content: string; toolsUsed: string[] }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
+  const toolsUsed: string[] = [];
 
   while (iteration < maxIterations) {
     iteration++;
