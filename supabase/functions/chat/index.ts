@@ -1108,6 +1108,198 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // Tier 2: Calendar Pro — additive, existing create_calendar_event untouched
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_calendars',
+      description: 'List all Google calendars the user has access to.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_events',
+      description: 'List Google Calendar events in a time window.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string', description: "Calendar ID, default 'primary'" },
+          timeMin: { type: 'string', description: 'ISO start time' },
+          timeMax: { type: 'string', description: 'ISO end time' },
+          q: { type: 'string', description: 'Optional text search' },
+          maxResults: { type: 'number' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_get_event',
+      description: 'Get a specific Google Calendar event by ID.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' } }, required: ['eventId'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_update_event',
+      description: 'Update a Google Calendar event (PATCH). Pass any subset of event fields.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          event: { type: 'object', description: 'Partial event object to merge' },
+        },
+        required: ['eventId', 'event'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_delete_event',
+      description: 'Delete a Google Calendar event. Confirm with user first.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' } }, required: ['eventId'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_quick_add',
+      description: 'Create a calendar event from a natural-language string (e.g. "Lunch with Sam tomorrow 1pm").',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, text: { type: 'string' } }, required: ['text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_freebusy',
+      description: 'Check free/busy times across one or more calendars.',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeMin: { type: 'string' },
+          timeMax: { type: 'string' },
+          calendarIds: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['timeMin', 'timeMax'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_find_free_slots',
+      description: 'Find available open slots of a given duration in a calendar within a window.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          timeMin: { type: 'string' },
+          timeMax: { type: 'string' },
+          durationMins: { type: 'number', description: 'Default 30' },
+        },
+        required: ['timeMin', 'timeMax'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_move_event',
+      description: 'Move an event to a different calendar.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' }, destination: { type: 'string' } }, required: ['eventId', 'destination'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_respond_to_event',
+      description: 'Respond to a calendar invite (accept/decline/tentative) on behalf of an attendee email.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          attendeeEmail: { type: 'string' },
+          responseStatus: { type: 'string', enum: ['accepted', 'declined', 'tentative', 'needsAction'] },
+        },
+        required: ['eventId', 'attendeeEmail', 'responseStatus'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_add_attendees',
+      description: 'Add attendees to an existing event and notify them.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          attendees: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['eventId', 'attendees'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_create_event_with_meet',
+      description: 'Create a calendar event with an auto-generated Google Meet conference link.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          summary: { type: 'string' },
+          start_time: { type: 'string' },
+          end_time: { type: 'string' },
+          description: { type: 'string' },
+          attendees: { type: 'string', description: 'Comma-separated emails' },
+        },
+        required: ['summary', 'start_time', 'end_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_create_calendar',
+      description: 'Create a new secondary calendar.',
+      parameters: { type: 'object', properties: { summary: { type: 'string' }, timeZone: { type: 'string' } }, required: ['summary'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_set_event_reminders',
+      description: 'Set custom reminders on a calendar event (popup or email, with minutes-before list).',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          reminderMinutes: { type: 'array', items: { type: 'number' } },
+          method: { type: 'string', enum: ['popup', 'email'] },
+        },
+        required: ['eventId', 'reminderMinutes'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_colors',
+      description: 'List the color palette available for events and calendars.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
   // Google Drive actions
   {
     type: 'function',
