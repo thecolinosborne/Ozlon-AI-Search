@@ -5367,6 +5367,100 @@ async function executeToolCall(
         }
       }
 
+      case 'create_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('scheduled_routines').insert({
+            user_id: userId,
+            name: args.name as string,
+            description: (args.description as string) || null,
+            prompt: args.prompt as string,
+            cron_expression: args.cron_expression as string,
+            delivery_channel: (args.delivery_channel as string) || 'in_app',
+            active: true,
+          }).select('id, name, cron_expression').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine "${data.name}" created (id: ${data.id}). Schedule: ${data.cron_expression} UTC. It will fire automatically and the result will appear in your Routines page.` };
+        } catch (e) {
+          return { success: false, result: `Routine error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'list_routines': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('scheduled_routines')
+            .select('id, name, cron_expression, active, last_run_at, last_run_status, run_count')
+            .eq('user_id', userId).order('created_at', { ascending: false });
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          if (!data || data.length === 0) return { success: true, result: 'No routines yet. Say "create a routine to..." to make one.' };
+          const lines = data.map((r) => `• ${r.name} — ${r.cron_expression} UTC — ${r.active ? 'active' : 'paused'} — runs: ${r.run_count}${r.last_run_status ? ` (last: ${r.last_run_status})` : ''} [id: ${r.id}]`);
+          return { success: true, result: `Your routines:\n${lines.join('\n')}` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'toggle_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('scheduled_routines')
+            .update({ active: args.active as boolean })
+            .eq('id', args.routine_id as string).eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine ${args.active ? 'resumed' : 'paused'}.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'delete_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('scheduled_routines')
+            .delete().eq('id', args.routine_id as string).eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine deleted.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'run_routine_now': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          // Fire and forget — don't block tool response on the full chain
+          fetch(`${supabaseUrl}/functions/v1/scheduled-routines?mode=run&routine_id=${args.routine_id}`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${serviceRoleKey}` },
+          }).catch((e) => console.error('[run_routine_now]', e));
+          return { success: true, result: `Routine triggered. Check the Routines page in a moment for the run output.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
       case 'add_standing_order': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
