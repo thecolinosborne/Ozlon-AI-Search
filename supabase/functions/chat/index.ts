@@ -1393,7 +1393,51 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // ClickUp actions (via dedicated edge function)
+  // ============================================================
+  // TIER 3: Drive / Docs / Sheets / Slides Pro — additive
+  // ============================================================
+  // ── Drive Pro
+  { type: 'function', function: { name: 'drive_list_files', description: 'List files in Google Drive with optional Drive query.', parameters: { type: 'object', properties: { q: { type: 'string', description: "Drive query, e.g. \"name contains 'invoice' and trashed=false\"" }, pageSize: { type: 'number' }, pageToken: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'drive_get_file', description: 'Get metadata for a Drive file by ID.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_create_folder', description: 'Create a folder in Google Drive (optionally inside a parent folder).', parameters: { type: 'object', properties: { name: { type: 'string' }, parents: { type: 'array', items: { type: 'string' } } }, required: ['name'] } } },
+  { type: 'function', function: { name: 'drive_move_file', description: 'Move a Drive file to a different folder.', parameters: { type: 'object', properties: { id: { type: 'string' }, newParentId: { type: 'string' } }, required: ['id', 'newParentId'] } } },
+  { type: 'function', function: { name: 'drive_copy_file', description: 'Copy a Drive file (optionally rename the copy).', parameters: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_rename_file', description: 'Rename a Drive file.', parameters: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'] } } },
+  { type: 'function', function: { name: 'drive_trash_file', description: 'Move a Drive file to trash. Confirm with user first.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_untrash_file', description: 'Restore a Drive file from trash.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_share_file', description: 'Share a Drive file with a person or group (sets a permission).', parameters: { type: 'object', properties: { id: { type: 'string' }, emailAddress: { type: 'string' }, role: { type: 'string', enum: ['reader', 'commenter', 'writer', 'owner'] }, type: { type: 'string', enum: ['user', 'group', 'domain', 'anyone'] } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_list_permissions', description: 'List all sharing permissions on a Drive file.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'drive_remove_permission', description: 'Remove a sharing permission from a Drive file.', parameters: { type: 'object', properties: { fileId: { type: 'string' }, permissionId: { type: 'string' } }, required: ['fileId', 'permissionId'] } } },
+  { type: 'function', function: { name: 'drive_storage_quota', description: "Get the user's Google Drive storage quota and usage.", parameters: { type: 'object', properties: {} } } },
+
+  // ── Docs Pro
+  { type: 'function', function: { name: 'docs_list_documents', description: 'List Google Docs documents.', parameters: { type: 'object', properties: { pageSize: { type: 'number' } } } } },
+  { type: 'function', function: { name: 'docs_get_document', description: 'Get the full structure/contents of a Google Doc.', parameters: { type: 'object', properties: { documentId: { type: 'string' } }, required: ['documentId'] } } },
+  { type: 'function', function: { name: 'docs_insert_text', description: 'Insert text into a Google Doc at a given index (default 1 = start).', parameters: { type: 'object', properties: { documentId: { type: 'string' }, text: { type: 'string' }, index: { type: 'number' } }, required: ['documentId', 'text'] } } },
+  { type: 'function', function: { name: 'docs_replace_text', description: 'Find and replace all matches of a string in a Google Doc.', parameters: { type: 'object', properties: { documentId: { type: 'string' }, find: { type: 'string' }, replaceText: { type: 'string' } }, required: ['documentId', 'find', 'replaceText'] } } },
+  { type: 'function', function: { name: 'docs_batch_update', description: 'Run an arbitrary Google Docs batchUpdate request payload (advanced; pass requests array).', parameters: { type: 'object', properties: { documentId: { type: 'string' }, requests: { type: 'array', items: { type: 'object' } } }, required: ['documentId', 'requests'] } } },
+
+  // ── Sheets Pro
+  { type: 'function', function: { name: 'sheets_list_spreadsheets', description: 'List Google Sheets spreadsheets.', parameters: { type: 'object', properties: { pageSize: { type: 'number' } } } } },
+  { type: 'function', function: { name: 'sheets_get_spreadsheet', description: 'Get spreadsheet metadata (sheets, properties).', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' } }, required: ['spreadsheetId'] } } },
+  { type: 'function', function: { name: 'sheets_read_range', description: 'Read values from a sheet range (e.g. "Sheet1!A1:D10").', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' }, valueRenderOption: { type: 'string', enum: ['FORMATTED_VALUE', 'UNFORMATTED_VALUE', 'FORMULA'] } }, required: ['spreadsheetId', 'range'] } } },
+  { type: 'function', function: { name: 'sheets_write_range', description: 'Write values into a sheet range (overwrites).', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' }, values: { type: 'array', items: { type: 'array' }, description: 'Array of rows, each row is an array of cell values' }, valueInputOption: { type: 'string', enum: ['RAW', 'USER_ENTERED'] } }, required: ['spreadsheetId', 'range', 'values'] } } },
+  { type: 'function', function: { name: 'sheets_append_rows', description: 'Append rows to the bottom of a range.', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' }, values: { type: 'array', items: { type: 'array' } } }, required: ['spreadsheetId', 'range', 'values'] } } },
+  { type: 'function', function: { name: 'sheets_clear_range', description: 'Clear all values from a range (preserves formatting).', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' } }, required: ['spreadsheetId', 'range'] } } },
+  { type: 'function', function: { name: 'sheets_create_spreadsheet', description: 'Create a new Google Sheets spreadsheet.', parameters: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } } },
+  { type: 'function', function: { name: 'sheets_add_sheet', description: 'Add a new tab/sheet to an existing spreadsheet.', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, title: { type: 'string' } }, required: ['spreadsheetId', 'title'] } } },
+  { type: 'function', function: { name: 'sheets_delete_sheet', description: 'Delete a tab/sheet by sheetId (numeric).', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, sheetId: { type: 'number' } }, required: ['spreadsheetId', 'sheetId'] } } },
+  { type: 'function', function: { name: 'sheets_get_values_batch', description: 'Read values from multiple ranges in one call.', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, ranges: { type: 'array', items: { type: 'string' } } }, required: ['spreadsheetId', 'ranges'] } } },
+  { type: 'function', function: { name: 'sheets_batch_update', description: 'Run an arbitrary Sheets batchUpdate (advanced; format, sort, charts, etc.).', parameters: { type: 'object', properties: { spreadsheetId: { type: 'string' }, requests: { type: 'array', items: { type: 'object' } } }, required: ['spreadsheetId', 'requests'] } } },
+
+  // ── Slides Pro
+  { type: 'function', function: { name: 'slides_list_presentations', description: 'List Google Slides presentations.', parameters: { type: 'object', properties: { pageSize: { type: 'number' } } } } },
+  { type: 'function', function: { name: 'slides_get_presentation', description: 'Get the full structure of a Google Slides presentation.', parameters: { type: 'object', properties: { presentationId: { type: 'string' } }, required: ['presentationId'] } } },
+  { type: 'function', function: { name: 'slides_add_slide', description: 'Add a new slide to a presentation. Layout defaults to BLANK.', parameters: { type: 'object', properties: { presentationId: { type: 'string' }, layout: { type: 'string', description: 'TITLE, TITLE_AND_BODY, BLANK, etc.' }, insertionIndex: { type: 'number' } }, required: ['presentationId'] } } },
+  { type: 'function', function: { name: 'slides_delete_slide', description: 'Delete a slide by its objectId.', parameters: { type: 'object', properties: { presentationId: { type: 'string' }, objectId: { type: 'string' } }, required: ['presentationId', 'objectId'] } } },
+  { type: 'function', function: { name: 'slides_replace_text', description: 'Find and replace text across all slides in a presentation.', parameters: { type: 'object', properties: { presentationId: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' }, matchCase: { type: 'boolean' } }, required: ['presentationId', 'find', 'replace'] } } },
+  { type: 'function', function: { name: 'slides_batch_update', description: 'Run an arbitrary Slides batchUpdate (advanced; insert text, images, shapes).', parameters: { type: 'object', properties: { presentationId: { type: 'string' }, requests: { type: 'array', items: { type: 'object' } } }, required: ['presentationId', 'requests'] } } },
+  { type: 'function', function: { name: 'slides_get_thumbnail', description: 'Get a thumbnail image URL for a single slide.', parameters: { type: 'object', properties: { presentationId: { type: 'string' }, pageObjectId: { type: 'string' }, mimeType: { type: 'string' }, thumbnailSize: { type: 'string', enum: ['SMALL', 'MEDIUM', 'LARGE'] } }, required: ['presentationId', 'pageObjectId'] } } },
   {
     type: 'function',
     function: {
