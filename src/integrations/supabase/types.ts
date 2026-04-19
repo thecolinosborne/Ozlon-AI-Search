@@ -122,6 +122,7 @@ export type Database = {
         Row: {
           created_at: string
           current_artifact_id: string | null
+          deleted_at: string | null
           goal: string | null
           id: string
           kind: string
@@ -138,6 +139,7 @@ export type Database = {
         Insert: {
           created_at?: string
           current_artifact_id?: string | null
+          deleted_at?: string | null
           goal?: string | null
           id?: string
           kind?: string
@@ -154,6 +156,7 @@ export type Database = {
         Update: {
           created_at?: string
           current_artifact_id?: string | null
+          deleted_at?: string | null
           goal?: string | null
           id?: string
           kind?: string
@@ -1699,6 +1702,7 @@ export type Database = {
           comments: Json
           completed_at: string | null
           created_at: string
+          deleted_at: string | null
           description: string | null
           draft_output: string | null
           final_deliverable: string | null
@@ -1725,6 +1729,7 @@ export type Database = {
           comments?: Json
           completed_at?: string | null
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           draft_output?: string | null
           final_deliverable?: string | null
@@ -1751,6 +1756,7 @@ export type Database = {
           comments?: Json
           completed_at?: string | null
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           draft_output?: string | null
           final_deliverable?: string | null
