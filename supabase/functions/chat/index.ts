@@ -6291,10 +6291,10 @@ async function runToolLoop(
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '' };
+    return { role: 'assistant', content: msg.content || '', toolsUsed };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.' };
+  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed };
 }
 
 // ============================================================================
