@@ -492,6 +492,16 @@ async function callChat(payload: Record<string, unknown>): Promise<string> {
 
 async function handleWebhook(payload: Record<string, unknown>) {
   const supabase = getSupabase();
+  const webhookId = typeof payload.webhook_id === 'string'
+    ? payload.webhook_id
+    : typeof payload.webhookId === 'string'
+      ? payload.webhookId
+      : undefined;
+  const teamIdFromPayload = typeof payload.team_id === 'string'
+    ? payload.team_id
+    : typeof payload.teamId === 'string'
+      ? payload.teamId
+      : undefined;
 
   // Extract fields from ClickUp webhook payload
   const event = payload.event as string;
@@ -521,7 +531,14 @@ async function handleWebhook(payload: Record<string, unknown>) {
   }
 
   // 3. Load config
-  const config = await getConfig(supabase);
+  let configQuery = supabase
+    .from('clickup_integration_state')
+    .select('*')
+    .order('updated_at', { ascending: false });
+  if (webhookId) configQuery = configQuery.eq('webhook_id', webhookId);
+  else if (teamIdFromPayload) configQuery = configQuery.eq('team_id', teamIdFromPayload);
+  const { data: matchedConfig } = await configQuery.limit(1).maybeSingle();
+  const config = matchedConfig || await getConfig(supabase, teamIdFromPayload);
 
   // 4. Check trigger mode
   if (!config.auto_reply_enabled) {
@@ -584,13 +601,22 @@ async function handleWebhook(payload: Record<string, unknown>) {
   await markProcessed(commentId, taskId, event, 'processed', responseCommentId, undefined, supabase);
 
   // 12. Update integration state timestamps
-  await supabase
+  let stateUpdate = supabase
     .from('clickup_integration_state')
     .update({
       last_webhook_event_at: new Date().toISOString(),
       last_successful_ai_reply_at: new Date().toISOString(),
-    })
-    .eq('team_id', config.team_id);
+    });
+  if ((config as Record<string, unknown>).connection_id) {
+    stateUpdate = stateUpdate.eq('connection_id', (config as Record<string, unknown>).connection_id as string);
+  } else if ((config as Record<string, unknown>).user_id && config.team_id) {
+    stateUpdate = stateUpdate
+      .eq('user_id', (config as Record<string, unknown>).user_id as string)
+      .eq('team_id', config.team_id);
+  } else {
+    stateUpdate = stateUpdate.eq('team_id', config.team_id);
+  }
+  await stateUpdate;
 
   return { status: 'success', intent, commentId, responseCommentId };
 }
