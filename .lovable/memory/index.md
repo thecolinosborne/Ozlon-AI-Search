@@ -8,8 +8,11 @@
 - **Google Services:** Native Google edge functions only (Gmail, Drive, Calendar, Sheets, Docs, Slides, GSC, GA, Tag Manager, YouTube). Maton is REMOVED — do not reference, do not re-add. Gmail: never HTTP DELETE (use POST `/trash`). Return structured errors to AI, don't swallow them.
 - **State Management:** Strict data isolation (reset app store on user change). Complete reset on signout.
 - **Forbidden Features:** Do not re-add Facebook Ads, Tasks, Video Studio, or Maton.
+- **Both-Sides Rule:** When fixing/verifying anything that spans backend + frontend, always check BOTH sides before claiming done.
 
 ## Memories
+
+- [Check both sides](mem://preferences/check-both-sides) — Always verify backend AND frontend on fix/verify requests
 
 ### Product & Design
 - [Product summary](mem://product/system-definition-summary) — Ozlon is an AI Personal OS managing agents via voice/text
