@@ -2,7 +2,20 @@ import { useMemo } from "react";
 import { Plus, Trash2, MessageSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConversationSession } from "@/hooks/useConversations";
-import { formatDistanceToNow, isToday, isYesterday, subDays, isAfter } from "date-fns";
+import { isToday, isYesterday, subDays, isAfter, format, differenceInMinutes, differenceInHours } from "date-fns";
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const mins = differenceInMinutes(now, d);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = differenceInHours(now, d);
+  if (hrs < 24) return `${hrs}h`;
+  if (isYesterday(d)) return "Yesterday";
+  if (isAfter(d, subDays(now, 7))) return format(d, "EEE");
+  return format(d, "MMM d");
+}
 
 interface ConversationSidebarProps {
   open: boolean;
