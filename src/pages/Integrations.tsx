@@ -5,6 +5,7 @@ import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { TopNav } from "@/components/navigation/TopNav";
 
 const integrations = [
   {
@@ -104,19 +105,22 @@ const Integrations = () => {
   }, [authLoading, user?.id, setStatus, setApiKeyConfigured, setLastSync, disconnect]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">
-      <header className="border-b border-border/50 px-4 py-4 safe-area-top">
-        <div className="max-w-2xl mx-auto flex items-center gap-4">
-          <button
-            onClick={() => navigate("/")}
-            className="p-2 hover:bg-muted rounded-full transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5 text-foreground" />
-          </button>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">Integrations</h1>
-            <p className="text-xs text-muted-foreground">Connect and manage your tools</p>
+    <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3 safe-area-top">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/")}
+              className="p-2 hover:bg-muted rounded-full transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5 text-foreground" />
+            </button>
+            <div>
+              <h1 className="text-lg font-semibold text-foreground">Integrations</h1>
+              <p className="text-xs text-muted-foreground">Connect and manage your tools</p>
+            </div>
           </div>
+          <TopNav />
         </div>
       </header>
 
