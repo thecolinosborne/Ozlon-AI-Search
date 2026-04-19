@@ -168,35 +168,44 @@ export async function streamChat({
   onError,
 }: StreamChatOptions): Promise<void> {
   try {
-    // Use the user's session JWT so edge functions can identify the caller
-    // and load their per-user integrations / tools. Falls back to anon key
-    // only when there is genuinely no session (guest flows).
+    // Resolve auth: ALWAYS need anon key in `apikey`; user JWT (if logged in) goes in Authorization.
+    // We FAIL FAST if either is missing/malformed — a bad Bearer string causes the
+    // Supabase gateway to reject the request with "invalid JWT" and tools never load.
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    let token = anonKey;
-    let usingUserJwt = false;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        token = session.access_token;
-        usingUserJwt = true;
-      }
-    } catch (e) {
-      console.warn('[streamChat] getSession failed, falling back to anon key', e);
+    if (!anonKey || typeof anonKey !== 'string' || anonKey.split('.').length !== 3) {
+      const msg = 'Missing or malformed VITE_SUPABASE_PUBLISHABLE_KEY — cannot reach chat backend.';
+      console.error('[streamChat]', msg);
+      onError(msg);
+      return;
     }
 
-    if (!usingUserJwt) {
-      console.warn('[streamChat] No user session — chat will run unauthenticated (no tools, no integrations).');
+    let userJwt: string | null = null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const t = session?.access_token;
+      // Real JWTs have exactly three dot-separated segments. Reject anything else.
+      if (t && typeof t === 'string' && t.split('.').length === 3) {
+        userJwt = t;
+      }
+    } catch (e) {
+      console.warn('[streamChat] getSession failed:', e);
+    }
+
+    // Authorization header: prefer user JWT, fall back to anon key (also a valid JWT).
+    // NEVER send empty / undefined / malformed.
+    const bearer = userJwt || anonKey;
+    if (userJwt) {
+      console.log('[streamChat] Using authenticated user session.');
     } else {
-      console.log('[streamChat] Using authenticated user session for chat call.');
+      console.warn('[streamChat] No user session — running anonymously (no integrations / tools).');
     }
 
     const response = await fetch(CHAT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        // Supabase gateway requires apikey when forwarding a user JWT in Authorization;
-        // without it the gateway can strip/replace the auth header for verify_jwt=false fns.
+        'Authorization': `Bearer ${bearer}`,
+        // apikey is REQUIRED by Supabase gateway; without it the gateway strips Authorization.
         'apikey': anonKey,
       },
       signal,
