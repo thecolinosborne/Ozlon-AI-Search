@@ -3178,6 +3178,25 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ q: a.query, pageSize: a.max_results }) },
   // Calendar
   create_calendar_event: { fn: 'google-calendar', action: 'create_event', mapArgs: (a) => ({ summary: a.title, description: a.description, start: a.start_time, end: a.end_time, attendees: a.attendees, location: a.location }) },
+  // Tier 2: Calendar Pro — additive
+  calendar_list_calendars: { fn: 'google-calendar', action: 'list_calendars' },
+  calendar_list_events: { fn: 'google-calendar', action: 'list_events', mapArgs: (a) => ({ calendarId: a.calendarId, timeMin: a.timeMin, timeMax: a.timeMax, q: a.q, maxResults: a.maxResults }) },
+  calendar_get_event: { fn: 'google-calendar', action: 'get_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId }) },
+  calendar_update_event: { fn: 'google-calendar', action: 'update_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, event: a.event }) },
+  calendar_delete_event: { fn: 'google-calendar', action: 'delete_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId }) },
+  calendar_quick_add: { fn: 'google-calendar', action: 'quick_add', mapArgs: (a) => ({ calendarId: a.calendarId, text: a.text }) },
+  calendar_freebusy: { fn: 'google-calendar', action: 'freebusy_query', mapArgs: (a) => ({ timeMin: a.timeMin, timeMax: a.timeMax, calendarIds: a.calendarIds }) },
+  calendar_find_free_slots: { fn: 'google-calendar', action: 'find_free_slots', mapArgs: (a) => ({ calendarId: a.calendarId, timeMin: a.timeMin, timeMax: a.timeMax, durationMins: a.durationMins }) },
+  calendar_move_event: { fn: 'google-calendar', action: 'move_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, destination: a.destination }) },
+  calendar_respond_to_event: { fn: 'google-calendar', action: 'respond_to_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, attendeeEmail: a.attendeeEmail, responseStatus: a.responseStatus }) },
+  calendar_add_attendees: { fn: 'google-calendar', action: 'add_attendees', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, attendees: a.attendees }) },
+  calendar_create_event_with_meet: { fn: 'google-calendar', action: 'create_event_with_meet', mapArgs: (a) => {
+    const attendeesArr = typeof a.attendees === 'string' ? (a.attendees as string).split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email })) : a.attendees;
+    return { calendarId: a.calendarId, event: { summary: a.summary, description: a.description, start: { dateTime: a.start_time }, end: { dateTime: a.end_time }, attendees: attendeesArr } };
+  } },
+  calendar_create_calendar: { fn: 'google-calendar', action: 'create_calendar', mapArgs: (a) => ({ summary: a.summary, timeZone: a.timeZone }) },
+  calendar_set_event_reminders: { fn: 'google-calendar', action: 'set_event_reminders', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, reminderMinutes: a.reminderMinutes, method: a.method }) },
+  calendar_list_colors: { fn: 'google-calendar', action: 'list_colors' },
   // GSC
   gsc_list_sites: { fn: 'google-search-console', action: 'list_sites' },
   gsc_query: { fn: 'google-search-console', action: 'search_analytics', mapArgs: (a) => ({ siteUrl: a.site_url, startDate: a.start_date, endDate: a.end_date, dimensions: a.dimensions, rowLimit: a.row_limit }) },
