@@ -2866,6 +2866,72 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Scheduled Routines (Recurring Workflows) ============
+  {
+    type: 'function',
+    function: {
+      name: 'create_routine',
+      description: 'Create a recurring scheduled routine that fires automatically on a cron schedule. Use when the user says "every morning", "daily at 7am", "every Monday", "remind me weekly", etc. The routine prompt will be executed by the assistant with all tools enabled at the scheduled time.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Short routine name, e.g. "Morning Brief"' },
+          description: { type: 'string', description: 'Optional plain-English description' },
+          prompt: { type: 'string', description: 'The full prompt the AI will execute when the routine fires. Be explicit — list every step, source, and output format. Example: "Scan unread Gmail, fetch today\'s Calendar, get top 3 industry headlines via Tavily, summarize into a Doc, email the link to me."' },
+          cron_expression: { type: 'string', description: 'Standard 5-field cron expression in UTC. Examples: "0 12 * * *" = 7am EST daily, "0 13 * * 1" = 8am EST Monday, "30 14 * * *" = 9:30am EST daily.' },
+          delivery_channel: { type: 'string', enum: ['in_app', 'email', 'gmail', 'doc'], description: 'Where to deliver the result (default in_app).' },
+        },
+        required: ['name', 'prompt', 'cron_expression'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_routines',
+      description: 'List all the user\'s scheduled routines (active and paused).',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'toggle_routine',
+      description: 'Pause or resume a scheduled routine.',
+      parameters: {
+        type: 'object',
+        properties: {
+          routine_id: { type: 'string', description: 'The routine id' },
+          active: { type: 'boolean', description: 'true to enable, false to pause' },
+        },
+        required: ['routine_id', 'active'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_routine',
+      description: 'Permanently delete a scheduled routine.',
+      parameters: {
+        type: 'object',
+        properties: { routine_id: { type: 'string' } },
+        required: ['routine_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_routine_now',
+      description: 'Trigger a routine to run immediately, outside of its schedule.',
+      parameters: {
+        type: 'object',
+        properties: { routine_id: { type: 'string' } },
+        required: ['routine_id'],
+      },
+    },
+  },
   // ============ Standing Orders (Durable Rules) ============
   {
     type: 'function',
