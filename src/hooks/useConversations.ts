@@ -161,21 +161,32 @@ export function useConversations() {
     // Auto-title: if this is the first user message, update the session title
     if (msg.role === "user") {
       const existingUserMessages = messagesRef.current.filter((m) => m.role === "user");
-      if (existingUserMessages.length === 0) {
-        const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      const isFirst = existingUserMessages.length === 0;
+      const fallbackTitle = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      if (isFirst) {
         await supabase
           .from("chat_sessions")
-          .update({ title, updated_at: new Date().toISOString() })
+          .update({ title: fallbackTitle, updated_at: new Date().toISOString() })
           .eq("id", sid);
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sid ? { ...s, title } : s))
-        );
       } else {
         await supabase
           .from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", sid);
       }
+      // Optimistically update preview + (if first) title in local sidebar state
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sid
+            ? {
+                ...s,
+                title: isFirst ? fallbackTitle : s.title,
+                preview: msg.content,
+                updated_at: new Date().toISOString(),
+              }
+            : s
+        )
+      );
     }
   }, [user, ensureSession]);
 
