@@ -363,7 +363,7 @@ export default function Routines() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       {run.status === "completed" ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        <CheckCircle2 className="w-4 h-4 text-primary" />
                       ) : run.status === "failed" ? (
                         <XCircle className="w-4 h-4 text-destructive" />
                       ) : (
