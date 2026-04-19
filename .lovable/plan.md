@@ -1,47 +1,41 @@
 
-ClickUp confirmed working end-to-end. Of the 3 remaining items, ranking by risk × leverage:
+## Scope: scrub all remaining Maton references
 
-**Recommended priority: Audit & migrate other integrations to per-user scoping.**
+Maton is fully removed from active code paths — no edge function, no tools registered, no frontend usage. Only stale references remain. Cleanup is cosmetic + one orphaned config block.
 
-Why this first:
-- It's the same class of bug we just spent 5 rounds fixing on ClickUp (shared global rows → wrong user's settings → 401s & "not configured" errors). GHL, Maton/Google, Descript, Higgsfield likely have the same pattern. Fixing now prevents the next 3-day fire drill.
-- Multi-user scaling is blocked until this is done — second user signing in today would inherit your settings or overwrite them.
-- Pure backend hardening, no UX risk.
+## What to remove
 
-The other two ranked:
-- **#2 — "Which tool ran" footer.** Useful observability, low risk, ~15 min. Worth doing right after the audit so you can *see* the audit working.
-- **#3 — Live multi-task test (Gmail→ClickUp).** You can run this yourself anytime in chat now that ClickUp is green. Doesn't need my involvement.
+**1. `supabase/functions/chat/index.ts`** — 7 stale comments referencing Maton:
+- Line 225: comment header
+- Line 990: ClickUp comment
+- Lines 2739–2740: native Google router header (rewrite to remove "fall through to Maton")
+- Line 2788: `// fall through to Maton` → `// caller handles failure`
+- Line 2801: comment
+- Line 6794: GHL comment
+- Line 6816: dead-code comment about Maton tools (the conditional branch that injects GHL tools "if no Maton tools were added" — simplify to just always ensure GHL tools present)
 
-## Plan — Per-user scoping audit & migration
+**2. `supabase/config.toml`** — remove orphaned `[functions.maton]` block (lines 45–46). The function directory doesn't exist, so this block is dead config.
 
-### Phase 1: Audit (read-only, ~5 min)
-Scan each integration's edge function + state tables for the same anti-pattern ClickUp had:
-- `gohighlevel_*` state tables → check if scoped by `user_id`
-- `google-*` functions (gmail, drive, calendar, sheets, docs, GSC, GA, slides, GTM) → check token resolution path
-- `descript_jobs` → already has `user_id`, verify reads filter on it
-- `higgsfield` → check state storage
-- `maton` if it has any state table
+**3. DB CHECK constraint** — `integration_connections.provider` allows `'maton'`. Migration to drop `'maton'` from the allowed values. Safe: no rows use it (we'd verify with a SELECT first; if any exist, delete them since the integration is gone).
 
-Output: a short table of which tables/functions need migration.
+**4. Memory hygiene** — the following memory files reference Maton as if it's active. Update them to reflect "removed":
+- `mem://integrations/maton-api-gateway` → mark as removed, replaced by native Google edge functions
+- `mem://integrations/maton-chat-logic` → remove
+- `mem://integrations/maton-gateway-constraints` → remove
+- `mem://integrations/maton-binary-file-transfer` → remove
+- `mem://integrations/identity-context-resolution-rules` → strip Maton mention
+- `mem://features/email-management-system` → note it's now native Gmail edge function
+- `mem://chat/action-execution-engine` → remove `MATON_ACTION_TOOLS` reference
+- `mem://index.md` → update Core line about Maton query params (no longer relevant) and remove Maton entries
 
-### Phase 2: Migrate any unscoped tables
-For each table missing per-user scoping:
-1. Add `user_id` + `connection_id` columns (nullable for backfill)
-2. Backfill from existing `integration_connections` where possible
-3. Add unique index `(user_id, provider_specific_key)`
-4. Tighten RLS to `auth.uid() = user_id`
-5. Update edge function reads/writes to filter by authenticated user
+## What I'll verify before changing
+- `SELECT count(*) FROM integration_connections WHERE provider = 'maton'` — if nonzero, delete those rows in the same migration.
+- Re-grep for `MATON_` env vars or imports — none expected, but confirm.
 
-### Phase 3: Update edge functions
-Apply the same `resolveAuth(userId, connectionId)` helper pattern from `clickup/index.ts` to each affected function. Priority: tokens prioritise user-scoped row, fall back to env only for webhooks without user context.
+## Risk
+None. All edits remove dead code/config/notes. Chat behavior unchanged because the Maton fall-through path was never hit (no `maton` function deployed).
 
-### Phase 4: Smoke test
-Quick check on each migrated integration: load its detail page, verify status hydrates correctly, no console errors.
+## Effort
+~10 minutes. One edit pass on `chat/index.ts`, one on `config.toml`, one migration, ~6 memory file rewrites.
 
-### Risk
-Low — additive columns + RLS tightening. Each migration is one table at a time, reversible. No UX changes.
-
-### Effort
-Audit: 5 min. Migrations: ~10 min per affected integration. Realistically 30-60 min total depending on how many need it.
-
-Approve and I'll start with Phase 1 audit and report back with the exact list before touching anything.
+Approve and I'll execute in that order, ending with a redeploy of `chat`.
