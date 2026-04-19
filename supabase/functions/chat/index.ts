@@ -2866,6 +2866,72 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Scheduled Routines (Recurring Workflows) ============
+  {
+    type: 'function',
+    function: {
+      name: 'create_routine',
+      description: 'Create a recurring scheduled routine that fires automatically on a cron schedule. Use when the user says "every morning", "daily at 7am", "every Monday", "remind me weekly", etc. The routine prompt will be executed by the assistant with all tools enabled at the scheduled time.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Short routine name, e.g. "Morning Brief"' },
+          description: { type: 'string', description: 'Optional plain-English description' },
+          prompt: { type: 'string', description: 'The full prompt the AI will execute when the routine fires. Be explicit — list every step, source, and output format. Example: "Scan unread Gmail, fetch today\'s Calendar, get top 3 industry headlines via Tavily, summarize into a Doc, email the link to me."' },
+          cron_expression: { type: 'string', description: 'Standard 5-field cron expression in UTC. Examples: "0 12 * * *" = 7am EST daily, "0 13 * * 1" = 8am EST Monday, "30 14 * * *" = 9:30am EST daily.' },
+          delivery_channel: { type: 'string', enum: ['in_app', 'email', 'gmail', 'doc'], description: 'Where to deliver the result (default in_app).' },
+        },
+        required: ['name', 'prompt', 'cron_expression'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_routines',
+      description: 'List all the user\'s scheduled routines (active and paused).',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'toggle_routine',
+      description: 'Pause or resume a scheduled routine.',
+      parameters: {
+        type: 'object',
+        properties: {
+          routine_id: { type: 'string', description: 'The routine id' },
+          active: { type: 'boolean', description: 'true to enable, false to pause' },
+        },
+        required: ['routine_id', 'active'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_routine',
+      description: 'Permanently delete a scheduled routine.',
+      parameters: {
+        type: 'object',
+        properties: { routine_id: { type: 'string' } },
+        required: ['routine_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_routine_now',
+      description: 'Trigger a routine to run immediately, outside of its schedule.',
+      parameters: {
+        type: 'object',
+        properties: { routine_id: { type: 'string' } },
+        required: ['routine_id'],
+      },
+    },
+  },
   // ============ Standing Orders (Durable Rules) ============
   {
     type: 'function',
@@ -5301,6 +5367,100 @@ async function executeToolCall(
         }
       }
 
+      case 'create_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('scheduled_routines').insert({
+            user_id: userId,
+            name: args.name as string,
+            description: (args.description as string) || null,
+            prompt: args.prompt as string,
+            cron_expression: args.cron_expression as string,
+            delivery_channel: (args.delivery_channel as string) || 'in_app',
+            active: true,
+          }).select('id, name, cron_expression').single();
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine "${data.name}" created (id: ${data.id}). Schedule: ${data.cron_expression} UTC. It will fire automatically and the result will appear in your Routines page.` };
+        } catch (e) {
+          return { success: false, result: `Routine error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'list_routines': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('scheduled_routines')
+            .select('id, name, cron_expression, active, last_run_at, last_run_status, run_count')
+            .eq('user_id', userId).order('created_at', { ascending: false });
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          if (!data || data.length === 0) return { success: true, result: 'No routines yet. Say "create a routine to..." to make one.' };
+          const lines = data.map((r) => `• ${r.name} — ${r.cron_expression} UTC — ${r.active ? 'active' : 'paused'} — runs: ${r.run_count}${r.last_run_status ? ` (last: ${r.last_run_status})` : ''} [id: ${r.id}]`);
+          return { success: true, result: `Your routines:\n${lines.join('\n')}` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'toggle_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('scheduled_routines')
+            .update({ active: args.active as boolean })
+            .eq('id', args.routine_id as string).eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine ${args.active ? 'resumed' : 'paused'}.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'delete_routine': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { error } = await admin.from('scheduled_routines')
+            .delete().eq('id', args.routine_id as string).eq('user_id', userId);
+          if (error) return { success: false, result: `Failed: ${error.message}` };
+          return { success: true, result: `Routine deleted.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'run_routine_now': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          // Fire and forget — don't block tool response on the full chain
+          fetch(`${supabaseUrl}/functions/v1/scheduled-routines?mode=run&routine_id=${args.routine_id}`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${serviceRoleKey}` },
+          }).catch((e) => console.error('[run_routine_now]', e));
+          return { success: true, result: `Routine triggered. Check the Routines page in a moment for the run output.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
       case 'add_standing_order': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
@@ -6734,6 +6894,7 @@ async function runToolLoop(
       const CORE_TOOLS = new Set([
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order',
+        'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task',
         'deep_research', 'web_search_google',
       ]);
@@ -6866,7 +7027,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;

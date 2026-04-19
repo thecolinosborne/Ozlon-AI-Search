@@ -1070,6 +1070,116 @@ export type Database = {
         }
         Relationships: []
       }
+      routine_runs: {
+        Row: {
+          completed_at: string | null
+          duration_ms: number | null
+          error_message: string | null
+          id: string
+          metadata: Json
+          output: string | null
+          routine_id: string
+          started_at: string
+          status: string
+          triggered_by: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          metadata?: Json
+          output?: string | null
+          routine_id: string
+          started_at?: string
+          status?: string
+          triggered_by?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          metadata?: Json
+          output?: string | null
+          routine_id?: string
+          started_at?: string
+          status?: string
+          triggered_by?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "routine_runs_routine_id_fkey"
+            columns: ["routine_id"]
+            isOneToOne: false
+            referencedRelation: "scheduled_routines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_routines: {
+        Row: {
+          active: boolean
+          created_at: string
+          cron_expression: string
+          delivery_channel: string
+          delivery_config: Json
+          description: string | null
+          id: string
+          last_run_at: string | null
+          last_run_status: string | null
+          metadata: Json
+          name: string
+          next_run_at: string | null
+          prompt: string
+          run_count: number
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          cron_expression: string
+          delivery_channel?: string
+          delivery_config?: Json
+          description?: string | null
+          id?: string
+          last_run_at?: string | null
+          last_run_status?: string | null
+          metadata?: Json
+          name: string
+          next_run_at?: string | null
+          prompt: string
+          run_count?: number
+          timezone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          cron_expression?: string
+          delivery_channel?: string
+          delivery_config?: Json
+          description?: string | null
+          id?: string
+          last_run_at?: string | null
+          last_run_status?: string | null
+          metadata?: Json
+          name?: string
+          next_run_at?: string | null
+          prompt?: string
+          run_count?: number
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       seo_snapshots: {
         Row: {
           created_at: string

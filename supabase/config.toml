@@ -81,3 +81,6 @@ verify_jwt = false
 [functions.personality-evolve]
 verify_jwt = false
 
+[functions.scheduled-routines]
+verify_jwt = false
+
