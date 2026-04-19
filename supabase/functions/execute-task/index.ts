@@ -109,21 +109,15 @@ async function executeTask(taskId: string) {
       }),
     });
 
-    const chatJson = await chatRes.json().catch(() => ({}));
-    const output: string =
-      chatJson?.message ||
-      chatJson?.content ||
-      chatJson?.choices?.[0]?.message?.content ||
-      "(no output)";
-
-    if (!chatRes.ok) {
+    if (!chatRes.ok || !chatRes.body) {
+      const errText = await chatRes.text().catch(() => "");
       log = await appendActivity(
         taskId,
         log,
         {
           timestamp: new Date().toISOString(),
           action: "execution_failed",
-          detail: `Chat returned ${chatRes.status}: ${String(output).slice(0, 300)}`,
+          detail: `Chat returned ${chatRes.status}: ${errText.slice(0, 300)}`,
           actor: "ai",
           status: "failed",
         },
@@ -134,6 +128,43 @@ async function executeTask(taskId: string) {
       );
       return { success: false, error: `Chat ${chatRes.status}` };
     }
+
+    // Parse the SSE stream from /chat to accumulate the assistant content.
+    const reader = chatRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let output = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Split on SSE event boundaries (blank line)
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+
+      for (const evt of events) {
+        // Each event may have multiple lines; we care about `data:` lines.
+        for (const line of evt.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const json = JSON.parse(payload);
+            const delta = json?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string") output += delta;
+            // Some providers stream full message instead of deltas
+            const fullMsg = json?.choices?.[0]?.message?.content;
+            if (typeof fullMsg === "string" && !delta) output += fullMsg;
+          } catch {
+            // ignore non-JSON event lines (e.g. provider_used metadata)
+          }
+        }
+      }
+    }
+
+    if (!output.trim()) output = "(no output)";
 
     // Success — store output and move to review
     log = await appendActivity(
