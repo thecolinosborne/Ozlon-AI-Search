@@ -7148,6 +7148,18 @@ Execute these in order. Be decisive — the user has already been shown this pla
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
 
+            // Emit which tools ran (deduped, with display names) for UI attribution
+            try {
+              const uniqueTools = Array.from(new Set(result.toolsUsed || []));
+              if (uniqueTools.length > 0) {
+                const labeled = uniqueTools.map((name) => ({
+                  name,
+                  label: TOOL_DISPLAY_NAMES[name] || name.replace(/_/g, ' '),
+                }));
+                await writer.write(encoder.encode(`event: tools_used\ndata: ${JSON.stringify({ tools: labeled })}\n\n`));
+              }
+            } catch { /* best-effort */ }
+
             // Emit which brain handled this turn (for UI attribution)
             try {
               const usedModel = modelConfig.name;
