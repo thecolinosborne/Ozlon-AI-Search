@@ -206,9 +206,14 @@ async function invokeNativeEdge(
   const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': authHeader,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
@@ -2808,9 +2813,14 @@ async function callNativeEdge(
   const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': authHeader,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
@@ -6659,14 +6669,18 @@ serve(async (req) => {
     // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
     let credUserId: string | null = null;
+    console.log(`[Auth] header present: ${!!authHeaderForCreds}, starts with Bearer: ${authHeaderForCreds?.startsWith('Bearer ') ?? false}`);
     if (authHeaderForCreds) {
       try {
         const { createClient: cc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
         const anonK = Deno.env.get('SUPABASE_ANON_KEY')!;
         const uc = cc(Deno.env.get('SUPABASE_URL')!, anonK, { global: { headers: { Authorization: authHeaderForCreds } } });
-        const { data: { user: credUser } } = await uc.auth.getUser();
+        const { data: { user: credUser }, error: authErr } = await uc.auth.getUser();
         credUserId = credUser?.id || null;
-      } catch { /* no auth */ }
+        console.log(`[Auth] resolved credUserId: ${credUserId ? credUserId.slice(0, 8) + '...' : 'null'}, error: ${authErr?.message || 'none'}`);
+      } catch (e) {
+        console.error('[Auth] getUser threw:', (e as Error).message);
+      }
     }
 
     // ================================================================

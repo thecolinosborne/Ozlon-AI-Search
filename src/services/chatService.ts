@@ -168,21 +168,26 @@ export async function streamChat({
   onError,
 }: StreamChatOptions): Promise<void> {
   try {
-    // Use the user's session JWT so edge functions can identify the caller.
-    // Falls back to the anon key for unauthenticated / guest flows.
-    // Timeout getSession to prevent hanging when backend is slow/unreachable.
+    // Use the user's session JWT so edge functions can identify the caller
+    // and load their per-user integrations / tools. Falls back to anon key
+    // only when there is genuinely no session (guest flows).
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     let token = anonKey;
+    let usingUserJwt = false;
     try {
-      const sessionResult = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
-      ]);
-      if (sessionResult && 'data' in sessionResult) {
-        token = sessionResult.data.session?.access_token ?? anonKey;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        token = session.access_token;
+        usingUserJwt = true;
       }
-    } catch {
-      console.warn('[streamChat] getSession failed, using anon key');
+    } catch (e) {
+      console.warn('[streamChat] getSession failed, falling back to anon key', e);
+    }
+
+    if (!usingUserJwt) {
+      console.warn('[streamChat] No user session — chat will run unauthenticated (no tools, no integrations).');
+    } else {
+      console.log('[streamChat] Using authenticated user session for chat call.');
     }
 
     const response = await fetch(CHAT_URL, {
@@ -190,6 +195,9 @@ export async function streamChat({
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
+        // Supabase gateway requires apikey when forwarding a user JWT in Authorization;
+        // without it the gateway can strip/replace the auth header for verify_jwt=false fns.
+        'apikey': anonKey,
       },
       signal,
       body: JSON.stringify({ 
