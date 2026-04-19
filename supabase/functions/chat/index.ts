@@ -6238,6 +6238,7 @@ async function runToolLoop(
     // If the model wants to call tools
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       const toolNames = msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name);
+      toolsUsed.push(...toolNames);
       console.log(`AI requested ${msg.tool_calls.length} tool calls:`, toolNames);
 
       // Create task on first tool call
