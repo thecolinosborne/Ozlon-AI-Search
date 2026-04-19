@@ -41,11 +41,13 @@ const AIProcessorDetail = () => {
     setVerifiedProviders((prev) => ({ ...prev, [providerId]: null }));
     try {
       const testModel = providerId === "gemini" ? "google/gemini-2.5-flash" : "gpt-5.4";
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const response = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${anonKey}`,
+          apikey: anonKey,
         },
         body: JSON.stringify({
           messages: [{ role: "user", content: "ping" }],
