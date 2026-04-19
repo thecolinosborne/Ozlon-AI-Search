@@ -37,6 +37,12 @@ function getToken(tokenOverride?: string): string {
   return token;
 }
 
+type ClickUpAuthContext = {
+  token: string;
+  userId: string | null;
+  connectionId: string | null;
+};
+
 async function tryVaultRead(
   adminClient: ReturnType<typeof createClient>,
   connectionId: string,
@@ -83,11 +89,25 @@ async function tryVaultRead(
   }
 }
 
-/** Resolve ClickUp token for AUTHENTICATED user actions: override → vault → metadata. No env fallback. */
-async function resolveClickUpToken(req: Request, tokenOverride?: string): Promise<string> {
-  if (tokenOverride) return tokenOverride;
+async function resolveStoredClickUpToken(
+  adminClient: ReturnType<typeof createClient>,
+  connectionId: string,
+  userId: string,
+  metadata?: Record<string, unknown> | null,
+): Promise<string | null> {
+  const vaultKey = await tryVaultRead(adminClient, connectionId, userId);
+  if (vaultKey) return vaultKey;
+  const legacyKey = typeof metadata?.api_key === 'string' ? metadata.api_key.trim() : '';
+  return legacyKey || null;
+}
 
+/** Resolve ClickUp auth context for authenticated user actions: vault → metadata → explicit override. */
+async function resolveClickUpAuth(req: Request, tokenOverride?: string): Promise<ClickUpAuthContext> {
+  const trimmedOverride = tokenOverride?.trim();
   const authHeader = req.headers.get('Authorization');
+  let userId: string | null = null;
+  let connectionId: string | null = null;
+
   if (authHeader) {
     try {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -97,10 +117,9 @@ async function resolveClickUpToken(req: Request, tokenOverride?: string): Promis
       });
       const { data: { user } } = await userClient.auth.getUser();
       if (user) {
+        userId = user.id;
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminClient = createClient(supabaseUrl, serviceKey);
-        // Defensive: if duplicate rows exist for this user+provider, always pick the most recently
-        // updated one. Avoids "Token invalid" errors caused by stale rows surviving a key rotation.
         const { data: conns } = await adminClient
           .from('integration_connections')
           .select('id, metadata, status, updated_at')
@@ -109,20 +128,23 @@ async function resolveClickUpToken(req: Request, tokenOverride?: string): Promis
           .order('updated_at', { ascending: false })
           .limit(5);
         const conn = (conns || []).find((c) => c.status === 'connected') || (conns || [])[0];
+        connectionId = conn?.id ?? null;
 
         if (conn?.id) {
-          // 1. Vault-first
-          const vaultKey = await tryVaultRead(adminClient, conn.id, user.id);
-          if (vaultKey) return vaultKey;
-          // 2. Legacy metadata fallback
-          const key = (conn?.metadata as Record<string, string>)?.api_key;
-          if (key) return key;
+          const token = await resolveStoredClickUpToken(
+            adminClient,
+            conn.id,
+            user.id,
+            (conn.metadata as Record<string, unknown> | null) ?? null,
+          );
+          if (token) return { token, userId, connectionId };
         }
       }
     } catch { /* fall through */ }
   }
 
-  // No env fallback — user must connect their own account.
+  if (trimmedOverride) return { token: trimmedOverride, userId, connectionId };
+
   throw new Error('ClickUp not connected. Add your API key in Integrations → ClickUp.');
 }
 
@@ -149,7 +171,11 @@ async function resolveTeamId(
   return { teamId: teams[0].id, teams };
 }
 
-async function getListId(params?: Record<string, unknown>, resolvedToken?: string): Promise<string> {
+async function getListId(
+  params?: Record<string, unknown>,
+  resolvedToken?: string,
+  authCtx?: Pick<ClickUpAuthContext, 'userId' | 'connectionId'>,
+): Promise<string> {
   // Priority: explicit param → defaultListId param → DB config → env var → auto-discover
   if (params?.listId) return String(params.listId);
   if (params?.defaultListId) return String(params.defaultListId);
@@ -162,14 +188,16 @@ async function getListId(params?: Record<string, unknown>, resolvedToken?: strin
       .from('clickup_integration_state')
       .select('default_list_id')
       .not('default_list_id', 'is', null)
-      .order('updated_at', { ascending: false })
-      .limit(1);
+      .order('updated_at', { ascending: false });
+    if (authCtx?.connectionId) query = query.eq('connection_id', authCtx.connectionId);
+    else if (authCtx?.userId) query = query.eq('user_id', authCtx.userId);
     if (requestedTeamId) query = query.eq('team_id', requestedTeamId);
+    query = query.limit(1);
     const { data } = await query.maybeSingle();
     if (data?.default_list_id) return data.default_list_id;
   } catch { /* fall through */ }
   
-  const envList = Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
+  const envList = authCtx?.userId ? null : Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
   if (envList) return envList;
 
   // Auto-discover: get first list from first space.
@@ -191,12 +219,13 @@ async function getListId(params?: Record<string, unknown>, resolvedToken?: strin
           const listsData = await listsRes.json();
           const lists = listsData?.lists || [];
           if (lists.length > 0) {
-            // Save for future use
             const supabase = getSupabase();
             await supabase.from('clickup_integration_state').upsert({
+              user_id: authCtx?.userId ?? null,
+              connection_id: authCtx?.connectionId ?? null,
               team_id: teamId,
               default_list_id: lists[0].id,
-            }, { onConflict: 'team_id' });
+            }, { onConflict: authCtx?.connectionId ? 'connection_id' : 'user_id,team_id' });
             return lists[0].id;
           }
         }
