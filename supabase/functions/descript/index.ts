@@ -115,8 +115,11 @@ async function tryVaultRead(
   }
 }
 
-async function resolveDescriptKey(req: Request, paramApiKey?: string): Promise<string> {
-  if (paramApiKey) return paramApiKey;
+async function resolveDescriptAuth(
+  req: Request,
+  paramApiKey?: string,
+): Promise<{ apiKey: string; userId: string | null }> {
+  let userId: string | null = null;
 
   const authHeader = req.headers.get('Authorization');
   if (authHeader) {
@@ -128,6 +131,9 @@ async function resolveDescriptKey(req: Request, paramApiKey?: string): Promise<s
       });
       const { data: { user } } = await userClient.auth.getUser();
       if (user) {
+        userId = user.id;
+        if (paramApiKey) return { apiKey: paramApiKey, userId };
+
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminClient = createClient(supabaseUrl, serviceKey);
         const { data: conn } = await adminClient
@@ -139,19 +145,17 @@ async function resolveDescriptKey(req: Request, paramApiKey?: string): Promise<s
           .single();
 
         if (conn?.id) {
-          // 1. Vault-first
           const vaultKey = await tryVaultRead(adminClient, conn.id, user.id);
-          if (vaultKey) return vaultKey;
+          if (vaultKey) return { apiKey: vaultKey, userId };
         }
-
-        // 2. Legacy metadata fallback
         const key = (conn?.metadata as Record<string, string>)?.api_key;
-        if (key) return key;
+        if (key) return { apiKey: key, userId };
       }
     } catch { /* fall through */ }
   }
 
-  // No env fallback for authenticated user actions — credentials must be per-user.
+  if (paramApiKey) return { apiKey: paramApiKey, userId };
+
   throw new Error("Descript not connected. Add your API key in Integrations → Descript.");
 }
 
@@ -164,7 +168,7 @@ serve(async (req) => {
     const body = await req.json();
     const { action, apiKey: paramApiKey, ...params } = body;
 
-    const DESCRIPT_API_KEY = await resolveDescriptKey(req, paramApiKey);
+    const { apiKey: DESCRIPT_API_KEY, userId } = await resolveDescriptAuth(req, paramApiKey);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -203,6 +207,7 @@ serve(async (req) => {
         const projectId = data.project_id || existingProjectId || "unknown";
 
         await supabase.from("descript_jobs").insert({
+          user_id: userId,
           project_id: projectId,
           job_id: jobId,
           job_type: "import",
@@ -240,6 +245,7 @@ serve(async (req) => {
         const jobId = data.id || data.job_id || data.data?.id || "unknown";
 
         await supabase.from("descript_jobs").insert({
+          user_id: userId,
           project_id,
           job_id: jobId,
           job_type: "agent",
@@ -265,13 +271,17 @@ serve(async (req) => {
 
         const data = await descriptFetch(`/jobs/${job_id}`, DESCRIPT_API_KEY);
 
-        await supabase
-          .from("descript_jobs")
-          .update({
-            status: data.state || data.status || "unknown",
-            output_data: data,
-          })
-          .eq("job_id", job_id);
+        {
+          const upd = supabase
+            .from("descript_jobs")
+            .update({
+              status: data.state || data.status || "unknown",
+              output_data: data,
+            })
+            .eq("job_id", job_id);
+          if (userId) upd.eq("user_id", userId);
+          await upd;
+        }
 
         return new Response(JSON.stringify({ success: true, data }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -298,10 +308,14 @@ serve(async (req) => {
           method: "DELETE",
         });
 
-        await supabase
-          .from("descript_jobs")
-          .update({ status: "cancelled" })
-          .eq("job_id", job_id);
+        {
+          const upd = supabase
+            .from("descript_jobs")
+            .update({ status: "cancelled" })
+            .eq("job_id", job_id);
+          if (userId) upd.eq("user_id", userId);
+          await upd;
+        }
 
         return new Response(JSON.stringify({ success: true, data }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
