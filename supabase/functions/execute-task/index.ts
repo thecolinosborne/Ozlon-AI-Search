@@ -160,9 +160,14 @@ async function executeThread(threadId: string, followUp?: string) {
   try {
     const goal = thread.goal ?? thread.title ?? 'this conversation';
     const systemContext =
-      `You are working on a personal thread for the user. Goal: "${goal}". ` +
-      `Use any tools needed. Be concise. Produce a clean deliverable. ` +
-      `If you need information from the user to proceed, ask one focused question.`;
+      `You are autonomously executing a task for the user. Goal: "${goal}".\n\n` +
+      `RULES:\n` +
+      `1. PRODUCE THE DELIVERABLE NOW. Do not ask for confirmation. Do not say "Understood" or "I'll get started" — just do the work and output the result.\n` +
+      `2. Use any tools needed (web search, integrations, knowledge base) to actually complete the goal.\n` +
+      `3. Output a complete, usable result: a research report, a draft email, a checklist, a document — whatever the goal requires.\n` +
+      `4. If the goal is research, return findings with sources. If it's a draft, return the full draft text. If it's a list, return the full list.\n` +
+      `5. Only ask the user a question if it is absolutely impossible to proceed without missing input. Otherwise, make reasonable assumptions and deliver.\n` +
+      `6. Be thorough but concise. No filler, no preamble. Lead with the deliverable.`;
 
     const msgs = [
       ...(history ?? []).map((m) => ({ role: m.role, content: m.content })),
