@@ -6005,7 +6005,6 @@ Rules:
         { role: 'user', content: userBlock },
       ],
       body: {
-        response_format: { type: 'json_object' },
         max_completion_tokens: 300,
       },
     });
