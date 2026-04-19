@@ -229,23 +229,59 @@ export function useConversations() {
       return [...prev, { ...msg, created_at: new Date().toISOString() }];
     });
 
-    // Auto-title: if this is the first user message, update the session title
+    // Auto-title from first user message (fallback before AI summary lands)
     if (msg.role === "user") {
       const userMessages = messagesRef.current.filter((m) => m.role === "user");
-      if (userMessages.length === 0) {
-        const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      const isFirst = userMessages.length === 0;
+      const fallbackTitle = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      if (isFirst) {
         await supabase
           .from("chat_sessions")
-          .update({ title, updated_at: new Date().toISOString() })
+          .update({ title: fallbackTitle, updated_at: new Date().toISOString() })
           .eq("id", sid);
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sid ? { ...s, title } : s))
-        );
       } else {
         await supabase
           .from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", sid);
+      }
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sid
+            ? {
+                ...s,
+                title: isFirst ? fallbackTitle : s.title,
+                preview: msg.content,
+                updated_at: new Date().toISOString(),
+              }
+            : s
+        )
+      );
+    }
+
+    // After assistant turns, fire-and-forget AI summary/title (debounced server-side by message count)
+    if (msg.role === "assistant" && msg.content && msg.content.length > 20) {
+      const totalMessages = messagesRef.current.length + 1;
+      // Run on first complete exchange, then every 4 messages to refresh
+      if (totalMessages === 2 || totalMessages % 4 === 0) {
+        supabase.functions.invoke("summarize-session", { body: { session_id: sid } })
+          .then((res) => {
+            const result = res.data as { title?: string; summary?: string } | null;
+            if (result?.title || result?.summary) {
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.id === sid
+                    ? {
+                        ...s,
+                        title: result.title || s.title,
+                        summary: result.summary || s.summary,
+                      }
+                    : s
+                )
+              );
+            }
+          })
+          .catch((e) => console.warn("[useConversations] summarize-session failed:", e));
       }
     }
   }, [user, ensureSession]);
