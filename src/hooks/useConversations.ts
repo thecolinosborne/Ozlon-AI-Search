@@ -9,6 +9,7 @@ export interface ConversationSession {
   title: string;
   summary: string | null;
   preview: string | null;
+  pinned: boolean;
   created_at: string;
   updated_at: string;
 }
