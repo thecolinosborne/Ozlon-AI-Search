@@ -33,7 +33,7 @@ const Index = () => {
   const {
     sessions, activeSessionId, messages: sessionMessages,
     sessionsLoaded, switchSession, startNewChat, saveMessage,
-    finalizeMessage, deleteSession,
+    finalizeMessage, deleteSession, togglePin,
   } = useConversations();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -207,7 +207,8 @@ const Index = () => {
       <ConversationSidebar
         open={sidebarOpen} onClose={() => setSidebarOpen(false)}
         sessions={sessions} activeSessionId={activeSessionId}
-        onNewChat={handleNewChat} onSelectSession={handleSwitchSession} onDeleteSession={handleDeleteSession}
+        onNewChat={handleNewChat} onSelectSession={handleSwitchSession}
+        onDeleteSession={handleDeleteSession} onTogglePin={togglePin}
       />
 
       {/* Global File Input */}

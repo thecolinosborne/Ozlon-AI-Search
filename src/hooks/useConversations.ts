@@ -9,6 +9,7 @@ export interface ConversationSession {
   title: string;
   summary: string | null;
   preview: string | null;
+  pinned: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -60,7 +61,7 @@ export function useConversations() {
         const { data, error } = await supabase
           .from("chat_sessions")
           .insert({ user_id: user.id, title: title || "New conversation" })
-          .select("id, title, summary, created_at, updated_at")
+          .select("id, title, summary, pinned, created_at, updated_at")
           .single();
 
         if (error || !data) {
@@ -301,6 +302,25 @@ export function useConversations() {
     }
   }, [user, setActiveSession]);
 
+  // Toggle pin on a session
+  const togglePin = useCallback(async (sessionId: string) => {
+    if (!user) return;
+    const current = sessions.find((s) => s.id === sessionId);
+    if (!current) return;
+    const next = !current.pinned;
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, pinned: next } : s)));
+    const { error } = await supabase
+      .from("chat_sessions")
+      .update({ pinned: next })
+      .eq("id", sessionId)
+      .eq("user_id", user.id);
+    if (error) {
+      console.error("[useConversations] togglePin error:", error);
+      // revert
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, pinned: !next } : s)));
+    }
+  }, [user, sessions]);
+
   // Initialization: load sessions, reset when user changes
   useEffect(() => {
     mountedRef.current = true;
@@ -322,7 +342,7 @@ export function useConversations() {
 
       const { data, error } = await supabase
         .from("chat_sessions")
-        .select("id, title, summary, created_at, updated_at")
+        .select("id, title, summary, pinned, created_at, updated_at")
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
 
@@ -400,7 +420,7 @@ export function useConversations() {
     if (!user) return;
     const { data } = await supabase
       .from("chat_sessions")
-      .select("id, title, summary, created_at, updated_at")
+      .select("id, title, summary, pinned, created_at, updated_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
     if (data) {
@@ -461,6 +481,7 @@ export function useConversations() {
     saveMessage,
     finalizeMessage,
     deleteSession,
+    togglePin,
     loadSessions,
     closeActiveSession,
   };
