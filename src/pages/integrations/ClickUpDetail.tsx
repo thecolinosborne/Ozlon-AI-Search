@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
@@ -45,6 +45,7 @@ const ClickUpDetail = () => {
     useIntegrationsStore();
   const integration = getIntegration("clickup");
   const storedSettings = integration.settings as { team_id?: string; list_id?: string; apiToken?: string };
+  const hydratedSessionRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
@@ -89,17 +90,11 @@ const ClickUpDetail = () => {
         setStatus("clickup", "connected");
         setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
-        updateSettings("clickup", {
-          ...storedSettings,
-          team_id: result.team_id,
-          list_id: result.list_id,
-        });
+        updateSettings("clickup", { team_id: result.team_id, list_id: result.list_id });
         try {
           const config = await callClickUp("get_config", getAuthParams());
           if (config) {
-            if (config.default_list_id) {
-              setSelectedList(config.default_list_id);
-            }
+            if (config.default_list_id) setSelectedList(config.default_list_id);
             setWebhookStatus(config.webhook_status || "not_registered");
             setAutoReplyEnabled(config.auto_reply_enabled ?? true);
             setReplyMode(config.ai_reply_mode || "standard");
@@ -120,12 +115,16 @@ const ClickUpDetail = () => {
     } finally {
       setLoading(false);
     }
-  }, [authLoading, session, setApiKeyConfigured, setLastSync, setStatus, storedSettings, updateSettings]);
+  }, [authLoading, session, setApiKeyConfigured, setLastSync, setStatus, updateSettings]);
 
-  // Check connection on mount
+  // Hydrate once per resolved auth session to avoid an infinite refetch loop.
   useEffect(() => {
+    if (authLoading) return;
+    const sessionKey = session?.user.id ?? "signed-out";
+    if (hydratedSessionRef.current === sessionKey) return;
+    hydratedSessionRef.current = sessionKey;
     void loadConnection();
-  }, [loadConnection]);
+  }, [authLoading, session?.user.id, loadConnection]);
 
   const handleSaveApiToken = async (token: string) => {
     setSavingKey(true);
@@ -137,16 +136,11 @@ const ClickUpDetail = () => {
         toast.error("Connection failed — check your API token");
         return false;
       }
-      updateSettings("clickup", { ...storedSettings, apiToken: token });
+      updateSettings("clickup", { apiToken: token });
       setStatus("clickup", "connected");
       setApiKeyConfigured("clickup", true);
       setLastSync("clickup", new Date().toISOString());
-      updateSettings("clickup", {
-        ...storedSettings,
-        apiToken: token,
-        team_id: result.team_id,
-        list_id: result.list_id,
-      });
+      updateSettings("clickup", { apiToken: token, team_id: result.team_id, list_id: result.list_id });
       if (result.list_id) {
         setSelectedList(String(result.list_id));
       }
@@ -169,11 +163,7 @@ const ClickUpDetail = () => {
         setStatus("clickup", "connected");
         setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
-        updateSettings("clickup", {
-          ...storedSettings,
-          team_id: result.team_id,
-          list_id: result.list_id,
-        });
+        updateSettings("clickup", { team_id: result.team_id, list_id: result.list_id });
         if (result.list_id) {
           setSelectedList(String(result.list_id));
         }
