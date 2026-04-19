@@ -83,13 +83,31 @@ export const ChatMessageList = ({
                       <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
                     </span>
                   )}
-                  {message.provider && message.content && (
-                    <div className="mt-2 pt-2 border-t border-neutral-200/60 text-[11px] text-neutral-400 not-prose">
-                      via {message.provider.platform}
-                      {message.provider.source === "your_key" ? (
-                        <span className="ml-1 text-emerald-600">· your key</span>
-                      ) : (
-                        <span className="ml-1">· Ozlon</span>
+                  {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0)) && (
+                    <div className="mt-2 pt-2 border-t border-neutral-200/60 text-[11px] text-neutral-400 not-prose space-y-0.5">
+                      {message.provider && (
+                        <div>
+                          via {message.provider.platform}
+                          {message.provider.source === "your_key" ? (
+                            <span className="ml-1 text-emerald-600">· your key</span>
+                          ) : (
+                            <span className="ml-1">· Ozlon</span>
+                          )}
+                        </div>
+                      )}
+                      {message.toolsUsed && message.toolsUsed.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          <span className="text-neutral-400">tools:</span>
+                          {message.toolsUsed.map((t) => (
+                            <span
+                              key={t.name}
+                              className="px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 text-[10px]"
+                              title={t.name}
+                            >
+                              {t.label}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}
