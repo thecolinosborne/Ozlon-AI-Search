@@ -14,6 +14,69 @@ export type Database = {
   }
   public: {
     Tables: {
+      artifacts: {
+        Row: {
+          content: Json
+          conversation_id: string
+          created_at: string
+          created_by: string
+          external_ref: Json
+          id: string
+          message_id: string | null
+          status: string
+          title: string | null
+          type: string
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          content?: Json
+          conversation_id: string
+          created_at?: string
+          created_by?: string
+          external_ref?: Json
+          id?: string
+          message_id?: string | null
+          status?: string
+          title?: string | null
+          type: string
+          updated_at?: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          content?: Json
+          conversation_id?: string
+          created_at?: string
+          created_by?: string
+          external_ref?: Json
+          id?: string
+          message_id?: string | null
+          status?: string
+          title?: string | null
+          type?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "artifacts_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "artifacts_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_messages: {
         Row: {
           content: string
@@ -58,27 +121,48 @@ export type Database = {
       chat_sessions: {
         Row: {
           created_at: string
+          current_artifact_id: string | null
+          goal: string | null
           id: string
+          kind: string
+          linked_work_task_id: string | null
+          metadata: Json
           pinned: boolean
+          priority: string | null
           summary: string | null
+          task_status: string | null
           title: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          current_artifact_id?: string | null
+          goal?: string | null
           id?: string
+          kind?: string
+          linked_work_task_id?: string | null
+          metadata?: Json
           pinned?: boolean
+          priority?: string | null
           summary?: string | null
+          task_status?: string | null
           title?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          current_artifact_id?: string | null
+          goal?: string | null
           id?: string
+          kind?: string
+          linked_work_task_id?: string | null
+          metadata?: Json
           pinned?: boolean
+          priority?: string | null
           summary?: string | null
+          task_status?: string | null
           title?: string | null
           updated_at?: string
           user_id?: string
@@ -1287,6 +1371,44 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      task_events: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          detail: string | null
+          event_type: string
+          id: string
+          metadata: Json
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          detail?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          detail?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_goals: {
         Row: {
