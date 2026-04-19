@@ -115,6 +115,15 @@ export interface ProviderUsedEvent {
   platform: string;
 }
 
+export interface ToolUsedInfo {
+  name: string;
+  label: string;
+}
+
+export interface ToolsUsedEvent {
+  tools: ToolUsedInfo[];
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -130,6 +139,7 @@ export interface StreamChatOptions {
   onTaskUpdate?: (update: TaskUpdate) => void;
   onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
   onProviderUsed?: (data: ProviderUsedEvent) => void;
+  onToolsUsed?: (data: ToolsUsedEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
