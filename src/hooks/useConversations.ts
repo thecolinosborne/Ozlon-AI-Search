@@ -353,10 +353,17 @@ export function useConversations() {
     if (!user) return;
     const { data } = await supabase
       .from("chat_sessions")
-      .select("id, title, created_at, updated_at")
+      .select("id, title, summary, created_at, updated_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
-    if (data) setSessions(data);
+    if (data) {
+      setSessions((prev) =>
+        data.map((s) => ({
+          ...s,
+          preview: prev.find((p) => p.id === s.id)?.preview || null,
+        }))
+      );
+    }
   }, [user]);
 
   /**
