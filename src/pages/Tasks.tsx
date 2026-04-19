@@ -499,53 +499,52 @@ function TaskDetailSheet({
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Page Header
+// Inline view-mode toolbar (no header, lives inside Tasks tab)
 // ══════════════════════════════════════════════════════════════════
 
-function TasksHeader({
+function TasksToolbar({
   view,
   onViewChange,
   onCreateClick,
+  count,
 }: {
   view: ViewMode;
   onViewChange: (v: ViewMode) => void;
   onCreateClick: () => void;
+  count: number;
 }) {
   return (
-    <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <div className="flex items-center gap-3">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-muted-foreground">
+        {count} {count === 1 ? "task" : "tasks"}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
+          <button
+            onClick={() => onViewChange('board')}
+            className={cn(
+              'p-1.5 transition-colors',
+              view === 'board' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title="Board view"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onViewChange('list')}
+            className={cn(
+              'p-1.5 transition-colors',
+              view === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title="List view"
+          >
+            <List className="w-4 h-4" />
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
-            <button
-              onClick={() => onViewChange('board')}
-              className={cn(
-                'p-1.5 transition-colors',
-                view === 'board' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="Board view"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => onViewChange('list')}
-              className={cn(
-                'p-1.5 transition-colors',
-                view === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="List view"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-          <Button size="sm" onClick={onCreateClick} className="gap-1.5">
-            <Plus className="w-4 h-4" />
-            New Task
-          </Button>
-        </div>
+        <Button size="sm" onClick={onCreateClick} className="gap-1.5">
+          <Plus className="w-4 h-4" />
+          New Task
+        </Button>
       </div>
     </div>
   );
@@ -555,7 +554,7 @@ function TasksHeader({
 // Page Component
 // ══════════════════════════════════════════════════════════════════
 
-const Tasks = () => {
+function TasksWorkspace() {
   const {
     tasks,
     loading,
@@ -588,14 +587,9 @@ const Tasks = () => {
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, WorkTask[]> = {
-      todo: [],
-      in_progress: [],
-      up_for_review: [],
-      completed: [],
+      todo: [], in_progress: [], up_for_review: [], completed: [],
     };
-    for (const t of tasks) {
-      grouped[t.status]?.push(t);
-    }
+    for (const t of tasks) grouped[t.status]?.push(t);
     for (const key of BOARD_COLUMNS) {
       grouped[key].sort((a, b) => a.board_position - b.board_position);
     }
@@ -621,11 +615,9 @@ const Tasks = () => {
     setCreateOpen(true);
   }, []);
 
-  // ── Terminal route states ──────────────────────────────────────
-
   if (routeState === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex items-center justify-center py-16">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -633,7 +625,7 @@ const Tasks = () => {
 
   if (routeState === 'error') {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4 bg-background">
+      <div className="flex items-center justify-center px-4 py-16">
         <div className="text-center space-y-4 max-w-sm">
           <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
           <p className="text-sm text-muted-foreground">{error}</p>
@@ -648,9 +640,9 @@ const Tasks = () => {
 
   if (routeState === 'empty') {
     return (
-      <div className="min-h-screen bg-background">
-        <TasksHeader view={view} onViewChange={setView} onCreateClick={() => setCreateOpen(true)} />
-        <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-4">
+      <div>
+        <TasksToolbar view={view} onViewChange={setView} onCreateClick={() => setCreateOpen(true)} count={0} />
+        <div className="max-w-2xl mx-auto px-4 py-12 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
             <Sparkles className="w-8 h-8 text-primary" />
           </div>
@@ -668,40 +660,107 @@ const Tasks = () => {
     );
   }
 
-  // ── Loaded ─────────────────────────────────────────────────────
-
   return (
-    <div className="min-h-screen bg-background pb-20">
-      <TasksHeader view={view} onViewChange={setView} onCreateClick={() => { setCreateDefaultStatus('todo'); setCreateOpen(true); }} />
+    <div>
+      <TasksToolbar
+        view={view}
+        onViewChange={setView}
+        onCreateClick={() => { setCreateDefaultStatus('todo'); setCreateOpen(true); }}
+        count={tasks.length}
+      />
 
-      <div className={cn('mx-auto px-4 py-4', view === 'board' ? 'max-w-7xl' : 'max-w-3xl')}>
-        {view === 'board' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {BOARD_COLUMNS.map(status => (
-              <BoardColumn
-                key={status}
-                status={status}
-                tasks={tasksByStatus[status]}
-                onTaskClick={handleTaskClick}
-                onMoveTask={handleMoveTask}
-                onCreateInColumn={handleCreateInColumn}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {[...tasks]
-              .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
-              .map(task => (
-                <ListRow key={task.id} task={task} onClick={handleTaskClick} />
-              ))
-            }
-          </div>
-        )}
-      </div>
+      {view === 'board' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {BOARD_COLUMNS.map(status => (
+            <BoardColumn
+              key={status}
+              status={status}
+              tasks={tasksByStatus[status]}
+              onTaskClick={handleTaskClick}
+              onMoveTask={handleMoveTask}
+              onCreateInColumn={handleCreateInColumn}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {[...tasks]
+            .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
+            .map(task => (
+              <ListRow key={task.id} task={task} onClick={handleTaskClick} />
+            ))
+          }
+        </div>
+      )}
 
       <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} />
       <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Page shell with Tasks / Routines tabs
+// ══════════════════════════════════════════════════════════════════
+
+import { BottomNav } from '@/components/navigation/BottomNav';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { RoutinesPanel } from '@/components/tasks/RoutinesPanel';
+import { ListChecks, Repeat } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+
+const Tasks = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') === 'routines' ? 'routines' : 'tasks';
+  const [tab, setTab] = useState<'tasks' | 'routines'>(initialTab);
+
+  const handleTabChange = (v: string) => {
+    const next = v as 'tasks' | 'routines';
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    if (next === 'routines') params.set('tab', 'routines');
+    else params.delete('tab');
+    setSearchParams(params, { replace: true });
+  };
+
+  return (
+    <div className="min-h-screen bg-background pb-24">
+      <header className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
+          <Sparkles className="w-5 h-5 text-primary" />
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
+            <p className="text-xs text-muted-foreground">
+              One-off tasks and recurring routines, all in one place.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-4">
+        <Tabs value={tab} onValueChange={handleTabChange}>
+          <TabsList className="grid w-full max-w-sm grid-cols-2 mb-4">
+            <TabsTrigger value="tasks" className="gap-2">
+              <ListChecks className="w-4 h-4" />
+              Tasks
+            </TabsTrigger>
+            <TabsTrigger value="routines" className="gap-2">
+              <Repeat className="w-4 h-4" />
+              Routines
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="tasks" className="mt-0">
+            <TasksWorkspace />
+          </TabsContent>
+
+          <TabsContent value="routines" className="mt-0 max-w-3xl">
+            <RoutinesPanel />
+          </TabsContent>
+        </Tabs>
+      </main>
+
+      <BottomNav />
     </div>
   );
 };
