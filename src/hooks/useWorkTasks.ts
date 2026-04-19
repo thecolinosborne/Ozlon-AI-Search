@@ -146,6 +146,54 @@ export function useWorkTasks() {
     fetchTasks();
   }, [fetchTasks]);
 
+  // Realtime: subscribe to work_tasks changes so the board updates live
+  // while the AI is executing tasks in the background.
+  useEffect(() => {
+    const channel = supabase
+      .channel('work_tasks_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'work_tasks' },
+        (payload) => {
+          if (!mountedRef.current) return;
+          if (payload.eventType === 'INSERT') {
+            const row = payload.new as unknown as WorkTask;
+            setTasks((prev) => (prev.some((t) => t.id === row.id) ? prev : [row, ...prev]));
+          } else if (payload.eventType === 'UPDATE') {
+            const row = payload.new as unknown as WorkTask;
+            setTasks((prev) => prev.map((t) => (t.id === row.id ? row : t)));
+          } else if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as { id?: string };
+            if (oldRow?.id) {
+              setTasks((prev) => prev.filter((t) => t.id !== oldRow.id));
+            }
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const runTaskWithAI = useCallback(async (id: string) => {
+    // Optimistic: flip ai_status so UI lights up immediately
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ai_status: 'executing' as AIStatus, status: 'in_progress' as TaskStatus } : t)),
+    );
+    const { data, error: invokeErr } = await supabase.functions.invoke('execute-task', {
+      body: { task_id: id },
+    });
+    if (invokeErr || !data?.success) {
+      const msg = invokeErr?.message || data?.error || 'Unknown error';
+      toast.error(`AI run failed: ${msg}`);
+      return false;
+    }
+    toast.success('AI finished — review the draft output');
+    return true;
+  }, []);
+
   const createTask = useCallback(async (input: Partial<WorkTask>) => {
     // Get current user id if available, otherwise use a placeholder
     const { data: { session } } = await supabase.auth.getSession();
@@ -270,5 +318,6 @@ export function useWorkTasks() {
     deleteTask,
     archiveTask,
     unarchiveTask,
+    runTaskWithAI,
   };
 }

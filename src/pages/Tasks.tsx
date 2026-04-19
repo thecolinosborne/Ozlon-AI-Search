@@ -321,16 +321,19 @@ function TaskDetailSheet({
   onClose,
   onUpdate,
   onDelete,
+  onRunWithAI,
 }: {
   task: WorkTask | null;
   open: boolean;
   onClose: () => void;
   onUpdate: (id: string, updates: Partial<WorkTask>) => void;
   onDelete: (id: string) => void;
+  onRunWithAI: (id: string) => Promise<boolean>;
 }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     setNotesDraft(task?.revision_notes || '');
@@ -351,7 +354,17 @@ function TaskDetailSheet({
     }
   };
 
+  const handleRun = async () => {
+    setRunning(true);
+    try {
+      await onRunWithAI(task.id);
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const aiLog = task.ai_activity_log || [];
+  const isAIBusy = task.ai_status === 'executing' || task.ai_status === 'thinking' || running;
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -413,14 +426,23 @@ function TaskDetailSheet({
           </div>
 
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Description</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Description / prompt</label>
             <Textarea
               value={task.description || ''}
               onChange={(e) => onUpdate(task.id, { description: e.target.value })}
-              placeholder="Describe this task..."
+              placeholder="Tell the AI what to do…"
               rows={4}
             />
           </div>
+
+          <Button
+            onClick={handleRun}
+            disabled={isAIBusy}
+            className="w-full gap-2"
+          >
+            <Sparkles className={cn('w-4 h-4', isAIBusy && 'animate-pulse')} />
+            {isAIBusy ? 'AI is working…' : task.draft_output ? 'Re-run with AI' : 'Run with AI'}
+          </Button>
 
           <Separator />
 
@@ -445,9 +467,32 @@ function TaskDetailSheet({
           {task.draft_output && (
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">AI Draft</label>
-              <div className="p-3 rounded-lg bg-muted/30 border border-border/30 text-sm whitespace-pre-wrap max-h-48 overflow-y-auto">
+              <div className="p-3 rounded-lg bg-muted/30 border border-border/30 text-sm whitespace-pre-wrap max-h-72 overflow-y-auto">
                 {task.draft_output}
               </div>
+              {task.status === 'up_for_review' && (
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => onUpdate(task.id, { status: 'completed', ai_status: 'idle', next_action: 'none', final_deliverable: task.draft_output })}
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-1" />
+                    Approve & Complete
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleRun}
+                    disabled={isAIBusy}
+                  >
+                    <Sparkles className="w-4 h-4 mr-1" />
+                    Revise
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -457,7 +502,7 @@ function TaskDetailSheet({
             <div>
               <label className="text-xs text-muted-foreground mb-2 block">Activity</label>
               <div className="space-y-2 max-h-48 overflow-y-auto">
-                {aiLog.map((entry, i) => (
+                {aiLog.slice().reverse().map((entry, i) => (
                   <div key={i} className="flex gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
                     <div>
@@ -563,6 +608,7 @@ function TasksWorkspace() {
     createTask,
     updateTask,
     deleteTask,
+    runTaskWithAI,
   } = useWorkTasks();
 
   const [view, setView] = useState<ViewMode>('board');
@@ -615,6 +661,15 @@ function TasksWorkspace() {
     setCreateOpen(true);
   }, []);
 
+  // Wrap createTask: if assignee is "ai" (default), immediately fire the AI executor.
+  const handleCreate = useCallback(async (data: Partial<WorkTask>) => {
+    const created = await createTask(data);
+    if (created && (created.assigned_to === 'ai' || !created.assigned_to)) {
+      // fire-and-forget; realtime surfaces progress
+      runTaskWithAI(created.id);
+    }
+  }, [createTask, runTaskWithAI]);
+
   if (routeState === 'loading') {
     return (
       <div className="flex items-center justify-center py-16">
@@ -655,7 +710,7 @@ function TasksWorkspace() {
             Create your first task
           </Button>
         </div>
-        <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
+        <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} defaultStatus={createDefaultStatus} />
       </div>
     );
   }
@@ -693,8 +748,8 @@ function TasksWorkspace() {
         </div>
       )}
 
-      <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} />
-      <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
+      <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} onRunWithAI={runTaskWithAI} />
+      <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} defaultStatus={createDefaultStatus} />
     </div>
   );
 }
