@@ -1108,6 +1108,198 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // Tier 2: Calendar Pro — additive, existing create_calendar_event untouched
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_calendars',
+      description: 'List all Google calendars the user has access to.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_events',
+      description: 'List Google Calendar events in a time window.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string', description: "Calendar ID, default 'primary'" },
+          timeMin: { type: 'string', description: 'ISO start time' },
+          timeMax: { type: 'string', description: 'ISO end time' },
+          q: { type: 'string', description: 'Optional text search' },
+          maxResults: { type: 'number' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_get_event',
+      description: 'Get a specific Google Calendar event by ID.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' } }, required: ['eventId'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_update_event',
+      description: 'Update a Google Calendar event (PATCH). Pass any subset of event fields.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          event: { type: 'object', description: 'Partial event object to merge' },
+        },
+        required: ['eventId', 'event'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_delete_event',
+      description: 'Delete a Google Calendar event. Confirm with user first.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' } }, required: ['eventId'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_quick_add',
+      description: 'Create a calendar event from a natural-language string (e.g. "Lunch with Sam tomorrow 1pm").',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, text: { type: 'string' } }, required: ['text'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_freebusy',
+      description: 'Check free/busy times across one or more calendars.',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeMin: { type: 'string' },
+          timeMax: { type: 'string' },
+          calendarIds: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['timeMin', 'timeMax'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_find_free_slots',
+      description: 'Find available open slots of a given duration in a calendar within a window.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          timeMin: { type: 'string' },
+          timeMax: { type: 'string' },
+          durationMins: { type: 'number', description: 'Default 30' },
+        },
+        required: ['timeMin', 'timeMax'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_move_event',
+      description: 'Move an event to a different calendar.',
+      parameters: { type: 'object', properties: { calendarId: { type: 'string' }, eventId: { type: 'string' }, destination: { type: 'string' } }, required: ['eventId', 'destination'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_respond_to_event',
+      description: 'Respond to a calendar invite (accept/decline/tentative) on behalf of an attendee email.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          attendeeEmail: { type: 'string' },
+          responseStatus: { type: 'string', enum: ['accepted', 'declined', 'tentative', 'needsAction'] },
+        },
+        required: ['eventId', 'attendeeEmail', 'responseStatus'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_add_attendees',
+      description: 'Add attendees to an existing event and notify them.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          attendees: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['eventId', 'attendees'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_create_event_with_meet',
+      description: 'Create a calendar event with an auto-generated Google Meet conference link.',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          summary: { type: 'string' },
+          start_time: { type: 'string' },
+          end_time: { type: 'string' },
+          description: { type: 'string' },
+          attendees: { type: 'string', description: 'Comma-separated emails' },
+        },
+        required: ['summary', 'start_time', 'end_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_create_calendar',
+      description: 'Create a new secondary calendar.',
+      parameters: { type: 'object', properties: { summary: { type: 'string' }, timeZone: { type: 'string' } }, required: ['summary'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_set_event_reminders',
+      description: 'Set custom reminders on a calendar event (popup or email, with minutes-before list).',
+      parameters: {
+        type: 'object',
+        properties: {
+          calendarId: { type: 'string' },
+          eventId: { type: 'string' },
+          reminderMinutes: { type: 'array', items: { type: 'number' } },
+          method: { type: 'string', enum: ['popup', 'email'] },
+        },
+        required: ['eventId', 'reminderMinutes'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calendar_list_colors',
+      description: 'List the color palette available for events and calendars.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
   // Google Drive actions
   {
     type: 'function',
@@ -2986,6 +3178,25 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ q: a.query, pageSize: a.max_results }) },
   // Calendar
   create_calendar_event: { fn: 'google-calendar', action: 'create_event', mapArgs: (a) => ({ summary: a.title, description: a.description, start: a.start_time, end: a.end_time, attendees: a.attendees, location: a.location }) },
+  // Tier 2: Calendar Pro — additive
+  calendar_list_calendars: { fn: 'google-calendar', action: 'list_calendars' },
+  calendar_list_events: { fn: 'google-calendar', action: 'list_events', mapArgs: (a) => ({ calendarId: a.calendarId, timeMin: a.timeMin, timeMax: a.timeMax, q: a.q, maxResults: a.maxResults }) },
+  calendar_get_event: { fn: 'google-calendar', action: 'get_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId }) },
+  calendar_update_event: { fn: 'google-calendar', action: 'update_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, event: a.event }) },
+  calendar_delete_event: { fn: 'google-calendar', action: 'delete_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId }) },
+  calendar_quick_add: { fn: 'google-calendar', action: 'quick_add', mapArgs: (a) => ({ calendarId: a.calendarId, text: a.text }) },
+  calendar_freebusy: { fn: 'google-calendar', action: 'freebusy_query', mapArgs: (a) => ({ timeMin: a.timeMin, timeMax: a.timeMax, calendarIds: a.calendarIds }) },
+  calendar_find_free_slots: { fn: 'google-calendar', action: 'find_free_slots', mapArgs: (a) => ({ calendarId: a.calendarId, timeMin: a.timeMin, timeMax: a.timeMax, durationMins: a.durationMins }) },
+  calendar_move_event: { fn: 'google-calendar', action: 'move_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, destination: a.destination }) },
+  calendar_respond_to_event: { fn: 'google-calendar', action: 'respond_to_event', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, attendeeEmail: a.attendeeEmail, responseStatus: a.responseStatus }) },
+  calendar_add_attendees: { fn: 'google-calendar', action: 'add_attendees', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, attendees: a.attendees }) },
+  calendar_create_event_with_meet: { fn: 'google-calendar', action: 'create_event_with_meet', mapArgs: (a) => {
+    const attendeesArr = typeof a.attendees === 'string' ? (a.attendees as string).split(',').map((e) => e.trim()).filter(Boolean).map((email) => ({ email })) : a.attendees;
+    return { calendarId: a.calendarId, event: { summary: a.summary, description: a.description, start: { dateTime: a.start_time }, end: { dateTime: a.end_time }, attendees: attendeesArr } };
+  } },
+  calendar_create_calendar: { fn: 'google-calendar', action: 'create_calendar', mapArgs: (a) => ({ summary: a.summary, timeZone: a.timeZone }) },
+  calendar_set_event_reminders: { fn: 'google-calendar', action: 'set_event_reminders', mapArgs: (a) => ({ calendarId: a.calendarId, eventId: a.eventId, reminderMinutes: a.reminderMinutes, method: a.method }) },
+  calendar_list_colors: { fn: 'google-calendar', action: 'list_colors' },
   // GSC
   gsc_list_sites: { fn: 'google-search-console', action: 'list_sites' },
   gsc_query: { fn: 'google-search-console', action: 'search_analytics', mapArgs: (a) => ({ siteUrl: a.site_url, startDate: a.start_date, endDate: a.end_date, dimensions: a.dimensions, rowLimit: a.row_limit }) },
@@ -5896,6 +6107,21 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'label_email': 'google-mail',
     'mark_email_read': 'google-mail',
     'create_calendar_event': 'google-calendar',
+    'calendar_list_calendars': 'google-calendar',
+    'calendar_list_events': 'google-calendar',
+    'calendar_get_event': 'google-calendar',
+    'calendar_update_event': 'google-calendar',
+    'calendar_delete_event': 'google-calendar',
+    'calendar_quick_add': 'google-calendar',
+    'calendar_freebusy': 'google-calendar',
+    'calendar_find_free_slots': 'google-calendar',
+    'calendar_move_event': 'google-calendar',
+    'calendar_respond_to_event': 'google-calendar',
+    'calendar_add_attendees': 'google-calendar',
+    'calendar_create_event_with_meet': 'google-calendar',
+    'calendar_create_calendar': 'google-calendar',
+    'calendar_set_event_reminders': 'google-calendar',
+    'calendar_list_colors': 'google-calendar',
     'search_google_drive': 'google-drive',
     'create_google_doc': 'google-drive',
     'create_google_sheet': 'google-drive',
