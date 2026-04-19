@@ -7,6 +7,8 @@ const isDev = import.meta.env.DEV;
 export interface ConversationSession {
   id: string;
   title: string;
+  summary: string | null;
+  preview: string | null;
   created_at: string;
   updated_at: string;
 }
