@@ -608,6 +608,7 @@ function TasksWorkspace() {
     createTask,
     updateTask,
     deleteTask,
+    runTaskWithAI,
   } = useWorkTasks();
 
   const [view, setView] = useState<ViewMode>('board');
@@ -660,6 +661,15 @@ function TasksWorkspace() {
     setCreateOpen(true);
   }, []);
 
+  // Wrap createTask: if assignee is "ai" (default), immediately fire the AI executor.
+  const handleCreate = useCallback(async (data: Partial<WorkTask>) => {
+    const created = await createTask(data);
+    if (created && (created.assigned_to === 'ai' || !created.assigned_to)) {
+      // fire-and-forget; realtime surfaces progress
+      runTaskWithAI(created.id);
+    }
+  }, [createTask, runTaskWithAI]);
+
   if (routeState === 'loading') {
     return (
       <div className="flex items-center justify-center py-16">
@@ -700,7 +710,7 @@ function TasksWorkspace() {
             Create your first task
           </Button>
         </div>
-        <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
+        <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} defaultStatus={createDefaultStatus} />
       </div>
     );
   }
@@ -738,8 +748,8 @@ function TasksWorkspace() {
         </div>
       )}
 
-      <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} />
-      <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createTask} defaultStatus={createDefaultStatus} />
+      <TaskDetailSheet task={selectedTask} open={detailOpen} onClose={handleDetailClose} onUpdate={updateTask} onDelete={deleteTask} onRunWithAI={runTaskWithAI} />
+      <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} defaultStatus={createDefaultStatus} />
     </div>
   );
 }
