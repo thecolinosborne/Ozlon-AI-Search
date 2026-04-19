@@ -4997,7 +4997,7 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
             method: 'POST',
             headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'gpt-5.4',
+              model: 'gpt-5',
               messages: [
                 { role: 'system', content: 'You are a thorough research analyst. Produce well-structured, citation-rich reports.' },
                 { role: 'user', content: synthesisPrompt },
@@ -5007,7 +5007,7 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           });
 
           if (!synthRes.ok) {
-            console.error('[deep_research] Synthesis error:', await synthRes.text());
+            console.error('[deep_research] Synthesis error:', synthRes.status, await synthRes.text());
             if (adminClient && taskRowId) {
               await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
             }
@@ -5120,7 +5120,7 @@ ${pageContents.slice(0, 12000)}`;
             method: 'POST',
             headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'gpt-5.4',
+              model: 'gpt-5',
               messages: [
                 { role: 'system', content: 'You extract structured event data from web content. Return only valid JSON arrays.' },
                 { role: 'user', content: extractionPrompt },
@@ -5131,6 +5131,7 @@ ${pageContents.slice(0, 12000)}`;
           });
 
           if (!extractRes.ok) {
+            console.error('[scrape_events] Extraction error:', extractRes.status, await extractRes.text());
             return { success: false, result: 'Failed to extract event data from search results.' };
           }
 
@@ -6528,7 +6529,7 @@ Return ONLY the JSON array, no commentary.`;
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-5.4',
+        model: 'gpt-5-mini',
         messages: [
           { role: 'system', content: extractionPrompt },
           { role: 'user', content: conversationText },
@@ -6537,7 +6538,10 @@ Return ONLY the JSON array, no commentary.`;
       }),
     });
 
-    if (!res.ok) { console.error('[PostTurnMemory] AI call failed:', res.status); return; }
+    if (!res.ok) {
+      console.error('[PostTurnMemory] AI call failed:', res.status, await res.text().catch(() => ''));
+      return;
+    }
     const data = await res.json();
     const raw = data.choices?.[0]?.message?.content || '[]';
 
