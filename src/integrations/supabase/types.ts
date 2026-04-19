@@ -88,6 +88,7 @@ export type Database = {
           allow_subtask_creation: boolean | null
           allow_task_updates: boolean | null
           auto_reply_enabled: boolean | null
+          connection_id: string | null
           cooldown_seconds: number | null
           created_at: string | null
           custom_triggers: string[] | null
@@ -110,6 +111,7 @@ export type Database = {
           allow_subtask_creation?: boolean | null
           allow_task_updates?: boolean | null
           auto_reply_enabled?: boolean | null
+          connection_id?: string | null
           cooldown_seconds?: number | null
           created_at?: string | null
           custom_triggers?: string[] | null
@@ -132,6 +134,7 @@ export type Database = {
           allow_subtask_creation?: boolean | null
           allow_task_updates?: boolean | null
           auto_reply_enabled?: boolean | null
+          connection_id?: string | null
           cooldown_seconds?: number | null
           created_at?: string | null
           custom_triggers?: string[] | null
@@ -149,7 +152,15 @@ export type Database = {
           webhook_id?: string | null
           webhook_status?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "clickup_integration_state_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "integration_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       clickup_processed_comments: {
         Row: {
