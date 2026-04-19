@@ -302,6 +302,25 @@ export function useConversations() {
     }
   }, [user, setActiveSession]);
 
+  // Toggle pin on a session
+  const togglePin = useCallback(async (sessionId: string) => {
+    if (!user) return;
+    const current = sessions.find((s) => s.id === sessionId);
+    if (!current) return;
+    const next = !current.pinned;
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, pinned: next } : s)));
+    const { error } = await supabase
+      .from("chat_sessions")
+      .update({ pinned: next })
+      .eq("id", sessionId)
+      .eq("user_id", user.id);
+    if (error) {
+      console.error("[useConversations] togglePin error:", error);
+      // revert
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, pinned: !next } : s)));
+    }
+  }, [user, sessions]);
+
   // Initialization: load sessions, reset when user changes
   useEffect(() => {
     mountedRef.current = true;
@@ -462,6 +481,7 @@ export function useConversations() {
     saveMessage,
     finalizeMessage,
     deleteSession,
+    togglePin,
     loadSessions,
     closeActiveSession,
   };
