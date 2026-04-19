@@ -115,6 +115,15 @@ export interface ProviderUsedEvent {
   platform: string;
 }
 
+export interface ToolUsedInfo {
+  name: string;
+  label: string;
+}
+
+export interface ToolsUsedEvent {
+  tools: ToolUsedInfo[];
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -130,6 +139,7 @@ export interface StreamChatOptions {
   onTaskUpdate?: (update: TaskUpdate) => void;
   onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
   onProviderUsed?: (data: ProviderUsedEvent) => void;
+  onToolsUsed?: (data: ToolsUsedEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -153,6 +163,7 @@ export async function streamChat({
   onTaskUpdate,
   onInfinityDebug,
   onProviderUsed,
+  onToolsUsed,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -259,6 +270,12 @@ export async function streamChat({
           // Handle provider_used events (which AI brain answered)
           if (currentEventType === 'provider_used' && onProviderUsed) {
             onProviderUsed(parsed as ProviderUsedEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle tools_used events (which tools the agent invoked)
+          if (currentEventType === 'tools_used' && onToolsUsed) {
+            onToolsUsed(parsed as ToolsUsedEvent);
             currentEventType = 'message';
             continue;
           }

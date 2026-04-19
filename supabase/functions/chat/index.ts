@@ -6047,10 +6047,11 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string }> {
+): Promise<{ role: string; content: string; toolsUsed: string[] }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
+  const toolsUsed: string[] = [];
 
   while (iteration < maxIterations) {
     iteration++;
@@ -6237,6 +6238,7 @@ async function runToolLoop(
     // If the model wants to call tools
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       const toolNames = msg.tool_calls.map((tc: { function: { name: string } }) => tc.function.name);
+      toolsUsed.push(...toolNames);
       console.log(`AI requested ${msg.tool_calls.length} tool calls:`, toolNames);
 
       // Create task on first tool call
@@ -6289,10 +6291,10 @@ async function runToolLoop(
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '' };
+    return { role: 'assistant', content: msg.content || '', toolsUsed };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.' };
+  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed };
 }
 
 // ============================================================================
@@ -7145,6 +7147,18 @@ Execute these in order. Be decisive — the user has already been shown this pla
             await writer.write(encoder.encode(`data: ${JSON.stringify({
               choices: [{ delta: { content: result.content }, finish_reason: 'stop' }],
             })}\n\n`));
+
+            // Emit which tools ran (deduped, with display names) for UI attribution
+            try {
+              const uniqueTools = Array.from(new Set(result.toolsUsed || []));
+              if (uniqueTools.length > 0) {
+                const labeled = uniqueTools.map((name) => ({
+                  name,
+                  label: TOOL_DISPLAY_NAMES[name] || name.replace(/_/g, ' '),
+                }));
+                await writer.write(encoder.encode(`event: tools_used\ndata: ${JSON.stringify({ tools: labeled })}\n\n`));
+              }
+            } catch { /* best-effort */ }
 
             // Emit which brain handled this turn (for UI attribution)
             try {
