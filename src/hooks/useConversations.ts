@@ -7,6 +7,8 @@ const isDev = import.meta.env.DEV;
 export interface ConversationSession {
   id: string;
   title: string;
+  summary: string | null;
+  preview: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,7 +60,7 @@ export function useConversations() {
         const { data, error } = await supabase
           .from("chat_sessions")
           .insert({ user_id: user.id, title: title || "New conversation" })
-          .select("id, title, created_at, updated_at")
+          .select("id, title, summary, created_at, updated_at")
           .single();
 
         if (error || !data) {
@@ -67,7 +69,8 @@ export function useConversations() {
         }
 
         console.log("[useConversations] Session created:", data.id);
-        setSessions((prev) => [data, ...prev]);
+        const session: ConversationSession = { ...data, preview: null };
+        setSessions((prev) => [session, ...prev]);
         setActiveSession(data.id);
         return data.id;
       } catch (e) {
@@ -158,21 +161,32 @@ export function useConversations() {
     // Auto-title: if this is the first user message, update the session title
     if (msg.role === "user") {
       const existingUserMessages = messagesRef.current.filter((m) => m.role === "user");
-      if (existingUserMessages.length === 0) {
-        const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      const isFirst = existingUserMessages.length === 0;
+      const fallbackTitle = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      if (isFirst) {
         await supabase
           .from("chat_sessions")
-          .update({ title, updated_at: new Date().toISOString() })
+          .update({ title: fallbackTitle, updated_at: new Date().toISOString() })
           .eq("id", sid);
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sid ? { ...s, title } : s))
-        );
       } else {
         await supabase
           .from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", sid);
       }
+      // Optimistically update preview + (if first) title in local sidebar state
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sid
+            ? {
+                ...s,
+                title: isFirst ? fallbackTitle : s.title,
+                preview: msg.content,
+                updated_at: new Date().toISOString(),
+              }
+            : s
+        )
+      );
     }
   }, [user, ensureSession]);
 
@@ -215,23 +229,59 @@ export function useConversations() {
       return [...prev, { ...msg, created_at: new Date().toISOString() }];
     });
 
-    // Auto-title: if this is the first user message, update the session title
+    // Auto-title from first user message (fallback before AI summary lands)
     if (msg.role === "user") {
       const userMessages = messagesRef.current.filter((m) => m.role === "user");
-      if (userMessages.length === 0) {
-        const title = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      const isFirst = userMessages.length === 0;
+      const fallbackTitle = msg.content.slice(0, 50) + (msg.content.length > 50 ? "…" : "");
+      if (isFirst) {
         await supabase
           .from("chat_sessions")
-          .update({ title, updated_at: new Date().toISOString() })
+          .update({ title: fallbackTitle, updated_at: new Date().toISOString() })
           .eq("id", sid);
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sid ? { ...s, title } : s))
-        );
       } else {
         await supabase
           .from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", sid);
+      }
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sid
+            ? {
+                ...s,
+                title: isFirst ? fallbackTitle : s.title,
+                preview: msg.content,
+                updated_at: new Date().toISOString(),
+              }
+            : s
+        )
+      );
+    }
+
+    // After assistant turns, fire-and-forget AI summary/title (debounced server-side by message count)
+    if (msg.role === "assistant" && msg.content && msg.content.length > 20) {
+      const totalMessages = messagesRef.current.length + 1;
+      // Run on first complete exchange, then every 4 messages to refresh
+      if (totalMessages === 2 || totalMessages % 4 === 0) {
+        supabase.functions.invoke("summarize-session", { body: { session_id: sid } })
+          .then((res) => {
+            const result = res.data as { title?: string; summary?: string } | null;
+            if (result?.title || result?.summary) {
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.id === sid
+                    ? {
+                        ...s,
+                        title: result.title || s.title,
+                        summary: result.summary || s.summary,
+                      }
+                    : s
+                )
+              );
+            }
+          })
+          .catch((e) => console.warn("[useConversations] summarize-session failed:", e));
       }
     }
   }, [user, ensureSession]);
@@ -272,7 +322,7 @@ export function useConversations() {
 
       const { data, error } = await supabase
         .from("chat_sessions")
-        .select("id, title, created_at, updated_at")
+        .select("id, title, summary, created_at, updated_at")
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
 
@@ -306,8 +356,29 @@ export function useConversations() {
         }
       }
 
+      // Fetch last user message per session as a preview fallback
+      const sessionIds = kept.map((s) => s.id);
+      const previewMap = new Map<string, string>();
+      if (sessionIds.length > 0) {
+        const { data: previews } = await supabase
+          .from("chat_messages")
+          .select("session_id, content, created_at, role")
+          .in("session_id", sessionIds)
+          .eq("user_id", user.id)
+          .eq("role", "user")
+          .order("created_at", { ascending: false });
+        for (const row of previews || []) {
+          if (!previewMap.has(row.session_id)) previewMap.set(row.session_id, row.content);
+        }
+      }
+
+      const enriched: ConversationSession[] = kept.map((s) => ({
+        ...s,
+        preview: previewMap.get(s.id) || null,
+      }));
+
       if (!mountedRef.current) return;
-      setSessions(kept);
+      setSessions(enriched);
 
       // Phase 1.5: do NOT auto-select last session. Show empty hero so each
       // sign-in is a fresh conversation. User clicks a past session OR types
@@ -329,10 +400,17 @@ export function useConversations() {
     if (!user) return;
     const { data } = await supabase
       .from("chat_sessions")
-      .select("id, title, created_at, updated_at")
+      .select("id, title, summary, created_at, updated_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
-    if (data) setSessions(data);
+    if (data) {
+      setSessions((prev) =>
+        data.map((s) => ({
+          ...s,
+          preview: prev.find((p) => p.id === s.id)?.preview || null,
+        }))
+      );
+    }
   }, [user]);
 
   /**
