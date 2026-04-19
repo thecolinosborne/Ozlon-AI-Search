@@ -499,53 +499,52 @@ function TaskDetailSheet({
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Page Header
+// Inline view-mode toolbar (no header, lives inside Tasks tab)
 // ══════════════════════════════════════════════════════════════════
 
-function TasksHeader({
+function TasksToolbar({
   view,
   onViewChange,
   onCreateClick,
+  count,
 }: {
   view: ViewMode;
   onViewChange: (v: ViewMode) => void;
   onCreateClick: () => void;
+  count: number;
 }) {
   return (
-    <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <div className="flex items-center gap-3">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-muted-foreground">
+        {count} {count === 1 ? "task" : "tasks"}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
+          <button
+            onClick={() => onViewChange('board')}
+            className={cn(
+              'p-1.5 transition-colors',
+              view === 'board' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title="Board view"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onViewChange('list')}
+            className={cn(
+              'p-1.5 transition-colors',
+              view === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title="List view"
+          >
+            <List className="w-4 h-4" />
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center border border-border/50 rounded-lg overflow-hidden">
-            <button
-              onClick={() => onViewChange('board')}
-              className={cn(
-                'p-1.5 transition-colors',
-                view === 'board' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="Board view"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => onViewChange('list')}
-              className={cn(
-                'p-1.5 transition-colors',
-                view === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-              title="List view"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-          <Button size="sm" onClick={onCreateClick} className="gap-1.5">
-            <Plus className="w-4 h-4" />
-            New Task
-          </Button>
-        </div>
+        <Button size="sm" onClick={onCreateClick} className="gap-1.5">
+          <Plus className="w-4 h-4" />
+          New Task
+        </Button>
       </div>
     </div>
   );
