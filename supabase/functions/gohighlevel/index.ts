@@ -522,6 +522,69 @@ serve(async (req) => {
         endpoint = `${GHL_BASE_URL}/medias/files?altId=${GHL_LOCATION_ID}&altType=location&limit=${params?.limit || 50}`;
         break;
       }
+      case 'upload_media_file': {
+        // Upload a file to the GHL Media Library.
+        // Accepts EITHER:
+        //   - { sourceUrl: "https://...", fileName?: "name.jpg" }   → server fetches the URL
+        //   - { fileBase64: "<base64>", fileName: "name.jpg", mimeType?: "image/jpeg" }
+        // Returns the GHL media object (incl. fileId / url) so it can be attached to a social post.
+        const b = (reqBody || {}) as Record<string, unknown>;
+        const sourceUrl = typeof b.sourceUrl === 'string' ? b.sourceUrl : undefined;
+        const fileBase64 = typeof b.fileBase64 === 'string' ? b.fileBase64 : undefined;
+        let fileName = typeof b.fileName === 'string' ? b.fileName : undefined;
+        let mimeType = typeof b.mimeType === 'string' ? b.mimeType : undefined;
+
+        if (!sourceUrl && !fileBase64) {
+          throw new Error('upload_media_file requires either sourceUrl or fileBase64');
+        }
+
+        let blob: Blob;
+        if (sourceUrl) {
+          const fetched = await fetch(sourceUrl);
+          if (!fetched.ok) throw new Error(`Failed to fetch sourceUrl (${fetched.status})`);
+          const buf = await fetched.arrayBuffer();
+          mimeType = mimeType || fetched.headers.get('content-type') || 'application/octet-stream';
+          if (!fileName) {
+            const u = new URL(sourceUrl);
+            fileName = u.pathname.split('/').pop() || `upload-${Date.now()}`;
+          }
+          blob = new Blob([buf], { type: mimeType });
+        } else {
+          if (!fileName) throw new Error('fileName required when using fileBase64');
+          mimeType = mimeType || 'application/octet-stream';
+          const bin = Uint8Array.from(atob(fileBase64!), (c) => c.charCodeAt(0));
+          blob = new Blob([bin], { type: mimeType });
+        }
+
+        const form = new FormData();
+        form.append('file', blob, fileName);
+        form.append('hosted', 'false');
+        form.append('name', fileName);
+
+        // Multipart: must NOT pre-set Content-Type — fetch sets the boundary.
+        const uploadRes = await fetch(
+          `${GHL_BASE_URL}/medias/upload-file?altId=${GHL_LOCATION_ID}&altType=location`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${GHL_API_KEY}`,
+              'Version': '2021-07-28',
+            },
+            body: form,
+          },
+        );
+        const uploadJson = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+          console.error('GHL media upload failed:', uploadRes.status, uploadJson);
+          return new Response(
+            JSON.stringify({ error: `GHL media upload failed: ${uploadRes.status}`, details: uploadJson }),
+            { status: uploadRes.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify(uploadJson), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
       // ============ COMPANIES ============
       case 'list_companies': {
