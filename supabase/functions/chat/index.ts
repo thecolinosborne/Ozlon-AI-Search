@@ -222,7 +222,7 @@ async function invokeNativeEdge(
 }
 
 // ============================================================================
-// SERVICE DATA FETCHERS (READ) — All native edge functions, no Maton.
+// SERVICE DATA FETCHERS (READ) — All native Google edge functions.
 // ============================================================================
 
 async function fetchGSCData(): Promise<string> {
@@ -987,7 +987,7 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // ClickUp actions (via dedicated edge function, not Maton)
+  // ClickUp actions (via dedicated edge function)
   {
     type: 'function',
     function: {
@@ -2736,8 +2736,8 @@ function isValidTaskTransition(from: string, to: string): boolean {
 // ============================================================================
 // NATIVE GOOGLE WORKSPACE ROUTER
 // Routes Gmail/Drive/Calendar/Sheets/Docs/GSC tool calls to native edge
-// functions (using the user's own Google OAuth token) instead of Maton.
-// Falls through to Maton on any failure.
+// functions using the user's own Google OAuth token.
+// Returns null on failure so the caller can surface the error.
 // ============================================================================
 
 const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs?: (a: Record<string, unknown>) => Record<string, unknown> }> = {
@@ -2785,7 +2785,7 @@ async function tryNativeGoogleCall(
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.success === false) {
       console.warn(`[NativeGoogle] ${toolName} failed:`, res.status, JSON.stringify(data).slice(0, 300));
-      return null; // fall through to Maton
+      return null; // caller handles failure
     }
     console.log(`[NativeGoogle] ${toolName} → ${route.fn}/${route.action} OK`);
     return { success: true, result: `[Native Google Workspace] ${JSON.stringify(data).slice(0, 4000)}` };
@@ -2798,7 +2798,7 @@ async function tryNativeGoogleCall(
 // ============================================================================
 // NATIVE EDGE FUNCTION INVOKER
 // Calls a Supabase edge function with the user's auth token.
-// All Google services route through here (no Maton).
+// All Google services route through here.
 // ============================================================================
 async function callNativeEdge(
   fn: string,
@@ -6791,7 +6791,7 @@ CONNECTED SERVICES (you can read data and take actions on these)
       }
     }
 
-    // GoHighLevel data injection (separate from Maton - uses its own API key)
+    // GoHighLevel data injection (uses its own API key)
     if (GHL_API_KEY_RESOLVED) {
       // Check if user is asking about GHL
       // Check if user is asking about GHL
@@ -6813,7 +6813,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
       // Add GHL to connected services list
       systemPrompt += `\n- GoHighLevel CRM (contacts, pipelines, opportunities, calendars, conversations, campaigns, workflows)`;
 
-      // If no Maton tools were added, ensure GHL tools are still available
+      // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
       }

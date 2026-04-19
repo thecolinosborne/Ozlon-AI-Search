@@ -42,9 +42,6 @@ verify_jwt = false
 [functions.youtube]
 verify_jwt = false
 
-[functions.maton]
-verify_jwt = false
-
 [functions.gohighlevel]
 verify_jwt = false
 
