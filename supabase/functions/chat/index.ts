@@ -6894,6 +6894,7 @@ async function runToolLoop(
       const CORE_TOOLS = new Set([
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order',
+        'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task',
         'deep_research', 'web_search_google',
       ]);
