@@ -61,7 +61,7 @@ export function useConversations() {
         const { data, error } = await supabase
           .from("chat_sessions")
           .insert({ user_id: user.id, title: title || "New conversation" })
-          .select("id, title, summary, created_at, updated_at")
+          .select("id, title, summary, pinned, created_at, updated_at")
           .single();
 
         if (error || !data) {
@@ -401,7 +401,7 @@ export function useConversations() {
     if (!user) return;
     const { data } = await supabase
       .from("chat_sessions")
-      .select("id, title, summary, created_at, updated_at")
+      .select("id, title, summary, pinned, created_at, updated_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
     if (data) {
