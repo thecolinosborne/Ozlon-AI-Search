@@ -6020,7 +6020,10 @@ Rules:
     }
     const raw = result.data?.choices?.[0]?.message?.content;
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    // Tolerate code fences / leading text — extract first {...} block.
+    const cleaned = String(raw).replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : cleaned);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const plan: AgenticPlan = {
       intent: String(parsed.intent || '').slice(0, 120),
