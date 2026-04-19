@@ -619,7 +619,8 @@ serve(async (req) => {
     }
 
     // All other (authenticated) paths require per-user credentials.
-    const resolvedToken = await resolveClickUpToken(req, tokenFromParams);
+    const authCtx = await resolveClickUpAuth(req, tokenFromParams);
+    const resolvedToken = authCtx.token;
     const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
       clickupFetch(path, method, payload, resolvedToken);
 
@@ -629,9 +630,7 @@ serve(async (req) => {
       case 'connect':
       case 'test_connection': {
         const token = resolvedToken;
-        const listId = typeof params?.defaultListId === 'string'
-          ? params.defaultListId
-          : Deno.env.get('CLICKUP_DEFAULT_LIST_ID');
+        const listId = await getListId(params, resolvedToken, authCtx).catch(() => '');
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
 
@@ -658,10 +657,12 @@ serve(async (req) => {
         await supabase
           .from('clickup_integration_state')
           .upsert({
+            user_id: authCtx.userId,
+            connection_id: authCtx.connectionId,
             team_id: teamId,
             default_list_id: listId || null,
             last_tested_at: new Date().toISOString(),
-          }, { onConflict: 'team_id' })
+          }, { onConflict: authCtx.connectionId ? 'connection_id' : 'user_id,team_id' })
           .select();
 
         return new Response(JSON.stringify({
@@ -676,7 +677,7 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken);
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('No ClickUp list configured. Ask the user to either pick a default list in Integrations → ClickUp, or call list_clickup_spaces / list_clickup_lists to choose one and pass listId explicitly.');
         const {
           name, description, priority, status, due_date, due_date_time,
@@ -701,7 +702,7 @@ serve(async (req) => {
 
       case 'list_tasks': {
         // If listId provided, scope to that list; otherwise search whole workspace
-        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken).catch(() => '');
+        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx).catch(() => '');
         if (listId) {
           const qs = new URLSearchParams();
           if (params?.statuses) for (const s of (Array.isArray(params.statuses) ? params.statuses : [params.statuses])) qs.append('statuses[]', s);
@@ -776,7 +777,7 @@ serve(async (req) => {
             listId = parentTask?.list?.id || '';
           } catch { /* fall through */ }
         }
-        if (!listId) listId = await getListId(params, resolvedToken);
+          if (!listId) listId = await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('Could not resolve listId for subtask — provide listId or ensure parent task is accessible');
         const { name, description, parentId: _pid, parent: _p, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
         const data = await clickupCall(`/list/${listId}/task`, 'POST', {
@@ -848,10 +849,12 @@ serve(async (req) => {
         await supabase
           .from('clickup_integration_state')
           .upsert({
+            user_id: authCtx.userId,
+            connection_id: authCtx.connectionId,
             team_id: teamId,
             webhook_id: webhookId || null,
             webhook_status: 'registered',
-          }, { onConflict: 'team_id' });
+          }, { onConflict: authCtx.connectionId ? 'connection_id' : 'user_id,team_id' });
 
         return new Response(JSON.stringify({ success: true, webhook_id: webhookId, already_exists: alreadyExists }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
@@ -866,12 +869,17 @@ serve(async (req) => {
       case 'get_config': {
         const supabase = getSupabase();
         const teamId = typeof params?.teamId === 'string' ? params.teamId : undefined;
-        const config = await getConfig(supabase, teamId);
+        let query = supabase.from('clickup_integration_state').select('*').order('updated_at', { ascending: false });
+        if (authCtx.connectionId) query = query.eq('connection_id', authCtx.connectionId);
+        else if (authCtx.userId) query = query.eq('user_id', authCtx.userId);
+        if (teamId) query = query.eq('team_id', teamId);
+        const { data } = await query.limit(1).maybeSingle();
+        const config = data || await getConfig(supabase, teamId);
         return new Response(JSON.stringify(config), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'update_config': {
-        const token = getToken(tokenFromParams);
+        const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const teamId = resolved.teamId;
         const supabase = getSupabase();
@@ -882,13 +890,17 @@ serve(async (req) => {
           'webhook_id', 'webhook_status', 'max_reply_length', 'cooldown_seconds',
           'custom_triggers',
         ];
-        const dbPayload: Record<string, unknown> = { team_id: teamId };
+        const dbPayload: Record<string, unknown> = {
+          team_id: teamId,
+          user_id: authCtx.userId,
+          connection_id: authCtx.connectionId,
+        };
         for (const col of validColumns) {
           if (params?.[col] !== undefined) dbPayload[col] = params[col];
         }
         const { data } = await supabase
           .from('clickup_integration_state')
-          .upsert(dbPayload, { onConflict: 'team_id' })
+          .upsert(dbPayload, { onConflict: authCtx.connectionId ? 'connection_id' : 'user_id,team_id' })
           .select()
           .single();
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1013,7 +1025,7 @@ serve(async (req) => {
 
       // ============ CUSTOM FIELDS ============
       case 'get_custom_fields': {
-        const listId = params?.listId || await getListId(params, resolvedToken);
+        const listId = params?.listId || await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}/field`);
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1081,7 +1093,7 @@ serve(async (req) => {
 
       // ============ LIST STATUSES ============
       case 'get_list_statuses': {
-        const listId = params?.listId || await getListId(params, resolvedToken);
+        const listId = params?.listId || await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('listId required');
         const data = await clickupCall(`/list/${listId}`);
         return new Response(JSON.stringify({ statuses: data.statuses || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1102,7 +1114,7 @@ serve(async (req) => {
 
       // ============ TIME TRACKING ============
       case 'get_time_entries': {
-        const token = getToken(tokenFromParams);
+         const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const qs = new URLSearchParams();
         if (params?.start_date) qs.set('start_date', String(params.start_date));
@@ -1113,7 +1125,7 @@ serve(async (req) => {
       }
 
       case 'start_time_entry': {
-        const token = getToken(tokenFromParams);
+         const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const data = await clickupCall(`/team/${resolved.teamId}/time_entries/start`, 'POST', {
           tid: params?.taskId,
@@ -1123,7 +1135,7 @@ serve(async (req) => {
       }
 
       case 'stop_time_entry': {
-        const token = getToken(tokenFromParams);
+         const token = resolvedToken;
         const resolved = await resolveTeamId(token, typeof params?.teamId === 'string' ? params.teamId : undefined);
         const data = await clickupCall(`/team/${resolved.teamId}/time_entries/stop`, 'POST');
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
