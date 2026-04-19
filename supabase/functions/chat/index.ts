@@ -4593,10 +4593,14 @@ async function executeToolCall(
                 { role: 'system', content: 'You are a search results formatter. Return ONLY a JSON array of the top organic search results for the given query. Each result should have: {position: number, title: string, url: string, snippet: string}. No commentary, just the JSON array.' },
                 { role: 'user', content: `What are the current top ${numResults} Google search results for: "${keyword}"` },
               ],
-              max_tokens: 2000,
+              max_completion_tokens: 2000,
             }),
           });
-          if (!searchRes.ok) return { success: false, result: `Search failed: HTTP ${searchRes.status}` };
+          if (!searchRes.ok) {
+            const errBody = await searchRes.text().catch(() => '');
+            console.error(`[web_search_google] Gateway ${searchRes.status}: ${errBody.slice(0, 400)}`);
+            return { success: false, result: `Search failed: HTTP ${searchRes.status}` };
+          }
           const searchData = await searchRes.json();
           const content = searchData.choices?.[0]?.message?.content || '';
           return { success: true, result: `**Live Google SERP Results for "${keyword}":**\n\n${content}\n\nCross-reference these positions with GSC data to validate ranking accuracy.` };
@@ -4998,7 +5002,7 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
                 { role: 'system', content: 'You are a thorough research analyst. Produce well-structured, citation-rich reports.' },
                 { role: 'user', content: synthesisPrompt },
               ],
-              max_tokens: 4096,
+              max_completion_tokens: 4096,
             }),
           });
 
@@ -5121,7 +5125,7 @@ ${pageContents.slice(0, 12000)}`;
                 { role: 'system', content: 'You extract structured event data from web content. Return only valid JSON arrays.' },
                 { role: 'user', content: extractionPrompt },
               ],
-              max_tokens: 4096,
+              max_completion_tokens: 4096,
               response_format: { type: 'json_object' },
             }),
           });
@@ -6001,7 +6005,7 @@ Rules:
       ],
       body: {
         response_format: { type: 'json_object' },
-        max_tokens: 300,
+        max_completion_tokens: 300,
       },
     });
 
@@ -6424,7 +6428,7 @@ async function geminiPreProcess(
           { role: 'system', content: taskPrompt },
           { role: 'user', content: lastUser.content },
         ],
-        max_tokens: 500,
+        max_completion_tokens: 500,
       }),
     });
 
@@ -6529,8 +6533,7 @@ Return ONLY the JSON array, no commentary.`;
           { role: 'system', content: extractionPrompt },
           { role: 'user', content: conversationText },
         ],
-        max_tokens: 1024,
-        temperature: 0.2,
+        max_completion_tokens: 1024,
       }),
     });
 
