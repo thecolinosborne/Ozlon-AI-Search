@@ -1,8 +1,8 @@
-import { useMemo } from "react";
-import { Plus, Trash2, MessageSquare, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Trash2, MessageSquare, X, Search, Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConversationSession } from "@/hooks/useConversations";
-import { isToday, isYesterday, subDays, isAfter, format, differenceInMinutes, differenceInHours } from "date-fns";
+import { isYesterday, subDays, isAfter, format, differenceInMinutes, differenceInHours } from "date-fns";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -25,6 +25,7 @@ interface ConversationSidebarProps {
   onNewChat: () => void;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
+  onTogglePin?: (id: string) => void;
 }
 
 interface GroupedSessions {
@@ -33,7 +34,7 @@ interface GroupedSessions {
 }
 
 function groupSessions(sessions: ConversationSession[]): GroupedSessions[] {
-  const groups: GroupedSessions[] = [];
+  const pinned: ConversationSession[] = [];
   const today: ConversationSession[] = [];
   const yesterday: ConversationSession[] = [];
   const week: ConversationSession[] = [];
@@ -42,18 +43,24 @@ function groupSessions(sessions: ConversationSession[]): GroupedSessions[] {
   const sevenDaysAgo = subDays(new Date(), 7);
 
   for (const s of sessions) {
+    if (s.pinned) {
+      pinned.push(s);
+      continue;
+    }
     const d = new Date(s.updated_at);
-    if (isToday(d)) today.push(s);
+    const now = new Date();
+    if (differenceInHours(now, d) < 24) today.push(s);
     else if (isYesterday(d)) yesterday.push(s);
     else if (isAfter(d, sevenDaysAgo)) week.push(s);
     else older.push(s);
   }
 
+  const groups: GroupedSessions[] = [];
+  if (pinned.length) groups.push({ label: "Pinned", sessions: pinned });
   if (today.length) groups.push({ label: "Today", sessions: today });
   if (yesterday.length) groups.push({ label: "Yesterday", sessions: yesterday });
   if (week.length) groups.push({ label: "Previous 7 days", sessions: week });
   if (older.length) groups.push({ label: "Older", sessions: older });
-
   return groups;
 }
 
@@ -65,8 +72,20 @@ export function ConversationSidebar({
   onNewChat,
   onSelectSession,
   onDeleteSession,
+  onTogglePin,
 }: ConversationSidebarProps) {
-  const grouped = useMemo(() => groupSessions(sessions), [sessions]);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => {
+      const haystack = [s.title, s.summary || "", s.preview || ""].join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [sessions, query]);
+
+  const grouped = useMemo(() => groupSessions(filtered), [filtered]);
 
   return (
     <>
@@ -94,8 +113,8 @@ export function ConversationSidebar({
           </button>
         </div>
 
-        {/* New Chat button */}
-        <div className="p-3">
+        {/* New Chat + Search */}
+        <div className="p-3 space-y-2">
           <button
             onClick={() => {
               onNewChat();
@@ -106,12 +125,24 @@ export function ConversationSidebar({
             <Plus className="w-4 h-4" />
             New Chat
           </button>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search conversations…"
+              className="w-full pl-8 pr-3 py-2 text-xs rounded-lg bg-muted/50 border border-transparent focus:border-border focus:bg-background outline-none transition-colors text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
         </div>
 
         {/* Sessions list */}
         <div className="flex-1 overflow-y-auto px-3 pb-4">
           {grouped.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center mt-8">No conversations yet</p>
+            <p className="text-xs text-muted-foreground text-center mt-8">
+              {query ? "No matches" : "No conversations yet"}
+            </p>
           )}
 
           {grouped.map((group) => (
@@ -121,10 +152,17 @@ export function ConversationSidebar({
               </p>
               {group.sessions.map((s) => {
                 const previewText = s.summary?.trim() || s.preview?.trim() || "";
-                const title = s.title && s.title !== "New conversation" ? s.title : (s.preview?.slice(0, 40) || "New conversation");
+                const title =
+                  s.title && s.title !== "New conversation"
+                    ? s.title
+                    : (s.preview?.slice(0, 40) || "New conversation");
+                const fullPreview = previewText
+                  ? `${title}\n\n${previewText}`
+                  : title;
                 return (
                   <div
                     key={s.id}
+                    title={fullPreview}
                     className={cn(
                       "group flex items-start gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors",
                       s.id === activeSessionId
@@ -150,16 +188,35 @@ export function ConversationSidebar({
                         </p>
                       )}
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteSession(s.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-all flex-shrink-0"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
+                      {onTogglePin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onTogglePin(s.id);
+                          }}
+                          className={cn(
+                            "p-1 rounded transition-all",
+                            s.pinned
+                              ? "text-amber-500 opacity-100"
+                              : "opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground"
+                          )}
+                          title={s.pinned ? "Unpin" : "Pin"}
+                        >
+                          {s.pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession(s.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-all"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
