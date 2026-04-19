@@ -28,7 +28,8 @@ import YouTubeDetail from "@/pages/integrations/YouTubeDetail";
 import Events from "@/pages/Events";
 import Finance from "@/pages/Finance";
 import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
-import Routines from "@/pages/Routines";
+import Tasks from "@/pages/Tasks";
+import { Navigate } from "react-router-dom";
 
 import NotFound from "@/pages/NotFound";
 
@@ -73,7 +74,8 @@ const AppRoutes = () => {
         <Route path="/events" element={<Events />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
-        <Route path="/routines" element={<Routines />} />
+        <Route path="/tasks" element={<Tasks />} />
+        <Route path="/routines" element={<Navigate to="/tasks?tab=routines" replace />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
