@@ -4,7 +4,6 @@ import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserSettings } from "@/services/chatService";
 import { UserMenu } from "@/components/UserMenu";
-import { TopNav } from "@/components/navigation/TopNav";
 import { SystemNamingModal } from "@/components/SystemNamingModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppStore } from "@/stores/useAppStore";
@@ -217,8 +216,8 @@ const Index = () => {
         onChange={handleFileSelect} className="hidden" aria-hidden="true" />
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 px-4 py-3 z-[60] bg-white/80 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto flex justify-between items-center gap-3">
+      <header className="fixed top-0 left-0 right-0 px-4 py-4 z-[60] bg-white/80 backdrop-blur-sm">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             {isAuthenticated && (
               <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-neutral-100 transition-colors" title="Conversations">
@@ -245,10 +244,7 @@ const Index = () => {
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <TopNav />
-            <UserMenu />
-          </div>
+          <UserMenu />
         </div>
       </header>
 

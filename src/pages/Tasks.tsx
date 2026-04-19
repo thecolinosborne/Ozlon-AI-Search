@@ -758,7 +758,6 @@ function TasksWorkspace() {
 // Page shell with Tasks / Routines tabs
 // ══════════════════════════════════════════════════════════════════
 
-import { TopNav } from '@/components/navigation/TopNav';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RoutinesPanel } from '@/components/tasks/RoutinesPanel';
 import { ListChecks, Repeat } from 'lucide-react';
@@ -779,19 +778,16 @@ const Tasks = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-24">
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <Sparkles className="w-5 h-5 text-primary shrink-0" />
-            <div className="min-w-0">
-              <h1 className="text-lg font-semibold text-foreground leading-tight">Tasks</h1>
-              <p className="text-xs text-muted-foreground truncate">
-                One-off tasks and recurring routines.
-              </p>
-            </div>
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
+          <Sparkles className="w-5 h-5 text-primary" />
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
+            <p className="text-xs text-muted-foreground">
+              One-off tasks and recurring routines, all in one place.
+            </p>
           </div>
-          <TopNav />
         </div>
       </header>
 
