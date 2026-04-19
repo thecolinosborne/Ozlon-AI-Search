@@ -97,6 +97,9 @@ const ClickUpDetail = () => {
         try {
           const config = await callClickUp("get_config", getAuthParams());
           if (config) {
+            if (config.default_list_id) {
+              setSelectedList(config.default_list_id);
+            }
             setWebhookStatus(config.webhook_status || "not_registered");
             setAutoReplyEnabled(config.auto_reply_enabled ?? true);
             setReplyMode(config.ai_reply_mode || "standard");
@@ -144,6 +147,9 @@ const ClickUpDetail = () => {
         team_id: result.team_id,
         list_id: result.list_id,
       });
+      if (result.list_id) {
+        setSelectedList(String(result.list_id));
+      }
       toast.success("ClickUp connected");
       return true;
     } catch (err) {
@@ -168,6 +174,9 @@ const ClickUpDetail = () => {
           team_id: result.team_id,
           list_id: result.list_id,
         });
+        if (result.list_id) {
+          setSelectedList(String(result.list_id));
+        }
         toast.success("ClickUp connected");
       } else {
         setStatus("clickup", "error");

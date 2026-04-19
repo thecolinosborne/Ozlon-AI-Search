@@ -427,6 +427,7 @@ async function fetchClickUpLocalData(userId: string): Promise<string | null> {
   const { data: config, error } = await adminClient
     .from('clickup_integration_state')
     .select('team_id, default_list_id, webhook_status, last_webhook_event_at, last_successful_ai_reply_at, updated_at')
+    .eq('user_id', userId)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
