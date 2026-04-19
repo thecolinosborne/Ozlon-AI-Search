@@ -6659,14 +6659,18 @@ serve(async (req) => {
     // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
     let credUserId: string | null = null;
+    console.log(`[Auth] header present: ${!!authHeaderForCreds}, starts with Bearer: ${authHeaderForCreds?.startsWith('Bearer ') ?? false}`);
     if (authHeaderForCreds) {
       try {
         const { createClient: cc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
         const anonK = Deno.env.get('SUPABASE_ANON_KEY')!;
         const uc = cc(Deno.env.get('SUPABASE_URL')!, anonK, { global: { headers: { Authorization: authHeaderForCreds } } });
-        const { data: { user: credUser } } = await uc.auth.getUser();
+        const { data: { user: credUser }, error: authErr } = await uc.auth.getUser();
         credUserId = credUser?.id || null;
-      } catch { /* no auth */ }
+        console.log(`[Auth] resolved credUserId: ${credUserId ? credUserId.slice(0, 8) + '...' : 'null'}, error: ${authErr?.message || 'none'}`);
+      } catch (e) {
+        console.error('[Auth] getUser threw:', (e as Error).message);
+      }
     }
 
     // ================================================================
