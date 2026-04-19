@@ -278,7 +278,9 @@ const Index = () => {
         <>
           {!hasInteracted && (
             <ChatHero systemName={systemName} composerProps={composerProps} onQuickAction={handleQuickAction}
-              userSettings={userSettings} disabled={isLoading || isRecording} />
+              userSettings={userSettings} disabled={isLoading || isRecording}
+              recentSession={isAuthenticated && sessionsLoaded ? (sessions.find((s) => !!(s.summary || s.preview)) || null) : null}
+              onContinueSession={handleSwitchSession} />
           )}
 
           {hasInteracted && (
