@@ -198,7 +198,7 @@ export function ConversationSidebar({
                           className={cn(
                             "p-1 rounded transition-all",
                             s.pinned
-                              ? "text-amber-500 opacity-100"
+                              ? "text-primary opacity-100"
                               : "opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground"
                           )}
                           title={s.pinned ? "Unpin" : "Pin"}
