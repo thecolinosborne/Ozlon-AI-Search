@@ -41,6 +41,44 @@ function buildRawEmail(headers: Record<string, string>, body: string): string {
     .replace(/=+$/, "");
 }
 
+// Build a multipart/mixed RFC822 message with one or more attachments.
+// attachments: [{ filename, mimeType, dataBase64 }]
+function buildRawEmailWithAttachments(
+  headers: Record<string, string>,
+  body: string,
+  attachments: Array<{ filename: string; mimeType: string; dataBase64: string }>,
+): string {
+  const boundary = `=_ozlon_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+  const head: string[] = [];
+  for (const [k, v] of Object.entries(headers)) head.push(`${k}: ${v}`);
+  head.push("MIME-Version: 1.0");
+  head.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+  head.push("");
+  const parts: string[] = [];
+  // text body part
+  parts.push(`--${boundary}`);
+  parts.push("Content-Type: text/plain; charset=UTF-8");
+  parts.push("Content-Transfer-Encoding: 7bit");
+  parts.push("");
+  parts.push(body);
+  // attachments
+  for (const att of attachments) {
+    parts.push(`--${boundary}`);
+    parts.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
+    parts.push("Content-Transfer-Encoding: base64");
+    parts.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+    parts.push("");
+    // wrap base64 at 76 chars per RFC
+    parts.push(att.dataBase64.replace(/(.{76})/g, "$1\r\n"));
+  }
+  parts.push(`--${boundary}--`);
+  const raw = head.join("\r\n") + parts.join("\r\n");
+  return btoa(unescape(encodeURIComponent(raw)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -246,6 +284,228 @@ serve(async (req) => {
         qs.set("maxResults", String(Math.min(500, Math.max(1, maxResults))));
         const data = await gFetch(token, `/history?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
+      }
+
+      // ── Tier 1: Filters ──
+      case "list_filters": {
+        const data = await gFetch(token, "/settings/filters");
+        return jsonOk({ success: true, ...(data as AnyJson) });
+      }
+
+      case "create_filter": {
+        const criteria = (params as AnyJson).criteria as AnyJson | undefined;
+        const action = (params as AnyJson).action as AnyJson | undefined;
+        if (!criteria || !action) return jsonErr("criteria and action are required");
+        const data = await gFetch(token, "/settings/filters", {
+          method: "POST",
+          body: JSON.stringify({ criteria, action }),
+        });
+        return jsonOk({ success: true, filter: data });
+      }
+
+      case "delete_filter": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        await gFetch(token, `/settings/filters/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return jsonOk({ success: true });
+      }
+
+      case "get_filter": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/settings/filters/${encodeURIComponent(id)}`);
+        return jsonOk({ success: true, filter: data });
+      }
+
+      // ── Tier 1: Vacation / Vacation Responder ──
+      case "get_vacation": {
+        const data = await gFetch(token, "/settings/vacation");
+        return jsonOk({ success: true, vacation: data });
+      }
+
+      case "update_vacation": {
+        const enableAutoReply = Boolean((params as AnyJson).enableAutoReply);
+        const responseSubject = String((params as AnyJson).responseSubject || "");
+        const responseBodyPlainText = String((params as AnyJson).responseBodyPlainText || "");
+        const restrictToContacts = Boolean((params as AnyJson).restrictToContacts || false);
+        const restrictToDomain = Boolean((params as AnyJson).restrictToDomain || false);
+        const startTime = (params as AnyJson).startTime as number | undefined;
+        const endTime = (params as AnyJson).endTime as number | undefined;
+        const body: AnyJson = {
+          enableAutoReply,
+          responseSubject,
+          responseBodyPlainText,
+          restrictToContacts,
+          restrictToDomain,
+        };
+        if (startTime) body.startTime = startTime;
+        if (endTime) body.endTime = endTime;
+        const data = await gFetch(token, "/settings/vacation", {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
+        return jsonOk({ success: true, vacation: data });
+      }
+
+      // ── Tier 1: SendAs / Signatures ──
+      case "list_send_as": {
+        const data = await gFetch(token, "/settings/sendAs");
+        return jsonOk({ success: true, ...(data as AnyJson) });
+      }
+
+      case "update_signature": {
+        const sendAsEmail = String((params as AnyJson).sendAsEmail || "");
+        const signature = String((params as AnyJson).signature || "");
+        if (!sendAsEmail) return jsonErr("sendAsEmail is required");
+        const data = await gFetch(
+          token,
+          `/settings/sendAs/${encodeURIComponent(sendAsEmail)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ signature }),
+          },
+        );
+        return jsonOk({ success: true, sendAs: data });
+      }
+
+      // ── Tier 1: Forward ──
+      case "forward_message": {
+        const to = String((params as AnyJson).to || "");
+        const subject = String((params as AnyJson).subject || "");
+        const body = String((params as AnyJson).body || "");
+        const originalMessageId = String((params as AnyJson).originalMessageId || "");
+        if (!to) return jsonErr("to is required");
+        const hdrs: Record<string, string> = {
+          To: to,
+          Subject: subject || "Fwd:",
+        };
+        if (originalMessageId) hdrs["References"] = originalMessageId;
+        const raw = buildRawEmail(hdrs, body);
+        const data = await gFetch(token, "/messages/send", {
+          method: "POST",
+          body: JSON.stringify({ raw }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      // ── Tier 1: Attachments ──
+      case "get_attachment": {
+        const messageId = String((params as AnyJson).messageId || "");
+        const attachmentId = String((params as AnyJson).attachmentId || "");
+        if (!messageId || !attachmentId) return jsonErr("messageId and attachmentId are required");
+        const data = await gFetch(
+          token,
+          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        );
+        return jsonOk({ success: true, attachment: data });
+      }
+
+      case "send_with_attachment": {
+        const to = String((params as AnyJson).to || "");
+        const subject = String((params as AnyJson).subject || "");
+        const body = String((params as AnyJson).body || "");
+        const cc = String((params as AnyJson).cc || "");
+        const bcc = String((params as AnyJson).bcc || "");
+        const attachments = (params as AnyJson).attachments as
+          | Array<{ filename: string; mimeType: string; dataBase64: string }>
+          | undefined;
+        if (!to || !subject) return jsonErr("to and subject are required");
+        if (!attachments || !attachments.length) {
+          return jsonErr("attachments array is required (use send_message for plain emails)");
+        }
+        const hdrs: Record<string, string> = { To: to, Subject: subject };
+        if (cc) hdrs["Cc"] = cc;
+        if (bcc) hdrs["Bcc"] = bcc;
+        const raw = buildRawEmailWithAttachments(hdrs, body, attachments);
+        const data = await gFetch(token, "/messages/send", {
+          method: "POST",
+          body: JSON.stringify({ raw }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      // ── Tier 1: Star / Read state shortcuts (uses /modify under the hood) ──
+      case "star_message": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: ["STARRED"], removeLabelIds: [] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "unstar_message": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["STARRED"] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "mark_read": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["UNREAD"] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "mark_unread": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: ["UNREAD"], removeLabelIds: [] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "mark_important": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: ["IMPORTANT"], removeLabelIds: [] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      case "archive_message": {
+        // archive = remove INBOX label (gmail-deletion-policy compliant: never hard-delete)
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+          method: "POST",
+          body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["INBOX"] }),
+        });
+        return jsonOk({ success: true, message: data });
+      }
+
+      // ── Tier 1: Label management ──
+      case "create_label": {
+        const name = String((params as AnyJson).name || "");
+        if (!name) return jsonErr("name is required");
+        const data = await gFetch(token, "/labels", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            labelListVisibility: "labelShow",
+            messageListVisibility: "show",
+          }),
+        });
+        return jsonOk({ success: true, label: data });
+      }
+
+      case "delete_label": {
+        const id = String((params as AnyJson).id || "");
+        if (!id) return jsonErr("id is required");
+        await gFetch(token, `/labels/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return jsonOk({ success: true });
       }
 
       default:
