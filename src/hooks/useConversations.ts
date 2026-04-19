@@ -275,7 +275,7 @@ export function useConversations() {
 
       const { data, error } = await supabase
         .from("chat_sessions")
-        .select("id, title, created_at, updated_at")
+        .select("id, title, summary, created_at, updated_at")
         .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
 
@@ -309,8 +309,29 @@ export function useConversations() {
         }
       }
 
+      // Fetch last user message per session as a preview fallback
+      const sessionIds = kept.map((s) => s.id);
+      const previewMap = new Map<string, string>();
+      if (sessionIds.length > 0) {
+        const { data: previews } = await supabase
+          .from("chat_messages")
+          .select("session_id, content, created_at, role")
+          .in("session_id", sessionIds)
+          .eq("user_id", user.id)
+          .eq("role", "user")
+          .order("created_at", { ascending: false });
+        for (const row of previews || []) {
+          if (!previewMap.has(row.session_id)) previewMap.set(row.session_id, row.content);
+        }
+      }
+
+      const enriched: ConversationSession[] = kept.map((s) => ({
+        ...s,
+        preview: previewMap.get(s.id) || null,
+      }));
+
       if (!mountedRef.current) return;
-      setSessions(kept);
+      setSessions(enriched);
 
       // Phase 1.5: do NOT auto-select last session. Show empty hero so each
       // sign-in is a fresh conversation. User clicks a past session OR types
