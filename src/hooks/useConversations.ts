@@ -60,7 +60,7 @@ export function useConversations() {
         const { data, error } = await supabase
           .from("chat_sessions")
           .insert({ user_id: user.id, title: title || "New conversation" })
-          .select("id, title, created_at, updated_at")
+          .select("id, title, summary, created_at, updated_at")
           .single();
 
         if (error || !data) {
@@ -69,7 +69,8 @@ export function useConversations() {
         }
 
         console.log("[useConversations] Session created:", data.id);
-        setSessions((prev) => [data, ...prev]);
+        const session: ConversationSession = { ...data, preview: null };
+        setSessions((prev) => [session, ...prev]);
         setActiveSession(data.id);
         return data.id;
       } catch (e) {
