@@ -758,7 +758,6 @@ function TasksWorkspace() {
 // Page shell with Tasks / Routines tabs
 // ══════════════════════════════════════════════════════════════════
 
-import { TopNav } from '@/components/navigation/TopNav';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RoutinesPanel } from '@/components/tasks/RoutinesPanel';
 import { ListChecks, Repeat } from 'lucide-react';

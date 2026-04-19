@@ -4,7 +4,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Calendar, MapPin, ExternalLink, ArrowLeft, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TopNav } from "@/components/navigation/TopNav";
 
 interface DiscoveredEvent {
   id: string;
@@ -66,17 +65,14 @@ export default function Events() {
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground pb-24">
       {/* Header */}
       <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
-        <div className="flex items-center justify-between gap-3 max-w-7xl mx-auto">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/")} className="p-2 -ml-2 rounded-xl hover:bg-muted/50">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="text-lg font-semibold">Events</h1>
-          </div>
-          <TopNav />
+        <div className="flex items-center gap-3 max-w-lg mx-auto">
+          <button onClick={() => navigate("/")} className="p-2 -ml-2 rounded-xl hover:bg-muted/50">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-lg font-semibold">Events</h1>
         </div>
       </div>
 
