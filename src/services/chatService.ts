@@ -273,6 +273,12 @@ export async function streamChat({
             currentEventType = 'message';
             continue;
           }
+          // Handle tools_used events (which tools the agent invoked)
+          if (currentEventType === 'tools_used' && onToolsUsed) {
+            onToolsUsed(parsed as ToolsUsedEvent);
+            currentEventType = 'message';
+            continue;
+          }
           currentEventType = 'message';
 
           const choice = parsed.choices?.[0];
