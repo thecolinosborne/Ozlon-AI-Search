@@ -391,7 +391,7 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
         tools: (opts.body as any)?.tools,
       });
       if (result.ok) {
-        console.log(`[Gauntlet shim] OK via ${result.modelUsed} for ${opts.agent}`);
+        console.log(`[Gauntlet] route -> ${result.modelUsed} (agent=${opts.agent}, fallback=${result.fallbackUsed})`);
         return result;
       }
       console.warn(`[Gauntlet shim] failed for ${opts.agent}, falling back to legacy gateway:`, result.errorText);
