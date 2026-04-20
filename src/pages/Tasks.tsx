@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, AlertCircle, RefreshCw, Sparkles, ArchiveRestore, Trash2 } from 'lucide-react';
+import { Plus, AlertCircle, RefreshCw, Sparkles, ArchiveRestore, Trash2, ArrowLeft } from 'lucide-react';
 import { TaskBoard } from '@/components/tasks/TaskBoard';
 import { TaskDetail } from '@/components/tasks/TaskDetail';
 import { TaskCard } from '@/components/tasks/TaskCard';
@@ -14,7 +14,7 @@ import { TasksSidebar, TaskView } from '@/components/tasks/TasksSidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RoutinesPanel } from '@/components/tasks/RoutinesPanel';
 import { ListChecks, Repeat } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -286,6 +286,7 @@ function TaskList({ tasks, onClick, emptyText }: { tasks: WorkTask[]; onClick: (
 // ── Page shell with Tasks / Routines tabs ─────────────────────────
 
 const Tasks = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') === 'routines' ? 'routines' : 'tasks';
   const [tab, setTab] = useState<'tasks' | 'routines'>(initialTab);
@@ -303,6 +304,15 @@ const Tasks = () => {
     <div className="min-h-screen bg-background pb-24">
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate('/')}
+            className="h-9 w-9 -ml-2"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
           <Sparkles className="w-5 h-5 text-primary" />
           <div>
             <h1 className="text-lg font-semibold text-foreground">Tasks</h1>
