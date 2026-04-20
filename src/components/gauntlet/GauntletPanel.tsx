@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const GauntletPanel = () => {
-  const { providers, stones, usage, verifying, verifyAll, setMode, toggleStatus, ALL_STONES } = useGauntlet();
+  const { providers, stones, usage, verifying, verifyAll, setMode, toggleStatus, ALL_STONES, keysDetected } = useGauntlet();
   const [globalMode, setGlobalMode] = useState<"auto" | "manual">("auto");
 
   // Derive global mode from any provider row (they share a mode)

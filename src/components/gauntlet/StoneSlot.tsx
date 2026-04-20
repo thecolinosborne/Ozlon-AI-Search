@@ -91,7 +91,17 @@ export const StoneSlot = ({ provider, row, capability, onToggle }: StoneSlotProp
         <p className="mt-2 text-[10px] text-destructive truncate">{row.last_error}</p>
       )}
     </div>
-  );
+);
+
+function formatRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 };
 
 const CapStat = ({ icon: Icon, label, value }: { icon: any; label: string; value: number }) => (
