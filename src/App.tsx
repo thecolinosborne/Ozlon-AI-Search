@@ -19,6 +19,7 @@ import Profile from "@/pages/Profile";
 import Billing from "@/pages/Billing";
 import Onboarding from "@/pages/onboarding";
 import Integrations from "@/pages/Integrations";
+import Wisdom from "@/pages/Wisdom";
 
 import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
 import DescriptDetail from "@/pages/integrations/DescriptDetail";
@@ -66,6 +67,7 @@ const AppRoutes = () => {
         <Route path="/developer" element={<Developer />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/integrations" element={<Integrations />} />
+        <Route path="/wisdom" element={<Wisdom />} />
         
         <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
         <Route path="/integrations/descript" element={<DescriptDetail />} />
