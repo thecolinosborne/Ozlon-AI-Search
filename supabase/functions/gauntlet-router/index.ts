@@ -21,7 +21,9 @@ type Stone = {
 };
 
 const STONES: Record<string, Stone> = {
-  lovable:    { provider: "lovable",    defaultModel: "google/gemini-3-flash-preview", reasoning: 8,  vision: 7,  image: 9,  video: 7, speed: 7, cost: 1, maxCtx: 1_000_000 },
+  // Lovable gateway is chat-only — it CANNOT produce images or videos. Score 0
+  // so the scorer never wastes a turn picking it for a guaranteed failure.
+  lovable:    { provider: "lovable",    defaultModel: "google/gemini-3-flash-preview", reasoning: 8,  vision: 7,  image: 0,  video: 0, speed: 7, cost: 1, maxCtx: 1_000_000 },
   openai:     { provider: "openai",     defaultModel: "gpt-5",                          reasoning: 10, vision: 9,  image: 0,  video: 0, speed: 6, cost: 4, maxCtx: 400_000 },
   gemini:     { provider: "gemini",     defaultModel: "gemini-2.5-flash",               reasoning: 9,  vision: 10, image: 10, video: 8, speed: 9, cost: 2, maxCtx: 2_000_000 },
   anthropic:  { provider: "anthropic",  defaultModel: "claude-sonnet-4-5",              reasoning: 9,  vision: 8,  image: 0,  video: 0, speed: 7, cost: 3, maxCtx: 200_000 },
@@ -419,6 +421,18 @@ Deno.serve(async (req) => {
       }
 
       return json({ providers: data ?? [], stones: STONES });
+    }
+
+    if (action === "recent_decisions") {
+      if (!userId) return json({ decisions: [] });
+      const limit = Math.min(Math.max(Number(payload.limit) || 20, 1), 100);
+      const { data } = await admin
+        .from("gauntlet_routing_log")
+        .select("id, chosen_stone, chosen_model, modality, complexity, reason, fallback_used, latency_ms, success, created_at, metadata")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      return json({ decisions: data ?? [] });
     }
 
     return json({ error: "unknown action" }, 400);
