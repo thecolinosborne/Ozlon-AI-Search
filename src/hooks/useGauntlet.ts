@@ -42,11 +42,11 @@ export const STONE_SOURCE: Record<string, "system" | "personal"> = {
   lovable: "system",
   openai: "system",
   gemini: "system",
-  anthropic: "system",
+  anthropic: "personal",
   higgsfield: "system",
 };
 
-const ALL_STONES = ["lovable", "openai", "gemini", "anthropic", "higgsfield"] as const;
+const ALL_STONES = ["lovable", "openai", "gemini", "higgsfield"] as const;
 
 export function useGauntlet() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);

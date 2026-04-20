@@ -28,6 +28,8 @@ const STONES: Record<string, Stone> = {
   higgsfield: { provider: "higgsfield", defaultModel: "higgsfield-ai/dop/standard",     reasoning: 0,  vision: 0,  image: 9,  video: 10, speed: 6, cost: 2, maxCtx: 32_000 },
 };
 
+const SYSTEM_STONES = ["lovable", "openai", "gemini", "higgsfield"] as const;
+
 // ─────────── Scoring function ───────────
 type Needs = {
   modality?: "text" | "vision" | "image_gen" | "video_gen" | "audio";
@@ -331,7 +333,7 @@ Deno.serve(async (req) => {
 
     if (action === "verify") {
       const results: Record<string, any> = {};
-      for (const p of Object.keys(STONES)) {
+      for (const p of SYSTEM_STONES) {
         results[p] = await verifyProvider(p);
       }
       if (userId) {
@@ -358,16 +360,15 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .order("priority", { ascending: true });
 
-      // Auto-verify any STONE missing OR stale (error/missing keyTail) so rows self-heal
+      // Auto-verify any system STONE missing OR stale (error/missing keyTail) so rows self-heal
       const keyMap: Record<string, string> = {
         lovable: "LOVABLE_API_KEY",
         openai: "OPENAI_API_KEY",
         gemini: "GEMINI_API_KEY",
-        anthropic: "ANTHROPIC_API_KEY",
         higgsfield: "HIGGSFIELD_API_KEY",
       };
       const existingMap = new Map((data ?? []).map((r: any) => [r.provider, r]));
-      const toVerify = Object.keys(STONES).filter((p) => {
+      const toVerify = SYSTEM_STONES.filter((p) => {
         const row = existingMap.get(p);
         if (!row) return true;
         const hasEnv = !!Deno.env.get(keyMap[p]);
@@ -419,7 +420,6 @@ async function getActiveProviders(admin: any, userId: string | null): Promise<st
   const sysKeys: Record<string, string> = {
     openai: "OPENAI_API_KEY",
     gemini: "GEMINI_API_KEY",
-    anthropic: "ANTHROPIC_API_KEY",
     higgsfield: "HIGGSFIELD_API_KEY",
   };
   for (const [p, env] of Object.entries(sysKeys)) {
