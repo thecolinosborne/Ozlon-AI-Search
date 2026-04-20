@@ -61,7 +61,9 @@ const AppRoutes = () => {
         <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/personality" element={<PersonalitySettings />} />
-        <Route path="/settings/routing" element={<ModelRouting />} />
+        <Route path="/settings/routing" element={<Navigate to="/settings/brain" replace />} />
+        <Route path="/settings/brain" element={<ModelRouting />} />
+        <Route path="/integrations/ai-processor" element={<Navigate to="/settings/brain" replace />} />
         <Route path="/developer" element={<Developer />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/integrations" element={<Integrations />} />

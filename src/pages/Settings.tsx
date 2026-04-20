@@ -14,7 +14,7 @@ import {
   Phone,
   Plug,
   Sparkles,
-  Zap,
+  Brain,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -284,13 +284,13 @@ const Settings = () => {
           />
         </SettingsSection>
 
-        {/* Intelligence Routing */}
-        <SettingsSection title="Intelligence Routing">
+        {/* The Brain */}
+        <SettingsSection title="The Brain">
           <SettingsRow
-            icon={Zap}
-            label="Model Router"
-            description="Pick speed vs. quality, override per-agent models, view telemetry"
-            onClick={() => navigate("/settings/routing")}
+            icon={Brain}
+            label="Brain Stones"
+            description="Stones picked automatically. Swap lobes anytime."
+            onClick={() => navigate("/settings/brain")}
           />
         </SettingsSection>
 

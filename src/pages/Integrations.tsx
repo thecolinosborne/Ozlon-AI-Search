@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Globe, Video, Sparkles, CheckSquare, Youtube } from "lucide-react";
+import { ArrowLeft, Globe, Video, CheckSquare, Youtube } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,13 +20,6 @@ const integrations = [
     description: "Video and podcast editing platform. Sync media and content assets.",
     icon: Video,
     path: "/integrations/descript",
-  },
-  {
-    id: "higgsfield",
-    name: "Higgsfield AI",
-    description: "AI-powered video generation and creative content platform.",
-    icon: Sparkles,
-    path: "/integrations/higgsfield",
   },
   {
     id: "clickup",

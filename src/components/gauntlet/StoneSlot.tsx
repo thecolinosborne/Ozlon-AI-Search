@@ -1,13 +1,15 @@
-import { CheckCircle2, XCircle, Loader2, Zap, Eye, Image as ImageIcon, Brain } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Zap, Eye, Image as ImageIcon, Brain, Shield, Key } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import type { ProviderRow, StoneCapability } from "@/hooks/useGauntlet";
+import { STONE_SOURCE } from "@/hooks/useGauntlet";
 
 const PROVIDER_LABELS: Record<string, string> = {
   lovable: "Lovable Gateway",
   openai: "OpenAI",
   gemini: "Gemini",
   anthropic: "Anthropic",
+  higgsfield: "Higgsfield",
 };
 
 interface StoneSlotProps {
@@ -22,6 +24,7 @@ export const StoneSlot = ({ provider, row, capability, onToggle }: StoneSlotProp
   const isActive = status === "active";
   const isError = status === "error";
   const verifying = !row && provider !== "lovable";
+  const source = STONE_SOURCE[provider] ?? "personal";
 
   return (
     <div
@@ -31,7 +34,7 @@ export const StoneSlot = ({ provider, row, capability, onToggle }: StoneSlotProp
         isError && "border-destructive/40 bg-destructive/5",
       )}
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className={cn(
             "w-2 h-2 rounded-full",
@@ -49,6 +52,19 @@ export const StoneSlot = ({ provider, row, capability, onToggle }: StoneSlotProp
             disabled={provider === "lovable"}
           />
         </div>
+      </div>
+
+      {/* Source badge */}
+      <div className="flex items-center gap-1.5 mb-3">
+        {source === "system" ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+            <Shield className="w-2.5 h-2.5" /> System Stone · Powered by system key
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+            <Key className="w-2.5 h-2.5" /> Personal Stone · BYOK
+          </span>
+        )}
       </div>
 
       {capability && (
