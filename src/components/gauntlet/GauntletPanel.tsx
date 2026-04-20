@@ -55,8 +55,8 @@ export const GauntletPanel = () => {
       body: { action: "list_status" },
     });
     const map: Record<string, ByokStatus> = {};
-    for (const p of (data?.platforms ?? []) as Array<{ id: string; connected: boolean; key_last4?: string; label?: string | null }>) {
-      map[p.id] = { id: p.id, connected: !!p.connected, last4: p.key_last4, label: p.label };
+    for (const p of (data?.platforms ?? []) as Array<{ id: string; connected: boolean; last4?: string; nickname?: string | null }>) {
+      map[p.id] = { id: p.id, connected: !!p.connected, last4: p.last4, label: p.nickname };
     }
     setByokStatus(map);
   }, []);
