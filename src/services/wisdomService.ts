@@ -148,7 +148,6 @@ export const wisdomService = {
   async setSourceActive(sourceId: string, isActive: boolean) {
     const { error } = await supabase
       .from("knowledge_sources")
-      // @ts-expect-error - is_active column added via migration; types regenerate async
       .update({ is_active: isActive })
       .eq("id", sourceId);
     return !error;
@@ -158,7 +157,6 @@ export const wisdomService = {
     const [activeRes, totalRes] = await Promise.all([
       supabase
         .from("knowledge_sources")
-        // @ts-expect-error - is_active column added via migration
         .select("id", { count: "exact", head: true }).eq("is_active", true),
       supabase.from("knowledge_sources").select("id", { count: "exact", head: true }),
     ]);
