@@ -352,6 +352,7 @@ export interface CallOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   registry?: Record<string, ModelEntry>; // merged registry (static + custom). Defaults to MODEL_REGISTRY.
+  routing_mode?: "speed" | "balanced" | "quality"; // user's budget choice (Brain page toggle)
 }
 
 export interface CallResult {
@@ -385,10 +386,16 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   if (useGauntlet) {
     try {
       const { gauntletCall } = await import("./gauntlet-call.ts");
+      // Routing mode falls back to a request-scoped global set by the chat function.
+      const routingMode =
+        opts.routing_mode ??
+        ((globalThis as Record<string, unknown>).__currentRoutingMode as
+          | "speed" | "balanced" | "quality" | undefined);
       const result = await gauntletCall({
         agent: opts.agent,
         messages: opts.messages,
         tools: (opts.body as any)?.tools,
+        routing_mode: routingMode,
       });
       if (result.ok) {
         console.log(`[Gauntlet] route -> ${result.modelUsed} (agent=${opts.agent}, fallback=${result.fallbackUsed})`);

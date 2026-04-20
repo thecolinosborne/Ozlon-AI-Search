@@ -3,6 +3,8 @@
 // without code changes.
 import type { CallResult, AgentName, ChatMessage } from "./model-registry.ts";
 
+export type RoutingMode = "speed" | "balanced" | "quality";
+
 export interface GauntletCallOptions {
   agent: AgentName;
   messages: ChatMessage[];
@@ -13,6 +15,7 @@ export interface GauntletCallOptions {
   modality?: "text" | "vision" | "image_gen" | "video_gen" | "audio";
   complexity?: "low" | "medium" | "high";
   latency_priority?: "fast" | "normal" | "relaxed";
+  routing_mode?: RoutingMode;
 }
 
 // ─────────── Per-message classification ───────────
@@ -81,14 +84,32 @@ function classifyMessage(messages: ChatMessage[]): {
   return { modality, complexity, latency_priority, context_size: ctxTokens };
 }
 
+// Map routing_mode → scorer overrides. User's budget choice wins over per-message classification.
+function modeOverrides(mode?: RoutingMode): {
+  cost_sensitivity?: "high" | "medium" | "low";
+  latency_priority?: "fast" | "normal" | "relaxed";
+  reason_tag?: string;
+} {
+  switch (mode) {
+    case "speed":   return { cost_sensitivity: "high",   latency_priority: "fast",    reason_tag: "speed mode: cheapest capable" };
+    case "quality": return { cost_sensitivity: "low",    latency_priority: "relaxed", reason_tag: "quality mode: best stone" };
+    case "balanced":return { cost_sensitivity: "medium", reason_tag: "balanced mode" };
+    default:        return {};
+  }
+}
+
 // Map agent → modality/complexity hints for the router (fallback when classification yields nothing useful)
 function deriveNeeds(agent: AgentName, messages: ChatMessage[], override?: Partial<GauntletCallOptions>) {
   const classified = classifyMessage(messages);
+  const mo = modeOverrides(override?.routing_mode);
   return {
     modality: override?.modality ?? classified.modality,
     complexity: override?.complexity ?? classified.complexity,
-    latency_priority: override?.latency_priority ?? classified.latency_priority,
+    latency_priority: mo.latency_priority ?? override?.latency_priority ?? classified.latency_priority,
     context_size: classified.context_size,
+    cost_sensitivity: mo.cost_sensitivity,
+    routing_mode: override?.routing_mode,
+    mode_reason: mo.reason_tag,
   };
 }
 

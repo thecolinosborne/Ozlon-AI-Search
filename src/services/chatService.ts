@@ -200,6 +200,13 @@ export async function streamChat({
       console.warn('[streamChat] No user session — running anonymously (no integrations / tools).');
     }
 
+    // Read user's routing budget (Brain page Speed/Balanced/Quality toggle).
+    let routingMode: 'speed' | 'balanced' | 'quality' | undefined;
+    try {
+      const v = localStorage.getItem('ozlon.gauntlet.mode');
+      if (v === 'speed' || v === 'balanced' || v === 'quality') routingMode = v;
+    } catch { /* ignore */ }
+
     const response = await fetch(CHAT_URL, {
       method: 'POST',
       headers: {
@@ -218,6 +225,7 @@ export async function streamChat({
         agentMetadata,
         enableTools,
         userSettings,
+        routing_mode: routingMode,
       }),
     });
 

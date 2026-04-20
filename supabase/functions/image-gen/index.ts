@@ -20,6 +20,7 @@ interface ReqBody {
   inputImageUrl?: string;
   userId?: string; // when called server-to-server with service role
   serviceSecret?: string; // optional shared-secret for internal calls
+  routing_mode?: "speed" | "balanced" | "quality";
 }
 
 serve(async (req) => {
@@ -101,9 +102,10 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             action: "call",
-            needs: { modality: "image_gen", complexity: "medium" },
+            needs: { modality: "image_gen", complexity: "medium", routing_mode: body.routing_mode },
             messages: [{ role: "user", content: body.prompt }],
             node_type: "image_artist",
+            routing_mode: body.routing_mode,
           }),
         });
         if (gRes.ok) {

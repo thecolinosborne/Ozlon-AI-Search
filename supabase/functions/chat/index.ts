@@ -7648,11 +7648,17 @@ serve(async (req) => {
       agentMetadata: _agentMetadata,
       enableTools = false,
       userSettings,
+      routing_mode,
     } = body;
 
     // Store auth context for tool handlers (create_work_task needs user ID)
     (globalThis as Record<string, unknown>).__currentAuthHeader = req.headers.get('Authorization') || undefined;
     (globalThis as Record<string, unknown>).__currentSessionId = body.sessionId || undefined;
+    // Routing budget (Brain page Speed/Balanced/Quality toggle) — picked up by callWithFallback → gauntletCall.
+    (globalThis as Record<string, unknown>).__currentRoutingMode =
+      routing_mode === 'speed' || routing_mode === 'balanced' || routing_mode === 'quality'
+        ? routing_mode
+        : undefined;
 
     const modelConfig = MODEL_REGISTRY[model] || MODEL_REGISTRY[DEFAULT_MODEL];
     const apiKey = Deno.env.get(modelConfig.apiKeyEnvVar);
