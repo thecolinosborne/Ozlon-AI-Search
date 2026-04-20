@@ -358,21 +358,19 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .order("priority", { ascending: true });
 
-      // Auto-verify on first load if user has no rows
-      if (!data || data.length === 0) {
-        const results: Record<string, any> = {};
-        for (const p of Object.keys(STONES)) {
-          results[p] = await verifyProvider(p);
-        }
-        for (const [provider, res] of Object.entries(results)) {
-          const r = res as any;
+      // Auto-verify any STONE missing from the user's rows (covers first load AND new stones added later)
+      const existing = new Set((data ?? []).map((r: any) => r.provider));
+      const missing = Object.keys(STONES).filter((p) => !existing.has(p));
+      if (missing.length > 0) {
+        for (const p of missing) {
+          const r = await verifyProvider(p);
           await admin.from("ai_providers").upsert({
             user_id: userId,
-            provider,
+            provider: p,
             status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
             last_error: r.error ?? null,
-            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null },
+            capabilities: { ...STONES[p], keyTail: r.keyTail ?? null },
           }, { onConflict: "user_id,provider" });
         }
         const refetched = await admin
