@@ -136,26 +136,77 @@ export function useThread(threadId: string | null) {
     return () => { supabase.removeChannel(channel); };
   }, [threadId]);
 
-  // Send a follow-up to the AI. Persists user message, then invokes execute-task
-  // which streams the AI response back into chat_messages + artifacts.
+  // Send a follow-up to the AI. Streams via the same /chat edge function the
+  // main chat uses (full tool access, Infinity Router, model routing), then
+  // calls execute-task in finalize_only mode for artifact extraction.
   const sendFollowUp = useCallback(async (content: string) => {
     if (!threadId || !content.trim()) return;
     const { data: sess } = await supabase.auth.getSession();
     const userId = sess?.session?.user?.id;
     if (!userId) return;
 
-    // Optimistic insert
-    const tempId = crypto.randomUUID();
-    const now = new Date().toISOString();
+    const trimmed = content.trim();
+
+    // Persist user message
+    const { error: insertErr } = await supabase.from('chat_messages').insert({
+      session_id: threadId,
+      user_id: userId,
+      role: 'user',
+      content: trimmed,
+    });
+    if (insertErr) { toast.error('Failed to send'); return; }
+
+    // Build history from current messages + the new user turn
+    const history: Message[] = messages.map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+    history.push({ role: 'user', content: trimmed });
+
+    // Optimistic in-flight assistant bubble
+    const tempAsstId = `inflight-${crypto.randomUUID()}`;
+    const startedAt = new Date().toISOString();
     setMessages((prev) => [...prev, {
-      id: tempId, session_id: threadId, user_id: userId,
-      role: 'user', content, created_at: now, metadata: null,
+      id: tempAsstId, session_id: threadId, user_id: userId,
+      role: 'assistant', content: '', created_at: startedAt, metadata: { inflight: true },
     }]);
 
-    await supabase.functions.invoke('execute-task', {
-      body: { thread_id: threadId, follow_up: content },
+    let assembled = '';
+    await new Promise<void>((resolve) => {
+      streamChat({
+        messages: history,
+        enableTools: true,
+        onDelta: (delta) => {
+          assembled += delta;
+          setMessages((prev) => prev.map((m) =>
+            m.id === tempAsstId ? { ...m, content: assembled } : m
+          ));
+        },
+        onDone: () => resolve(),
+        onError: (err) => { toast.error(`Chat error: ${err}`); resolve(); },
+      });
     });
-  }, [threadId]);
+
+    const finalText = assembled.trim() || '(no output)';
+
+    // Persist assistant message; realtime will replace the optimistic bubble
+    const { data: asstMsg } = await supabase.from('chat_messages').insert({
+      session_id: threadId,
+      user_id: userId,
+      role: 'assistant',
+      content: finalText,
+    }).select().single();
+
+    // Drop the optimistic bubble (real one arrives via realtime)
+    setMessages((prev) => prev.filter((m) => m.id !== tempAsstId));
+
+    // Extract artifact from the just-saved assistant message
+    if (asstMsg?.id) {
+      supabase.functions.invoke('execute-task', {
+        body: { thread_id: threadId, finalize_only: true, assistant_message_id: asstMsg.id },
+      }).catch((e) => console.warn('[useThread] finalize_only failed:', e));
+    }
+  }, [threadId, messages]);
 
   const latestArtifact = artifacts.length > 0
     ? [...artifacts].sort((a, b) => b.version - a.version)[0]
