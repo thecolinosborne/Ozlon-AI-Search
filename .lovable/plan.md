@@ -1,113 +1,99 @@
 
 
-## What you're seeing & why
+## Goal
+Make the keys you've already added (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `HIGGSFIELD_API_KEY`, `ANTHROPIC_API_KEY`) (a) **visibly confirmed** in The Brain, (b) **actually used** by chat/orchestrator instead of the Lovable gateway, and (c) **really invoked** for Higgsfield image/video generation.
 
-### "Get a free key" explained
-On the **Intelligence Routing** page (`/settings/routing` → `ModelRouting.tsx`), each provider has a small `Get a free key ↗` link. It's just a courtesy outbound link to the provider's API console (e.g., `platform.openai.com/api-keys`, `aistudio.google.com/apikey`) where new users can sign up and grab a developer key. Gemini's tier is genuinely free up to a daily quota; OpenAI and Anthropic call it "free signup" but charge per-token after credits. The wording is misleading — we'll change it to **"Where to get a key ↗"**.
+## What's broken right now
 
-### Why OpenAI & Gemini look "not synced"
-They actually *are* synced — the keys exist as **server-side secrets** (`OPENAI_API_KEY`, `GEMINI_API_KEY`), which is why the Gauntlet shows them as **active stones**. But there's no visual that says "this stone is powered by a project-level key, not a user-level key." So it looks like a dead input. Two separate concepts are colliding:
-
-- **Project-wide stones** (powered by secrets you've added) — always on for everyone, no input needed
-- **Bring-your-own-key stones** (the `/settings/routing` form) — per-user keys stored in the vault
-
-We'll make this visually obvious with a **"Powered by system key"** badge on the stone, plus a small "Replace key" affordance for admins.
-
-### The two-routing-pages problem
-Right now:
-- `/settings/routing` → old `ModelRouting` page (BYOK key entry, "Get a free key" links)
-- `/integrations/ai-processor` → new `GauntletPanel` (Auto router, stone slots, telemetry)
-
-Same domain, two pages, confusing. We unify under one concept you named: **The Brain**.
-
----
-
-## The Brain — naming & IA
-
-| Old name | New name |
+| Symptom | Root cause |
 |---|---|
-| Intelligence Routing (Settings) | **The Brain** |
-| Model Router | **Brain Stones** |
-| AI Processor (Integrations) | *(removed — folded into The Brain)* |
-| Higgsfield (Integrations) | *(removed — becomes a Brain Stone for image/video)* |
-| Settings → Intelligence Routing row | Settings → **The Brain** |
+| Gemini/OpenAI stones look "not plugged in" | The Brain page only renders rows that already exist in `ai_providers`. New users have an empty table → stones appear dim until "Verify all" is clicked. No first-load auto-verify. |
+| Chat still goes through Lovable gateway | `chat/index.ts` uses `_shared/model-registry.ts` → `ai.gateway.lovable.dev`. It never calls `gauntlet-router`. Same for `summarize-session`, `personality-evolve`, `viral-creative`, `image-gen`, `video-gen`. |
+| Higgsfield stone never actually generates | `callHiggsfield()` in `gauntlet-router/index.ts` is a stub that returns `[higgsfield] queued: …` text — it does not call the real `higgsfield` edge function. |
+| Stone slot shows "System Stone · Powered by system key" but no last-verified or key-tail | UI lacks a "key detected ✓ ending in •••• 4f2a · last verified 2m ago" affordance. |
 
-**Concept:** The Brain is one mind. Stones are its lobes — each lobe handles what it's best at (reasoning, vision, image, video). The system picks the right lobe for the moment. You can swap lobes in and out.
+## The fix (surgical, additive)
 
-Tagline under the header: *"One mind. Many lobes. Auto-tuned to the moment."*
+### 1. Auto-verify on first load + key-tail confirmation
+- `useGauntlet.refresh()` → if no `ai_providers` rows exist for the user, auto-run `verify` once before fetching list.
+- `gauntlet-router /verify` → also returns `keyTail` (last 4 chars) per provider so the UI can show `✓ Key detected · ••••a4f2`.
+- Persist `keyTail` into `ai_providers.capabilities.keyTail` (no schema change — it's jsonb).
+- `StoneSlot.tsx` shows under the System Stone badge:
+  > ✓ Key detected · ••••a4f2 · verified 2 min ago
 
----
+### 2. Make Higgsfield stone actually generate
+Replace the stub `callHiggsfield()` with a real dispatch:
+- Detect modality from messages: if `image_gen` → call `higgsfield` edge fn `generate_image`; if `video_gen` → call `generate_video`.
+- Forward the user's auth header so the existing per-user vault lookup in `higgsfield/index.ts` works (or fall back to `HIGGSFIELD_API_KEY` + `HIGGSFIELD_APP_ID` system secrets, which you already have set).
+- Return a normalized shape: `{ choices: [{ message: { content: <url or job id> } }], model: "higgsfield" }`.
 
-## Build (additive, surgical)
+### 3. Route chat through the gauntlet (opt-in flag, default ON for you)
+This is the meaningful "stop using Lovable" change. We add a thin shim **without** rewriting the chat function:
+- New helper `supabase/functions/_shared/gauntlet-call.ts` — small wrapper that calls `gauntlet-router /call` with `{ needs, messages, tools }` and returns the same shape `model-registry.callWithFallback()` does today.
+- In `_shared/model-registry.ts` → `callWithFallback()`, add a top-of-function check:
+  ```ts
+  if (Deno.env.get("USE_GAUNTLET") === "1" || prefs.use_gauntlet) {
+    return gauntletCall({ agent, messages, tools, userId });
+  }
+  ```
+- The gauntlet router decides per-call: vision → Gemini direct, heavy reasoning → OpenAI direct, fast/cheap → Lovable, image_gen → Lovable Gemini Nano or Higgsfield, video_gen → Higgsfield.
+- Set `USE_GAUNTLET=1` as a project secret to flip it on globally.
+- Add a per-user toggle in `user_model_preferences.use_gauntlet` (jsonb already exists) so individual users can disable it without redeploy.
 
-### 1. Unify routing under `/settings/brain`
-- Rename route `/settings/routing` → `/settings/brain` (keep old route as redirect for safety)
-- `ModelRouting.tsx` → `Brain.tsx` (file rename + header + copy update)
-- The page becomes a single screen with three sections:
-  1. **Auto Mode** toggle (from GauntletPanel)
-  2. **Brain Stones** grid — every stone (system + BYOK) shown together
-  3. **Usage Breakdown** chart (from GauntletPanel)
+### 4. Wire the other AI-calling functions
+Same one-line shim added to:
+- `summarize-session/index.ts`
+- `personality-evolve/index.ts`
+- `viral-creative/index.ts`
+- `image-gen/index.ts` → new path: if gauntlet active, call `gauntlet-router` with `modality: "image_gen"` and let it pick Gemini direct vs. Higgsfield
+- `video-gen/index.ts` → same with `modality: "video_gen"`
 
-### 2. Stone source clarity
-Each `StoneSlot` gets a source badge:
-- 🟣 **System Stone** — powered by project-level key, always-on, no input
-- 🔵 **Personal Stone** — your BYOK key, replaceable
-- ⚪ **Available** — not yet activated, click to add a key
+Lovable gateway becomes a **fallback stone**, not the primary path.
 
-For System Stones, replace the dead-looking input with:
-> ✓ Powered by system key · Last verified 2 min ago
-> [Replace with my own key →] (collapsed by default)
-
-### 3. Add Higgsfield as a Brain Stone
-- Add `higgsfield` to `STONES` matrix in `gauntlet-router/index.ts`:
-  - capabilities: `{ image: 9, video: 10, reasoning: 0, vision: 0, speed: 6, cost: 2 }`
-  - Add `video` modality to the `Needs` type and scoring function
-- Add Higgsfield driver (`callHiggsfield`) that wraps existing `higgsfield` edge function
-- Auto-route: image_gen requests can pick between Lovable Gemini (free, fast) and Higgsfield (premium, video-capable); video_gen requests go to Higgsfield first
-- Remove Higgsfield card from `/integrations` page
-- Keep `/integrations/higgsfield` route alive but redirect to `/settings/brain` with stone highlighted
-
-### 4. Copy fixes
-- "Get a free key" → "Where to get a key" (it's not always free)
-- Add tooltip on the link: *"Some providers offer free tiers (Gemini), others charge per-token after signup."*
-- Add bottom-of-page note:
-  > **Not yet supported:** Anthropic Claude, Groq, Mistral, DeepSeek. We'll add these as Brain Stones when there's demand.
-
-### 5. Settings page update
-- Rename "Intelligence Routing" section → "The Brain"
-- Rename "Model Router" row → "Brain Stones"
-- Update icon from `Zap` → `Brain` (lucide)
-- Update description: *"Stones picked automatically. Swap lobes anytime."*
-
----
+### 5. UI clarity tweaks on The Brain page
+- Auto-trigger `verifyAll()` on first mount if `providers.length === 0`.
+- Show a small banner above the stone grid:
+  > "4 keys detected. Auto mode is picking the best one per task."
+- Per-stone tooltip shows: capabilities active for routing (e.g. "Used for: vision, long context, fast text") so you can see *what each stone is doing*.
 
 ## Files touched
 
-**Modified (additive, no deletions):**
-- `src/pages/ModelRouting.tsx` — rename copy, update "Get a free key" wording, add System/Personal stone badges, embed GauntletPanel sections
-- `src/pages/Settings.tsx` — rename section + row labels, swap icon
-- `src/pages/Integrations.tsx` — remove Higgsfield from list array
-- `src/App.tsx` — add `/settings/brain` route (alias to existing page), add redirect for `/integrations/higgsfield` → `/settings/brain?stone=higgsfield`
-- `src/components/gauntlet/StoneSlot.tsx` — add source badge ("System Stone" / "Personal Stone")
-- `src/components/gauntlet/GauntletPanel.tsx` — add bottom note about unsupported providers
-- `src/hooks/useGauntlet.ts` — add `higgsfield` to `ALL_STONES`, add `source: 'system'|'personal'` field
-- `supabase/functions/gauntlet-router/index.ts` — add Higgsfield stone + driver + `video` modality scoring
-- `src/pages/integrations/AIProcessorDetail.tsx` — keep page alive but show banner: *"Moved to Settings → The Brain"* with redirect button
+**Modified (additive, surgical):**
+- `supabase/functions/gauntlet-router/index.ts` — real Higgsfield dispatch, return `keyTail` from verify
+- `supabase/functions/_shared/model-registry.ts` — top-of-function gauntlet shim
+- `supabase/functions/summarize-session/index.ts` — gauntlet shim
+- `supabase/functions/personality-evolve/index.ts` — gauntlet shim
+- `supabase/functions/viral-creative/index.ts` — gauntlet shim
+- `supabase/functions/image-gen/index.ts` — route via gauntlet for image_gen
+- `supabase/functions/video-gen/index.ts` — route via gauntlet for video_gen
+- `src/hooks/useGauntlet.ts` — auto-verify on first load, expose `keyTail` per stone
+- `src/components/gauntlet/StoneSlot.tsx` — show "✓ Key detected · ••••XXXX · verified Nm ago"
+- `src/components/gauntlet/GauntletPanel.tsx` — top banner with "N keys detected"
 
-**Untouched:**
-- `/integrations/higgsfield` detail page stays accessible (for advanced API key management) but de-emphasized
-- All chat tools, voice, onboarding, auth
-- The 17-item verification checklist still applies
+**New:**
+- `supabase/functions/_shared/gauntlet-call.ts` — single-purpose wrapper
 
----
+**Untouched:** all 259 chat tools, voice, onboarding, auth, Higgsfield detail page (still works for advanced settings), every other integration.
 
-## What this fixes
-1. ✅ "Get a free key" mystery — relabeled + tooltipped
-2. ✅ OpenAI/Gemini look unsynced — now shows "System Stone · Powered by system key"
-3. ✅ Higgsfield no longer clutters Integrations — becomes a real Brain Stone for image/video
-4. ✅ Two routing pages collapse into one — **The Brain** at `/settings/brain`
-5. ✅ Naming feels productized + human (Brain / Stones / Lobes metaphor consistent)
-6. ✅ Anthropic/Groq/Mistral/DeepSeek noted as "not yet" — no false promises
+## Secrets needed
+None new. All four already configured:
+- `OPENAI_API_KEY` ✓
+- `GEMINI_API_KEY` ✓
+- `ANTHROPIC_API_KEY` ✓
+- `HIGGSFIELD_API_KEY` + `HIGGSFIELD_APP_ID` ✓
+
+We will add **one new secret toggle**: `USE_GAUNTLET=1` (project secret, on/off switch so you can roll back instantly if anything regresses).
+
+## Verification (run after deploy)
+1. Open `/settings/brain` cold (no prior verify) → all 4 stones light up automatically with "✓ Key detected · ••••XXXX"
+2. Send a chat message → check `gauntlet_routing_log` table → see `chosen_stone = openai` or `gemini` (not lovable) for normal text
+3. Send a vision message (image attached) → `chosen_stone = gemini` (direct, not Lovable)
+4. Run image generation in chat → `chosen_stone = lovable` or `higgsfield`, image appears
+5. Trigger video generation → `chosen_stone = higgsfield`, real job ID returned (not stub text)
+6. Disable OpenAI stone in UI → next chat falls back to Gemini direct, completes
+7. Set `USE_GAUNTLET=0` → system reverts to Lovable gateway path, nothing breaks
+
+## Outcome
+Your direct provider keys become the *primary* execution path. Lovable gateway becomes a safety net. The Brain page visibly confirms each key is plugged in. Higgsfield actually generates. One env flag (`USE_GAUNTLET`) controls the whole switchover.
 
 Approve and I execute.
-
