@@ -20,6 +20,7 @@ interface ReqBody {
   inputImageUrl?: string;
   userId?: string; // when called server-to-server with service role
   serviceSecret?: string; // optional shared-secret for internal calls
+  routing_mode?: "speed" | "balanced" | "quality";
 }
 
 serve(async (req) => {
