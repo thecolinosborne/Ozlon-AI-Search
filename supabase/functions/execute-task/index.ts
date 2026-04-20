@@ -217,10 +217,10 @@ async function executeThread(threadId: string, followUp?: string) {
       status: 'draft',
     }).select().single();
 
-    // Update thread pointer + status
+    // Update thread pointer + status (stay in working — user keeps editing in-thread)
     await admin.from('chat_sessions').update({
       current_artifact_id: artifact?.id ?? null,
-      task_status: 'awaiting_user',
+      task_status: 'working',
       updated_at: new Date().toISOString(),
     }).eq('id', threadId);
 
@@ -228,9 +228,9 @@ async function executeThread(threadId: string, followUp?: string) {
     if (thread.linked_work_task_id) {
       await admin.from('work_tasks').update({
         draft_output: output,
-        status: 'up_for_review',
-        ai_status: 'waiting',
-        next_action: 'needs_review',
+        status: 'in_progress',
+        ai_status: 'idle',
+        next_action: 'none',
         last_activity_at: new Date().toISOString(),
       }).eq('id', thread.linked_work_task_id);
     }

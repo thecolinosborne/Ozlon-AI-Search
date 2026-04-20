@@ -14,27 +14,21 @@ export function TasksOverview({ tasks, onTaskClick }: TasksOverviewProps) {
   }));
 
   const aiWorking = tasks.filter(t => t.ai_status === 'thinking' || t.ai_status === 'executing');
-  const needsReview = tasks.filter(t => t.status === 'up_for_review');
-  const recentCompleted = tasks
-    .filter(t => t.status === 'completed')
-    .sort((a, b) => new Date(b.completed_at || b.updated_at).getTime() - new Date(a.completed_at || a.updated_at).getTime())
-    .slice(0, 5);
 
   const recentActivity = tasks
+    .slice()
     .sort((a, b) => new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime())
     .slice(0, 8);
 
   const statusColors: Record<string, string> = {
     todo: 'bg-muted-foreground/20',
     in_progress: 'bg-primary/20',
-    up_for_review: 'bg-warning/20',
-    completed: 'bg-green-500/20',
+    done: 'bg-green-500/20',
   };
 
   return (
     <div className="space-y-6">
-      {/* Status Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {statusCounts.map(({ status, label, count }) => (
           <div key={status} className={cn('rounded-xl p-4 border border-border/50', statusColors[status])}>
             <p className="text-2xl font-semibold text-foreground">{count}</p>
@@ -43,7 +37,6 @@ export function TasksOverview({ tasks, onTaskClick }: TasksOverviewProps) {
         ))}
       </div>
 
-      {/* AI Working Now */}
       {aiWorking.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
@@ -68,47 +61,6 @@ export function TasksOverview({ tasks, onTaskClick }: TasksOverviewProps) {
         </div>
       )}
 
-      {/* Needs Review */}
-      {needsReview.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-foreground mb-2">Needs Review ({needsReview.length})</h3>
-          <div className="space-y-2">
-            {needsReview.map(task => (
-              <button
-                key={task.id}
-                onClick={() => onTaskClick(task)}
-                className="w-full text-left p-3 rounded-lg border border-warning/20 bg-warning/5 hover:bg-warning/10 transition-colors"
-              >
-                <p className="text-sm font-medium">{task.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">{task.task_type}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Recent Completions */}
-      {recentCompleted.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-foreground mb-2">Recently Completed</h3>
-          <div className="space-y-2">
-            {recentCompleted.map(task => (
-              <button
-                key={task.id}
-                onClick={() => onTaskClick(task)}
-                className="w-full text-left p-3 rounded-lg border border-border/30 bg-muted/30 hover:bg-muted/50 transition-colors"
-              >
-                <p className="text-sm font-medium text-muted-foreground">{task.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {task.completed_at ? new Date(task.completed_at).toLocaleDateString() : ''}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Activity Feed */}
       <div>
         <h3 className="text-sm font-medium text-foreground mb-2">Recent Activity</h3>
         <div className="space-y-2">
