@@ -7437,7 +7437,7 @@ ${content}`;
 async function runInfinityRouter(
   messages: { role: string; content: string }[],
   debugMode: boolean,
-): Promise<{ enrichment: string | null; debug: InfinityRouterResult | null }> {
+): Promise<{ enrichment: string | null; debug: InfinityRouterResult | null; classification: InfinityClassification | null; fallback: boolean }> {
   const start = Date.now();
   let fallback = false;
 
@@ -7446,7 +7446,7 @@ async function runInfinityRouter(
     const scores = scoreRoutes(classification);
     const path = pickRoute(scores);
 
-    console.log(`[InfinityRouter] Path: ${path}, Scores:`, scores);
+    console.log(`[InfinityRouter] Path: ${path}, Scores:`, scores, 'Domains:', classification.domains);
 
     let enrichment: string | null = null;
 
@@ -7463,10 +7463,12 @@ async function runInfinityRouter(
     return {
       enrichment,
       debug: debugMode ? result : null,
+      classification,
+      fallback,
     };
   } catch (e) {
     console.error('[InfinityRouter] Error, falling back:', e);
-    return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0, domains: ALL_DOMAINS }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null };
+    return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0, domains: ALL_DOMAINS }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null, classification: null, fallback: true };
   }
 }
 
