@@ -97,9 +97,10 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             action: "call",
-            needs: { modality: "video_gen", complexity: "medium" },
+            needs: { modality: "video_gen", complexity: "medium", routing_mode: body.routing_mode },
             messages: [{ role: "user", content: body.prompt }],
             node_type: "video_director",
+            routing_mode: body.routing_mode,
           }),
         });
         if (gRes.ok) {
