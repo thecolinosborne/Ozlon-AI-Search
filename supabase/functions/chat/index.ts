@@ -5917,6 +5917,7 @@ ${pageContents.slice(0, 12000)}`;
             .select('board_position')
             .eq('user_id', userId)
             .eq('status', 'todo')
+            .is('deleted_at', null)
             .order('board_position', { ascending: false })
             .limit(1);
           const maxPos = existingTasks?.[0]?.board_position ?? -1;
@@ -5970,10 +5971,11 @@ ${pageContents.slice(0, 12000)}`;
             .from('work_tasks')
             .select('*')
             .eq('id', taskId)
+            .is('deleted_at', null)
             .single();
 
           if (fetchErr || !existing) {
-            return { success: false, result: `Task not found: ${fetchErr?.message || 'no rows'}` };
+            return { success: false, result: `Task not found or has been deleted: ${fetchErr?.message || 'no rows'}` };
           }
 
           // Validate status transition if status provided
@@ -6008,7 +6010,8 @@ ${pageContents.slice(0, 12000)}`;
           const { error: updateErr } = await adminClient
             .from('work_tasks')
             .update(updateObj)
-            .eq('id', taskId);
+            .eq('id', taskId)
+            .is('deleted_at', null);
 
           if (updateErr) {
             console.error('[update_work_task] Error:', updateErr);
