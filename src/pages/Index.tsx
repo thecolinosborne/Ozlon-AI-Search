@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserSettings } from "@/services/chatService";
@@ -25,6 +25,7 @@ import { QuickActionsBar, QuickAction } from "@/components/chat/QuickActionsBar"
 
 const Index = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
