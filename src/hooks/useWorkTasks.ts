@@ -393,10 +393,40 @@ export function useWorkTasks(options: UseWorkTasksOptions = {}) {
     return true;
   }, []);
 
+  /**
+   * Soft-delete a task without changing its status. Sends to trash for 30 days.
+   * Same trash mechanism as markDone, but preserves the task's status so
+   * restoring puts it back in the right column.
+   */
+  const softDelete = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    let snapshot: WorkTask[] = [];
+    setTasks((prev) => { snapshot = prev; return prev.filter((t) => t.id !== id); });
+
+    const { error: err } = await supabase
+      .from('work_tasks')
+      .update({ deleted_at: now, last_activity_at: now } as never)
+      .eq('id', id);
+
+    if (err) {
+      toast.error('Could not delete');
+      if (mountedRef.current) setTasks(snapshot);
+      return false;
+    }
+
+    await supabase
+      .from('chat_sessions')
+      .update({ deleted_at: now } as never)
+      .eq('linked_work_task_id', id);
+
+    toast.success('Moved to trash — recoverable for 30 days');
+    return true;
+  }, []);
+
   const restoreFromTrash = useCallback(async (id: string) => {
     const { error: err } = await supabase
       .from('work_tasks')
-      .update({ deleted_at: null, status: 'in_progress' } as never)
+      .update({ deleted_at: null } as never)
       .eq('id', id);
     if (err) { toast.error('Could not restore'); return; }
     await supabase
@@ -426,6 +456,7 @@ export function useWorkTasks(options: UseWorkTasksOptions = {}) {
     unarchiveTask,
     runTaskWithAI,
     markDone,
+    softDelete,
     restoreFromTrash,
     purgeNow,
   };

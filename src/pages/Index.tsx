@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserSettings } from "@/services/chatService";
@@ -25,6 +25,7 @@ import { QuickActionsBar, QuickAction } from "@/components/chat/QuickActionsBar"
 
 const Index = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { authLoading, session, user, systemName, needsOnboarding, profileLoaded, isReturningUser, completeOnboarding, voiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!user;
   const { user: storeUser, connections, agents } = useAppStore();
@@ -187,6 +188,27 @@ const Index = () => {
     resetEphemeralState();
     await switchSession(sessionId);
   }, [abortStream, resetEphemeralState, switchSession]);
+
+  // Deep-link: /?session=<id> opens that session (used by "Open in chat" from /tasks)
+  const switchedToParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target = searchParams.get('session');
+    if (!target || !sessionsLoaded) return;
+    if (switchedToParamRef.current === target) return;
+    if (target === activeSessionId) {
+      switchedToParamRef.current = target;
+      const params = new URLSearchParams(searchParams);
+      params.delete('session');
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    switchedToParamRef.current = target;
+    handleSwitchSession(target).then(() => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('session');
+      setSearchParams(params, { replace: true });
+    });
+  }, [searchParams, sessionsLoaded, activeSessionId, handleSwitchSession, setSearchParams]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();

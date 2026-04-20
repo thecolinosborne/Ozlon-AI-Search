@@ -338,6 +338,71 @@ async function executeLegacyTask(taskId: string) {
   return result;
 }
 
+// ── Mode: finalize_only ────────────────────────────────────────────
+// Used by the in-task ThreadView after it has streamed its own assistant
+// reply via /chat and persisted the message. We only need to extract a
+// typed artifact + update thread pointers — no AI re-run.
+async function finalizeThread(threadId: string, assistantMessageId: string) {
+  const { data: thread } = await admin
+    .from('chat_sessions').select('*').eq('id', threadId).maybeSingle();
+  if (!thread) return { success: false, error: 'Thread not found' };
+
+  const { data: msg } = await admin
+    .from('chat_messages').select('id, content, user_id').eq('id', assistantMessageId).maybeSingle();
+  if (!msg) return { success: false, error: 'Assistant message not found' };
+
+  const goal = thread.goal ?? thread.title ?? 'this conversation';
+  const detected = detectArtifactType(msg.content, goal);
+
+  const { data: existing } = await admin
+    .from('artifacts')
+    .select('version')
+    .eq('conversation_id', threadId)
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextVersion = (existing?.version ?? 0) + 1;
+
+  const { data: artifact } = await admin.from('artifacts').insert({
+    user_id: thread.user_id,
+    conversation_id: threadId,
+    message_id: msg.id,
+    version: nextVersion,
+    type: detected.type,
+    title: detected.title,
+    content: detected.content,
+    created_by: 'ai',
+    status: 'draft',
+  }).select().single();
+
+  await admin.from('chat_sessions').update({
+    current_artifact_id: artifact?.id ?? null,
+    task_status: 'working',
+    kind: thread.kind === 'chat' ? 'both' : (thread.kind ?? 'task'),
+    updated_at: new Date().toISOString(),
+  }).eq('id', threadId);
+
+  if (thread.linked_work_task_id) {
+    await admin.from('work_tasks').update({
+      draft_output: msg.content,
+      status: 'in_progress',
+      ai_status: 'idle',
+      next_action: 'none',
+      last_activity_at: new Date().toISOString(),
+    }).eq('id', thread.linked_work_task_id);
+  }
+
+  await admin.from('task_events').insert({
+    user_id: thread.user_id,
+    conversation_id: threadId,
+    event_type: 'execution_completed',
+    detail: 'Output ready for review',
+    metadata: { artifact_id: artifact?.id, type: detected.type, version: nextVersion, finalize_only: true },
+  });
+
+  return { success: true, artifact_id: artifact?.id };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -346,9 +411,13 @@ Deno.serve(async (req) => {
     const threadId = body.thread_id ?? body.threadId;
     const taskId = body.task_id ?? body.taskId;
     const followUp = body.follow_up ?? body.followUp;
+    const finalizeOnly = body.finalize_only ?? body.finalizeOnly;
+    const assistantMessageId = body.assistant_message_id ?? body.assistantMessageId;
 
     let result;
-    if (threadId) {
+    if (finalizeOnly && threadId && assistantMessageId) {
+      result = await finalizeThread(threadId, assistantMessageId);
+    } else if (threadId) {
       result = await executeThread(threadId, followUp);
     } else if (taskId) {
       result = await executeLegacyTask(taskId);
