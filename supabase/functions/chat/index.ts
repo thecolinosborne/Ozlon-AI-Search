@@ -7223,6 +7223,21 @@ async function runToolLoop(
 
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
+
+      // GUARD: if user just approved an action and assistant only called task-tracking tools,
+      // inject a system reminder to actually execute the action on next iteration.
+      const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
+      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task');
+      // Find last user message (skip tool/assistant) BEFORE this assistant turn
+      const lastUser = [...openAIMessages].reverse().find((m) => m.role === 'user');
+      const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
+      if (onlyTaskTools && APPROVAL_RE.test(lastUserText)) {
+        console.log('[ToolLoopGuard] Approval detected but only task-tracking tools called. Injecting reminder.');
+        openAIMessages.push({
+          role: 'system',
+          content: 'REMINDER: The user just approved an action. You called only create_work_task/update_work_task — that is tracking, not execution. Call the actual action tool now (e.g. batch_trash_emails, send_email, delete_calendar_event). Do not respond with text until the real tool has been invoked.',
+        });
+      }
       // Continue the loop so the model can process tool results
       continue;
     }
