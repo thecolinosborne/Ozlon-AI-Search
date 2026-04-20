@@ -8665,6 +8665,8 @@ Execute these in order. Be decisive — the user has already been shown this pla
         if (infinityDebug) {
           await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
         }
+        // Emit orchestration trace (wisdom + routing decisions)
+        await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
         // Emit provider_used up-front so the UI can attribute even if the user closes early.
         await writer.write(encoder.encode(providerEvent));
         const reader = response.body!.getReader();
