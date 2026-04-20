@@ -195,15 +195,6 @@ serve(async (req) => {
         const label = (r.metadata?.label as string) || null;
         byPlatform.set(pid, { last4, label });
       }
-      // Higgsfield is special — stored in integration_connections
-      const { data: hf } = await admin
-        .from("integration_connections")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("provider", "higgsfield")
-        .eq("status", "connected")
-        .maybeSingle();
-
       const status = Object.values(PLATFORMS).map((p) => {
         const c = byPlatform.get(p.id);
         return {
@@ -218,19 +209,6 @@ serve(async (req) => {
           last4: c?.last4 || null,
           nickname: c?.label || null,
         };
-      });
-      // Append higgsfield virtual entry
-      status.push({
-        id: "higgsfield",
-        label: "Higgsfield AI",
-        blurb: "Cinematic AI video & image generation.",
-        human_blurb: "Cinematic brain. Creates filmlike video and image clips.",
-        capabilities: ["video", "image"],
-        console_url: "https://higgsfield.ai",
-        key_prefix: "",
-        connected: !!hf,
-        last4: hf ? "••••" : null,
-        nickname: null,
       });
       return json({ platforms: status });
     }
