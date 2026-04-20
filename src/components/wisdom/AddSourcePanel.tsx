@@ -11,9 +11,10 @@ import { toast } from "@/hooks/use-toast";
 
 interface Props {
   onIngested?: () => void;
+  defaultTab?: "text" | "upload" | "url";
 }
 
-export const AddSourcePanel = ({ onIngested }: Props) => {
+export const AddSourcePanel = ({ onIngested, defaultTab = "text" }: Props) => {
   const [busy, setBusy] = useState(false);
 
   // Common metadata
@@ -188,7 +189,7 @@ export const AddSourcePanel = ({ onIngested }: Props) => {
         </div>
       </div>
 
-      <Tabs defaultValue="text">
+      <Tabs defaultValue={defaultTab}>
         <TabsList className="grid grid-cols-3 w-full">
           <TabsTrigger value="text"><Type className="w-3.5 h-3.5 mr-1.5" />Paste Text</TabsTrigger>
           <TabsTrigger value="upload"><Upload className="w-3.5 h-3.5 mr-1.5" />Upload</TabsTrigger>
