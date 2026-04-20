@@ -189,6 +189,27 @@ const Index = () => {
     await switchSession(sessionId);
   }, [abortStream, resetEphemeralState, switchSession]);
 
+  // Deep-link: /?session=<id> opens that session (used by "Open in chat" from /tasks)
+  const switchedToParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target = searchParams.get('session');
+    if (!target || !sessionsLoaded) return;
+    if (switchedToParamRef.current === target) return;
+    if (target === activeSessionId) {
+      switchedToParamRef.current = target;
+      const params = new URLSearchParams(searchParams);
+      params.delete('session');
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    switchedToParamRef.current = target;
+    handleSwitchSession(target).then(() => {
+      const params = new URLSearchParams(searchParams);
+      params.delete('session');
+      setSearchParams(params, { replace: true });
+    });
+  }, [searchParams, sessionsLoaded, activeSessionId, handleSwitchSession, setSearchParams]);
+
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
