@@ -1,93 +1,90 @@
 
 
-## Build: Wisdom Library — Ingest Minds, Make the OS Smarter
+## Settings Refresh + Wisdom Library Section
 
-You already have the engine. We're building the cockpit that lets you pour intelligence into it and the wiring that pulls from it on every turn.
+Two things, scoped tight: modernize `/settings` visuals only (no nav changes anywhere), and give Wisdom Library its own first-class section inside Settings with quick-upload affordances.
 
-## What exists today (no rebuild needed)
+## What changes
 
-- `knowledge_entries`, `knowledge_sources`, `wisdom_memories`, `reflection_notes` tables with pgvector
-- `knowledge-ingest` edge function — takes raw text + source_person, extracts 5-20 structured insights, embeds, optionally extracts memories + reflection
-- `knowledge-search` edge function — multi-scope search across knowledge/memory/reflection with weighted ranking and a ready-to-inject `context_bundle`
+### 1. Profile hero card (top of Settings)
+Replace the small Account row with a presence-forward header:
+- Large avatar with gradient ring, initials fallback
+- Display name (weight 600) + email muted below
+- Status pill: `● Signed in` (primary dot) or `● Guest` (muted dot)
+- Right-aligned **Edit Profile** ghost button → `/profile`
+- Guest variant: "Sign in to unlock" CTA → `/auth`
 
-## What's missing (this build)
+### 2. Reorganize Settings sections (in-page only, no nav)
+1. **Profile** — hero card
+2. **Personalization** — OS Name (inline edit), Personality, Brain Stones
+3. **Voice & Communication** — Mode (segmented control), Voice features toggle, Auto-play, Preview
+4. **Wisdom Library** — dedicated section (see #4)
+5. **Memory** — Memory Settings link
+6. **Integrations** — single row → `/integrations`
+7. **Data & Privacy** — Clear chat history
+8. **Account** — Sign out (signed-in only)
 
-### 1. Wisdom Library page (`/wisdom`)
+The bespoke "System" section disappears; OS Name moves into Personalization as an inline-edit row.
 
-A new top-level page that becomes the home of the OS's brain:
+### 3. Segmented control for Communication Mode
+Three mutually exclusive toggles → one row with a 3-pill segmented control (`Text` / `Voice` / `Both`). Active pill: `bg-primary/15 text-primary`. New small reusable component.
 
-- **Header**: "Wisdom Library" + count chips (`X sources · Y entries · Z memories`)
-- **Add Source panel** — three input modes via tabs:
-  - **Paste Text** — textarea + author/title/type fields → calls `knowledge-ingest`
-  - **Upload Document** — drop a PDF/DOCX/TXT/MD/EPUB, parses client-side (pdf.js for PDF, mammoth for DOCX, plain read for TXT/MD), chunks if >50k chars, sends each chunk to `knowledge-ingest` with shared source metadata
-  - **From URL** — paste article/blog URL → new edge function `knowledge-fetch-url` uses Firecrawl (already configured) to scrape clean markdown, then pipes to ingest
-- **Toggles per ingest**: `Extract durable memories` (default on), `Generate reflection note` (default on)
-- **Sources list** — grouped cards showing person, title, type, entry count, ingestion date, with expand-to-preview top 5 entries
-- **Browse all entries** — filterable table by domain (marketing, leadership, finance…) and category (framework, principle, strategy…), with search-by-similarity input that calls `knowledge-search` and ranks results
-- **Memories tab** — view + manually edit/delete `wisdom_memories` (uses existing `memoryService`)
-- **Reflections tab** — read-only feed of synthesized notes with source backlinks
+### 4. Wisdom Library — its own section in Settings
+A featured block (not just a row) so it feels like a real capability:
+- Section title "Wisdom Library" with "New" accent
+- **Stat strip**: `X sources · Y entries · Z memories` (live counts via `wisdomService`)
+- **Three quick-action tiles** in a responsive row:
+  - **Paste Text** → opens `/wisdom?mode=text`
+  - **Upload Document** → opens `/wisdom?mode=upload`
+  - **From URL** → opens `/wisdom?mode=url`
+- **Open Library** ghost button at the bottom → `/wisdom`
+- Empty state (zero sources): friendly one-liner + same tiles
+- New component: `src/components/settings/WisdomLibraryCard.tsx`
+- `Wisdom.tsx` reads `?mode=` on mount and pre-selects the matching tab in `AddSourcePanel`
 
-### 2. Chat auto-augment with library (RAG hookup)
+### 5. SettingsRow polish (additive props only)
+- Optional `badge` prop (small pill: "New", "Beta", count)
+- Icon container gets subtle gradient `from-muted/80 to-muted/40`
+- Hover gets soft ring `shadow-[0_0_0_1px_hsl(var(--primary)/0.2)]`
+- Inline-edit variant for OS Name (click row → input replaces label, Save/Cancel inline)
 
-In `supabase/functions/chat/index.ts`, before calling the model:
+### 6. SettingsSection polish
+- Title gets a 2px primary/40 gradient accent bar to the left
+- Rows render inside a soft grouped container `bg-card/30 rounded-2xl p-2`
+- Spacing between sections bumped to `mb-10`
 
-- Call `knowledge-search` with the user's latest message, `scope=all`, `match_count=6`, `threshold=0.5`
-- If results exist, inject `context_bundle` into the system prompt under a new section:
-  ```
-  ## Relevant Wisdom
-  The user has ingested the following knowledge that may be relevant. Cite frameworks by name when you use them.
-  {context_bundle}
-  ```
-- Add a routing hint: any time the AI uses an ingested framework in its reply, it should attribute it (e.g. *"Per Hormozi's Value Equation…"*) — gives the user provenance and confidence
-- Cost guard: skip the search if the message is <8 chars or pure greeting (regex check)
-
-### 3. Source presets — one-click "Wisdom Packs"
-
-A small grid above Add Source with curated starter packs (per `mem://knowledge/wisdom-engine-sources` — Hormozi, Munger, Buffett, Naval, Seth Godin, Dalio, etc.):
-
-- Each pack is a button: "Ingest Hormozi Core" → calls a new edge function `knowledge-pack-ingest` that ships ~30 curated frameworks per author as pre-written ingest payload (no scraping, no copyright issues — original synthesized summaries)
-- Marks pack as installed so it won't re-ingest
-- This is the "integrate people's minds" headline feature — instant intelligence injection
-
-### 4. Knowledge attribution chip on chat replies
-
-Tiny UI addition: when a chat reply was augmented with ≥1 wisdom result, render a small chip beneath the message: `🧠 Drew from 3 sources` → click opens popover listing source_person + title for each used entry. The chat function returns this metadata in the response payload.
-
-### 5. Nav entry
-
-Add `/wisdom` to the BottomNav and CommandPalette as "Wisdom" with brain icon. Existing `MemorySettings` page stays — it manages standing orders/goals; Wisdom Library manages the knowledge corpus.
+### 7. Header polish (Settings page only)
+- Sticky header gets `bg-background/80 backdrop-blur-xl` to match app shell
+- Right-side "Done" action on mobile returns to `/`
 
 ## Files
 
 **New**:
-- `src/pages/Wisdom.tsx` — the library page
-- `src/components/wisdom/AddSourcePanel.tsx`
-- `src/components/wisdom/SourceCard.tsx`
-- `src/components/wisdom/EntriesBrowser.tsx`
-- `src/components/wisdom/WisdomPackGrid.tsx`
-- `src/components/wisdom/KnowledgeChip.tsx` (chat attribution chip)
-- `src/services/wisdomService.ts` — wraps ingest/search/fetch-url calls
-- `supabase/functions/knowledge-fetch-url/index.ts` — Firecrawl → ingest pipeline
-- `supabase/functions/knowledge-pack-ingest/index.ts` — ships curated packs
+- `src/components/settings/ProfileHeroCard.tsx`
+- `src/components/settings/SegmentedControl.tsx`
+- `src/components/settings/WisdomLibraryCard.tsx`
 
 **Edited**:
-- `supabase/functions/chat/index.ts` — RAG augmentation block + return `wisdom_used` array
-- `src/App.tsx` — `/wisdom` route
-- `src/components/CommandPalette.tsx` + bottom nav — entry point
-- `src/components/chat/MessageBubble.tsx` — render KnowledgeChip when `wisdom_used` present
+- `src/pages/Settings.tsx` — restructure, swap System block for inline OS Name, mount Wisdom section
+- `src/components/settings/SettingsRow.tsx` — `badge` prop, gradient icon, inline-edit variant
+- `src/components/settings/SettingsSection.tsx` — accent bar, grouped container
+- `src/pages/Wisdom.tsx` — read `?mode=` query param to pre-select Add Source tab
+
+**Untouched**: All app navigation (BottomNav, CommandPalette, App.tsx routes), all auth/voice/OS-name/clear-chat/sign-out logic, store, routing.
 
 ## Verification
 
-1. Open `/wisdom` → page renders empty state with packs visible
-2. Click "Ingest Hormozi Core" → 30 entries appear, source card shows count
-3. Paste a chapter from any book + author "Charlie Munger" → entries + memories + reflection generated, all visible in tabs
-4. Upload a PDF → parses, chunks, ingests, source card shows total entries across chunks
-5. Paste URL → Firecrawl scrapes, ingests
-6. In chat, ask *"How should I price my new offer?"* → reply cites Value Equation framework, KnowledgeChip shows "Drew from 2 sources" → click reveals Hormozi entries
-7. Search "leverage" in Entries Browser → ranked results across all sources
-8. Conversational mode unaffected when no relevant wisdom matches (no chip shown)
+1. `/settings` opens → Profile hero card at top with avatar, name, status pill
+2. Communication Mode shows as one row with active Text/Voice/Both pill
+3. OS Name editor lives inline in Personalization (no separate System section)
+4. Wisdom Library section visible with live counts + three quick-action tiles
+5. Click "Upload Document" tile → lands on `/wisdom` with Upload tab pre-selected
+6. Section headers have left accent bars; rows feel grouped
+7. Sign out / clear chat dialogs unchanged behavior
+8. Mobile (375px): no horizontal scroll, tiles stack cleanly
+9. No app navigation changed anywhere
 
 ## Outcome
 
-Ozlon stops being a generic assistant with memory and becomes **a personal operating system with a curated library of minds inside it**. Every chat turn is silently enriched by everything you've ingested. Books, articles, podcasts transcripts, your own notes — all become live intelligence the AI can reach for and cite.
+Settings becomes a modern control center with the Wisdom Library promoted to its own featured section — discoverable, with one-tap entry into each upload mode — without touching any navigation surface.
 
