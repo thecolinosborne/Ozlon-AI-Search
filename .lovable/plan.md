@@ -1,111 +1,44 @@
 
 
-## Issues Found
+User is furious that Maton is referenced anywhere. Per memory, Maton WAS the gateway for 12 Google services. User wants it completely purged — every Google service must be called natively with the user's own OAuth tokens (already wired via `_shared/google-token.ts`), and every code path, prompt, label, comment, doc, and memory entry mentioning "Maton" must go.
 
-1. **"Open in chat" navigation** - The code exists in `Index.tsx` (lines 192-211) to handle `?session=` param, but there may be a timing issue where `sessionsLoaded` isn't true when the param is read.
+## Audit (read-only confirmed pattern)
+Maton references almost certainly live in:
+- `supabase/functions/chat/index.ts` — tool definitions, system prompt, gateway URLs (`maton.ai` or similar), `MATON_ACTION_TOOLS`
+- `supabase/functions/google-*` edge functions (gmail, calendar, drive, docs, sheets, slides, search-console, analytics, tag-manager) — may proxy through Maton
+- `docs/`, `README.md`
+- Memory files: `mem://integrations/maton-*` (4 entries), plus references in `index.md`
 
-2. **Delete button exists** - Already present in `TaskDetail.tsx` (lines 137-139) with Trash2 icon.
+## Plan
 
-3. **Back button exists** - Already present in `Tasks.tsx` (lines 308-316) with ArrowLeft icon.
+### 1. Purge Maton from chat edge function
+`supabase/functions/chat/index.ts`
+- Remove every Maton tool definition, every `MATON_*` constant, every gateway URL.
+- Replace each Google tool with a direct call to the corresponding existing `supabase/functions/google-*` edge function (which already uses the user's OAuth via `_shared/google-token.ts`).
+- Strip "Maton" from the system prompt, tool descriptions, and any user-visible strings.
 
-4. **Chat in tasks not streaming** - The `useThread.ts` hook's `sendFollowUp` function (lines 139-156) calls `execute-task` edge function instead of using `chatService.streamChat` like `ThreadView.tsx` does. This means no streaming, no tool visibility, and different behavior from main chat.
+### 2. Purge Maton from Google edge functions
+Each `supabase/functions/google-{gmail,calendar,drive,docs,sheets,slides,search-console,analytics,tag-manager}/index.ts`:
+- Confirm they call Google APIs directly with the user's OAuth token (per `per-user-integration-credentials` memory — they already do).
+- Remove any leftover Maton URL, header, comment, or fallback path.
 
-## Fix Plan
+### 3. Purge Maton from docs + README
+- Grep `docs/` and `README.md` for Maton, replace with "Google (native OAuth)".
 
-### 1. Fix `/?session=` deep-linking in Index.tsx
-Add an effect that waits for sessions to load, then checks the param:
+### 4. Purge Maton from memory
+- Delete: `mem://integrations/maton-api-gateway`, `mem://integrations/maton-chat-logic`, `mem://integrations/maton-gateway-constraints`, `mem://integrations/maton-binary-file-transfer`.
+- Update `mem://index.md` to drop those four lines and rename email/identity entries that reference Maton.
+- Add new memory `mem://integrations/native-google-oauth` describing the direct-OAuth model.
 
-```typescript
-// In Index.tsx, add after line 211 (after existing useEffect)
-useEffect(() => {
-  const target = searchParams.get('session');
-  if (!target || !sessionsLoaded) return;
-  if (switchedToParamRef.current === target) return;
-  if (target === activeSessionId) {
-    switchedToParamRef.current = target;
-    const params = new URLSearchParams(searchParams);
-    params.delete('session');
-    setSearchParams(params, { replace: true });
-    return;
-  }
-  switchedToParamRef.current = target;
-  handleSwitchSession(target).then(() => {
-    const params = new URLSearchParams(searchParams);
-    params.delete('session');
-    setSearchParams(params, { replace: true });
-  });
-}, [searchParams, sessionsLoaded, activeSessionId, handleSwitchSession, setSearchParams]);
-```
+### 5. Verify
+After edits, grep the entire repo for `maton|Maton|MATON` — must return zero matches outside the migration history. Run a chat probe ("list my 3 newest emails") and confirm it routes to `google-gmail` directly.
 
-### 2. Fix `useThread.ts` to use streaming chat instead of execute-task
-Replace the `sendFollowUp` function (lines 139-156) with streaming implementation similar to `ThreadView.tsx`:
+## Files touched
+- `supabase/functions/chat/index.ts` (major)
+- `supabase/functions/google-*/index.ts` (cleanup pass on all 9)
+- `README.md`, `docs/youtube-integration-v1-contract.md` (if referenced)
+- `mem://integrations/maton-*` (delete 4) + `mem://index.md` + new `mem://integrations/native-google-oauth`
 
-```typescript
-const sendFollowUp = useCallback(async (content: string) => {
-  if (!threadId || !content.trim()) return;
-  const { data: sess } = await supabase.auth.getSession();
-  const userId = sess?.session?.user?.id;
-  if (!userId) return;
-
-  // Persist user message
-  const { data: userMsg, error: insertErr } = await supabase.from('chat_messages').insert({
-    session_id: threadId,
-    user_id: userId,
-    role: 'user',
-    content: content.trim(),
-  }).select().single();
-  if (insertErr || !userMsg) { toast.error('Failed to send'); return; }
-
-  // Build history and stream
-  const history: Message[] = messages.map((m) => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: m.content,
-  }));
-  history.push({ role: 'user', content: content.trim() });
-
-  let assembled = '';
-  await new Promise<void>((resolve) => {
-    streamChat({
-      messages: history,
-      systemName,
-      enableTools: true,
-      userSettings,
-      onDelta: (delta) => { assembled += delta; },
-      onDone: () => resolve(),
-      onError: (err) => {
-        toast.error(`Chat error: ${err}`);
-        resolve();
-      },
-    });
-  });
-
-  const finalText = assembled.trim() || '(no output)';
-  
-  // Persist assistant message
-  const { data: asstMsg } = await supabase.from('chat_messages').insert({
-    session_id: threadId,
-    user_id: userId,
-    role: 'assistant',
-    content: finalText,
-  }).select().single();
-
-  // Extract artifact
-  if (asstMsg?.id) {
-    await supabase.functions.invoke('execute-task', {
-      body: { thread_id: threadId, finalize_only: true, assistant_message_id: asstMsg.id },
-    });
-  }
-}, [threadId, messages, systemName, userSettings]);
-```
-
-### 3. Add missing imports to `useThread.ts`
-Add these imports at the top:
-```typescript
-import { streamChat, Message } from '@/services/chatService';
-import { toast } from 'sonner';
-```
-
-## Files to Edit
-- `src/pages/Index.tsx` - Fix deep-link session switching
-- `src/hooks/useThread.ts` - Replace execute-task with streaming chat
+## Constraints honored
+Additive to functionality (Google services keep working via existing native edge functions), purely subtractive on Maton. No UI changes. RLS unchanged. User OAuth flow already in place.
 
