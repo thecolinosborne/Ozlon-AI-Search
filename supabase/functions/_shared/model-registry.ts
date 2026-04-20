@@ -374,12 +374,14 @@ export interface CallResult {
 export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   const prefs = opts.prefs || DEFAULT_PREFS;
 
-  // ── GAUNTLET SHIM ──
-  // If USE_GAUNTLET=1 (or per-user prefs.use_gauntlet), route through
-  // gauntlet-router which picks a stone (OpenAI/Gemini/Anthropic/Higgsfield/Lovable)
-  // based on capability + cost, falling back automatically.
-  const useGauntlet = (prefs as any).use_gauntlet === true
-    || ((prefs as any).use_gauntlet !== false && Deno.env.get("USE_GAUNTLET") === "1");
+  // ── GAUNTLET SHIM (env-first) ──
+  // USE_GAUNTLET=1 (project secret) routes through gauntlet-router which picks
+  // a stone (OpenAI/Gemini/Anthropic/Higgsfield/Lovable) by capability + cost.
+  // User can opt out individually via prefs.use_gauntlet === false.
+  const envGauntlet = Deno.env.get("USE_GAUNTLET") === "1";
+  const userOptOut = (prefs as any).use_gauntlet === false;
+  const userOptIn = (prefs as any).use_gauntlet === true;
+  const useGauntlet = !userOptOut && (envGauntlet || userOptIn);
   if (useGauntlet) {
     try {
       const { gauntletCall } = await import("./gauntlet-call.ts");
@@ -388,9 +390,11 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
         messages: opts.messages,
         tools: (opts.body as any)?.tools,
       });
-      // If gauntlet succeeded, return it. If it failed entirely, fall through to legacy.
-      if (result.ok) return result;
-      console.warn("[Gauntlet shim] failed, falling back to legacy gateway:", result.errorText);
+      if (result.ok) {
+        console.log(`[Gauntlet shim] OK via ${result.modelUsed} for ${opts.agent}`);
+        return result;
+      }
+      console.warn(`[Gauntlet shim] failed for ${opts.agent}, falling back to legacy gateway:`, result.errorText);
     } catch (e) {
       console.warn("[Gauntlet shim] threw, falling back:", e);
     }
