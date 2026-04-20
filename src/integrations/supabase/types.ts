@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_providers: {
+        Row: {
+          capabilities: Json
+          created_at: string
+          id: string
+          last_error: string | null
+          last_verified_at: string | null
+          mode: string
+          priority: number
+          provider: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          capabilities?: Json
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          mode?: string
+          priority?: number
+          provider: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          capabilities?: Json
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          mode?: string
+          priority?: number
+          provider?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       artifacts: {
         Row: {
           content: Json
@@ -514,6 +556,60 @@ export type Database = {
           title?: string
           updated_at?: string
           url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      gauntlet_routing_log: {
+        Row: {
+          chosen_model: string | null
+          chosen_stone: string
+          complexity: string | null
+          cost_estimate: number | null
+          created_at: string
+          fallback_used: boolean
+          id: string
+          latency_ms: number | null
+          metadata: Json | null
+          modality: string | null
+          node_type: string | null
+          reason: string | null
+          run_id: string | null
+          success: boolean
+          user_id: string
+        }
+        Insert: {
+          chosen_model?: string | null
+          chosen_stone: string
+          complexity?: string | null
+          cost_estimate?: number | null
+          created_at?: string
+          fallback_used?: boolean
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          modality?: string | null
+          node_type?: string | null
+          reason?: string | null
+          run_id?: string | null
+          success?: boolean
+          user_id: string
+        }
+        Update: {
+          chosen_model?: string | null
+          chosen_stone?: string
+          complexity?: string | null
+          cost_estimate?: number | null
+          created_at?: string
+          fallback_used?: boolean
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          modality?: string | null
+          node_type?: string | null
+          reason?: string | null
+          run_id?: string | null
+          success?: boolean
           user_id?: string
         }
         Relationships: []
