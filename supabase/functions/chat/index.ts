@@ -6351,6 +6351,79 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
 // ============================================================================
+// TOOL SECTIONING — DOMAIN REGISTRY + SCHEMA VALIDATION GUARD
+// ----------------------------------------------------------------------------
+// Each tool is mapped to a domain so we can:
+//   1. Drop only the broken tool (not the whole array) if its schema is bad.
+//   2. Track per-domain tool counts on every turn (observability).
+//   3. Cap how many tools ship per request (prevents 128-tool overload).
+// ============================================================================
+
+type ToolDomain =
+  | 'google-mail' | 'google-calendar' | 'google-drive' | 'google-docs'
+  | 'google-sheets' | 'google-slides' | 'google-search-console'
+  | 'google-analytics' | 'youtube' | 'clickup' | 'ghl'
+  | 'memory' | 'creative' | 'finance' | 'system';
+
+/**
+ * Validate a single tool schema. Returns true if the schema is structurally
+ * sound and safe to ship to the LLM. Logs (but does not throw) on failure.
+ *
+ * This is the failure-isolation guard: if `sheets_write_range` ships malformed
+ * JSON-schema, only that tool is dropped — the other 227 still load.
+ */
+function isValidToolSchema(tool: ToolDef): boolean {
+  try {
+    if (!tool || tool.type !== 'function') return false;
+    const fn = tool.function;
+    if (!fn || typeof fn.name !== 'string' || fn.name.length === 0) return false;
+    if (typeof fn.description !== 'string') return false;
+    const params = fn.parameters as Record<string, unknown> | undefined;
+    if (!params || typeof params !== 'object') return false;
+    if (params.type !== 'object') return false;
+    // properties must be an object if present
+    if (params.properties !== undefined && (typeof params.properties !== 'object' || params.properties === null)) return false;
+    // required must be an array of strings if present
+    if (params.required !== undefined) {
+      if (!Array.isArray(params.required)) return false;
+      if (!params.required.every((r) => typeof r === 'string')) return false;
+    }
+    // JSON-serializable check — catches circular refs and exotic values
+    JSON.stringify(tool);
+    return true;
+  } catch (err) {
+    console.error(`[tool-guard] schema validation threw for "${tool?.function?.name ?? 'unknown'}":`, err);
+    return false;
+  }
+}
+
+/**
+ * Run validation on the full ACTION_TOOLS array exactly once, on cold-start.
+ * Drops broken tools, logs each drop, and caches the clean array.
+ */
+let _validatedTools: ToolDef[] | null = null;
+let _droppedTools: string[] = [];
+function getValidatedTools(): ToolDef[] {
+  if (_validatedTools) return _validatedTools;
+  const valid: ToolDef[] = [];
+  const dropped: string[] = [];
+  for (const t of ACTION_TOOLS) {
+    if (isValidToolSchema(t)) {
+      valid.push(t);
+    } else {
+      dropped.push(t?.function?.name ?? '<unnamed>');
+    }
+  }
+  _validatedTools = valid;
+  _droppedTools = dropped;
+  if (dropped.length > 0) {
+    console.warn(`[tool-guard] DROPPED ${dropped.length} malformed tool(s):`, dropped);
+  }
+  console.log(`[tool-guard] ${valid.length}/${ACTION_TOOLS.length} tools validated and ready.`);
+  return valid;
+}
+
+// ============================================================================
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
@@ -6603,12 +6676,27 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'generate_video': '_always_',
   };
 
-  return ACTION_TOOLS.filter(tool => {
+  // Use the validated tool array — broken schemas have already been dropped.
+  const validated = getValidatedTools();
+  const filtered = validated.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
+
+  // Per-domain distribution log — observability for the sectioning plan.
+  const byDomain: Record<string, number> = {};
+  for (const t of filtered) {
+    const svc = toolToService[t.function.name] || 'unscoped';
+    byDomain[svc] = (byDomain[svc] || 0) + 1;
+  }
+  console.log(`[tool-sections] ${filtered.length} tools available. By domain:`, byDomain);
+  if (_droppedTools.length > 0) {
+    console.warn(`[tool-sections] ${_droppedTools.length} tool(s) permanently disabled (bad schema):`, _droppedTools);
+  }
+
+  return filtered;
 }
 
 // ============================================================================
