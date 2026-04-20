@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Cpu, Zap, Check, RefreshCw, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { SyncControl } from "@/components/integrations/SyncControl";
+import { GauntletPanel } from "@/components/gauntlet/GauntletPanel";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -115,6 +116,11 @@ const AIProcessorDetail = () => {
       icon={Cpu}
       status={integration.status === "disconnected" ? "connected" : integration.status}
     >
+      {/* AI Gauntlet — Auto router with hot-swappable stones */}
+      <GauntletPanel />
+
+      <div className="h-px bg-border/40 my-2" />
+
       {/* Provider Selection */}
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-foreground">Provider</h3>
