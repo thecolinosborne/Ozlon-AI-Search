@@ -14,6 +14,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { GauntletPanel } from "@/components/gauntlet/GauntletPanel";
 
 // ----------------------------------------------------------------------------
 // Platform catalog — one entry per AI platform (NOT per model).
