@@ -15,28 +15,87 @@ export interface GauntletCallOptions {
   latency_priority?: "fast" | "normal" | "relaxed";
 }
 
-// Map agent → modality/complexity hints for the router
-function deriveNeeds(agent: AgentName, override?: Partial<GauntletCallOptions>) {
-  const base: Record<AgentName, { modality: string; complexity: string; latency_priority: string }> = {
-    planner:        { modality: "text",      complexity: "low",    latency_priority: "fast" },
-    executor:       { modality: "text",      complexity: "high",   latency_priority: "normal" },
-    classifier:     { modality: "text",      complexity: "low",    latency_priority: "fast" },
-    summarizer:     { modality: "text",      complexity: "medium", latency_priority: "normal" },
-    image_artist:   { modality: "image_gen", complexity: "medium", latency_priority: "relaxed" },
-    video_director: { modality: "video_gen", complexity: "medium", latency_priority: "relaxed" },
-  };
-  const b = base[agent] ?? base.executor;
+// ─────────── Per-message classification ───────────
+// Cheap heuristics that turn the actual user message into routing "needs"
+// instead of using a static per-agent default. This is what makes the
+// router pick different stones for different inputs.
+function lastUserText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    if (typeof m.content === "string") return m.content;
+    if (Array.isArray(m.content)) {
+      return (m.content as any[])
+        .map((p) => (typeof p === "string" ? p : p?.text ?? ""))
+        .join(" ");
+    }
+  }
+  return "";
+}
+
+function hasImageAttachment(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const c: any = messages[i].content;
+    if (Array.isArray(c)) {
+      if (c.some((p: any) => p?.type === "image_url" || p?.image_url)) return true;
+    }
+  }
+  return false;
+}
+
+function classifyMessage(messages: ChatMessage[]): {
+  modality: "text" | "vision" | "image_gen" | "video_gen";
+  complexity: "low" | "medium" | "high";
+  latency_priority: "fast" | "normal" | "relaxed";
+  context_size: number;
+} {
+  const text = lastUserText(messages).toLowerCase();
+  const totalChars = messages.reduce((sum, m) => {
+    const c: any = m.content;
+    return sum + (typeof c === "string" ? c.length : JSON.stringify(c ?? "").length);
+  }, 0);
+  const ctxTokens = Math.ceil(totalChars / 4);
+
+  // Modality
+  let modality: "text" | "vision" | "image_gen" | "video_gen" = "text";
+  if (/\b(generate|create|draw|make|render)\b.*\b(video|clip|animation)\b/.test(text)) {
+    modality = "video_gen";
+  } else if (/\b(generate|create|draw|make|render|design)\b.*\b(image|picture|illustration|logo|art|photo)\b/.test(text)) {
+    modality = "image_gen";
+  } else if (hasImageAttachment(messages) || /\b(this image|the photo|attached picture|see the image)\b/.test(text)) {
+    modality = "vision";
+  }
+
+  // Complexity
+  let complexity: "low" | "medium" | "high" = "medium";
+  const hasCode = /```/.test(text) || /\bfunction\b|\bclass\b|=>/.test(text);
+  const heavyVerbs = /\b(analyze|debug|refactor|architect|explain why|design|optimize|investigate|compare|evaluate)\b/.test(text);
+  if (text.length > 500 || hasCode || heavyVerbs) complexity = "high";
+  else if (text.length < 80 && !heavyVerbs) complexity = "low";
+
+  // Latency
+  let latency_priority: "fast" | "normal" | "relaxed" = "normal";
+  if (text.length < 80) latency_priority = "fast";
+  else if (text.length > 800 || complexity === "high") latency_priority = "relaxed";
+
+  return { modality, complexity, latency_priority, context_size: ctxTokens };
+}
+
+// Map agent → modality/complexity hints for the router (fallback when classification yields nothing useful)
+function deriveNeeds(agent: AgentName, messages: ChatMessage[], override?: Partial<GauntletCallOptions>) {
+  const classified = classifyMessage(messages);
   return {
-    modality: override?.modality ?? b.modality,
-    complexity: override?.complexity ?? b.complexity,
-    latency_priority: override?.latency_priority ?? b.latency_priority,
+    modality: override?.modality ?? classified.modality,
+    complexity: override?.complexity ?? classified.complexity,
+    latency_priority: override?.latency_priority ?? classified.latency_priority,
+    context_size: classified.context_size,
   };
 }
 
 export async function gauntletCall(opts: GauntletCallOptions): Promise<CallResult> {
   const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/gauntlet-router`;
   const start = Date.now();
-  const needs = deriveNeeds(opts.agent, opts);
+  const needs = deriveNeeds(opts.agent, opts.messages, opts);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

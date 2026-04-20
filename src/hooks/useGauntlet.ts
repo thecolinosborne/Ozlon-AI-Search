@@ -31,11 +31,14 @@ export type RoutingLogEntry = {
   id: string;
   chosen_stone: string;
   chosen_model: string | null;
+  modality: string | null;
+  complexity: string | null;
   reason: string | null;
   fallback_used: boolean;
   latency_ms: number | null;
   success: boolean;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type UserKeyStatus = {
@@ -48,19 +51,36 @@ export type UserKeyStatus = {
   label?: string;
 };
 
-// All stones we surface in the UI. lovable is platform-default (not editable).
+// All stones surfaced in the Brain UI. Lovable is the platform default.
 export const ALL_STONES = ["lovable", "openai", "gemini", "higgsfield", "anthropic", "xai", "deepseek", "mistral"] as const;
 
 // Which stones the system has env keys for (verified server-side)
 const SYSTEM_VERIFIED = ["lovable", "openai", "gemini", "higgsfield"];
 
+export type GauntletMode = "speed" | "balanced" | "quality";
+const MODE_KEY = "ozlon.gauntlet.mode";
+
+function readMode(): GauntletMode {
+  try {
+    const v = localStorage.getItem(MODE_KEY);
+    if (v === "speed" || v === "balanced" || v === "quality") return v;
+  } catch { /* ignore */ }
+  return "balanced";
+}
+
 export function useGauntlet() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [stones, setStones] = useState<Record<string, StoneCapability>>({});
-  const [logs, setLogs] = useState<RoutingLogEntry[]>([]);
+  const [recentDecisions, setRecentDecisions] = useState<RoutingLogEntry[]>([]);
   const [userKeys, setUserKeys] = useState<Record<string, UserKeyStatus>>({});
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [mode, setModeState] = useState<GauntletMode>(() => readMode());
+
+  const setMode = useCallback((m: GauntletMode) => {
+    setModeState(m);
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* ignore */ }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -68,13 +88,17 @@ export function useGauntlet() {
       const { data: { session } } = await supabase.auth.getSession();
       const auth = session ? { Authorization: `Bearer ${session.access_token}` } : {};
 
-      const [{ data: gauntlet }, { data: brain }] = await Promise.all([
+      const [{ data: gauntlet }, { data: brain }, { data: decisions }] = await Promise.all([
         supabase.functions.invoke("gauntlet-router", {
           body: { action: "list" },
           headers: auth,
         }),
         supabase.functions.invoke("connect-brain", {
           body: { action: "list_status" },
+          headers: auth,
+        }),
+        supabase.functions.invoke("gauntlet-router", {
+          body: { action: "recent_decisions", limit: 20 },
           headers: auth,
         }),
       ]);
@@ -89,13 +113,7 @@ export function useGauntlet() {
         map[p.id] = p;
       }
       setUserKeys(map);
-
-      const { data: logData } = await supabase
-        .from("gauntlet_routing_log")
-        .select("id, chosen_stone, chosen_model, reason, fallback_used, latency_ms, success, created_at")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      setLogs(logData ?? []);
+      setRecentDecisions((decisions?.decisions ?? []) as RoutingLogEntry[]);
     } finally {
       setLoading(false);
     }
@@ -118,15 +136,22 @@ export function useGauntlet() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const usage = ALL_STONES.map((stone) => {
-    const count = logs.filter((l) => l.chosen_stone === stone).length;
-    return { stone, count, pct: logs.length > 0 ? Math.round((count / logs.length) * 100) : 0 };
+    const count = recentDecisions.filter((l) => l.chosen_stone === stone).length;
+    return {
+      stone,
+      count,
+      pct: recentDecisions.length > 0 ? Math.round((count / recentDecisions.length) * 100) : 0,
+    };
   });
 
-  const keysDetected = providers.filter((p) => p.status === "active").length + Object.values(userKeys).filter((u) => u.connected).length;
+  const keysDetected =
+    providers.filter((p) => p.status === "active").length +
+    Object.values(userKeys).filter((u) => u.connected).length;
 
   return {
-    providers, stones, logs, usage, userKeys,
+    providers, stones, logs: recentDecisions, recentDecisions, usage, userKeys,
     loading, verifying, refresh, verifyAll,
+    mode, setMode,
     ALL_STONES, SYSTEM_VERIFIED, keysDetected,
   };
 }
