@@ -12,8 +12,7 @@ interface TaskBoardProps {
 const COLUMN_STYLES: Record<TaskStatus, string> = {
   todo: 'border-muted-foreground/20',
   in_progress: 'border-primary/30',
-  up_for_review: 'border-warning/30',
-  completed: 'border-green-500/30',
+  done: 'border-green-500/30',
 };
 
 export function TaskBoard({ tasks, onTaskClick, onMoveTask }: TaskBoardProps) {
@@ -32,10 +31,8 @@ export function TaskBoard({ tasks, onTaskClick, onMoveTask }: TaskBoardProps) {
     e.preventDefault();
     const taskId = e.dataTransfer.getData('text/plain');
     if (!taskId) return;
-
     const columnTasks = getColumnTasks(status);
-    const newPosition = columnTasks.length; // append to bottom
-    onMoveTask(taskId, status, newPosition);
+    onMoveTask(taskId, status, columnTasks.length);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -44,7 +41,7 @@ export function TaskBoard({ tasks, onTaskClick, onMoveTask }: TaskBoardProps) {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
       {STATUS_ORDER.map(status => {
         const columnTasks = getColumnTasks(status);
         return (
