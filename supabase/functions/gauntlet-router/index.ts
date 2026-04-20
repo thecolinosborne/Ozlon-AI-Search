@@ -358,11 +358,24 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .order("priority", { ascending: true });
 
-      // Auto-verify any STONE missing from the user's rows (covers first load AND new stones added later)
-      const existing = new Set((data ?? []).map((r: any) => r.provider));
-      const missing = Object.keys(STONES).filter((p) => !existing.has(p));
-      if (missing.length > 0) {
-        for (const p of missing) {
+      // Auto-verify any STONE missing OR stale (error/missing keyTail) so rows self-heal
+      const keyMap: Record<string, string> = {
+        lovable: "LOVABLE_API_KEY",
+        openai: "OPENAI_API_KEY",
+        gemini: "GEMINI_API_KEY",
+        anthropic: "ANTHROPIC_API_KEY",
+        higgsfield: "HIGGSFIELD_API_KEY",
+      };
+      const existingMap = new Map((data ?? []).map((r: any) => [r.provider, r]));
+      const toVerify = Object.keys(STONES).filter((p) => {
+        const row = existingMap.get(p);
+        if (!row) return true;
+        const hasEnv = !!Deno.env.get(keyMap[p]);
+        const stale = (row.status === "error" && hasEnv) || !((row.capabilities as any)?.keyTail);
+        return stale;
+      });
+      if (toVerify.length > 0) {
+        for (const p of toVerify) {
           const r = await verifyProvider(p);
           await admin.from("ai_providers").upsert({
             user_id: userId,

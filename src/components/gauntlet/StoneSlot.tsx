@@ -23,6 +23,7 @@ interface ProviderRowProps {
   row?: ProviderRow;
   capability?: StoneCapability;
   connected: boolean;
+  verifying?: boolean;
 }
 
 function formatRelative(iso: string): string {
@@ -35,9 +36,8 @@ function formatRelative(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export const StoneSlot = ({ provider, row, capability, connected }: ProviderRowProps) => {
+export const StoneSlot = ({ provider, row, capability, connected, verifying = false }: ProviderRowProps) => {
   const label = PROVIDER_LABELS[provider] ?? provider;
-  const verifying = !row;
   const isError = row?.status === "error" && connected;
 
   return (

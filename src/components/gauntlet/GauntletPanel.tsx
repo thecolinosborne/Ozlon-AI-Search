@@ -108,6 +108,7 @@ export const GauntletPanel = () => {
                 row={providerMap[p]}
                 capability={stones[p]}
                 connected
+                verifying={verifying}
               />
             ))}
           </div>
@@ -128,6 +129,7 @@ export const GauntletPanel = () => {
                 row={providerMap[p]}
                 capability={stones[p]}
                 connected={false}
+                verifying={verifying}
               />
             ))}
           </div>
