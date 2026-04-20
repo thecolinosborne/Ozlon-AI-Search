@@ -1,32 +1,85 @@
 
-Phase C — two surgical fixes. No refactor.
+User wants a full end-to-end audit: confirm everything we've built actually works, backend↔frontend, no broken paths. This is a research/QA pass, not a feature build — but it's substantial enough to warrant a plan so the user knows the scope before I burn cycles.
 
-## Fix 1: ClickUp `create_task` (verify + wire)
-Audit showed the tool entry exists at line 1442 and handler at line 4028 in `chat/index.ts`. I'll do a final verification pass and confirm it's reachable through the v2 domain gate (domain: `projects`). If the handler is broken or the tool definition is malformed, fix it. If already working, mark verified and move on.
+## Scope: Full-stack health check
 
-## Fix 2: Soft-delete sync for `work_tasks`
-**Bug**: chat context queries fetch `work_tasks` without filtering `deleted_at IS NULL`. Deleted tasks still appear in the model's context, causing it to reference/act on tasks the user trashed.
+### What I'll verify
 
-**Locations to patch** in `supabase/functions/chat/index.ts`:
-- Line ~5915 (work_tasks context query) — add `.is('deleted_at', null)`
-- Any other `from('work_tasks').select(...)` call without that filter — audit and patch
-- The `work_tasks` tool handlers (`list_work_tasks`, `get_work_task`, etc.) — ensure they exclude trashed tasks unless explicitly requested
+**1. Chat pipeline (the spine)**
+- `/chat` edge function deploys clean (post Phase C edits)
+- Tool registry returns 259 validated tools
+- v2 domain gating works (sample: send "what's in my gmail" → confirm only google-workspace tools loaded)
+- Streaming SSE reaches frontend, deltas render
+- Auth: JWT forwarded, user_id resolved, integrations visible
 
-**Frontend check** (per "check both sides" rule):
-- `src/hooks/useWorkTasks.ts` — confirm the default fetch already filters `deleted_at IS NULL` (it does, since trash view is opt-in via `{ trash: true }`)
-- No frontend changes expected
+**2. Phase C fixes (just shipped)**
+- ClickUp `create_task` callable end-to-end
+- Soft-deleted work_tasks excluded from chat context (the 3 patched queries)
+- Frontend `useWorkTasks` still filters `deleted_at IS NULL` by default
 
-## Verification
-- Deploy `chat` function
-- Smoke test: create a task → soft-delete it → ask the AI "what tasks do I have?" → confirm trashed task does NOT appear
-- Confirm ClickUp `create_task` still callable
+**3. Integrations — connection + tool roundtrip**
+For each: confirm (a) connection record exists / can be created, (b) edge function deploys, (c) at least one chat tool successfully calls it
+- Google Workspace (Gmail, Calendar, Drive, Docs, Sheets, Slides) via Maton
+- Google Marketing (GSC, GA4, Tag Manager, YouTube)
+- GoHighLevel (Tier 3, ~50 tools)
+- ClickUp (workspace discovery + create_task)
+- Plaid (accounts + transactions)
+- Descript / Higgsfield / image-gen / video-gen / viral-creative
+- Knowledge / Wisdom (ingest + search)
 
-## Out of scope
-- Phase A file split (deferred)
-- Router changes
-- New tools
+**4. Auth + onboarding**
+- Signup → onboarding → chat flow intact
+- Signout reset (no data leak between users)
+- Google OAuth still works
+- AuthContext single source of truth
 
-## Files touched
-- `supabase/functions/chat/index.ts` (add `deleted_at` filter to work_tasks queries; verify ClickUp create_task)
+**5. Voice subsystem**
+- Whisper transcription (transcribe fn)
+- ElevenLabs TTS + OpenAI fallback (text-to-speech fn)
+- Realtime voice mode (realtime-session fn)
+- Voice cloning (voice-clone fn)
 
-Approve and I execute.
+**6. Wisdom / Memory**
+- knowledge-ingest + knowledge-search
+- save_memory tool from chat
+- personality-evolve + proposal inbox
+
+**7. Database health**
+- Run Supabase linter (RLS, exposed columns)
+- Spot-check RLS on user_roles, profiles, work_tasks, integration_credentials
+- Confirm no tables without RLS
+
+**8. Build / runtime**
+- TypeScript compiles
+- Console logs clean (currently only one benign warning: "RESET_BLANK_CHECK")
+- No 500s in recent edge logs
+
+### Method
+Read-only tools only (this mode):
+- `code--search_files` to verify wiring across files
+- `supabase--read_query` for DB state
+- `supabase--linter` for security
+- `supabase--edge_function_logs` for recent failures
+- `supabase--analytics_query` for HTTP error rates last 24h
+- `code--view` for surgical file checks
+
+Active testing (curl edge functions, browser flows) requires default mode — I'll list any test that needs the user to run it manually OR flag it for the post-approval execution pass.
+
+### Deliverable
+A single status report with one of three marks per area:
+- ✅ **PASS** — verified working
+- ⚠️ **WARN** — works but has known caveat (e.g., requires user connection)
+- ❌ **FAIL** — broken, with proposed fix
+
+If FAILs are found, I'll group them and propose surgical fixes (no refactors, per stabilization policy).
+
+### Out of scope
+- No code changes during the audit
+- No new features
+- No Phase A file split (still deferred)
+- No UI changes
+
+### Estimated effort
+~15-20 read-only tool calls. Single report at the end. Any fixes proposed get their own approval gate.
+
+Approve and I execute the audit.
