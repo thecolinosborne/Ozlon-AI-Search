@@ -204,9 +204,8 @@ export async function parseFileToText(file: File): Promise<string> {
 
   if (name.endsWith(".pdf")) {
     const pdfjs = await import("pdfjs-dist");
-    // Configure worker via CDN to avoid bundler config
-    // @ts-expect-error - GlobalWorkerOptions exists at runtime
-    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+    (pdfjs as unknown as { GlobalWorkerOptions: { workerSrc: string } }).GlobalWorkerOptions.workerSrc =
+      `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
     const buf = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: buf }).promise;
     let out = "";
