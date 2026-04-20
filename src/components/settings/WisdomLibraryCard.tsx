@@ -29,9 +29,11 @@ const tiles = [
 export const WisdomLibraryCard = () => {
   const navigate = useNavigate();
   const [counts, setCounts] = useState({ sources: 0, entries: 0, memories: 0 });
+  const [active, setActive] = useState({ active: 0, total: 0 });
 
   useEffect(() => {
     wisdomService.getCounts().then(setCounts).catch(() => {});
+    wisdomService.getActiveSourceCount().then(setActive).catch(() => {});
   }, []);
 
   const isEmpty = counts.sources === 0;
@@ -63,7 +65,9 @@ export const WisdomLibraryCard = () => {
           <p className="text-xs text-muted-foreground mt-0.5">
             {isEmpty
               ? "Pour minds, books, and notes into your OS."
-              : "Make your AI smarter — ingest a new source."}
+              : active.active > 0
+                ? `${active.active} of ${active.total} plugged in · influencing chat`
+                : "Sources stored — none plugged in. Toggle to activate."}
           </p>
         </div>
       </div>
