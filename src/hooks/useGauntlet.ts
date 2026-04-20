@@ -15,7 +15,7 @@ export type StoneCapability = {
 export type ProviderRow = {
   id: string;
   user_id: string;
-  provider: "lovable" | "openai" | "gemini" | "anthropic";
+  provider: "lovable" | "openai" | "gemini" | "anthropic" | "higgsfield";
   status: "active" | "disabled" | "error";
   priority: number;
   capabilities: StoneCapability;
@@ -35,7 +35,17 @@ export type RoutingLogEntry = {
   created_at: string;
 };
 
-const ALL_STONES = ["lovable", "openai", "gemini", "anthropic"] as const;
+// System stones are powered by project-level secrets (always-on for everyone).
+// Personal stones would be BYOK keys. Currently all our stones run on system keys.
+export const STONE_SOURCE: Record<string, "system" | "personal"> = {
+  lovable: "system",
+  openai: "system",
+  gemini: "system",
+  anthropic: "system",
+  higgsfield: "system",
+};
+
+const ALL_STONES = ["lovable", "openai", "gemini", "anthropic", "higgsfield"] as const;
 
 export function useGauntlet() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
