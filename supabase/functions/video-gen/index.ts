@@ -22,6 +22,7 @@ interface ReqBody {
   aspect_ratio?: string;        // 16:9, 9:16, 1:1
   model?: string;
   userId?: string;              // present on service-role calls
+  routing_mode?: "speed" | "balanced" | "quality";
 }
 
 serve(async (req) => {
