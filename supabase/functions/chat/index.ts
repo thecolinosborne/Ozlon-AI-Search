@@ -6676,12 +6676,27 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     'generate_video': '_always_',
   };
 
-  return ACTION_TOOLS.filter(tool => {
+  // Use the validated tool array — broken schemas have already been dropped.
+  const validated = getValidatedTools();
+  const filtered = validated.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
+
+  // Per-domain distribution log — observability for the sectioning plan.
+  const byDomain: Record<string, number> = {};
+  for (const t of filtered) {
+    const svc = toolToService[t.function.name] || 'unscoped';
+    byDomain[svc] = (byDomain[svc] || 0) + 1;
+  }
+  console.log(`[tool-sections] ${filtered.length} tools available. By domain:`, byDomain);
+  if (_droppedTools.length > 0) {
+    console.warn(`[tool-sections] ${_droppedTools.length} tool(s) permanently disabled (bad schema):`, _droppedTools);
+  }
+
+  return filtered;
 }
 
 // ============================================================================
