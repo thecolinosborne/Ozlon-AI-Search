@@ -88,6 +88,53 @@ serve(async (req) => {
     let modelUsed = "";
     let lastError = "";
 
+    // ── GAUNTLET SHIM: route through gauntlet-router when enabled ──
+    const useGauntlet = Deno.env.get("USE_GAUNTLET") === "1";
+    if (useGauntlet) {
+      try {
+        const gRes = await fetch(`${supabaseUrl}/functions/v1/gauntlet-router`, {
+          method: "POST",
+          headers: {
+            Authorization: authHeader || `Bearer ${serviceKey}`,
+            "Content-Type": "application/json",
+            apikey: anonKey,
+          },
+          body: JSON.stringify({
+            action: "call",
+            needs: { modality: "image_gen", complexity: "medium" },
+            messages: [{ role: "user", content: body.prompt }],
+            node_type: "image_artist",
+          }),
+        });
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          // If Higgsfield was picked, return its URL/job directly
+          if (gData?.stone === "higgsfield") {
+            const hfUrl = gData?.result?.higgsfield?.url;
+            const reqId = gData?.result?.higgsfield?.request_id;
+            if (hfUrl) {
+              return new Response(
+                JSON.stringify({ url: hfUrl, model: "higgsfield", mode: "generate", stone: "higgsfield" }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+            if (reqId) {
+              return new Response(
+                JSON.stringify({ pending: true, provider: "higgsfield", request_id: reqId }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+          }
+          // Otherwise the gauntlet picked Lovable/Gemini for image-gen — fall through to legacy chain
+          // (those drivers don't currently return an image_url field, so we use the existing flow below)
+        } else {
+          console.warn("[image-gen] gauntlet returned", gRes.status);
+        }
+      } catch (e) {
+        console.warn("[image-gen] gauntlet shim failed:", e);
+      }
+    }
+
     for (const modelId of chain) {
       try {
         const resp = await fetch(GATEWAY_URL, {
