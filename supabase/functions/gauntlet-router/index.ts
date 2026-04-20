@@ -28,6 +28,8 @@ const STONES: Record<string, Stone> = {
   higgsfield: { provider: "higgsfield", defaultModel: "higgsfield-ai/dop/standard",     reasoning: 0,  vision: 0,  image: 9,  video: 10, speed: 6, cost: 2, maxCtx: 32_000 },
 };
 
+const SYSTEM_STONES = ["lovable", "openai", "gemini", "higgsfield"] as const;
+
 // ─────────── Scoring function ───────────
 type Needs = {
   modality?: "text" | "vision" | "image_gen" | "video_gen" | "audio";
