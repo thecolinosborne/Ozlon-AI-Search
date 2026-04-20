@@ -1,52 +1,74 @@
 
-You approved Tool Sectioning v1, which delivered **failure isolation + domain telemetry** but kept all 259 tools in a single file and still loads them all per turn. The big wins from the original plan are still on the table:
+Executing **A then C**: physical file split first, then fix the two audit failures.
 
-## What's done
-- Schema validator drops malformed tools instead of killing the whole toolset
-- Per-request domain logging (visibility into what's loaded)
-- All 259 tools currently valid
+## Phase A: Tool Sectioning v3 — Physical File Split
 
-## What's NOT done (the actual token/accuracy wins)
-- Tools still live in one 8,090-line file (no physical sectioning)
-- Router still doesn't gate by domain — every turn ships all 259 tools to the model
-- No per-domain failure isolation at load time
+Split the 8,090-line `supabase/functions/chat/index.ts` into a domain-organized module tree. Zero behavior change — registry produces the same `ACTION_TOOLS` array v2 already gates on.
 
-## Recommended next step: Tool Sectioning v2 — Router-Gated Loading
-
-This is the high-impact half of the original plan:
-
-**1. Tag every tool with a domain** (in-place, no file split yet)
-```ts
-{ name: 'gmail_search', domain: 'google-workspace', ... }
+### New structure
 ```
-8 domains: `google-workspace`, `google-marketing`, `crm`, `projects`, `finance`, `memory`, `creative`, `system`
-
-**2. Extend Infinity Router classification** to emit `domains: string[]`
-Cheap Gemini Flash call already runs — add one field to its output.
-
-**3. Gate `getValidatedTools()` by domain**
-```ts
-const domains = classification.domains ?? ALL_DOMAINS; // fallback = current behavior
-const tools = validatedTools.filter(t => 
-  t.domain === 'system' || domains.includes(t.domain)
-);
+supabase/functions/chat/
+  ├── index.ts                 (orchestrator, ~800 lines: serve handler, streaming, router wiring)
+  ├── tools/
+  │   ├── registry.ts          (loads all domains, runs validator, exports getValidatedTools)
+  │   ├── types.ts             (ToolDef, Domain, Handler types)
+  │   ├── google-workspace.ts  (gmail, calendar, drive, docs, sheets, slides)
+  │   ├── google-marketing.ts  (gsc, ga4, tag-manager, youtube)
+  │   ├── crm.ts               (gohighlevel — largest domain)
+  │   ├── projects.ts          (clickup, work_tasks)
+  │   ├── finance.ts           (plaid)
+  │   ├── memory.ts            (knowledge, wisdom, save_memory)
+  │   ├── creative.ts          (descript, higgsfield, image-gen, video-gen, viral-creative)
+  │   └── system.ts            (web_search, time, user_context — always-on)
+  └── handlers/
+      └── (one file per domain mirroring tools/, exports a handler map)
 ```
 
-**4. Safety net**: if router confidence < 0.5 OR classification fails → load all domains (current behavior). Zero regression risk.
+### Each domain file shape
+```ts
+// tools/google-workspace.ts
+export const domain = 'google-workspace' as const;
+export const tools: ToolDef[] = [ /* gmail_search, calendar_create, ... */ ];
 
-### Expected impact
-- ~60-70% fewer tool tokens per turn (259 → ~30-50 typical)
-- Better model tool-selection accuracy (smaller menu)
-- Faster first-token latency
-- Foundation for v3 (physical file split) later, only if needed
+// handlers/google-workspace.ts
+export const handlers: Record<string, ToolHandler> = {
+  gmail_search: async (args, ctx) => { ... },
+  ...
+};
+```
 
-### Out of scope
-- No file split (defer until v2 proves the gating works)
+### Registry
+```ts
+// tools/registry.ts
+import * as gw from './google-workspace.ts';
+import * as crm from './crm.ts';
+// ...
+const ALL = [gw, crm, /* ... */];
+export const ACTION_TOOLS = ALL.flatMap(d => d.tools.map(t => ({ ...t, domain: d.domain })));
+export const HANDLERS = Object.assign({}, ...ALL.map(d => d.handlers));
+```
+
+`getValidatedTools()` and the v2 domain-gating logic stay in `index.ts` and consume `ACTION_TOOLS` from the registry. **No logic changes** — purely a file move.
+
+### Risk controls
+- Move tools one domain at a time, deploy + smoke-test between each
+- Keep validator on; if any domain file has a syntax error it isolates to that domain
+- Compare tool count before/after at each step (must stay 259)
+
+## Phase C: Fix audit FAILs (after A is green)
+1. **ClickUp `create_task`** — register the missing tool entry in `tools/projects.ts` and wire its handler
+2. **Soft-delete sync** — when a `work_task` is deleted, exclude it from chat session context queries (filter `deleted_at IS NULL`)
+
+## Out of scope
+- No router changes (v2 stays)
+- No new tools beyond ClickUp `create_task`
 - No UI changes
-- No new tools
-- No handler changes
 
-### Files touched
-- `supabase/functions/chat/index.ts` — add `domain` field to each tool entry, update `getValidatedTools()` to accept a domain filter, wire router output into the call site
+## Files touched
+- `supabase/functions/chat/index.ts` (shrinks dramatically)
+- `supabase/functions/chat/tools/*.ts` (new)
+- `supabase/functions/chat/handlers/*.ts` (new)
+- `supabase/functions/chat/tools/projects.ts` (Phase C: add create_task)
+- Chat context query (Phase C: filter deleted tasks)
 
-Approve and I execute.
+Approve and I execute Phase A first, verify, then Phase C.
