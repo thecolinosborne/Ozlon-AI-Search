@@ -4,6 +4,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { streamChat, type Message } from '@/services/chatService';
+import { toast } from 'sonner';
 
 export type ThreadKind = 'chat' | 'task' | 'both';
 export type TaskStatus = 'awaiting_user' | 'working' | 'scheduled' | 'blocked' | 'done';
