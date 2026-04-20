@@ -8554,13 +8554,16 @@ Execute these in order. Be decisive — the user has already been shown this pla
               })}\n\n`));
             } catch { /* best-effort */ }
 
+            // Emit orchestration trace before DONE so the client can attach it to the message
+            await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
 
-            // Fire-and-forget: post-turn memory extraction + telemetry
+            // Fire-and-forget: post-turn memory extraction + recurrence updates + telemetry
             if (wisdomUserId) {
               extractPostTurnMemories(messages, result.content, wisdomUserId).catch(e =>
                 console.error('[PostTurnMemory] Error:', e)
               );
+              updateWisdomRecurrence(result.content || '').catch(() => {});
               try {
                 const { createClient: ccLog } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 const adminLog = ccLog(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
