@@ -823,6 +823,7 @@ export type Database = {
           created_at: string
           entry_count: number
           id: string
+          is_active: boolean
           person: string
           title: string
           type: string
@@ -832,6 +833,7 @@ export type Database = {
           created_at?: string
           entry_count?: number
           id?: string
+          is_active?: boolean
           person: string
           title: string
           type?: string
@@ -841,6 +843,7 @@ export type Database = {
           created_at?: string
           entry_count?: number
           id?: string
+          is_active?: boolean
           person?: string
           title?: string
           type?: string

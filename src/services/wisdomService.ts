@@ -136,13 +136,31 @@ export const wisdomService = {
   async getSources() {
     const { data, error } = await supabase
       .from("knowledge_sources")
-      .select("id, person, title, type, entry_count, created_at")
+      .select("id, person, title, type, entry_count, created_at, is_active")
       .order("created_at", { ascending: false });
     if (error) {
       console.error("getSources error:", error);
       return [];
     }
     return data || [];
+  },
+
+  async setSourceActive(sourceId: string, isActive: boolean) {
+    const { error } = await supabase
+      .from("knowledge_sources")
+      .update({ is_active: isActive })
+      .eq("id", sourceId);
+    return !error;
+  },
+
+  async getActiveSourceCount(): Promise<{ active: number; total: number }> {
+    const [activeRes, totalRes] = await Promise.all([
+      supabase
+        .from("knowledge_sources")
+        .select("id", { count: "exact", head: true }).eq("is_active", true),
+      supabase.from("knowledge_sources").select("id", { count: "exact", head: true }),
+    ]);
+    return { active: activeRes.count || 0, total: totalRes.count || 0 };
   },
 
   async getEntries(sourceId?: string) {
