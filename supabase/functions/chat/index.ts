@@ -7990,11 +7990,35 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
     }
 
     // ================================================================
-    // WISDOM ENGINE — Multi-source context injection
+    // WISDOM ENGINE — Multi-source context injection + orchestration signal
     // Searches: knowledge entries, wisdom memories, reflection notes
+    // Filters by knowledge_sources.is_active (plug-state).
+    // Produces a structured wisdom_signal used by tool prioritization
+    // and emitted as orchestration_trace at the end of the turn.
     // ================================================================
     const OPENAI_KEY_FOR_EMBED = Deno.env.get('OPENAI_API_KEY');
     let wisdomUserId: string | null = null;
+    type WisdomSignal = {
+      resonant_sources: Array<{ id: string; person: string; title: string; similarity: number }>;
+      dominant_domains: string[];
+      framework_hits: string[];
+      memory_hits: number;
+      reflection_hits: number;
+      confidence: number;
+    };
+    let wisdomSignal: WisdomSignal = {
+      resonant_sources: [],
+      dominant_domains: [],
+      framework_hits: [],
+      memory_hits: 0,
+      reflection_hits: 0,
+      confidence: 0,
+    };
+    let frameworksInjected: Array<{ id: string; title: string }> = [];
+    let memoriesInjected: Array<{ id: string; summary: string }> = [];
+    let reflectionsInjected: Array<{ id: string; type: string }> = [];
+    let knowledgeIdsForRecurrence: string[] = [];
+    let memoryIdsForRecurrence: string[] = [];
 
     if (OPENAI_KEY_FOR_EMBED) {
       try {
@@ -8030,12 +8054,23 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
                 const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+                // Plug-state: which sources are active for this user?
+                const { data: activeSources } = await adminClient
+                  .from('knowledge_sources')
+                  .select('id, person, title')
+                  .eq('user_id', wisdomUserId)
+                  .eq('is_active', true);
+                const activeSourceIds = new Set((activeSources || []).map((s: { id: string }) => s.id));
+                const sourceLookup = new Map<string, { person: string; title: string }>(
+                  (activeSources || []).map((s: { id: string; person: string; title: string }) => [s.id, { person: s.person, title: s.title }])
+                );
+
                 // Run all three searches in parallel
                 const [knowledgeRes, memoriesRes, reflectionsRes] = await Promise.all([
                   adminClient.rpc('match_knowledge', {
                     query_embedding: JSON.stringify(queryEmbedding),
                     match_threshold: 0.45,
-                    match_count: 8,
+                    match_count: 16, // overscan; we'll filter by plug-state
                     filter_user_id: wisdomUserId,
                     filter_domain: null,
                     filter_category: null,
@@ -8056,47 +8091,112 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
                   }),
                 ]);
 
-                // Inject knowledge
-                const knowledgeResults = knowledgeRes.data || [];
-                if (knowledgeResults.length > 0) {
-                  const injection = knowledgeResults.map((k: { source_person: string; title: string; content: string; category: string; domain: string; similarity: number }) =>
-                    `**${k.title}** (${k.source_person} - ${k.category}/${k.domain}, relevance: ${(k.similarity * 100).toFixed(0)}%)\n${k.content}`
+                // Hydrate knowledge with source_id (RPC doesn't return it)
+                let activeKnowledge: Array<{ id: string; source_id: string | null; source_person: string; title: string; content: string; category: string; domain: string; similarity: number; recurrence_count?: number }> = [];
+                const allHits = (knowledgeRes.data || []) as Array<{ id: string; source_person: string; title: string; content: string; category: string; domain: string; similarity: number }>;
+                if (allHits.length > 0) {
+                  const hitIds = allHits.map((k) => k.id);
+                  const { data: hitRows } = await adminClient
+                    .from('knowledge_entries')
+                    .select('id, source_id')
+                    .in('id', hitIds);
+                  const meta = new Map<string, { source_id: string | null }>(
+                    ((hitRows || []) as Array<{ id: string; source_id: string | null }>).map((r) => [r.id, { source_id: r.source_id }])
+                  );
+                  // Filter by plug-state (entries without a source_id are always allowed — legacy)
+                  activeKnowledge = allHits
+                    .map((k) => {
+                      const m = meta.get(k.id);
+                      return { ...k, source_id: m?.source_id ?? null };
+                    })
+                    .filter((k) => !k.source_id || activeSourceIds.has(k.source_id))
+                    .sort((a, b) => b.similarity - a.similarity)
+                    .slice(0, 8);
+                }
+
+                // ── Build wisdom_signal ──────────────────────────────────
+                const domainCounts = new Map<string, number>();
+                const frameworkSet = new Set<string>();
+                for (const k of activeKnowledge) {
+                  domainCounts.set(k.domain, (domainCounts.get(k.domain) || 0) + 1);
+                  if (k.category === 'framework' || k.category === 'frameworks') {
+                    frameworkSet.add(k.title);
+                  }
+                }
+                const dominantDomains = [...domainCounts.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 3)
+                  .map(([d]) => d);
+                const resonantSources: Array<{ id: string; person: string; title: string; similarity: number }> = [];
+                const seenSourceIds = new Set<string>();
+                for (const k of activeKnowledge) {
+                  if (k.source_id && !seenSourceIds.has(k.source_id)) {
+                    const s = sourceLookup.get(k.source_id);
+                    if (s) {
+                      resonantSources.push({ id: k.source_id, person: s.person, title: s.title, similarity: k.similarity });
+                      seenSourceIds.add(k.source_id);
+                    }
+                  }
+                }
+                const memoryResults = (memoriesRes.data || []) as Array<{ id: string; memory_type: string; content: string; summary: string; confidence: number }>;
+                const reflectionResults = (reflectionsRes.data || []) as Array<{ id: string; note_type: string; content: string; importance: number }>;
+                const avgSim = activeKnowledge.length > 0
+                  ? activeKnowledge.reduce((s, k) => s + k.similarity, 0) / activeKnowledge.length
+                  : 0;
+                wisdomSignal = {
+                  resonant_sources: resonantSources.slice(0, 5),
+                  dominant_domains: dominantDomains,
+                  framework_hits: [...frameworkSet].slice(0, 5),
+                  memory_hits: memoryResults.length,
+                  reflection_hits: reflectionResults.length,
+                  confidence: Number(avgSim.toFixed(2)),
+                };
+
+                knowledgeIdsForRecurrence = activeKnowledge.map((k) => k.id);
+                memoryIdsForRecurrence = memoryResults.map((m) => m.id);
+
+                // ── Inject STRUCTURED wisdom blocks ──────────────────────
+                const frameworkEntries = activeKnowledge.filter((k) => k.category === 'framework' || k.category === 'frameworks');
+                const principleEntries = activeKnowledge.filter((k) => !(k.category === 'framework' || k.category === 'frameworks'));
+
+                if (frameworkEntries.length > 0) {
+                  const block = frameworkEntries.map((k) =>
+                    `- **${k.title}** — ${k.source_person} (${k.domain}, ${(k.similarity * 100).toFixed(0)}%) [src:${k.id}]\n  ${k.content}`
                   ).join('\n\n');
-                  systemPrompt += `\n\n===========================================================
-KNOWLEDGE REPOSITORY - RELEVANT WISDOM
-===========================================================
-Apply these frameworks naturally when giving advice.\n\n${injection}`;
-                  console.log(`Injected ${knowledgeResults.length} knowledge entries`);
+                  systemPrompt += `\n\n## Active Frameworks\nApply these by name when relevant. Cite them explicitly in your reasoning.\n\n${block}`;
+                  frameworksInjected = frameworkEntries.map((k) => ({ id: k.id, title: k.title }));
+                  console.log(`[Wisdom] ${frameworkEntries.length} frameworks injected`);
                 }
 
-                // Inject memories
-                const memoryResults = memoriesRes.data || [];
+                if (principleEntries.length > 0) {
+                  const block = principleEntries.map((k) =>
+                    `- **${k.title}** — ${k.source_person}/${k.category} (${(k.similarity * 100).toFixed(0)}%) [src:${k.id}]\n  ${k.content}`
+                  ).join('\n\n');
+                  systemPrompt += `\n\n## Relevant Principles\nDraw on these when shaping advice; attribute when material.\n\n${block}`;
+                  console.log(`[Wisdom] ${principleEntries.length} principles injected`);
+                }
+
                 if (memoryResults.length > 0) {
-                  const injection = memoryResults.map((m: { memory_type: string; content: string; summary: string; confidence: number }) =>
-                    `[${m.memory_type}] ${m.summary || m.content} (confidence: ${(m.confidence * 100).toFixed(0)}%)`
+                  const block = memoryResults.map((m) =>
+                    `- [${m.memory_type}] ${m.summary || m.content} (${(m.confidence * 100).toFixed(0)}%) [mem:${m.id}]`
                   ).join('\n');
-                  systemPrompt += `\n\n===========================================================
-LIVING MEMORY - WHAT I KNOW ABOUT THIS USER
-===========================================================
-These are durable facts, preferences, and patterns I've learned about the user. Use them to personalize responses. Distinguish between known memory and inference.\n\n${injection}`;
-                  console.log(`Injected ${memoryResults.length} memories`);
-
-                  // Update last_accessed_at for matched memories
-                  const memIds = memoryResults.map((m: { id: string }) => m.id);
-                  adminClient.from('wisdom_memories').update({ last_accessed_at: new Date().toISOString() }).in('id', memIds).then(() => {});
+                  systemPrompt += `\n\n## Personal Memories\nGround truth about this user. **If a Personal Memory contradicts a Framework, the Memory wins.**\n\n${block}`;
+                  memoriesInjected = memoryResults.map((m) => ({ id: m.id, summary: m.summary || m.content.slice(0, 80) }));
+                  console.log(`[Wisdom] ${memoryResults.length} memories injected`);
+                  adminClient.from('wisdom_memories').update({ last_accessed_at: new Date().toISOString() }).in('id', memoryIdsForRecurrence).then(() => {});
                 }
 
-                // Inject reflections
-                const reflectionResults = reflectionsRes.data || [];
                 if (reflectionResults.length > 0) {
-                  const injection = reflectionResults.map((r: { note_type: string; content: string; importance: number }) =>
-                    `[${r.note_type}] ${r.content}`
+                  const block = reflectionResults.map((r) =>
+                    `- [${r.note_type}] ${r.content} [ref:${r.id}]`
                   ).join('\n');
-                  systemPrompt += `\n\n===========================================================
-REFLECTION LAYER - SYNTHESIZED INSIGHTS
-===========================================================
-These are patterns and lessons distilled from past conversations.\n\n${injection}`;
-                  console.log(`Injected ${reflectionResults.length} reflections`);
+                  systemPrompt += `\n\n## Reflections\nPrior synthesized insights. Treat as prior conclusions, refine if new evidence contradicts.\n\n${block}`;
+                  reflectionsInjected = reflectionResults.map((r) => ({ id: r.id, type: r.note_type }));
+                  console.log(`[Wisdom] ${reflectionResults.length} reflections injected`);
+                }
+
+                if (wisdomSignal.framework_hits.length > 0 || wisdomSignal.dominant_domains.length > 0) {
+                  console.log(`[Wisdom] Signal — domains=[${wisdomSignal.dominant_domains.join(',')}] frameworks=[${wisdomSignal.framework_hits.join(',')}] confidence=${wisdomSignal.confidence}`);
                 }
               }
             }
@@ -8106,6 +8206,106 @@ These are patterns and lessons distilled from past conversations.\n\n${injection
         console.error('Wisdom Engine injection error:', e);
       }
     }
+
+    // ================================================================
+    // WISDOM-AWARE TOOL PRIORITIZATION
+    // Reorder availableTools so domain-relevant tools appear first.
+    // ================================================================
+    let toolsReordered = false;
+    if (availableTools.length > 0 && wisdomSignal.dominant_domains.length > 0) {
+      const domainToToolPrefixes: Record<string, string[]> = {
+        marketing: ['ghl_', 'higgsfield_', 'send_email', 'create_email_draft'],
+        sales: ['ghl_', 'create_calendar_event', 'send_email'],
+        ops: ['create_work_task', 'clickup_', 'calendar_', 'sheets_', 'docs_'],
+        productivity: ['calendar_', 'sheets_', 'docs_', 'drive_', 'create_work_task'],
+        creative: ['higgsfield_', 'descript_', 'upload_youtube_video', 'video_'],
+        seo: ['gsc_', 'analytics_', 'web_search_google'],
+        finance: ['plaid_'],
+        memory: ['save_memory', 'add_standing_order', 'add_goal'],
+      };
+      const prefixSet = new Set<string>();
+      for (const d of wisdomSignal.dominant_domains) {
+        const prefixes = domainToToolPrefixes[d.toLowerCase()];
+        if (prefixes) prefixes.forEach((p) => prefixSet.add(p));
+      }
+      if (prefixSet.size > 0) {
+        const before = availableTools.map((t) => t.function.name);
+        availableTools.sort((a, b) => {
+          const aHit = [...prefixSet].some((p) => a.function.name.startsWith(p) || a.function.name === p) ? 0 : 1;
+          const bHit = [...prefixSet].some((p) => b.function.name.startsWith(p) || b.function.name === p) ? 0 : 1;
+          return aHit - bHit;
+        });
+        const after = availableTools.map((t) => t.function.name);
+        toolsReordered = before.join(',') !== after.join(',');
+        if (toolsReordered) {
+          console.log(`[Wisdom] Tools reordered for domains [${wisdomSignal.dominant_domains.join(',')}]`);
+        }
+      }
+    }
+
+    // Build orchestration trace event payload (emitted later in stream)
+    const orchestrationTrace = {
+      intent: routerClassification?.intent || null,
+      domains: routerClassification?.domains || [],
+      agent_chosen: routerClassification?.intent || 'general',
+      wisdom_signal: wisdomSignal,
+      frameworks_injected: frameworksInjected,
+      memories_injected: memoriesInjected,
+      reflections_injected: reflectionsInjected,
+      tools_reordered: toolsReordered,
+      router_path: infinityDebug?.path || null,
+    };
+
+    // Helper: post-turn recurrence updates (gravitational compounding).
+    const updateWisdomRecurrence = async (replyText: string) => {
+      if (!wisdomUserId) return;
+      try {
+        const supabaseUrl2 = Deno.env.get('SUPABASE_URL')!;
+        const serviceRoleKey2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const adminClient = createClient(supabaseUrl2, serviceRoleKey2);
+
+        const cited = new Set<string>();
+        const memCited = new Set<string>();
+        for (const m of replyText.matchAll(/\[src:([0-9a-f-]{8,})\]/gi)) cited.add(m[1]);
+        for (const m of replyText.matchAll(/\[mem:([0-9a-f-]{8,})\]/gi)) memCited.add(m[1]);
+        // Touch all injected entries as "considered" — softer pull
+        const lower = replyText.toLowerCase();
+        for (const k of knowledgeIdsForRecurrence) {
+          // Only count knowledge entries whose framework name was actually mentioned
+          const f = frameworksInjected.find((f) => f.id === k);
+          if (f && lower.includes(f.title.toLowerCase())) cited.add(k);
+        }
+
+        const nowIso = new Date().toISOString();
+        if (cited.size > 0) {
+          const { data: rows } = await adminClient
+            .from('knowledge_entries')
+            .select('id, recurrence_count')
+            .in('id', [...cited]);
+          await Promise.all(((rows || []) as Array<{ id: string; recurrence_count: number | null }>).map((r) =>
+            adminClient.from('knowledge_entries').update({
+              recurrence_count: (r.recurrence_count || 0) + 1,
+              last_accessed_at: nowIso,
+            }).eq('id', r.id)
+          ));
+        }
+        if (memCited.size > 0) {
+          const { data: mrows } = await adminClient
+            .from('wisdom_memories')
+            .select('id, recurrence_count')
+            .in('id', [...memCited]);
+          await Promise.all(((mrows || []) as Array<{ id: string; recurrence_count: number | null }>).map((r) =>
+            adminClient.from('wisdom_memories').update({
+              recurrence_count: (r.recurrence_count || 0) + 1,
+              last_accessed_at: nowIso,
+            }).eq('id', r.id)
+          ));
+        }
+      } catch (e) {
+        console.error('[Wisdom] recurrence update error:', e);
+      }
+    };
 
     // ================================================================
     // SENTIENT WORKER — Identity Layer
