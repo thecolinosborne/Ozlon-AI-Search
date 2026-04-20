@@ -504,10 +504,6 @@ const ModelRouting = () => {
                             href={p.console_url}
                             target="_blank"
                             rel="noreferrer"
-                          <a
-                            href={p.console_url}
-                            target="_blank"
-                            rel="noreferrer"
                             title="Some providers offer free tiers (Gemini), others charge per-token after signup."
                             className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
                           >
