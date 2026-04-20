@@ -63,33 +63,37 @@ export function ArtifactRenderer({ artifact, isLatest, onRevise }: Props) {
   if (isDocument) {
     return (
       <div className={cn(
-        "rounded-2xl bg-card border shadow-sm overflow-hidden transition-opacity",
+        "relative rounded-2xl border shadow-sm overflow-hidden transition-opacity",
+        "bg-gradient-to-b from-card to-card/95 ring-1 ring-border/20",
+        "print:bg-white print:text-black print:ring-0 print:shadow-none print:border-0",
         isLatest ? "border-border/50" : "border-border/30 opacity-70"
       )}>
-        <div className="px-8 sm:px-10 pt-8 sm:pt-10 pb-6">
+        {/* Editorial accent bar */}
+        <div className="h-[3px] w-full bg-gradient-to-r from-primary/40 via-primary/20 to-transparent print:hidden" />
+
+        <div className="px-8 sm:px-14 pt-10 sm:pt-14 pb-8 sm:pb-10">
           {artifact.title && (
-            <div className="border-b border-border/30 pb-4 mb-6">
-              <h1 className="text-2xl sm:text-[1.65rem] font-semibold tracking-tight text-foreground leading-tight">
+            <div className="border-b border-border/30 pb-5 mb-8">
+              {/* Eyebrow metadata strip */}
+              <div className="flex items-center gap-2 mb-4 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <span>{typeLabel[artifact.type] ?? artifact.type}</span>
+                <span className="opacity-40">·</span>
+                <span>v{artifact.version}</span>
+                {createdDate && (<><span className="opacity-40">·</span><span>{createdDate}</span></>)}
+                {!isLatest && (<><span className="opacity-40">·</span><span className="opacity-70">superseded</span></>)}
+              </div>
+              <h1 className="text-[2rem] sm:text-[2.25rem] font-bold tracking-tight text-foreground leading-[1.15]">
                 {artifact.title}
               </h1>
-              <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
-                <Badge variant="outline" className="text-[10px] font-medium">
-                  {typeLabel[artifact.type] ?? artifact.type}
-                </Badge>
-                <span>·</span>
-                <span>v{artifact.version}</span>
-                {createdDate && (<><span>·</span><span>{createdDate}</span></>)}
-                {!isLatest && (<><span>·</span><span className="opacity-70">superseded</span></>)}
-              </div>
             </div>
           )}
-          <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none">
+          <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none prose-document">
             {renderBody(artifact)}
           </div>
         </div>
 
         {isLatest && (
-          <div className="flex flex-wrap gap-2 px-6 sm:px-8 py-3 border-t border-border/30 bg-muted/10">
+          <div className="flex flex-wrap gap-2 px-6 sm:px-8 py-3 border-t border-border/30 bg-muted/10 print:hidden">
             <Button size="sm" variant="ghost" onClick={copy}>
               <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
             </Button>

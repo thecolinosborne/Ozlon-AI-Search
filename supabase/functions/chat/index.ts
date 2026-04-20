@@ -6315,6 +6315,59 @@ Produce a real, intentional deliverable. Use this skeleton:
 - Drop the metadata line if irrelevant — but keep title, subtitle, exec summary, sections, closing
 - Aim for substance over length. Every section earns its place.
 
+— VISUAL CRAFT (typography & polish) —
+- **Bold** key terms, names, numbers, dollar amounts — never bold whole sentences
+- *Italics* for emphasis, foreign terms, titles of works, and subtle asides
+- Use H4 (\`####\`) as EYEBROW LABELS above sections (e.g. \`#### OVERVIEW\`, \`#### KEY FINDINGS\`, \`#### RISK\`) — they auto-render small uppercase
+- Use \`>\` blockquotes ONLY for a genuine pull-quote or notable insight (max 1–2 per document) — never for plain prose
+- Use \`---\` horizontal rules to separate major document phases (intro → analysis → recommendation)
+- ALWAYS use tables for any 2+ option comparison; never bullet-list a comparison
+- End every document with a single-sentence *italic closing thought* below Recommendations
+
+— APPROVED PROFESSIONAL GLYPHS (use sparingly, max ~5 per document) —
+Allowed only as section accents or callout markers:
+  ◆ ▸ ▪   neutral structural markers
+  ✓ ✗     verification / pass-fail
+  → ⇢     flow / next steps
+  ★       single highlighted recommendation
+  ⚠       risk or caution callout
+BANNED — never output: 😀 🎉 🚀 💡 🔥 ✨ 👍 💪 ❤️ or ANY colored / cartoon / smiley / hand emoji. They destroy professionalism.
+
+— WORKED EXAMPLE (Strategy Memo) —
+\`\`\`
+# Launching the Pro Tier
+*A pricing and positioning play to capture our top 8% of users without alienating the free base.*
+
+**Date:** 2026-04-20 · **For:** Leadership · **Purpose:** Decide go/no-go on Pro tier launch
+
+#### OVERVIEW
+## Executive Summary
+Our top users already pay competitors $20–$40/mo for capabilities we ship for free. A **$19/mo Pro tier** captures roughly **$340K ARR** in year one with minimal churn risk. Recommend launch in Q3.
+
+## Situation
+Free tier usage is healthy but monetization is flat. The top 8% of accounts generate **62% of session volume** yet contribute zero revenue.
+
+## Options
+
+| Option | Price | Year-1 ARR | Risk |
+| --- | --- | --- | --- |
+| Hold (free only) | — | $0 | Competitor erosion |
+| Pro tier | $19/mo | ~$340K | Minor free-tier confusion |
+| Premium only | $49/mo | ~$180K | Adoption ceiling |
+
+> The cost of *not* monetizing power users is no longer hypothetical — it's measurable churn to paid alternatives.
+
+#### RECOMMENDATION
+## Next Steps
+1. ★ Ship Pro tier at **$19/mo** — Product, by Aug 1
+2. → Migrate 3 power-user features behind the paywall — Eng, by Jul 15
+3. ⚠ Prepare comms plan for free-tier users — Marketing, by Jul 20
+
+---
+
+*A clear price beats a clever one — ship simple, iterate on signal.*
+\`\`\`
+
 — LIGHTWEIGHT TEMPLATES (pick the closest fit) —
 • Brief        → Title · Background · Goal · Audience · Key Messages · Deliverables · Timeline · Success Metrics
 • Plan         → Title · Objective · Strategy · Phases (table) · Risks · Owners · Next Steps
