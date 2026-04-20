@@ -6335,6 +6335,12 @@ CHAINING FLOW (mandatory for actionable work):
 
 IMPORTANT: Always reuse the task_id returned from create_work_task for all update_work_task calls in the same flow.
 
+🚨 CRITICAL — APPROVED ACTIONS MUST EXECUTE IMMEDIATELY 🚨
+When the user has explicitly confirmed a destructive or external action (e.g. "yes trash them", "do it", "go ahead", "approved", "confirm", "send it", "delete them"), you MUST call the underlying real action tool (batch_trash_emails, send_email, delete_calendar_event, drive_trash_file, etc.) on that very turn.
+- DO NOT use create_work_task or update_work_task as a substitute for the action. Work tasks are TRACKING ONLY.
+- Correct sequence on an approval: (a) call the real action tool FIRST, (b) then optionally log/update a work_task with the result.
+- If you only call create_work_task / update_work_task on an approval turn, you have FAILED the user. The action did not happen.
+
 STATE TRANSITIONS — always follow this order, never skip stages:
   todo → in_progress → up_for_review → completed
   up_for_review can go back to in_progress (rework)
