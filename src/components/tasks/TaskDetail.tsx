@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Badge } from '@/components/ui/badge';
 import { ThreadView } from '@/components/threads/ThreadView';
 import { WorkTask, TaskStatus, TaskPriority, STATUS_LABELS, STATUS_ORDER } from '@/hooks/useWorkTasks';
-import { Archive, ArchiveRestore, Check, ChevronDown, MessageSquare } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, ChevronDown, MessageSquare, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -21,9 +21,10 @@ interface TaskDetailProps {
   onArchive: (id: string) => void;
   onUnarchive: (id: string) => void;
   onMarkDone: (id: string) => Promise<boolean> | void;
+  onSoftDelete: (id: string) => Promise<boolean> | void;
 }
 
-export function TaskDetail({ task, open, onClose, onUpdate, onArchive, onUnarchive, onMarkDone }: TaskDetailProps) {
+export function TaskDetail({ task, open, onClose, onUpdate, onArchive, onUnarchive, onMarkDone, onSoftDelete }: TaskDetailProps) {
   const navigate = useNavigate();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
@@ -87,6 +88,12 @@ export function TaskDetail({ task, open, onClose, onUpdate, onArchive, onUnarchi
     if (ok !== false) onClose();
   };
 
+  const handleDelete = async () => {
+    if (!confirm('Move this task to trash? You can restore it within 30 days.')) return;
+    const ok = await onSoftDelete(task.id);
+    if (ok !== false) onClose();
+  };
+
   const handleOpenInChat = () => {
     if (!threadId) { toast.error('Thread not ready'); return; }
     navigate(`/?session=${threadId}`);
@@ -126,6 +133,9 @@ export function TaskDetail({ task, open, onClose, onUpdate, onArchive, onUnarchi
               </Button>
               <Button size="sm" onClick={handleMarkDone} className="gap-1.5">
                 <Check className="w-3.5 h-3.5" /> Mark done
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDelete} className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10" aria-label="Delete task">
+                <Trash2 className="w-3.5 h-3.5" />
               </Button>
             </div>
           </div>

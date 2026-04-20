@@ -132,7 +132,7 @@ function TasksWorkspace() {
   const {
     tasks, loading, error, fetchTasks,
     createTask, updateTask, runTaskWithAI,
-    archiveTask, unarchiveTask, markDone,
+    archiveTask, unarchiveTask, markDone, softDelete,
   } = useWorkTasks();
 
   const [activeView, setActiveView] = useState<TaskView>('board');
@@ -264,6 +264,7 @@ function TasksWorkspace() {
         onArchive={archiveTask}
         onUnarchive={unarchiveTask}
         onMarkDone={markDone}
+        onSoftDelete={softDelete}
       />
       <CreateTaskDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreate={handleCreate} />
     </div>
