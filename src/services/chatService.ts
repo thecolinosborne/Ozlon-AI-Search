@@ -165,6 +165,7 @@ export interface StreamChatOptions {
   onInfinityDebug?: (data: InfinityRouterDebugEvent) => void;
   onProviderUsed?: (data: ProviderUsedEvent) => void;
   onToolsUsed?: (data: ToolsUsedEvent) => void;
+  onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -189,6 +190,7 @@ export async function streamChat({
   onInfinityDebug,
   onProviderUsed,
   onToolsUsed,
+  onOrchestrationTrace,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -326,6 +328,12 @@ export async function streamChat({
           // Handle tools_used events (which tools the agent invoked)
           if (currentEventType === 'tools_used' && onToolsUsed) {
             onToolsUsed(parsed as ToolsUsedEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle orchestration_trace events (wisdom signal + routing decisions)
+          if (currentEventType === 'orchestration_trace' && onOrchestrationTrace) {
+            onOrchestrationTrace(parsed as OrchestrationTraceEvent);
             currentEventType = 'message';
             continue;
           }

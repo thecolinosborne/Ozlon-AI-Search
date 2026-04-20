@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@/hooks/useChatStream";
 import { RoutingChip } from "./RoutingChip";
+import { KnowledgeChip } from "./KnowledgeChip";
 
 // Auto-link bare URLs (http/https/www.) that aren't already inside a markdown link.
 const linkifyPlainUrls = (text: string): string => {
@@ -84,8 +85,8 @@ export const ChatMessageList = ({
                       <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
                     </span>
                   )}
-                  {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0)) && (
-                    <div className="mt-2 not-prose">
+                  {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0) || message.orchestration) && (
+                    <div className="mt-2 not-prose flex flex-wrap items-center gap-2">
                       {message.provider ? (
                         <RoutingChip
                           provider={message.provider}
@@ -105,6 +106,9 @@ export const ChatMessageList = ({
                           ))}
                         </div>
                       ) : null}
+                      {message.orchestration && (
+                        <KnowledgeChip orchestration={message.orchestration} />
+                      )}
                     </div>
                   )}
                 </div>

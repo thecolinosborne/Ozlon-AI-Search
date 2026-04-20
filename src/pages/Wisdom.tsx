@@ -18,6 +18,7 @@ type Source = {
   type: string;
   entry_count: number;
   created_at: string;
+  is_active?: boolean;
 };
 
 type Reflection = {
@@ -86,6 +87,31 @@ const Wisdom = () => {
               {counts.sources} sources · {counts.entries} entries · {counts.memories} memories
             </p>
           </div>
+          {(() => {
+            const activeCount = sources.filter((s) => s.is_active !== false).length;
+            const isLive = activeCount > 0;
+            return (
+              <div
+                className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium border ${
+                  isLive
+                    ? "bg-primary/10 border-primary/30 text-primary"
+                    : "bg-muted/40 border-border/40 text-muted-foreground"
+                }`}
+                title={
+                  isLive
+                    ? `${activeCount} source${activeCount === 1 ? "" : "s"} influencing routing & responses`
+                    : "No sources plugged in — orchestration idle"
+                }
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isLive ? "bg-primary animate-pulse" : "bg-muted-foreground/50"
+                  }`}
+                />
+                {isLive ? `Orchestration: Active · ${activeCount} plugged` : "Orchestration: Idle"}
+              </div>
+            );
+          })()}
         </div>
       </header>
 
@@ -108,7 +134,7 @@ const Wisdom = () => {
               </div>
             ) : (
               sources.map((s) => (
-                <SourceCard key={s.id} source={s} onDeleted={reload} />
+                <SourceCard key={s.id} source={s} onDeleted={reload} onChanged={reload} />
               ))
             )}
           </TabsContent>
