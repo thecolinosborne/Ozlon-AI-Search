@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  User,
   Mic,
-  Type,
-  Keyboard,
   LogOut,
   ArrowLeft,
   Edit3,
@@ -15,16 +12,20 @@ import {
   Plug,
   Sparkles,
   Brain,
+  Database,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
+import { SegmentedControl } from "@/components/settings/SegmentedControl";
+import { ProfileHeroCard } from "@/components/settings/ProfileHeroCard";
+import { WisdomLibraryCard } from "@/components/settings/WisdomLibraryCard";
 import { useAppStore } from "@/stores/useAppStore";
 import { supabase } from "@/integrations/supabase/client";
 import { localDb } from "@/services/localDb";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { voiceService, VoiceSettings, OZLON_DEFAULT_VOICE_ID } from "@/services/voiceService";
+import { voiceService, VoiceSettings } from "@/services/voiceService";
 import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,14 +42,10 @@ const Settings = () => {
   const { user: storeUser, updateUser, reset, clearMessages: clearStoreMessages } = useAppStore();
   const { authLoading, session, user: authUser, systemName, signOut, voiceEnabled, setVoiceEnabled } = useAuth();
   const isAuthenticated = !!session && !!authUser;
-  
-  // Profile name state
+
   const [profileName, setProfileName] = useState<string | null>(null);
-  
-  // OS Name state
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [osName, setOsName] = useState(systemName);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(systemName);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [showClearChatDialog, setShowClearChatDialog] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings | null>(null);
@@ -57,32 +54,28 @@ const Settings = () => {
 
   const communicationMode = storeUser?.communicationMode || "both";
 
-  // Sync osName with systemName from auth context
   useEffect(() => {
     setOsName(systemName);
-    setTempName(systemName);
   }, [systemName]);
 
-  // Fetch profile name when user is available
   useEffect(() => {
     if (!authUser) {
       setProfileName(null);
+      setAvatarUrl(null);
       return;
     }
-    
-    const fetchProfileName = async () => {
+    const fetchProfile = async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("full_name")
+        .select("full_name, avatar_url")
         .eq("user_id", authUser.id)
         .maybeSingle();
       setProfileName(data?.full_name || null);
+      setAvatarUrl(data?.avatar_url || null);
     };
-    
-    fetchProfileName();
+    fetchProfile();
   }, [authUser]);
 
-  // Load voice settings when auth changes
   useEffect(() => {
     const loadVoiceSettings = async () => {
       if (!authUser) return;
@@ -90,18 +83,16 @@ const Settings = () => {
         const { settings } = await voiceService.getSettings();
         setVoiceSettings(settings);
       } catch (error) {
-        console.error('Failed to load voice settings:', error);
+        console.error("Failed to load voice settings:", error);
       }
     };
     loadVoiceSettings();
   }, [authUser]);
 
-  // Computed account display values
   const isSignedIn = !!session && !!authUser;
-  const accountLabel = isSignedIn 
-    ? (profileName || authUser?.user_metadata?.full_name || authUser?.email || "User")
+  const displayName = isSignedIn
+    ? profileName || authUser?.user_metadata?.full_name || authUser?.email?.split("@")[0] || "User"
     : "Guest";
-  const accountDescription = isSignedIn ? "Signed in" : "Not signed in";
 
   const handleLogout = async () => {
     reset();
@@ -120,12 +111,9 @@ const Settings = () => {
     }
   };
 
-  const handleCommunicationChange = async (mode: "text" | "voice" | "both") => {
+  const handleCommunicationChange = (mode: "text" | "voice" | "both") => {
     updateUser({ communicationMode: mode });
-    
-    // Persist to localStorage
     localStorage.setItem("ozlon_communication_mode", mode);
-    toast.success(`Communication mode set to ${mode === "both" ? "text and voice" : mode}`);
   };
 
   const handleAutoPlayToggle = async (enabled: boolean) => {
@@ -133,7 +121,7 @@ const Settings = () => {
     setIsLoadingVoice(true);
     try {
       const updated = await voiceService.updateSettings({ auto_play_responses: enabled });
-      setVoiceSettings(prev => prev ? { ...prev, ...updated } : null);
+      setVoiceSettings((prev) => (prev ? { ...prev, ...updated } : null));
       toast.success(enabled ? "Auto-play enabled" : "Auto-play disabled");
     } catch (error) {
       toast.error("Failed to update voice settings");
@@ -147,37 +135,22 @@ const Settings = () => {
     try {
       await voiceService.previewVoice();
     } catch (error) {
-      console.error('Voice preview failed:', error);
+      console.error("Voice preview failed:", error);
       toast.error("Failed to preview voice. Please try again.");
     } finally {
       setIsPreviewingVoice(false);
     }
   };
 
-  const handleSaveOsName = async () => {
-    const trimmedName = tempName.trim();
-    if (!trimmedName) {
-      toast.error("Please enter a name");
-      return;
-    }
-    
-    setOsName(trimmedName);
-    localStorage.setItem("ozlon_system_name", trimmedName);
-    
-    // Also update in database if user is logged in
+  const handleSaveOsName = async (newName: string) => {
+    setOsName(newName);
+    localStorage.setItem("ozlon_system_name", newName);
     if (authUser) {
-      await supabase
-        .from("profiles")
-        .update({ system_name: trimmedName })
-        .eq("user_id", authUser.id);
+      await supabase.from("profiles").update({ system_name: newName }).eq("user_id", authUser.id);
     }
-    
-    setIsEditingName(false);
-    toast.success(`System renamed to ${trimmedName}`);
+    toast.success(`System renamed to ${newName}`);
   };
 
-
-  // Show loading state
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -191,77 +164,100 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 pb-24">
-      {/* Header with Back Button */}
-      <header className="border-b border-border/50 px-4 py-4 safe-area-top">
-        <div className="max-w-2xl mx-auto flex items-center gap-4">
+      {/* Sticky header with backdrop blur */}
+      <header className="sticky top-0 z-40 border-b border-border/40 bg-background/80 backdrop-blur-xl px-4 py-4 safe-area-top">
+        <div className="max-w-2xl mx-auto flex items-center gap-3">
           <button
             onClick={() => navigate("/")}
             className="p-2 hover:bg-muted rounded-full transition-colors"
+            aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-semibold text-foreground">Settings</h1>
-            <p className="text-xs text-muted-foreground">System configuration</p>
+            <p className="text-[11px] text-muted-foreground font-mono uppercase tracking-[0.15em]">
+              System configuration
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/")}
+            className="rounded-full sm:hidden"
+          >
+            Done
+          </Button>
         </div>
       </header>
 
-      <div className="px-4">
-        {/* Account */}
-        <SettingsSection title="Account">
+      <div className="px-4 max-w-2xl mx-auto pt-6">
+        {/* Profile hero */}
+        <ProfileHeroCard
+          isSignedIn={isSignedIn}
+          displayName={displayName}
+          email={authUser?.email}
+          avatarUrl={avatarUrl}
+        />
+
+        {/* Personalization */}
+        <SettingsSection title="Personalization">
           <SettingsRow
-            icon={User}
-            label={accountLabel}
-            description={accountDescription}
-            onClick={() => navigate(isSignedIn ? "/profile" : "/auth")}
+            icon={Edit3}
+            label="Operating System Name"
+            description="Personalize your assistant"
+            type="inline-edit"
+            editValue={osName}
+            onEditSave={handleSaveOsName}
+            editPlaceholder="Enter system name"
+          />
+          <SettingsRow
+            icon={Sparkles}
+            label="AI Identity & Persona"
+            description="How your AI speaks and what it knows about you"
+            onClick={() => navigate("/settings/personality")}
+          />
+          <SettingsRow
+            icon={Brain}
+            label="Brain Stones"
+            description="Stones picked automatically. Swap lobes anytime."
+            onClick={() => navigate("/settings/brain")}
           />
         </SettingsSection>
 
-        {/* Voice Mode */}
-        <SettingsSection title="Communication Mode">
-          <SettingsRow
-            icon={Keyboard}
-            label="Text only"
-            type="toggle"
-            value={communicationMode === "text"}
-            onChange={() => handleCommunicationChange("text")}
-          />
+        {/* Voice & Communication */}
+        <SettingsSection title="Voice & Communication">
           <SettingsRow
             icon={Mic}
-            label="Voice only"
-            type="toggle"
-            value={communicationMode === "voice"}
-            onChange={() => handleCommunicationChange("voice")}
+            label="Communication Mode"
+            description="How you talk with the assistant"
+            type="action"
+            rightSlot={
+              <SegmentedControl
+                value={communicationMode}
+                onChange={handleCommunicationChange}
+                options={[
+                  { value: "text", label: "Text" },
+                  { value: "voice", label: "Voice" },
+                  { value: "both", label: "Both" },
+                ]}
+              />
+            }
           />
-          <SettingsRow
-            icon={Type}
-            label="Text and voice"
-            type="toggle"
-            value={communicationMode === "both"}
-            onChange={() => handleCommunicationChange("both")}
-          />
-        </SettingsSection>
-
-        {/* Voice Conversation */}
-        <SettingsSection title="Voice Conversation">
           <SettingsRow
             icon={Phone}
             label="Enable Voice Features"
-            description={!isAuthenticated ? "Sign in to enable voice conversation" : voiceEnabled ? "Voice output active" : "Turn on to hear AI responses"}
+            description={
+              !isAuthenticated
+                ? "Sign in to enable voice conversation"
+                : voiceEnabled
+                ? "Voice output active"
+                : "Turn on to hear AI responses"
+            }
             type="toggle"
             value={voiceEnabled}
             onChange={setVoiceEnabled}
             disabled={!isAuthenticated}
-          />
-          <SettingsRow
-            icon={Volume2}
-            label="Voice Preview"
-            description="Aria - ElevenLabs voice"
-            type="action"
-            onClick={handlePreviewVoice}
-            actionLabel={isPreviewingVoice ? "Playing..." : "Preview"}
-            disabled={isPreviewingVoice}
           />
           <SettingsRow
             icon={PlayCircle}
@@ -272,25 +268,29 @@ const Settings = () => {
             onChange={handleAutoPlayToggle}
             disabled={isLoadingVoice}
           />
-        </SettingsSection>
-
-        {/* Personality */}
-        <SettingsSection title="Personality">
           <SettingsRow
-            icon={Sparkles}
-            label="AI Identity & Persona"
-            description="Author who your AI is, how it speaks, and what it knows about you"
-            onClick={() => navigate("/settings/personality")}
+            icon={Volume2}
+            label="Voice Preview"
+            description="Aria — ElevenLabs voice"
+            type="action"
+            onClick={handlePreviewVoice}
+            actionLabel={isPreviewingVoice ? "Playing…" : "Preview"}
+            disabled={isPreviewingVoice}
           />
         </SettingsSection>
 
-        {/* The Brain */}
-        <SettingsSection title="The Brain">
+        {/* Wisdom Library — its own featured section */}
+        <SettingsSection title="Wisdom Library" grouped={false}>
+          <WisdomLibraryCard />
+        </SettingsSection>
+
+        {/* Memory */}
+        <SettingsSection title="Memory">
           <SettingsRow
-            icon={Brain}
-            label="Brain Stones"
-            description="Stones picked automatically. Swap lobes anytime."
-            onClick={() => navigate("/settings/brain")}
+            icon={Database}
+            label="Memory Settings"
+            description="What your AI remembers about you"
+            onClick={() => navigate("/settings/memory")}
           />
         </SettingsSection>
 
@@ -304,67 +304,8 @@ const Settings = () => {
           />
         </SettingsSection>
 
-        {/* System */}
-        <SettingsSection title="System">
-          <div className="w-full p-4 rounded-2xl bg-card/60 border border-border/30">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-2.5 rounded-xl bg-muted/60">
-                  <Edit3 className="w-5 h-5 text-foreground/70" strokeWidth={1.5} />
-                </div>
-                <div>
-                  <p className="font-medium text-foreground">Operating System Name</p>
-                  <p className="text-xs text-muted-foreground">Personalize your system</p>
-                </div>
-              </div>
-            </div>
-            
-            {isEditingName ? (
-              <div className="mt-4 flex gap-2">
-                <input
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  placeholder="Enter system name"
-                  className={cn(
-                    "flex-1 px-4 py-2 rounded-lg border border-border",
-                    "bg-background text-foreground",
-                    "focus:outline-none focus:ring-2 focus:ring-ring"
-                  )}
-                  autoFocus
-                />
-                <button
-                  onClick={handleSaveOsName}
-                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => {
-                    setIsEditingName(false);
-                    setTempName(osName);
-                  }}
-                  className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-medium hover:bg-muted/80 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="mt-4 flex items-center justify-between">
-                <span className="text-lg font-light text-foreground">{osName}</span>
-                <button
-                  onClick={() => setIsEditingName(true)}
-                  className="px-3 py-1.5 text-sm rounded-full bg-muted text-foreground hover:bg-muted/80 transition-colors"
-                >
-                  Rename
-                </button>
-              </div>
-            )}
-          </div>
-        </SettingsSection>
-
-        {/* Data Management */}
-        <SettingsSection title="Data">
+        {/* Data & Privacy */}
+        <SettingsSection title="Data & Privacy">
           <SettingsRow
             icon={Trash2}
             label="Clear chat history"
@@ -372,12 +313,13 @@ const Settings = () => {
             type="action"
             onClick={() => setShowClearChatDialog(true)}
             destructive
+            actionLabel="Clear"
           />
         </SettingsSection>
 
-        {/* Account Actions */}
+        {/* Account */}
         {isSignedIn && (
-          <SettingsSection title="Account Actions">
+          <SettingsSection title="Account">
             <SettingsRow
               icon={LogOut}
               label="Sign out"
@@ -385,12 +327,12 @@ const Settings = () => {
               type="action"
               onClick={() => setShowSignOutDialog(true)}
               destructive
+              actionLabel="Sign out"
             />
           </SettingsSection>
         )}
       </div>
 
-      {/* Sign Out Confirmation Dialog */}
       <AlertDialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -401,14 +343,16 @@ const Settings = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleLogout} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleLogout}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Sign out
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Clear Chat Confirmation Dialog */}
       <AlertDialog open={showClearChatDialog} onOpenChange={setShowClearChatDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -419,7 +363,10 @@ const Settings = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleClearChat} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleClearChat}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Clear history
             </AlertDialogAction>
           </AlertDialogFooter>
