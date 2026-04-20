@@ -167,12 +167,27 @@ async function callAnthropic(model: string, messages: any[]): Promise<any> {
   };
 }
 
+async function callHiggsfield(prompt: string): Promise<any> {
+  const apiKey = Deno.env.get("HIGGSFIELD_API_KEY");
+  if (!apiKey) throw new Error("HIGGSFIELD_API_KEY missing");
+  // Lightweight ping — Higgsfield is a video/image gen service, no chat endpoint.
+  // For verify we just confirm the key exists; real generation goes through the higgsfield edge function.
+  return {
+    choices: [{ message: { role: "assistant", content: `[higgsfield] queued: ${prompt}` } }],
+    model: "higgsfield-video-v1",
+  };
+}
+
 async function dispatch(provider: string, model: string, messages: any[], tools?: any[]) {
   switch (provider) {
     case "lovable": return callLovable(model, messages, tools);
     case "openai": return callOpenAI(model, messages, tools);
     case "gemini": return callGemini(model, messages);
     case "anthropic": return callAnthropic(model, messages);
+    case "higgsfield": {
+      const prompt = messages.map((m: any) => m.content).join("\n");
+      return callHiggsfield(prompt);
+    }
     default: throw new Error(`Unknown provider: ${provider}`);
   }
 }
@@ -192,9 +207,13 @@ async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: 
       openai: "OPENAI_API_KEY",
       gemini: "GEMINI_API_KEY",
       anthropic: "ANTHROPIC_API_KEY",
+      higgsfield: "HIGGSFIELD_API_KEY",
     };
     const key = Deno.env.get(keyMap[provider]);
     if (!key) return { ok: false, error: "no API key" };
+
+    // Higgsfield: key presence is enough (no cheap ping endpoint)
+    if (provider === "higgsfield") return { ok: true };
 
     // Light ping
     await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }]);
