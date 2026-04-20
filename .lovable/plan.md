@@ -1,44 +1,70 @@
 
 
-## Honest answer: No, the Routing Budget toggle is currently cosmetic.
+## Build: Routing Attribution Chip
 
-The toggle saves your selection (Speed / Balanced / Quality) to `localStorage` and shows a toast — but the value never reaches the backend scorer. The router's `pickStone()` already reads `cost_sensitivity`, but no one passes it. So clicking Speed vs Quality changes nothing about which model gets chosen.
+Surgical, additive. One file changes (plus one tiny helper). Zero backend work — the data is already flowing via `message.provider`.
 
-## What needs to happen (4 small changes)
+## What gets built
 
-### 1. Send the mode with every chat request
-`useChatStream` / `chatService.ts` reads the mode from localStorage and includes it in the chat request body as `routing_mode: "speed" | "balanced" | "quality"`.
+A small pill rendered under each assistant message in `MessageBubble.tsx`, between the existing timestamp row and the action buttons:
 
-### 2. Forward it through chat → gauntlet
-`supabase/functions/chat/index.ts` reads `routing_mode` from the request body and passes it into `gauntletCall(...)` as a new option.
+```
+✨ Gemini 2.5 Flash · your key · 1.2s   [↻ if fallback]
+```
 
-### 3. Translate mode → scorer inputs
-`_shared/gauntlet-call.ts` maps the mode into the two knobs the scorer already understands:
-- **Speed** → `cost_sensitivity: "high"`, `latency_priority: "fast"` (cheapest capable stone wins)
-- **Balanced** → `cost_sensitivity: "medium"`, keep classified latency (current behavior)
-- **Quality** → `cost_sensitivity: "low"`, `latency_priority: "relaxed"` (best stone, cost ignored)
+Click the chip → shadcn `Popover` opens with routing details.
 
-These overrides take precedence over the per-message classification so the user's budget choice is respected.
+## Visual spec
 
-### 4. Apply the same path to image-gen and video-gen
-`image-gen` and `video-gen` edge functions also call through `gauntletCall` — accept and forward `routing_mode` from their request bodies too, so the budget applies to all modalities, not just chat.
+**Chip (default state):**
+- Pill: `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full`
+- Background: `bg-muted/40 hover:bg-muted/60 border border-border/30`
+- Text: `text-[10px] text-muted-foreground/80`
+- Provider icon: 10px Lucide glyph (Sparkles for Gemini, Bot for OpenAI, generic Cpu fallback)
+- `your key` segment: `text-emerald-500/90` (green = user saved cost)
+- `ozlon` segment: `text-muted-foreground/60` (muted = gateway fallback)
+- Latency: muted, formatted `1.2s` (≥1000ms) or `340ms` (<1000ms)
+- Fallback indicator: trailing `↻` in `text-amber-500/90` when `provider.fallback_used === true`
+
+**Popover content (on click):**
+- Header: full model ID (e.g. `gemini-2.5-flash`)
+- Row: **Routed via** — `Your API key` or `Ozlon gateway`
+- Row: **Mode** — Speed / Balanced / Quality (from `provider.routing_mode`)
+- Row: **Why** — `provider.reason` text
+- Row: **Latency** — `1240ms`
+- Row: **Cost** — if `provider.cost_estimate` present, format as `$0.0023` else hide
+- Conditional block: **Fallback chain** — if `provider.fallback_used`, render each entry from `provider.fallback_chain[]` as `Model X ❌ → Model Y ✅` with the failure reason in muted text
+- Conditional block: **Tools used** — if `message.toolsUsed?.length`, list each tool name (replaces need for a separate tool chip)
 
 ## Files touched
-- `src/services/chatService.ts` (or wherever the chat invoke is built) — read `localStorage["ozlon.gauntlet.mode"]` and include in request body.
-- `supabase/functions/_shared/gauntlet-call.ts` — accept `routing_mode`, map to `cost_sensitivity` + `latency_priority` overrides in `deriveNeeds`.
-- `supabase/functions/chat/index.ts` — pass `routing_mode` from body into `gauntletCall`.
-- `supabase/functions/image-gen/index.ts`, `supabase/functions/video-gen/index.ts` — same passthrough.
 
-**Untouched:** `pickStone` scorer (already accepts these inputs), Brain page UI, every other surface.
+**1. `src/lib/modelLabels.ts`** (new, ~30 lines)
+- Export `getModelLabel(id: string): { name: string; provider: "openai" | "google" | "anthropic" | "xai" | "deepseek" | "mistral" | "unknown" }`
+- Map: `gemini-2.5-flash` → `"Gemini 2.5 Flash"`, `gpt-5` → `"GPT-5"`, etc. Falls back to the raw ID with provider="unknown".
+- Export `getProviderIcon(provider): LucideIcon` — Sparkles for google, Bot for openai, etc.
+
+**2. `src/components/chat/MessageBubble.tsx`** (edit)
+- Import `Popover`, `PopoverTrigger`, `PopoverContent` from `@/components/ui/popover`
+- Import `getModelLabel`, `getProviderIcon` from `@/lib/modelLabels`
+- After the timestamp row (around line 90), add a conditional render: `{!isUser && message.provider && <RoutingChip provider={message.provider} toolsUsed={message.toolsUsed} />}`
+- Define `RoutingChip` as a small inline component (or co-located in same file) that builds the pill + popover
+
+**Untouched:** `useChatStream.ts` (already captures `provider` and `toolsUsed`), backend, `Message` type (provider field already exists per the hook).
+
+## Type safety
+
+`Message` in `src/types/index.ts` doesn't currently have `provider` / `toolsUsed` fields, but `useChatStream`'s `ChatMessage` type does. Verify the chat page maps inflight `ChatMessage` → display `Message` and forwards those fields. If it strips them, add `provider?: ProviderUsedEvent` and `toolsUsed?: ToolUsedInfo[]` to the `Message` interface as optional fields (additive, no breakage).
 
 ## Verification
-1. Send the same prompt 3 times, switching the toggle between calls. Check the **Recent routing decisions** panel:
-   - **Speed** → flash/mini-tier stones win (gemini-2.5-flash, gpt-5-nano).
-   - **Balanced** → mid-tier picks (current behavior).
-   - **Quality** → pro-tier stones win (gpt-5, gemini-2.5-pro).
-2. Each row's `reason` field reflects the budget (e.g., `"speed mode: cheapest capable"`).
-3. Image-gen with Speed mode picks the cheaper image stone; with Quality, the best one.
+
+1. Send a chat message → chip appears under the assistant reply with model name, key source, latency.
+2. Click the chip → popover opens with reason + mode.
+3. Switch routing budget to Speed → next message's chip shows a flash-tier model.
+4. Kill personal OpenAI key → chip shows `↻` and popover renders the fallback chain.
+5. Send a message that triggers a tool (e.g. "check my emails") → tools listed in popover.
+6. User messages have NO chip (only assistant).
 
 ## Outcome
-The toggle becomes real: one knob that demonstrably changes which stone the router picks, provable in the audit log on the same page.
+
+Every assistant turn becomes self-documenting routing proof. The Brain page audit log gains a per-message peer inside the conversation itself. ~80 lines, one real file edit, no backend or schema changes.
 
