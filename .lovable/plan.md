@@ -1,82 +1,85 @@
 
 
-## Goal
-Two things in one pass:
+## What's actually happening today (the honest picture)
 
-1. **Brain page**: let me update/replace the API key for **every** stone — including the system ones (OpenAI, Gemini, Higgsfield). Right now system stones are read-only (just show "connected" with a tail) and only Claude/Grok/DeepSeek/Mistral have an editable input. Fix that asymmetry, and make replacement keys auto-validate so a stone moves in/out of "Connected" based on whether its current key actually works.
-2. **Full system scan**: walk every integration edge function + the orchestration layers (Gauntlet router, Infinity router, chat tool registry) and confirm the front-end calls match the back-end contracts. Surface anything broken; fix only what's actually broken (no cosmetic refactors).
+The Brain page is **not** purely cosmetic — the routing wiring is real:
 
----
+- `USE_GAUNTLET=1` is set as a project secret → `callWithFallback` (used by chat) detects it and routes through `gauntlet-router` instead of going straight to Lovable Gateway.
+- `gauntlet-router` calls `pickStone()` which scores every active provider on a 6-factor model: modality, reasoning need, vision need, image/video capability, speed, cost, and context size. Highest score wins, others become the fallback chain.
+- `image-gen` and `video-gen` edge functions also check `USE_GAUNTLET` and route through the same path.
+- Every selection writes to `gauntlet_routing_log` with `chosen_stone`, `reason`, `fallback_used`, `latency_ms`, and `key_source` (user vs system). This table is real and queryable.
 
-## Part 1 — Brain page: every stone is editable
+So when you removed your OpenAI key, chat *will* fall back to Gemini or Lovable. That part works.
 
-### Current behavior
-- System stones (lovable/openai/gemini/higgsfield) → `StoneSlot` shows tail + verified time, no input. Key only changes if a project secret changes.
-- BYOK stones (anthropic/xai/deepseek/mistral) → `ByokSlot` with input + connect/disconnect.
+## The two reasons it FEELS cosmetic
 
-### New behavior
-- **Every stone gets an editable input**, including OpenAI, Gemini, Higgsfield (Lovable stays read-only — it's the platform default).
-- Each stone has three possible states:
-  - **Connected (system key)** — the project secret works. Shows `••••<tail>` + "verified Xm ago" + an "Override with my key" link.
-  - **Connected (your key)** — user pasted their own key, it validated. Shows `••••<tail>` + "your key" + "Replace" / "Remove (use system key)".
-  - **Available** — neither system key nor user key is valid. Shows the input form to paste one.
-- "Re-verify all" hits both system stones AND the user-keyed stones, so a dead key flips a stone back to "Available" automatically.
+**1. The "needs" sent into the scorer are hardcoded per agent, not per message.**
+In `_shared/gauntlet-call.ts`, every `executor` call sends `{modality: "text", complexity: "high", latency_priority: "normal"}` no matter what the user asked. So the router always picks the same stone for chat. The scoring engine is real but the inputs are dumb — it's like having a sommelier who only ever gets told "wine."
 
-### How it'll work under the hood
-- Reuse the existing `connect-brain` plumbing (which already stores per-user keys in `custom_models` with `metadata.platform_id`) for ALL stones, not just BYOK ones. OpenAI/Gemini already have presets there; we just expose the UI for them. Higgsfield gets added to `connect-brain` presets so personal Higgsfield keys work the same way.
-- `gauntlet-router` `verifyProvider`: when checking a stone for a given user, prefer the user's personal key from `custom_models` (read via `inline:` secret pattern that's already there); fall back to the system env key. Verification result is what determines `status: active | error`. So if the user's key is bad, the row goes to "Available" even if a system key exists — because the user explicitly said "use mine."
-- `gauntlet-router` `dispatch` (the actual call path): same precedence — user key first, system key fallback. This keeps live AI calls aligned with what the Brain page shows.
-- New unified slot component `StoneSlot` (extended) replaces the current split between `StoneSlot` and `ByokSlot`. One component, three render states. `ByokSlot` deleted.
+**2. There's no UI proof of routing.**
+The Brain page shows which keys are connected, but nowhere does the user see "this answer came from Gemini because OpenAI was rate-limited" or "we routed your image request to Higgsfield." The decision is invisible, so it looks fake.
 
-### Files touched (Part 1)
-- `supabase/functions/connect-brain/index.ts` — add `higgsfield` preset; nothing else changes (openai/gemini already there).
-- `supabase/functions/gauntlet-router/index.ts` — `verifyProvider` and `dispatch` accept a per-user key override looked up from `custom_models`. System key becomes fallback, not the only path.
-- `src/components/gauntlet/StoneSlot.tsx` — extend to render "edit/override" UI; merge in the input + connect/disconnect from `ByokSlot`.
-- `src/components/gauntlet/GauntletPanel.tsx` — drop the separate BYOK section; render every stone (lovable, openai, gemini, higgsfield, anthropic, xai, deepseek, mistral) through one unified `StoneSlot`. Lovable stays non-editable.
-- `src/hooks/useGauntlet.ts` — extend `ALL_STONES` to include the BYOK ones; expose user-key status alongside system status so the slot knows which state to render.
-- `src/components/gauntlet/ByokSlot.tsx` — deleted (logic absorbed into `StoneSlot`).
+## Plan: make routing real AND visible (4 surgical changes)
 
----
+### Change 1 — Classify the message before routing (the actual brain)
+Add a tiny pre-router in `_shared/gauntlet-call.ts` that derives `needs` from the **last user message**, not just the agent name:
 
-## Part 2 — Full system scan (read-only sweep, then fix what's broken)
+- **Modality**: if the message has image attachments → `vision`; if it asks to "generate/create/draw an image" → `image_gen`; if "video" → `video_gen`; otherwise `text`.
+- **Complexity**: cheap heuristics — message length > 500 chars OR contains code blocks OR contains words like "analyze/debug/refactor/explain why/architect" → `high`; short factual question → `low`; everything else → `medium`.
+- **Latency priority**: voice mode or short message → `fast`; long-form ask → `relaxed`; default → `normal`.
+- **Context size**: pass `messages` total char count / 4 as a token estimate so `pickStone` can disqualify small-context stones when conversation gets long.
 
-I'll walk these in order and report findings inline. No edits unless something's actually broken.
+This is ~40 lines of code, no new dependencies. It turns the scorer from theatre into a real decision.
 
-### A. Edge function ↔ frontend contract check
-For each integration, confirm the frontend caller invokes the right action with the right payload shape, and the function returns what the caller expects. Sweep covers:
-- `clickup`, `gohighlevel`, `descript`, `higgsfield`, `plaid`, `youtube`
-- All `google-*` (gmail, calendar, drive, docs, sheets, slides, search-console, analytics, tag-manager)
-- `chat`, `realtime-session`, `transcribe`, `text-to-speech`, `voice-settings`, `voice-clone`
-- `gauntlet-router`, `connect-brain`, `personality-evolve`, `scheduled-routines`
-- `image-gen`, `video-gen`, `render-video`, `viral-creative`
-- `knowledge-ingest`, `knowledge-search`, `summarize-session`, `vault-store`, `execute-task`
+### Change 2 — Surface the routing decision in the chat UI
+The chat function already emits a `provider_used` SSE event (see `chatService.ts` → `ProviderUsedEvent`). Right now it shows nothing or is shown weakly. Wire it to render a small attribution chip under each assistant message:
 
-For each: verify (1) the function exists and deploys clean, (2) every frontend `supabase.functions.invoke(...)` call site uses an action the function actually handles, (3) per-user credential resolution follows the documented JWT-first pattern from `mem://architecture/per-user-integration-credentials`.
+> `Answered by Gemini 2.5 Pro · your key · 1.2s`
 
-### B. Orchestration layer check
-- **Gauntlet router** — confirm `pickStone` is actually being called by `chat/index.ts` (or whichever path) when `USE_GAUNTLET` env is set. Confirm fallback chain works (kill OpenAI key → next stone takes over). Confirm `gauntlet_routing_log` is being written.
-- **Infinity router** — confirm the 6-path Gemini pre-processor still wraps chat turns (`INFINITY_ROUTER_ENABLED=true` is set). Confirm it doesn't double-route or strip tool calls.
-- **Chat tool loop** — confirm `enableTools: true` is passed from the composer (per `mem://backend/agent-execution-constraint`) and that every tool in the registry has a working backend handler.
+Click the chip → small popover shows the routing reason (`"gemini: vision 10/10, fast"`) and any fallback that was used. Pulled straight from the existing `gauntlet_routing_log` row via a lightweight `select` keyed on `run_id`. No new tables.
 
-### C. Findings + fix policy
-Anything actually broken (404 action, mismatched payload, dead env reference, contract drift) → I'll list it AND fix it in the same pass. Anything that's just stylistic or undocumented → I'll note it and leave it alone (per `mem://architecture/stabilization-policy` — no broad refactors).
+### Change 3 — Add a "Why this stone?" panel on the Brain page
+Below the existing list of stones, add a collapsed section: **Recent routing decisions**. Reads the last 20 rows from `gauntlet_routing_log` and shows:
 
----
+```
+2m ago  · vision · gemini-2.5-flash · "vision 10/10, fast"     · 1.1s
+5m ago  · text   · openai gpt-5     · "heavy reasoning"        · 2.3s · ↻ fell back from anthropic
+```
 
-## Verification (after edits)
+This is the proof. Now the user can SEE the routing happening on every turn.
 
-**Brain page:**
-1. Visit `/settings/brain` → every stone has an input or override action visible.
-2. Replace the OpenAI key with garbage → row flips to "Available" with "key invalid" within ~2s of clicking save (verification runs immediately on connect).
-3. Click "Remove" on the personal OpenAI key → row falls back to system key and flips back to "Connected".
-4. "Re-verify all" → all stones (system + personal) re-check; tails and timestamps update.
-5. Drop a personal Higgsfield key → next chat call that needs video routes to it (check `gauntlet_routing_log` shows `chosen_stone: higgsfield`).
+### Change 4 — Fix one real bug found during the sweep
+`pickStone` scores `lovable` highly for image (`image: 9`) and video (`video: 7`), but `callLovable` only does chat completions — it has no image/video output path. So if Lovable wins for `image_gen`, the call will fail and fall back. Drop `lovable.image` and `lovable.video` to `0` in the STONES matrix so the scorer doesn't waste a turn on a guaranteed failure.
 
-**System sweep:**
-6. Send a chat message that triggers a tool (e.g., "list my recent emails") → tool call resolves end-to-end, no swallowed errors, result rendered.
-7. Send an image-gen request → routes via Gauntlet to gemini or higgsfield based on availability; output URL renders.
-8. Kill the OpenAI key in personal storage → chat falls back to lovable/gemini per scoring; no user-visible failure.
+## Recommendations to make this better without overcomplicating it
+
+Three additions, all small:
+
+1. **Per-stone health budget** — track rolling 24h success rate per stone in a tiny in-memory cache (or a `gauntlet_health` view over the existing log). If a stone's success rate drops below 80%, automatically deprioritize it for ~15 minutes. Self-healing without manual intervention.
+
+2. **One-click "Speed / Balanced / Quality" toggle on the Brain page** — three radio buttons that set the user's `cost_sensitivity` preference (`high` / `medium` / `low`). The scorer already accepts this input; we just need to surface it. Most users don't want to micromanage; they want one knob.
+
+3. **Don't add per-message model picker UI** — resist the temptation. The whole point of the router is the user shouldn't think about it. Keep the choice automatic; expose only the *result* (the chip) and the *budget* (the toggle).
+
+## Files touched
+
+- `supabase/functions/_shared/gauntlet-call.ts` — classify message → needs (Change 1).
+- `supabase/functions/gauntlet-router/index.ts` — fix Lovable image/video scores (Change 4); add `/recent_decisions` action for the Brain panel (Change 3).
+- `supabase/functions/chat/index.ts` — pass `run_id` through so the chip can look up the routing log row (Change 2 plumbing).
+- `src/components/chat/MessageBubble.tsx` — add the attribution chip (Change 2).
+- `src/components/gauntlet/GauntletPanel.tsx` — add "Recent decisions" collapsed panel + Speed/Balanced/Quality toggle (Changes 3 + recommendation 2).
+- `src/hooks/useGauntlet.ts` — fetch recent decisions; expose mode preference.
+
+**Untouched:** Stone slot UI, BYOK plumbing, every other settings page, all 30+ integration edge functions, schema.
+
+## Verification
+
+1. Send "what's 2+2?" → chip shows a flash-tier model (low complexity won). Send "refactor this 800-line component" with a code paste → chip shows a pro-tier model (high complexity won). Different inputs route to different stones — provable.
+2. Attach an image and ask "what's in this?" → chip shows Gemini (vision 10/10 wins).
+3. Ask "generate an image of a sunset" → chip shows Gemini or Higgsfield, never Lovable (Change 4).
+4. Open Brain page → "Recent decisions" shows the last 20 routes with reasons. Switch to "Speed" mode → next chat turn picks the cheapest capable stone; chip reflects it.
+5. Kill the personal OpenAI key → next reasoning-heavy turn falls back, chip shows `↻ fell back from openai → gemini`. Visible proof, not just a backend log.
 
 ## Outcome
-Every stone is replaceable from the Brain page with live in/out validation, and the rest of the system is confirmed wired correctly end-to-end (or fixed if not).
+The router goes from "theoretically smart but always picks the same thing" to actually adapting per message. The user sees every decision in the chat itself and can audit the last 20 on the Brain page. One Speed/Balanced/Quality toggle covers 90% of preference needs without exposing model-picker UI.
 
