@@ -28,7 +28,7 @@ const STONES: Record<string, Stone> = {
 
 // ─────────── Scoring function ───────────
 type Needs = {
-  modality?: "text" | "vision" | "image_gen" | "audio";
+  modality?: "text" | "vision" | "image_gen" | "video_gen" | "audio";
   complexity?: "low" | "medium" | "high";
   latency_priority?: "fast" | "normal" | "relaxed";
   context_size?: number;
@@ -56,7 +56,10 @@ export function pickStone(
     let why: string[] = [];
 
     // Modality fit (×3 weight)
-    if (modality === "image_gen") {
+    if (modality === "video_gen") {
+      score += s.video * 3;
+      if (s.video > 0) why.push(`video-capable (${s.video}/10)`);
+    } else if (modality === "image_gen") {
       score += s.image * 3;
       if (s.image > 0) why.push(`image-capable (${s.image}/10)`);
     } else if (modality === "vision") {
