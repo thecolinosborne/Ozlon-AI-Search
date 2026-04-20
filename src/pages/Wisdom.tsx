@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Brain } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WisdomPackGrid } from "@/components/wisdom/WisdomPackGrid";
@@ -30,6 +30,9 @@ type Reflection = {
 
 const Wisdom = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialMode = searchParams.get("mode");
+  const initialAddTab = initialMode === "upload" || initialMode === "url" ? initialMode : "text";
   const [sources, setSources] = useState<Source[]>([]);
   const [memories, setMemories] = useState<WisdomMemory[]>([]);
   const [reflections, setReflections] = useState<Reflection[]>([]);
@@ -88,7 +91,7 @@ const Wisdom = () => {
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6 pb-24">
         <WisdomPackGrid onInstalled={reload} />
-        <AddSourcePanel onIngested={reload} />
+        <AddSourcePanel onIngested={reload} defaultTab={initialAddTab} />
 
         <Tabs defaultValue="sources">
           <TabsList className="grid grid-cols-4 w-full">
