@@ -1,90 +1,104 @@
 
 
-## Settings Refresh + Wisdom Library Section
+## Wisdom Library → Cosmic Orchestration Integration
 
-Two things, scoped tight: modernize `/settings` visuals only (no nav changes anywhere), and give Wisdom Library its own first-class section inside Settings with quick-upload affordances.
+Right now Wisdom is bolted onto the side: the chat function does its own one-shot RAG lookup at the start of each turn. That's a flashlight, not gravity. To make it part of the orchestration — felt by every agent, every router, every tool decision — we wire it into the **Infinity Router** (the pre-processing brain) and the **agent registry** so wisdom *shapes routing decisions, tool selection, and agent persona*, not just reply text.
 
 ## What changes
 
-### 1. Profile hero card (top of Settings)
-Replace the small Account row with a presence-forward header:
-- Large avatar with gradient ring, initials fallback
-- Display name (weight 600) + email muted below
-- Status pill: `● Signed in` (primary dot) or `● Guest` (muted dot)
-- Right-aligned **Edit Profile** ghost button → `/profile`
-- Guest variant: "Sign in to unlock" CTA → `/auth`
+### 1. Wisdom becomes a first-class signal in the Infinity Router
 
-### 2. Reorganize Settings sections (in-page only, no nav)
-1. **Profile** — hero card
-2. **Personalization** — OS Name (inline edit), Personality, Brain Stones
-3. **Voice & Communication** — Mode (segmented control), Voice features toggle, Auto-play, Preview
-4. **Wisdom Library** — dedicated section (see #4)
-5. **Memory** — Memory Settings link
-6. **Integrations** — single row → `/integrations`
-7. **Data & Privacy** — Clear chat history
-8. **Account** — Sign out (signed-in only)
+The Infinity Router (`supabase/functions/chat/index.ts` orchestration layer) currently does 6-path Gemini pre-processing for intent, identity, etc. Add a **7th path: Wisdom Resonance**.
 
-The bespoke "System" section disappears; OS Name moves into Personalization as an inline-edit row.
+- Runs in parallel with the other router paths (no latency cost — they're already concurrent)
+- Calls `match_knowledge` + `match_wisdom_memories` + `match_reflections` against the user message *plus* the resolved intent
+- Returns a structured `wisdom_signal`:
+  ```
+  {
+    resonant_sources: [{id, person, title, similarity}],
+    dominant_domains: ['negotiation', 'pricing'],
+    framework_hits: ['Value Equation', 'First Principles'],
+    confidence: 0.82
+  }
+  ```
+- This signal is passed into every downstream stage, not just the system prompt
 
-### 3. Segmented control for Communication Mode
-Three mutually exclusive toggles → one row with a 3-pill segmented control (`Text` / `Voice` / `Both`). Active pill: `bg-primary/15 text-primary`. New small reusable component.
+### 2. Wisdom-aware agent routing
 
-### 4. Wisdom Library — its own section in Settings
-A featured block (not just a row) so it feels like a real capability:
-- Section title "Wisdom Library" with "New" accent
-- **Stat strip**: `X sources · Y entries · Z memories` (live counts via `wisdomService`)
-- **Three quick-action tiles** in a responsive row:
-  - **Paste Text** → opens `/wisdom?mode=text`
-  - **Upload Document** → opens `/wisdom?mode=upload`
-  - **From URL** → opens `/wisdom?mode=url`
-- **Open Library** ghost button at the bottom → `/wisdom`
-- Empty state (zero sources): friendly one-liner + same tiles
-- New component: `src/components/settings/WisdomLibraryCard.tsx`
-- `Wisdom.tsx` reads `?mode=` on mount and pre-selects the matching tab in `AddSourcePanel`
+In `src/core/orchestrator.ts` and the agent dispatcher, the routing decision (which agent handles the turn) currently uses intent only. Upgrade it:
 
-### 5. SettingsRow polish (additive props only)
-- Optional `badge` prop (small pill: "New", "Beta", count)
-- Icon container gets subtle gradient `from-muted/80 to-muted/40`
-- Hover gets soft ring `shadow-[0_0_0_1px_hsl(var(--primary)/0.2)]`
-- Inline-edit variant for OS Name (click row → input replaces label, Save/Cancel inline)
+- `wisdom_signal.dominant_domains` becomes a tiebreaker and amplifier
+- Example: intent = "general advice" + dominant_domain = "negotiation" → route to a Negotiation specialist persona instead of base agent
+- New helper `selectAgentWithWisdom(intent, wisdomSignal)` in `src/core/agents/index.ts`
 
-### 6. SettingsSection polish
-- Title gets a 2px primary/40 gradient accent bar to the left
-- Rows render inside a soft grouped container `bg-card/30 rounded-2xl p-2`
-- Spacing between sections bumped to `mb-10`
+### 3. Wisdom-shaped system prompt (structured, not appended)
 
-### 7. Header polish (Settings page only)
-- Sticky header gets `bg-background/80 backdrop-blur-xl` to match app shell
-- Right-side "Done" action on mobile returns to `/`
+Currently the chat function appends a `## Relevant Wisdom` block. Restructure into three named blocks the model treats differently:
+
+- **`## Active Frameworks`** — the named frameworks (Value Equation, etc.) the model is *expected to apply by name*
+- **`## Personal Memories`** — durable memories from `wisdom_memories` (user's own facts/preferences) framed as ground truth
+- **`## Reflections`** — synthesized notes framed as prior conclusions
+
+Each block carries source IDs so attribution survives. Plus a routing instruction: *"Cite frameworks by name. If a Personal Memory contradicts a Framework, the Memory wins."*
+
+### 4. Tool selection biased by wisdom
+
+When `enableTools: true` and `wisdom_signal.framework_hits` includes operational frameworks (e.g. anything tagged `domain: ops` or `domain: marketing`), the tool list passed to the model is reordered so domain-relevant tools (GHL, Maton, Calendar, etc.) appear first. Models honor tool ordering when choosing. Implemented as a small `prioritizeToolsByDomain(tools, domains)` helper in the chat function.
+
+### 5. Plug-state honored end-to-end
+
+Every wisdom query in steps 1-4 filters by `knowledge_sources.is_active = true` (the plug toggle). Pulling a stone instantly removes its influence from routing, prompt, *and* tool ordering — not just the citation block.
+
+### 6. Telemetry: prove it's orchestrating
+
+Emit a new SSE event `orchestration_trace` once per turn containing:
+```
+{
+  intent, agent_chosen, wisdom_signal,
+  frameworks_injected: [...], memories_injected: [...],
+  tools_reordered: bool
+}
+```
+Client stores it on the message; new debug-only chip "Show orchestration" (visible when developer mode is on) opens a popover with the full trace. This is how you *see* the gravity.
+
+### 7. Wisdom feedback loop (closes the orchestration ring)
+
+After the model replies, a lightweight post-turn task:
+- If the model cited a framework → increment `recurrence_count` and `last_accessed_at` on the relevant `knowledge_entries` / `wisdom_memories` (already-existing columns)
+- High-recurrence entries get boosted similarity in future matches (multiply score by `1 + log(recurrence_count) * 0.05`)
+- This is the gravitational compounding: the more a piece of wisdom proves useful, the more it pulls future turns toward itself
+
+### 8. Settings & Wisdom page surfaces
+
+- Wisdom page header gets a live "Orchestration: Active · Influencing routing" indicator (green dot when ≥1 source is plugged)
+- Settings → Wisdom card shows new line: `Frameworks influencing chat: N`
 
 ## Files
 
-**New**:
-- `src/components/settings/ProfileHeroCard.tsx`
-- `src/components/settings/SegmentedControl.tsx`
-- `src/components/settings/WisdomLibraryCard.tsx`
-
 **Edited**:
-- `src/pages/Settings.tsx` — restructure, swap System block for inline OS Name, mount Wisdom section
-- `src/components/settings/SettingsRow.tsx` — `badge` prop, gradient icon, inline-edit variant
-- `src/components/settings/SettingsSection.tsx` — accent bar, grouped container
-- `src/pages/Wisdom.tsx` — read `?mode=` query param to pre-select Add Source tab
+- `supabase/functions/chat/index.ts` — add 7th router path, structured wisdom blocks, tool prioritization, SSE trace event, post-turn recurrence updates, plug filter on all queries
+- `src/core/orchestrator.ts` — accept and apply `wisdom_signal` in routing
+- `src/core/agents/index.ts` — `selectAgentWithWisdom` helper
+- `src/hooks/useChatStream.ts` — parse `orchestration_trace` SSE event
+- `src/components/chat/MessageBubble.tsx` — orchestration trace popover (dev mode)
+- `src/pages/Wisdom.tsx` — orchestration-active indicator
+- `src/components/settings/WisdomLibraryCard.tsx` — frameworks-influencing line
+- `src/services/wisdomService.ts` — `getActiveSourceCount()`, `getInfluencingCount()`
 
-**Untouched**: All app navigation (BottomNav, CommandPalette, App.tsx routes), all auth/voice/OS-name/clear-chat/sign-out logic, store, routing.
+**No new tables, no new edge functions.** All wiring uses existing schema (`recurrence_count`, `last_accessed_at`, `is_active` already exist on the wisdom tables).
 
 ## Verification
 
-1. `/settings` opens → Profile hero card at top with avatar, name, status pill
-2. Communication Mode shows as one row with active Text/Voice/Both pill
-3. OS Name editor lives inline in Personalization (no separate System section)
-4. Wisdom Library section visible with live counts + three quick-action tiles
-5. Click "Upload Document" tile → lands on `/wisdom` with Upload tab pre-selected
-6. Section headers have left accent bars; rows feel grouped
-7. Sign out / clear chat dialogs unchanged behavior
-8. Mobile (375px): no horizontal scroll, tiles stack cleanly
-9. No app navigation changed anywhere
+1. Plug in a Hormozi pack, ask "how should I price my new offer" → orchestration trace shows `framework_hits: ['Value Equation']`, agent persona shifted, reply cites the framework by name
+2. Unplug Hormozi mid-session, ask same question → trace shows empty `framework_hits`, no citation, generic reply
+3. Plug it back in, ask 5 more pricing questions → `recurrence_count` on Value Equation entry increments each turn (verify in DB)
+4. Ingest a personal memory ("I prefer recurring revenue over one-time sales") → next pricing question, the memory appears in `## Personal Memories` block and reply respects it even when a framework would suggest otherwise
+5. Wisdom page shows "Orchestration: Active" green dot when sources plugged, neutral when all unplugged
+6. Settings card shows accurate "Frameworks influencing chat: N" count
+7. Dev-mode message popover reveals full orchestration trace (intent, agent, wisdom signal, tool reorder)
+8. Empty library → orchestration runs cleanly, no errors, no trace clutter
 
 ## Outcome
 
-Settings becomes a modern control center with the Wisdom Library promoted to its own featured section — discoverable, with one-tap entry into each upload mode — without touching any navigation surface.
+Wisdom stops being a citation feature and becomes the gravitational core of every turn: it bends routing, persona, tool selection, and prompt structure simultaneously. Plug a mind in → the entire orchestration tilts toward it. Pull it out → influence vanishes instantly, capability remains. The system gets measurably smarter the more you use the wisdom you've ingested, because frequently-cited entries gain pull over time. That's the cosmic orchestration — every component in unison, weighted by what's plugged in.
 
