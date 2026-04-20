@@ -22,13 +22,6 @@ const integrations = [
     path: "/integrations/descript",
   },
   {
-    id: "higgsfield",
-    name: "Higgsfield AI",
-    description: "AI-powered video generation and creative content platform.",
-    icon: Sparkles,
-    path: "/integrations/higgsfield",
-  },
-  {
     id: "clickup",
     name: "ClickUp",
     description: "Task management with AI-powered project manager replies inside task comments.",

@@ -77,6 +77,11 @@ export const GauntletPanel = () => {
 
       {/* Usage breakdown */}
       <UsageBreakdown usage={usage} />
+
+      {/* Not yet supported */}
+      <p className="text-[11px] text-muted-foreground/70 pt-2 border-t border-border/30">
+        <strong className="text-muted-foreground">Not yet supported:</strong> Groq, Mistral, DeepSeek. We'll add these as Brain Stones when there's demand.
+      </p>
     </div>
   );
 };
