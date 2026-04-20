@@ -84,3 +84,6 @@ verify_jwt = false
 [functions.scheduled-routines]
 verify_jwt = false
 
+[functions.gauntlet-router]
+verify_jwt = false
+
