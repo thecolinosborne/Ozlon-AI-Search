@@ -7787,7 +7787,7 @@ ${parts.join('\n\n')}
         console.log(`Native connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
-        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
         console.log(`Available action tools: ${availableTools.length}`);
 
         // Add connected services info to system prompt
@@ -7839,7 +7839,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
-        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
       }
     }
 
