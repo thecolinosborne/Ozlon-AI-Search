@@ -1,27 +1,37 @@
 
 
 ## Goal
-Collapse the redundant "Your Brains" / "AI Brain" split on `/settings/brain` into one unified section.
+Make Higgsfield (and any other system stone) resolve to Connected/Available within one page load instead of spinning forever.
 
-## What's there now
-The `/settings/brain` page renders two stacked panels covering the same providers:
-1. A "Your Brains" header/intro section
-2. The `GauntletPanel` ("AI Brain" with Connected / Available list)
+## Root cause
+1. **Backend**: `gauntlet-router` `list` action only auto-verifies stones that are *missing* from `ai_providers`. If a stale Higgsfield row exists with `status="error"` from an earlier failed attempt (before the verify branch was fixed), it never re-runs and stays broken.
+2. **Frontend**: `StoneSlot` treats `verifying = !row` as a permanent state — if the row never arrives or arrives without `keyTail`, the loader spins indefinitely with no resolution.
 
-Both describe the same set of API keys, which is the redundancy you're seeing.
+## Fix (two surgical changes)
 
-## The change
-Edit `src/pages/Settings.tsx` (the `/settings/brain` route). Remove the outer "Your Brains" wrapper header/intro block. Keep only the `GauntletPanel`, rendered directly inside the page's standard settings container.
+### 1. `supabase/functions/gauntlet-router/index.ts` — heal stale rows on `list`
+Extend the auto-verify loop in the `list` branch: in addition to *missing* providers, also re-verify any existing row where:
+- `status = "error"` AND the corresponding env key is now present, OR
+- `capabilities.keyTail` is null/missing.
 
-Result: one section, one header ("AI Brain"), one Connected list, one Available list. Nothing else.
+This self-heals Higgsfield's stale error row on the next page load. No schema changes, no migration.
+
+### 2. `src/components/gauntlet/StoneSlot.tsx` — never spin forever
+Change spinner logic so a row with `status="active"` always shows the green check, even if `capabilities.keyTail` happens to be null. Keep the spinner only for a brief in-flight `verifying` prop passed from the parent (during "Re-verify all"). If `row` is missing AND not actively verifying, render as Available with the soft empty state instead of an infinite loader.
+
+### 3. `src/components/gauntlet/GauntletPanel.tsx` — pass real verifying state
+Pass the `verifying` flag from `useGauntlet()` down to each `StoneSlot` so the spinner only appears during an actual in-flight verify, not as a default "no data yet" state.
 
 ## Files touched
-- `src/pages/Settings.tsx` — strip the duplicate "Your Brains" section wrapper around `<GauntletPanel />`.
+- `supabase/functions/gauntlet-router/index.ts` — extend auto-verify in `list`
+- `src/components/gauntlet/StoneSlot.tsx` — fix spinner logic, never infinite
+- `src/components/gauntlet/GauntletPanel.tsx` — thread `verifying` prop through
 
-**Untouched:** `GauntletPanel`, `StoneSlot`, `useGauntlet`, routing, every other settings page.
+**Untouched:** routing logic, BYOK section, every other page, the schema.
 
 ## Verification
-1. Visit `/settings/brain` → see exactly one section titled "AI Brain" with Connected (OpenAI, Gemini, Higgsfield, Lovable) and Available (Anthropic).
-2. No second header, no duplicate intro text, no second card grid above or below.
-3. "Re-verify all" still works and refreshes timestamps.
+1. Reload `/settings/brain`. Higgsfield resolves within ~2s to Connected with `••••<tail>` + "verified just now".
+2. No row ever shows a stuck spinner — it's either Connected (green check), Error (red X), or Available (dashed empty slot).
+3. Clicking "Re-verify all" briefly shows spinners on all rows, then resolves.
+4. The Available section still shows Anthropic with "Add ANTHROPIC_API_KEY to enable."
 
