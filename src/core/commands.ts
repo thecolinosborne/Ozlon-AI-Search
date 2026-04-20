@@ -51,6 +51,14 @@ const navigationCommands: Omit<Command, "handler">[] = [
     shortcut: "G M",
     category: "Navigation",
   },
+  {
+    id: "go-wisdom",
+    label: "Go to Wisdom Library",
+    description: "Ingest minds and frameworks into the OS",
+    icon: "Brain",
+    shortcut: "G W",
+    category: "Navigation",
+  },
 ];
 
 // ============================================
@@ -219,6 +227,7 @@ export function registerDefaultCommands(): void {
           "go-settings": "/settings",
           "go-developer": "/developer",
           "go-memory": "/memory-settings",
+          "go-wisdom": "/wisdom",
         };
         if (navigationHandler && pathMap[cmd.id]) {
           navigationHandler(pathMap[cmd.id]);

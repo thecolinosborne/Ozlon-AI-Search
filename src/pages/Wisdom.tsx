@@ -56,7 +56,7 @@ const Wisdom = () => {
 
   const deleteMemory = async (id: string) => {
     if (!confirm("Delete this memory?")) return;
-    const ok = await memoryService.deleteMemory?.(id);
+    const ok = await memoryService.deleteMemory(id);
     if (ok) {
       toast({ title: "Memory deleted" });
       reload();
