@@ -352,6 +352,7 @@ export interface CallOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   registry?: Record<string, ModelEntry>; // merged registry (static + custom). Defaults to MODEL_REGISTRY.
+  routing_mode?: "speed" | "balanced" | "quality"; // user's budget choice (Brain page toggle)
 }
 
 export interface CallResult {
