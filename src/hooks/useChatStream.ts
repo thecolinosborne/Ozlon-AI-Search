@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
 export type ChatMessage = {
@@ -8,6 +8,7 @@ export type ChatMessage = {
   content: string;
   provider?: ProviderUsedEvent;
   toolsUsed?: ToolUsedInfo[];
+  orchestration?: OrchestrationTraceEvent;
 };
 
 /**
@@ -259,6 +260,14 @@ export function useChatStream({
             safeSetInflight((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, toolsUsed: info.tools } : m
+              )
+            );
+          },
+          onOrchestrationTrace: (trace) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, orchestration: trace } : m
               )
             );
           },
