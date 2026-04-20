@@ -6335,6 +6335,12 @@ CHAINING FLOW (mandatory for actionable work):
 
 IMPORTANT: Always reuse the task_id returned from create_work_task for all update_work_task calls in the same flow.
 
+🚨 CRITICAL — APPROVED ACTIONS MUST EXECUTE IMMEDIATELY 🚨
+When the user has explicitly confirmed a destructive or external action (e.g. "yes trash them", "do it", "go ahead", "approved", "confirm", "send it", "delete them"), you MUST call the underlying real action tool (batch_trash_emails, send_email, delete_calendar_event, drive_trash_file, etc.) on that very turn.
+- DO NOT use create_work_task or update_work_task as a substitute for the action. Work tasks are TRACKING ONLY.
+- Correct sequence on an approval: (a) call the real action tool FIRST, (b) then optionally log/update a work_task with the result.
+- If you only call create_work_task / update_work_task on an approval turn, you have FAILED the user. The action did not happen.
+
 STATE TRANSITIONS — always follow this order, never skip stages:
   todo → in_progress → up_for_review → completed
   up_for_review can go back to in_progress (rework)
@@ -7217,6 +7223,21 @@ async function runToolLoop(
 
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
+
+      // GUARD: if user just approved an action and assistant only called task-tracking tools,
+      // inject a system reminder to actually execute the action on next iteration.
+      const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
+      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task');
+      // Find last user message (skip tool/assistant) BEFORE this assistant turn
+      const lastUser = [...openAIMessages].reverse().find((m) => m.role === 'user');
+      const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
+      if (onlyTaskTools && APPROVAL_RE.test(lastUserText)) {
+        console.log('[ToolLoopGuard] Approval detected but only task-tracking tools called. Injecting reminder.');
+        openAIMessages.push({
+          role: 'system',
+          content: 'REMINDER: The user just approved an action. You called only create_work_task/update_work_task — that is tracking, not execution. Call the actual action tool now (e.g. batch_trash_emails, send_email, delete_calendar_event). Do not respond with text until the real tool has been invoked.',
+        });
+      }
       // Continue the loop so the model can process tool results
       continue;
     }
