@@ -316,7 +316,11 @@ Deno.serve(async (req) => {
       for (const stone of chain) {
         const start = Date.now();
         try {
-          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader);
+          const resolved = await resolveKey(admin, userId, stone.provider);
+          if (!resolved.key && stone.provider !== "higgsfield") {
+            throw new Error(`no key for ${stone.provider}`);
+          }
+          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "");
           const latency = Date.now() - start;
           if (userId) {
             await admin.from("gauntlet_routing_log").insert({
@@ -325,6 +329,7 @@ Deno.serve(async (req) => {
               chosen_stone: stone.provider, chosen_model: stone.defaultModel,
               reason: picked.reason, fallback_used: fallbackUsed,
               latency_ms: latency, success: true,
+              metadata: { key_source: resolved.source },
             });
           }
           return json({
@@ -352,7 +357,7 @@ Deno.serve(async (req) => {
     if (action === "verify") {
       const results: Record<string, any> = {};
       for (const p of SYSTEM_STONES) {
-        results[p] = await verifyProvider(p);
+        results[p] = await verifyProvider(p, admin, userId);
       }
       if (userId) {
         for (const [provider, res] of Object.entries(results)) {
@@ -363,7 +368,7 @@ Deno.serve(async (req) => {
             status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
             last_error: r.error ?? null,
-            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null },
+            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null, source: r.source ?? "none" },
           }, { onConflict: "user_id,provider" });
         }
       }
@@ -378,31 +383,31 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .order("priority", { ascending: true });
 
-      // Auto-verify any system STONE missing OR stale (error/missing keyTail) so rows self-heal
-      const keyMap: Record<string, string> = {
-        lovable: "LOVABLE_API_KEY",
-        openai: "OPENAI_API_KEY",
-        gemini: "GEMINI_API_KEY",
-        higgsfield: "HIGGSFIELD_API_KEY",
-      };
+      // Auto-verify any system STONE missing OR stale (error/missing keyTail) so rows self-heal.
+      // Also re-verify if the user just connected/disconnected a personal key (source mismatch).
       const existingMap = new Map((data ?? []).map((r: any) => [r.provider, r]));
-      const toVerify = SYSTEM_STONES.filter((p) => {
+      const toVerify: string[] = [];
+      for (const p of SYSTEM_STONES) {
         const row = existingMap.get(p);
-        if (!row) return true;
-        const hasEnv = !!Deno.env.get(keyMap[p]);
-        const stale = (row.status === "error" && hasEnv) || !((row.capabilities as any)?.keyTail);
-        return stale;
-      });
+        const userKey = await getUserKey(admin, userId, p);
+        const hasEnv = !!Deno.env.get(ENV_KEY_MAP[p]);
+        const recordedSource = (row?.capabilities as any)?.source;
+        const expectedSource = userKey ? "user" : (hasEnv ? "system" : "none");
+        if (!row) { toVerify.push(p); continue; }
+        const stale = (row.status === "error" && (userKey || hasEnv)) || !((row.capabilities as any)?.keyTail);
+        const sourceMismatch = recordedSource !== expectedSource;
+        if (stale || sourceMismatch) toVerify.push(p);
+      }
       if (toVerify.length > 0) {
         for (const p of toVerify) {
-          const r = await verifyProvider(p);
+          const r = await verifyProvider(p, admin, userId);
           await admin.from("ai_providers").upsert({
             user_id: userId,
             provider: p,
             status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
             last_error: r.error ?? null,
-            capabilities: { ...STONES[p], keyTail: r.keyTail ?? null },
+            capabilities: { ...STONES[p], keyTail: r.keyTail ?? null, source: r.source ?? "none" },
           }, { onConflict: "user_id,provider" });
         }
         const refetched = await admin
