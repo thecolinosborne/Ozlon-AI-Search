@@ -12,12 +12,13 @@ export type StoneCapability = {
   cost: number;
   maxCtx: number;
   keyTail?: string | null;
+  source?: "user" | "system" | "none";
 };
 
 export type ProviderRow = {
   id: string;
   user_id: string;
-  provider: "lovable" | "openai" | "gemini" | "anthropic" | "higgsfield";
+  provider: string;
   status: "active" | "disabled" | "error";
   priority: number;
   capabilities: StoneCapability;
@@ -37,21 +38,27 @@ export type RoutingLogEntry = {
   created_at: string;
 };
 
-// System stones are powered by project-level secrets (always-on for everyone).
-export const STONE_SOURCE: Record<string, "system" | "personal"> = {
-  lovable: "system",
-  openai: "system",
-  gemini: "system",
-  anthropic: "personal",
-  higgsfield: "system",
+export type UserKeyStatus = {
+  id: string;
+  connected: boolean;
+  last4?: string | null;
+  nickname?: string | null;
+  console_url?: string;
+  key_prefix?: string;
+  label?: string;
 };
 
-const ALL_STONES = ["lovable", "openai", "gemini", "higgsfield"] as const;
+// All stones we surface in the UI. lovable is platform-default (not editable).
+export const ALL_STONES = ["lovable", "openai", "gemini", "higgsfield", "anthropic", "xai", "deepseek", "mistral"] as const;
+
+// Which stones the system has env keys for (verified server-side)
+const SYSTEM_VERIFIED = ["lovable", "openai", "gemini", "higgsfield"];
 
 export function useGauntlet() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [stones, setStones] = useState<Record<string, StoneCapability>>({});
   const [logs, setLogs] = useState<RoutingLogEntry[]>([]);
+  const [userKeys, setUserKeys] = useState<Record<string, UserKeyStatus>>({});
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
@@ -59,15 +66,29 @@ export function useGauntlet() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      // The 'list' action now auto-verifies on first load if no rows exist
-      const { data, error } = await supabase.functions.invoke("gauntlet-router", {
-        body: { action: "list" },
-        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
-      });
-      if (!error && data) {
-        setProviders(data.providers ?? []);
-        setStones(data.stones ?? {});
+      const auth = session ? { Authorization: `Bearer ${session.access_token}` } : {};
+
+      const [{ data: gauntlet }, { data: brain }] = await Promise.all([
+        supabase.functions.invoke("gauntlet-router", {
+          body: { action: "list" },
+          headers: auth,
+        }),
+        supabase.functions.invoke("connect-brain", {
+          body: { action: "list_status" },
+          headers: auth,
+        }),
+      ]);
+
+      if (gauntlet) {
+        setProviders(gauntlet.providers ?? []);
+        setStones(gauntlet.stones ?? {});
       }
+
+      const map: Record<string, UserKeyStatus> = {};
+      for (const p of (brain?.platforms ?? []) as Array<UserKeyStatus & { id: string }>) {
+        map[p.id] = p;
+      }
+      setUserKeys(map);
 
       const { data: logData } = await supabase
         .from("gauntlet_routing_log")
@@ -94,26 +115,6 @@ export function useGauntlet() {
     }
   }, [refresh]);
 
-  const setMode = useCallback(async (provider: string, mode: "auto" | "manual") => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("ai_providers").upsert(
-      { user_id: user.id, provider, mode } as any,
-      { onConflict: "user_id,provider" }
-    );
-    await refresh();
-  }, [refresh]);
-
-  const toggleStatus = useCallback(async (provider: string, status: "active" | "disabled") => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("ai_providers").upsert(
-      { user_id: user.id, provider, status } as any,
-      { onConflict: "user_id,provider" }
-    );
-    await refresh();
-  }, [refresh]);
-
   useEffect(() => { refresh(); }, [refresh]);
 
   const usage = ALL_STONES.map((stone) => {
@@ -121,8 +122,11 @@ export function useGauntlet() {
     return { stone, count, pct: logs.length > 0 ? Math.round((count / logs.length) * 100) : 0 };
   });
 
-  // Count of stones with detected keys (active, not error)
-  const keysDetected = providers.filter((p) => p.status === "active").length;
+  const keysDetected = providers.filter((p) => p.status === "active").length + Object.values(userKeys).filter((u) => u.connected).length;
 
-  return { providers, stones, logs, usage, loading, verifying, refresh, verifyAll, setMode, toggleStatus, ALL_STONES, keysDetected };
+  return {
+    providers, stones, logs, usage, userKeys,
+    loading, verifying, refresh, verifyAll,
+    ALL_STONES, SYSTEM_VERIFIED, keysDetected,
+  };
 }
