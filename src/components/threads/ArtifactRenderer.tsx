@@ -18,6 +18,8 @@ interface Props {
   onRevise?: () => void;
 }
 
+const DOCUMENT_TYPES = new Set(['markdown', 'plan', 'decision', 'action_result']);
+
 export function ArtifactRenderer({ artifact, isLatest, onRevise }: Props) {
   const [acting, setActing] = useState<string | null>(null);
 
@@ -52,6 +54,67 @@ export function ArtifactRenderer({ artifact, isLatest, onRevise }: Props) {
     plan: 'Plan',
   };
 
+  const isDocument = DOCUMENT_TYPES.has(artifact.type);
+  const createdDate = artifact.created_at
+    ? new Date(artifact.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+
+  // Document-mode rendering: paper-like card with real document chrome
+  if (isDocument) {
+    return (
+      <div className={cn(
+        "rounded-2xl bg-card border shadow-sm overflow-hidden transition-opacity",
+        isLatest ? "border-border/50" : "border-border/30 opacity-70"
+      )}>
+        <div className="px-8 sm:px-10 pt-8 sm:pt-10 pb-6">
+          {artifact.title && (
+            <div className="border-b border-border/30 pb-4 mb-6">
+              <h1 className="text-2xl sm:text-[1.65rem] font-semibold tracking-tight text-foreground leading-tight">
+                {artifact.title}
+              </h1>
+              <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
+                <Badge variant="outline" className="text-[10px] font-medium">
+                  {typeLabel[artifact.type] ?? artifact.type}
+                </Badge>
+                <span>·</span>
+                <span>v{artifact.version}</span>
+                {createdDate && (<><span>·</span><span>{createdDate}</span></>)}
+                {!isLatest && (<><span>·</span><span className="opacity-70">superseded</span></>)}
+              </div>
+            </div>
+          )}
+          <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none">
+            {renderBody(artifact)}
+          </div>
+        </div>
+
+        {isLatest && (
+          <div className="flex flex-wrap gap-2 px-6 sm:px-8 py-3 border-t border-border/30 bg-muted/10">
+            <Button size="sm" variant="ghost" onClick={copy}>
+              <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
+            </Button>
+            {onRevise && (
+              <Button size="sm" variant="ghost" onClick={onRevise}>
+                <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Revise
+              </Button>
+            )}
+            {artifact.type === 'markdown' && (
+              <Button size="sm" variant="outline" disabled={acting !== null}
+                onClick={() => callTool('google-docs', {
+                  action: 'create',
+                  title: artifact.title ?? 'Untitled',
+                  body: artifact.content?.text,
+                })}>
+                <FileText className="w-3.5 h-3.5 mr-1.5" /> Save to Google Doc
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Non-document artifacts: original compact rendering
   return (
     <div className={cn(
       "rounded-2xl border bg-card/40 backdrop-blur-md overflow-hidden",
@@ -91,16 +154,6 @@ export function ArtifactRenderer({ artifact, isLatest, onRevise }: Props) {
               <Mail className="w-3.5 h-3.5 mr-1.5" /> Send via Gmail
             </Button>
           )}
-          {artifact.type === 'markdown' && (
-            <Button size="sm" variant="outline" disabled={acting !== null}
-              onClick={() => callTool('google-docs', {
-                action: 'create',
-                title: artifact.title ?? 'Untitled',
-                body: artifact.content?.text,
-              })}>
-              <FileText className="w-3.5 h-3.5 mr-1.5" /> Save to Google Doc
-            </Button>
-          )}
           {artifact.type === 'doc_link' && artifact.external_ref?.url && (
             <Button size="sm" variant="outline" asChild>
               <a href={String(artifact.external_ref.url)} target="_blank" rel="noopener noreferrer">
@@ -131,16 +184,14 @@ function renderBody(artifact: Artifact) {
     case 'decision':
     case 'action_result':
       return (
-        <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{String(c.text ?? '')}</ReactMarkdown>
-        </div>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{String(c.text ?? '')}</ReactMarkdown>
       );
     case 'email_draft':
       return (
         <div className="space-y-2 text-sm">
           {c.to && <div><span className="text-muted-foreground">To: </span>{String(c.to)}</div>}
           {c.subject && <div className="font-medium">{String(c.subject)}</div>}
-          <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none pt-2 border-t border-border/30">
+          <div className="prose prose-sm dark:prose-invert max-w-none pt-2 border-t border-border/30">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{String(c.body ?? c.text ?? '')}</ReactMarkdown>
           </div>
         </div>
