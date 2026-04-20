@@ -130,6 +130,25 @@ export interface ToolsUsedEvent {
   tools: ToolUsedInfo[];
 }
 
+export interface OrchestrationTraceEvent {
+  intent: string | null;
+  domains: string[];
+  agent_chosen: string;
+  wisdom_signal: {
+    resonant_sources: Array<{ id: string; person: string; title: string; similarity: number }>;
+    dominant_domains: string[];
+    framework_hits: string[];
+    memory_hits: number;
+    reflection_hits: number;
+    confidence: number;
+  };
+  frameworks_injected: Array<{ id: string; title: string }>;
+  memories_injected: Array<{ id: string; summary: string }>;
+  reflections_injected: Array<{ id: string; type: string }>;
+  tools_reordered: boolean;
+  router_path: string | null;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
