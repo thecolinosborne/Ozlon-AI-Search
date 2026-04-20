@@ -6427,7 +6427,51 @@ function getValidatedTools(): ToolDef[] {
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): ToolDef[] {
+// Service → domain mapping (Tool Sectioning v2). Used to gate tool exposure
+// per turn based on the Infinity Router's domain classification.
+const SERVICE_TO_DOMAIN: Record<string, string> = {
+  'google-mail': 'google-workspace',
+  'google-calendar': 'google-workspace',
+  'google-drive': 'google-workspace',
+  'google-docs': 'google-workspace',
+  'google-sheets': 'google-workspace',
+  'google-slides': 'google-workspace',
+  'google-search-console': 'google-marketing',
+  'google-analytics': 'google-marketing',
+  'google-tag-manager': 'google-marketing',
+  'ghl': 'crm',
+  'plaid': 'finance',
+  // ClickUp tools currently use '_always_' (no auth required at the tool layer);
+  // we steer them via name-prefix below so they only load when projects intent fires.
+};
+
+// Tools tagged '_always_' that we still want to gate by domain (name-prefix steering).
+const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
+  { prefix: 'clickup', domain: 'projects' },
+  { prefix: 'higgsfield_', domain: 'creative' },
+  { prefix: 'generate_image', domain: 'creative' },
+  { prefix: 'edit_image', domain: 'creative' },
+  { prefix: 'generate_video', domain: 'creative' },
+  { prefix: 'upload_youtube_video', domain: 'creative' },
+  { prefix: 'save_memory', domain: 'memory' },
+  { prefix: 'add_standing_order', domain: 'memory' },
+  { prefix: 'remove_standing_order', domain: 'memory' },
+  { prefix: 'add_goal', domain: 'memory' },
+  { prefix: 'update_goal_progress', domain: 'memory' },
+  { prefix: 'complete_goal', domain: 'memory' },
+];
+
+// 'system' tools are ALWAYS loaded regardless of router domain decisions.
+const SYSTEM_TOOL_NAMES = new Set<string>([
+  'web_search_google',
+  'deep_research',
+  'scrape_events',
+  'list_events',
+  'create_work_task',
+  'update_work_task',
+]);
+
+function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
   const toolToService: Record<string, string> = {
