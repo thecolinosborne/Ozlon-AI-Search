@@ -6722,12 +6722,41 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
 
   // Use the validated tool array — broken schemas have already been dropped.
   const validated = getValidatedTools();
-  const filtered = validated.filter(tool => {
+
+  // Step 1: connection-based filter (existing behavior)
+  const connectionFiltered = validated.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
+
+  // Step 2: Tool Sectioning v2 — domain gating
+  // If allowedDomains is undefined (router off / fallback / low confidence),
+  // skip gating entirely → identical to v1 behavior. Zero regression risk.
+  let filtered = connectionFiltered;
+  let domainGateApplied = false;
+  if (allowedDomains && allowedDomains.length > 0) {
+    const domainSet = new Set(allowedDomains);
+    domainSet.add('system'); // always include system tools
+    filtered = connectionFiltered.filter(tool => {
+      const name = tool.function.name;
+      // Always-on system tools
+      if (SYSTEM_TOOL_NAMES.has(name)) return true;
+      const svc = toolToService[name];
+      // Map service → domain
+      if (svc && svc !== '_always_') {
+        const domain = SERVICE_TO_DOMAIN[svc];
+        if (domain) return domainSet.has(domain);
+      }
+      // '_always_' or unmapped → check name-prefix steering
+      const prefixMatch = NAME_PREFIX_DOMAIN.find(p => name.startsWith(p.prefix));
+      if (prefixMatch) return domainSet.has(prefixMatch.domain);
+      // Unscoped fallback: keep it (safer to over-include than drop a real tool)
+      return true;
+    });
+    domainGateApplied = true;
+  }
 
   // Per-domain distribution log — observability for the sectioning plan.
   const byDomain: Record<string, number> = {};
@@ -6735,7 +6764,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     const svc = toolToService[t.function.name] || 'unscoped';
     byDomain[svc] = (byDomain[svc] || 0) + 1;
   }
-  console.log(`[tool-sections] ${filtered.length} tools available. By domain:`, byDomain);
+  console.log(
+    `[tool-sections] ${filtered.length}/${connectionFiltered.length} tools loaded. ` +
+    `Gate=${domainGateApplied ? `[${allowedDomains?.join(',')}]` : 'OFF'}. By service:`, byDomain
+  );
   if (_droppedTools.length > 0) {
     console.warn(`[tool-sections] ${_droppedTools.length} tool(s) permanently disabled (bad schema):`, _droppedTools);
   }
