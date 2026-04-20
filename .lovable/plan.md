@@ -1,116 +1,113 @@
 
-Yes — this folds into the Gauntlet plan and actually simplifies it. The user-facing surface becomes one toggle: **Auto** (default, system picks per task) vs **Manual** (power-user override). Most people never touch it.
 
-## The Auto Router (the brain inside the Gauntlet)
+## What you're seeing & why
 
-Every DAG node gets scored across 5 dimensions, the router picks the stone with the best fit-to-cost ratio, falls back automatically on failure. Deterministic, sub-10ms, no extra LLM call for routing.
+### "Get a free key" explained
+On the **Intelligence Routing** page (`/settings/routing` → `ModelRouting.tsx`), each provider has a small `Get a free key ↗` link. It's just a courtesy outbound link to the provider's API console (e.g., `platform.openai.com/api-keys`, `aistudio.google.com/apikey`) where new users can sign up and grab a developer key. Gemini's tier is genuinely free up to a daily quota; OpenAI and Anthropic call it "free signup" but charge per-token after credits. The wording is misleading — we'll change it to **"Where to get a key ↗"**.
 
-### Scoring dimensions per node
-| Dimension | Source | Example |
-|---|---|---|
-| **complexity** | planner emits `low / medium / high` | multi-step reasoning → high |
-| **modality** | task type | `vision`, `image_gen`, `text`, `audio` |
-| **latency_priority** | user context | voice mode → fast; background → relaxed |
-| **context_size** | tokens estimated | >200k → only Gemini Pro / GPT-5 |
-| **cost_sensitivity** | user tier + run budget | free user → prefer cheaper stones |
+### Why OpenAI & Gemini look "not synced"
+They actually *are* synced — the keys exist as **server-side secrets** (`OPENAI_API_KEY`, `GEMINI_API_KEY`), which is why the Gauntlet shows them as **active stones**. But there's no visual that says "this stone is powered by a project-level key, not a user-level key." So it looks like a dead input. Two separate concepts are colliding:
 
-### Stone capability matrix (seed values, tunable)
-```text
-Stone              reasoning  vision  image  speed  cost   max_ctx
-─────────────────────────────────────────────────────────────────
-Lovable Gateway    8          7       9      7      $      1M
-OpenAI gpt-5       10         9       —      6      $$$$   400k
-OpenAI gpt-5-mini  8          8       —      9      $$     400k
-Gemini 2.5 Pro     9          10      —      7      $$$    2M
-Gemini 2.5 Flash   7          8       —      10     $      1M
-Gemini Nano Banana —          —       10     8      $$     —
-Anthropic Sonnet   9          8       —      7      $$$    200k
-```
+- **Project-wide stones** (powered by secrets you've added) — always on for everyone, no input needed
+- **Bring-your-own-key stones** (the `/settings/routing` form) — per-user keys stored in the vault
 
-### Routing function (pseudocode)
-```text
-score(stone, node) =
-    capability_match(stone, node.modality) * 3
-  + reasoning_fit(stone, node.complexity) * 2
-  + speed_fit(stone, node.latency_priority) * 1
-  - cost_penalty(stone, user.cost_sensitivity)
-  - context_overflow_penalty(stone, node.context_size)
+We'll make this visually obvious with a **"Powered by system key"** badge on the stone, plus a small "Replace key" affordance for admins.
 
-pick = argmax(active_stones, score)
-fallback_chain = sorted(active_stones - pick, score desc)
-```
+### The two-routing-pages problem
+Right now:
+- `/settings/routing` → old `ModelRouting` page (BYOK key entry, "Get a free key" links)
+- `/integrations/ai-processor` → new `GauntletPanel` (Auto router, stone slots, telemetry)
 
-### Auto mode UX
-- One toggle on the AI Gauntlet panel: **Auto (recommended)** ↔ **Manual**
-- In Auto: user sees nothing — just gets results. Optional "why this stone?" chip on each AI response that expands to show the routing reason (e.g. "Picked Gemini Flash: fast classification, low cost").
-- In Manual: existing per-task model dropdown returns for power users.
-- Default for all users: **Auto**.
+Same domain, two pages, confusing. We unify under one concept you named: **The Brain**.
 
-### Telemetry feedback loop (lightweight, additive)
-New table `gauntlet_routing_log`:
-```text
-id, user_id, run_id, node_type, modality, complexity,
-chosen_stone, fallback_used (bool), latency_ms,
-success (bool), cost_estimate, created_at
-```
-Used for:
-1. Showing the user's "stone usage breakdown" on the panel (Gemini 60%, OpenAI 25%, Lovable 15%)
-2. Future: tune the scoring weights from real outcomes (out of scope for this build, but the data lands now)
+---
 
-## Updated build (delta vs the previous Gauntlet plan)
+## The Brain — naming & IA
 
-### Same as before
-- `ai_providers` table + RLS
-- `gauntlet-router` edge function with 4 drivers (Lovable, OpenAI, Gemini, Anthropic)
-- Frontend panel under `/integrations/ai-processor` with stone slots
-- `GEMINI_API_KEY` secret request (only new secret needed)
-- Wire orchestrator to call gauntlet-router for inference
+| Old name | New name |
+|---|---|
+| Intelligence Routing (Settings) | **The Brain** |
+| Model Router | **Brain Stones** |
+| AI Processor (Integrations) | *(removed — folded into The Brain)* |
+| Higgsfield (Integrations) | *(removed — becomes a Brain Stone for image/video)* |
+| Settings → Intelligence Routing row | Settings → **The Brain** |
 
-### New / changed for Auto mode
-- **Router is the default path.** Manual override is opt-in, not the entry point.
-- Add `mode` field to `ai_providers` settings: `'auto' | 'manual'`. Default `'auto'`.
-- Add scoring function `pickStone(needs, activeStones)` inside `gauntlet-router/index.ts` (~80 lines, pure function, unit-testable).
-- Add `gauntlet_routing_log` table + RLS.
-- Add "why this stone" tooltip data to the gauntlet-router response (`{ stone, reason, fallback_used }`) so frontend can surface it.
-- Panel shows usage breakdown chart (reuse existing `chart.tsx` from shadcn).
+**Concept:** The Brain is one mind. Stones are its lobes — each lobe handles what it's best at (reasoning, vision, image, video). The system picks the right lobe for the moment. You can swap lobes in and out.
 
-### Files touched (final list)
+Tagline under the header: *"One mind. Many lobes. Auto-tuned to the moment."*
 
-**New:**
-- `supabase/functions/gauntlet-router/index.ts` (router + 4 drivers + scoring fn)
-- `supabase/migrations/<ts>_ai_providers_and_routing_log.sql`
-- `src/components/gauntlet/GauntletPanel.tsx`
-- `src/components/gauntlet/StoneSlot.tsx`
-- `src/components/gauntlet/AutoModeToggle.tsx`
-- `src/components/gauntlet/UsageBreakdown.tsx`
-- `src/hooks/useGauntlet.ts`
+---
 
-**Modified (surgical, additive):**
-- `supabase/functions/orchestrator/index.ts` — call gauntlet-router, default Auto
-- `supabase/functions/chat/index.ts` — opt-in Auto routing for chat too (default off this build to avoid regression; flip on after smoke tests pass)
-- `src/pages/integrations/AIProcessorDetail.tsx` — embed `GauntletPanel`
-- `supabase/config.toml` — register `gauntlet-router`
+## Build (additive, surgical)
 
-**Untouched:** all 259 chat tools, voice, onboarding, auth, integrations UI.
+### 1. Unify routing under `/settings/brain`
+- Rename route `/settings/routing` → `/settings/brain` (keep old route as redirect for safety)
+- `ModelRouting.tsx` → `Brain.tsx` (file rename + header + copy update)
+- The page becomes a single screen with three sections:
+  1. **Auto Mode** toggle (from GauntletPanel)
+  2. **Brain Stones** grid — every stone (system + BYOK) shown together
+  3. **Usage Breakdown** chart (from GauntletPanel)
 
-## Verification (full 13-item checklist, unchanged + 4 new)
-1-9. Original chat / integration / Phase C smoke tests (must all PASS)
-10. All 4 stones appear, status reflects active keys
-11. Auto picks correct stone for: text Q (→ Flash), code reasoning (→ gpt-5), vision (→ Gemini Pro), image gen (→ Nano Banana)
-12. Fallback test: kill OpenAI mid-run → router auto-routes to Gemini, completes
-13. Hot-swap test: add new key → stone lights up <5s, no reload
-14. **NEW:** Auto/Manual toggle works; Manual restores per-task dropdown
-15. **NEW:** "Why this stone?" tooltip shows reason on AI responses
-16. **NEW:** Usage breakdown chart populates after 5+ runs
-17. **NEW:** Routing log table receives entries with correct user_id under RLS
+### 2. Stone source clarity
+Each `StoneSlot` gets a source badge:
+- 🟣 **System Stone** — powered by project-level key, always-on, no input
+- 🔵 **Personal Stone** — your BYOK key, replaceable
+- ⚪ **Available** — not yet activated, click to add a key
 
-## Build order
-1. Request `GEMINI_API_KEY` (one prompt)
-2. Migration: `ai_providers` + `gauntlet_routing_log` + RLS
-3. `gauntlet-router` edge function (drivers + scoring + verify endpoint)
-4. Orchestrator → gauntlet-router wiring
-5. Frontend: `GauntletPanel`, `AutoModeToggle`, `UsageBreakdown`, `StoneSlot`
-6. Embed in `AIProcessorDetail`
-7. Run all 17 verification items, paste results table
+For System Stones, replace the dead-looking input with:
+> ✓ Powered by system key · Last verified 2 min ago
+> [Replace with my own key →] (collapsed by default)
 
-Approve and I execute. Auto-mode is the default — user never has to think about which stone is firing unless they want to.
+### 3. Add Higgsfield as a Brain Stone
+- Add `higgsfield` to `STONES` matrix in `gauntlet-router/index.ts`:
+  - capabilities: `{ image: 9, video: 10, reasoning: 0, vision: 0, speed: 6, cost: 2 }`
+  - Add `video` modality to the `Needs` type and scoring function
+- Add Higgsfield driver (`callHiggsfield`) that wraps existing `higgsfield` edge function
+- Auto-route: image_gen requests can pick between Lovable Gemini (free, fast) and Higgsfield (premium, video-capable); video_gen requests go to Higgsfield first
+- Remove Higgsfield card from `/integrations` page
+- Keep `/integrations/higgsfield` route alive but redirect to `/settings/brain` with stone highlighted
+
+### 4. Copy fixes
+- "Get a free key" → "Where to get a key" (it's not always free)
+- Add tooltip on the link: *"Some providers offer free tiers (Gemini), others charge per-token after signup."*
+- Add bottom-of-page note:
+  > **Not yet supported:** Anthropic Claude, Groq, Mistral, DeepSeek. We'll add these as Brain Stones when there's demand.
+
+### 5. Settings page update
+- Rename "Intelligence Routing" section → "The Brain"
+- Rename "Model Router" row → "Brain Stones"
+- Update icon from `Zap` → `Brain` (lucide)
+- Update description: *"Stones picked automatically. Swap lobes anytime."*
+
+---
+
+## Files touched
+
+**Modified (additive, no deletions):**
+- `src/pages/ModelRouting.tsx` — rename copy, update "Get a free key" wording, add System/Personal stone badges, embed GauntletPanel sections
+- `src/pages/Settings.tsx` — rename section + row labels, swap icon
+- `src/pages/Integrations.tsx` — remove Higgsfield from list array
+- `src/App.tsx` — add `/settings/brain` route (alias to existing page), add redirect for `/integrations/higgsfield` → `/settings/brain?stone=higgsfield`
+- `src/components/gauntlet/StoneSlot.tsx` — add source badge ("System Stone" / "Personal Stone")
+- `src/components/gauntlet/GauntletPanel.tsx` — add bottom note about unsupported providers
+- `src/hooks/useGauntlet.ts` — add `higgsfield` to `ALL_STONES`, add `source: 'system'|'personal'` field
+- `supabase/functions/gauntlet-router/index.ts` — add Higgsfield stone + driver + `video` modality scoring
+- `src/pages/integrations/AIProcessorDetail.tsx` — keep page alive but show banner: *"Moved to Settings → The Brain"* with redirect button
+
+**Untouched:**
+- `/integrations/higgsfield` detail page stays accessible (for advanced API key management) but de-emphasized
+- All chat tools, voice, onboarding, auth
+- The 17-item verification checklist still applies
+
+---
+
+## What this fixes
+1. ✅ "Get a free key" mystery — relabeled + tooltipped
+2. ✅ OpenAI/Gemini look unsynced — now shows "System Stone · Powered by system key"
+3. ✅ Higgsfield no longer clutters Integrations — becomes a real Brain Stone for image/video
+4. ✅ Two routing pages collapse into one — **The Brain** at `/settings/brain`
+5. ✅ Naming feels productized + human (Brain / Stones / Lobes metaphor consistent)
+6. ✅ Anthropic/Groq/Mistral/DeepSeek noted as "not yet" — no false promises
+
+Approve and I execute.
+
