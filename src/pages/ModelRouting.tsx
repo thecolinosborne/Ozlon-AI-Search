@@ -364,12 +364,17 @@ const ModelRouting = () => {
           </button>
           <div>
             <h1 className="text-lg font-semibold text-foreground">The Brain</h1>
-            <p className="text-xs text-muted-foreground">The AI minds powering Ozlon.</p>
+            <p className="text-xs text-muted-foreground">One mind. Many lobes. Auto-tuned to the moment.</p>
           </div>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-4 space-y-10 pt-6">
+        {/* AI Gauntlet — Auto router with hot-swappable Brain Stones */}
+        <section>
+          <GauntletPanel />
+        </section>
+
         {/* Empty-state hero */}
         {!userHasPersonalBrain && (
           <div className="rounded-2xl bg-primary/5 border border-primary/20 p-5">
@@ -499,9 +504,14 @@ const ModelRouting = () => {
                             href={p.console_url}
                             target="_blank"
                             rel="noreferrer"
+                          <a
+                            href={p.console_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Some providers offer free tiers (Gemini), others charge per-token after signup."
                             className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
                           >
-                            Get a free key <ExternalLink className="w-3 h-3" />
+                            Where to get a key <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
                         <div className="relative">
