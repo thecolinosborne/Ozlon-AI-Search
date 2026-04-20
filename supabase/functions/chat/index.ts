@@ -8423,6 +8423,8 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
             if (infinityDebug) {
               await writer.write(encoder.encode(`event: infinity_router_debug\ndata: ${JSON.stringify(infinityDebug)}\n\n`));
             }
+            // Emit orchestration trace (wisdom + routing decisions)
+            await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
 
             // PHASE 3 — Planner pass (two-pass agentic routing).
             // Cheap planner produces a structured plan; integrations feed the prioritizer
