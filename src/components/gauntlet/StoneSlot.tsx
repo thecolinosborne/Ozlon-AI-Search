@@ -54,15 +54,26 @@ export const StoneSlot = ({ provider, row, capability, onToggle }: StoneSlotProp
         </div>
       </div>
 
-      {/* Source badge */}
-      <div className="flex items-center gap-1.5 mb-3">
+      {/* Source badge + key-tail confirmation */}
+      <div className="flex flex-col gap-1 mb-3">
         {source === "system" ? (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-            <Shield className="w-2.5 h-2.5" /> System Stone · Powered by system key
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary self-start">
+            <Shield className="w-2.5 h-2.5" /> System Stone
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground self-start">
             <Key className="w-2.5 h-2.5" /> Personal Stone · BYOK
+          </span>
+        )}
+        {isActive && capability?.keyTail && (
+          <span className="text-[10px] text-muted-foreground">
+            ✓ Key detected · ••••{capability.keyTail}
+            {row?.last_verified_at && ` · ${formatRelative(row.last_verified_at)}`}
+          </span>
+        )}
+        {isActive && !capability?.keyTail && row?.last_verified_at && (
+          <span className="text-[10px] text-muted-foreground">
+            ✓ Verified {formatRelative(row.last_verified_at)}
           </span>
         )}
       </div>
