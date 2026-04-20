@@ -123,6 +123,19 @@ const PLATFORMS: Record<string, PlatformPreset> = {
       { model_id: "deepseek/deepseek-chat", display_name: "DeepSeek Chat", capabilities: ["tools","json","reasoning"], tier: "flash", context_window: 128_000, cost_per_1k_in: 0.00014, cost_per_1k_out: 0.00028, avg_latency_ms: 1000, fallback_model_id: null },
     ],
   },
+  higgsfield: {
+    id: "higgsfield",
+    label: "Higgsfield AI",
+    blurb: "Cinematic AI video & image generation.",
+    human_blurb: "Cinematic brain. Creates filmlike video and image clips.",
+    capabilities: ["image", "video"],
+    console_url: "https://higgsfield.ai",
+    key_prefix: "",
+    gateway_url: "https://platform.higgsfield.ai/v1/generate",
+    models: [
+      { model_id: "higgsfield/dop-standard", display_name: "Higgsfield DoP Standard", capabilities: ["video_gen","image_gen"], tier: "standard", context_window: 32_000, cost_per_1k_in: 0.001, cost_per_1k_out: 0.01, avg_latency_ms: 30000, fallback_model_id: null },
+    ],
+  },
 };
 
 interface ReqBody {
@@ -182,15 +195,6 @@ serve(async (req) => {
         const label = (r.metadata?.label as string) || null;
         byPlatform.set(pid, { last4, label });
       }
-      // Higgsfield is special — stored in integration_connections
-      const { data: hf } = await admin
-        .from("integration_connections")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("provider", "higgsfield")
-        .eq("status", "connected")
-        .maybeSingle();
-
       const status = Object.values(PLATFORMS).map((p) => {
         const c = byPlatform.get(p.id);
         return {
@@ -205,19 +209,6 @@ serve(async (req) => {
           last4: c?.last4 || null,
           nickname: c?.label || null,
         };
-      });
-      // Append higgsfield virtual entry
-      status.push({
-        id: "higgsfield",
-        label: "Higgsfield AI",
-        blurb: "Cinematic AI video & image generation.",
-        human_blurb: "Cinematic brain. Creates filmlike video and image clips.",
-        capabilities: ["video", "image"],
-        console_url: "https://higgsfield.ai",
-        key_prefix: "",
-        connected: !!hf,
-        last4: hf ? "••••" : null,
-        nickname: null,
       });
       return json({ platforms: status });
     }
@@ -313,5 +304,6 @@ function inferPlatformIdFromModelId(modelId: string): string | null {
   if (prefix === "xai") return "xai";
   if (prefix === "mistral") return "mistral";
   if (prefix === "deepseek") return "deepseek";
+  if (prefix === "higgsfield") return "higgsfield";
   return null;
 }

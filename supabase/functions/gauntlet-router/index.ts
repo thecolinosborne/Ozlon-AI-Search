@@ -107,53 +107,44 @@ export function pickStone(
   };
 }
 
-// ─────────── Provider drivers ───────────
-async function callLovable(model: string, messages: any[], tools?: any[]): Promise<any> {
+// ─────────── Provider drivers (key passed in, never read env directly) ───────────
+async function callLovable(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${Deno.env.get("LOVABLE_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
   });
   if (!res.ok) throw new Error(`Lovable ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callOpenAI(model: string, messages: any[], tools?: any[]): Promise<any> {
+async function callOpenAI(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callGemini(model: string, messages: any[]): Promise<any> {
+async function callGemini(model: string, messages: any[], key: string): Promise<any> {
   const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${Deno.env.get("GEMINI_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages }),
   });
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callAnthropic(model: string, messages: any[]): Promise<any> {
+async function callAnthropic(model: string, messages: any[], key: string): Promise<any> {
   const system = messages.find((m) => m.role === "system")?.content;
   const filtered = messages.filter((m) => m.role !== "system");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": Deno.env.get("ANTHROPIC_API_KEY") ?? "",
+      "x-api-key": key,
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
@@ -172,7 +163,6 @@ async function callAnthropic(model: string, messages: any[]): Promise<any> {
 async function callHiggsfield(needs: Needs, messages: any[], authHeader?: string): Promise<any> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  // Build prompt from messages
   const prompt = messages
     .filter((m: any) => m.role === "user" || m.role === "system")
     .map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content))
@@ -196,7 +186,6 @@ async function callHiggsfield(needs: Needs, messages: any[], authHeader?: string
   const json = await res.json();
   if (!json.success) throw new Error(json.error || "higgsfield failed");
 
-  // Normalize to OpenAI-ish chat completion shape
   const data = json.data;
   const url = data?.url || data?.video_url || data?.image_url || "";
   const requestId = data?.request_id || data?.id || "";
@@ -208,44 +197,73 @@ async function callHiggsfield(needs: Needs, messages: any[], authHeader?: string
   };
 }
 
-async function dispatch(provider: string, model: string, messages: any[], tools?: any[], needs?: Needs, authHeader?: string) {
+const ENV_KEY_MAP: Record<string, string> = {
+  lovable: "LOVABLE_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  higgsfield: "HIGGSFIELD_API_KEY",
+};
+
+// Look up the user's personal key for a platform from custom_models (stored as inline:<key>)
+async function getUserKey(admin: any, userId: string | null, platformId: string): Promise<string | null> {
+  if (!userId) return null;
+  const { data } = await admin
+    .from("custom_models")
+    .select("api_key_secret_name, metadata")
+    .eq("user_id", userId)
+    .eq("metadata->>platform_id", platformId)
+    .limit(1)
+    .maybeSingle();
+  const secret = data?.api_key_secret_name as string | undefined;
+  if (secret && secret.startsWith("inline:")) return secret.slice("inline:".length);
+  return null;
+}
+
+// Resolve key with precedence: user > env. Returns { key, source }
+async function resolveKey(admin: any, userId: string | null, provider: string): Promise<{ key: string | null; source: "user" | "system" | "none" }> {
+  const userKey = await getUserKey(admin, userId, provider);
+  if (userKey) return { key: userKey, source: "user" };
+  const envKey = Deno.env.get(ENV_KEY_MAP[provider] || "");
+  if (envKey) return { key: envKey, source: "system" };
+  return { key: null, source: "none" };
+}
+
+async function dispatch(provider: string, model: string, messages: any[], tools: any[] | undefined, needs: Needs | undefined, authHeader: string | undefined, key: string) {
   switch (provider) {
-    case "lovable":   return callLovable(model, messages, tools);
-    case "openai":    return callOpenAI(model, messages, tools);
-    case "gemini":    return callGemini(model, messages);
-    case "anthropic": return callAnthropic(model, messages);
+    case "lovable":   return callLovable(model, messages, key, tools);
+    case "openai":    return callOpenAI(model, messages, key, tools);
+    case "gemini":    return callGemini(model, messages, key);
+    case "anthropic": return callAnthropic(model, messages, key);
     case "higgsfield": return callHiggsfield(needs ?? {}, messages, authHeader);
     default: throw new Error(`Unknown provider: ${provider}`);
   }
 }
 
-// ─────────── Verify each provider has a working key (returns keyTail) ───────────
-async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: string; keyTail?: string }> {
+// ─────────── Verify each provider has a working key (returns keyTail + source) ───────────
+async function verifyProvider(
+  provider: string,
+  admin: any,
+  userId: string | null,
+): Promise<{ ok: boolean; error?: string; keyTail?: string; source?: "user" | "system" | "none" }> {
   try {
     const stone = STONES[provider];
     if (!stone) return { ok: false, error: "unknown provider" };
 
-    const keyMap: Record<string, string> = {
-      lovable: "LOVABLE_API_KEY",
-      openai: "OPENAI_API_KEY",
-      gemini: "GEMINI_API_KEY",
-      anthropic: "ANTHROPIC_API_KEY",
-      higgsfield: "HIGGSFIELD_API_KEY",
-    };
-    const key = Deno.env.get(keyMap[provider]);
-    if (!key) return { ok: false, error: "no API key" };
-    const keyTail = key.length >= 4 ? key.slice(-4) : key;
+    const resolved = await resolveKey(admin, userId, provider);
+    if (!resolved.key) return { ok: false, error: "no API key", source: "none" };
+    const keyTail = resolved.key.length >= 4 ? resolved.key.slice(-4) : resolved.key;
 
     if (provider === "higgsfield") {
-      // Higgsfield needs both API key and APP ID
+      // Higgsfield needs both API key and APP ID (APP ID env-only for now)
       const appId = Deno.env.get("HIGGSFIELD_APP_ID");
-      if (!appId) return { ok: false, error: "missing HIGGSFIELD_APP_ID" };
-      return { ok: true, keyTail };
+      if (!appId) return { ok: false, error: "missing HIGGSFIELD_APP_ID", source: resolved.source, keyTail };
+      return { ok: true, keyTail, source: resolved.source };
     }
 
-    // Light ping for chat-capable providers (including lovable to detect dead/expired keys)
-    await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }]);
-    return { ok: true, keyTail };
+    // Light ping for chat-capable providers
+    await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }], undefined, undefined, undefined, resolved.key);
+    return { ok: true, keyTail, source: resolved.source };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -298,7 +316,11 @@ Deno.serve(async (req) => {
       for (const stone of chain) {
         const start = Date.now();
         try {
-          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader);
+          const resolved = await resolveKey(admin, userId, stone.provider);
+          if (!resolved.key && stone.provider !== "higgsfield") {
+            throw new Error(`no key for ${stone.provider}`);
+          }
+          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "");
           const latency = Date.now() - start;
           if (userId) {
             await admin.from("gauntlet_routing_log").insert({
@@ -307,6 +329,7 @@ Deno.serve(async (req) => {
               chosen_stone: stone.provider, chosen_model: stone.defaultModel,
               reason: picked.reason, fallback_used: fallbackUsed,
               latency_ms: latency, success: true,
+              metadata: { key_source: resolved.source },
             });
           }
           return json({
@@ -334,7 +357,7 @@ Deno.serve(async (req) => {
     if (action === "verify") {
       const results: Record<string, any> = {};
       for (const p of SYSTEM_STONES) {
-        results[p] = await verifyProvider(p);
+        results[p] = await verifyProvider(p, admin, userId);
       }
       if (userId) {
         for (const [provider, res] of Object.entries(results)) {
@@ -345,7 +368,7 @@ Deno.serve(async (req) => {
             status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
             last_error: r.error ?? null,
-            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null },
+            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null, source: r.source ?? "none" },
           }, { onConflict: "user_id,provider" });
         }
       }
@@ -360,31 +383,31 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .order("priority", { ascending: true });
 
-      // Auto-verify any system STONE missing OR stale (error/missing keyTail) so rows self-heal
-      const keyMap: Record<string, string> = {
-        lovable: "LOVABLE_API_KEY",
-        openai: "OPENAI_API_KEY",
-        gemini: "GEMINI_API_KEY",
-        higgsfield: "HIGGSFIELD_API_KEY",
-      };
+      // Auto-verify any system STONE missing OR stale (error/missing keyTail) so rows self-heal.
+      // Also re-verify if the user just connected/disconnected a personal key (source mismatch).
       const existingMap = new Map((data ?? []).map((r: any) => [r.provider, r]));
-      const toVerify = SYSTEM_STONES.filter((p) => {
+      const toVerify: string[] = [];
+      for (const p of SYSTEM_STONES) {
         const row = existingMap.get(p);
-        if (!row) return true;
-        const hasEnv = !!Deno.env.get(keyMap[p]);
-        const stale = (row.status === "error" && hasEnv) || !((row.capabilities as any)?.keyTail);
-        return stale;
-      });
+        const userKey = await getUserKey(admin, userId, p);
+        const hasEnv = !!Deno.env.get(ENV_KEY_MAP[p]);
+        const recordedSource = (row?.capabilities as any)?.source;
+        const expectedSource = userKey ? "user" : (hasEnv ? "system" : "none");
+        if (!row) { toVerify.push(p); continue; }
+        const stale = (row.status === "error" && (userKey || hasEnv)) || !((row.capabilities as any)?.keyTail);
+        const sourceMismatch = recordedSource !== expectedSource;
+        if (stale || sourceMismatch) toVerify.push(p);
+      }
       if (toVerify.length > 0) {
         for (const p of toVerify) {
-          const r = await verifyProvider(p);
+          const r = await verifyProvider(p, admin, userId);
           await admin.from("ai_providers").upsert({
             user_id: userId,
             provider: p,
             status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
             last_error: r.error ?? null,
-            capabilities: { ...STONES[p], keyTail: r.keyTail ?? null },
+            capabilities: { ...STONES[p], keyTail: r.keyTail ?? null, source: r.source ?? "none" },
           }, { onConflict: "user_id,provider" });
         }
         const refetched = await admin
