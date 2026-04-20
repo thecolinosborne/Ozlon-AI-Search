@@ -487,6 +487,9 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
       console.warn(
         `[Gauntlet] ${opts.agent} via ${modelId} -> ${resp.status} (retryable=${retryable})`,
       );
+      if (resp.status === 401 && (gatewayUrl === GATEWAY_URL)) {
+        console.error(`[Gauntlet] LOVABLE_API_KEY appears invalid (401). Set USE_GAUNTLET=1 (already set) and ensure provider keys are configured. Direct providers will still work via the gauntlet shim.`);
+      }
       if (!retryable) return lastResult;
       // continue to next candidate
     } catch (e) {
