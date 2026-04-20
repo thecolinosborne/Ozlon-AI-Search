@@ -113,6 +113,12 @@ export interface ProviderUsedEvent {
   model: string;
   source: 'your_key' | 'ozlon';
   platform: string;
+  routing_mode?: 'speed' | 'balanced' | 'quality';
+  reason?: string;
+  latency_ms?: number;
+  cost_estimate?: number;
+  fallback_used?: boolean;
+  fallback_chain?: Array<{ model: string; status: 'failed' | 'succeeded'; error?: string }>;
 }
 
 export interface ToolUsedInfo {
