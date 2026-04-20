@@ -240,33 +240,30 @@ async function dispatch(provider: string, model: string, messages: any[], tools:
   }
 }
 
-// ─────────── Verify each provider has a working key (returns keyTail) ───────────
-async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: string; keyTail?: string }> {
+// ─────────── Verify each provider has a working key (returns keyTail + source) ───────────
+async function verifyProvider(
+  provider: string,
+  admin: any,
+  userId: string | null,
+): Promise<{ ok: boolean; error?: string; keyTail?: string; source?: "user" | "system" | "none" }> {
   try {
     const stone = STONES[provider];
     if (!stone) return { ok: false, error: "unknown provider" };
 
-    const keyMap: Record<string, string> = {
-      lovable: "LOVABLE_API_KEY",
-      openai: "OPENAI_API_KEY",
-      gemini: "GEMINI_API_KEY",
-      anthropic: "ANTHROPIC_API_KEY",
-      higgsfield: "HIGGSFIELD_API_KEY",
-    };
-    const key = Deno.env.get(keyMap[provider]);
-    if (!key) return { ok: false, error: "no API key" };
-    const keyTail = key.length >= 4 ? key.slice(-4) : key;
+    const resolved = await resolveKey(admin, userId, provider);
+    if (!resolved.key) return { ok: false, error: "no API key", source: "none" };
+    const keyTail = resolved.key.length >= 4 ? resolved.key.slice(-4) : resolved.key;
 
     if (provider === "higgsfield") {
-      // Higgsfield needs both API key and APP ID
+      // Higgsfield needs both API key and APP ID (APP ID env-only for now)
       const appId = Deno.env.get("HIGGSFIELD_APP_ID");
-      if (!appId) return { ok: false, error: "missing HIGGSFIELD_APP_ID" };
-      return { ok: true, keyTail };
+      if (!appId) return { ok: false, error: "missing HIGGSFIELD_APP_ID", source: resolved.source, keyTail };
+      return { ok: true, keyTail, source: resolved.source };
     }
 
-    // Light ping for chat-capable providers (including lovable to detect dead/expired keys)
-    await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }]);
-    return { ok: true, keyTail };
+    // Light ping for chat-capable providers
+    await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }], undefined, undefined, undefined, resolved.key);
+    return { ok: true, keyTail, source: resolved.source };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
