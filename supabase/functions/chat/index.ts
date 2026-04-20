@@ -7158,6 +7158,22 @@ async function runToolLoop(
 // INFINITY ROUTER — Intelligent Pre-processing Layer
 // ============================================================================
 
+// 8 high-level domains used to gate tools per turn (Tool Sectioning v2).
+// 'system' is always loaded (memory, goals, web search, work tasks, creative gen).
+export type ToolDomain =
+  | 'google-workspace'
+  | 'google-marketing'
+  | 'crm'
+  | 'projects'
+  | 'finance'
+  | 'memory'
+  | 'creative'
+  | 'system';
+
+export const ALL_DOMAINS: ToolDomain[] = [
+  'google-workspace', 'google-marketing', 'crm', 'projects', 'finance', 'memory', 'creative', 'system',
+];
+
 interface InfinityClassification {
   intent: string;
   input_length: number;
@@ -7166,6 +7182,7 @@ interface InfinityClassification {
   needs_multimodal: boolean;
   needs_live_data: boolean;
   confidence: number;
+  domains: ToolDomain[];
 }
 
 type InfinityPath = 'gemini_flash' | 'gemini_pro' | 'retrieval' | 'action' | 'default_chat';
@@ -7177,6 +7194,53 @@ interface InfinityRouterResult {
   enrichment: string | null;
   timing_ms: number;
   fallback: boolean;
+}
+
+// Keyword → domain map. Cheap, deterministic, works without an extra LLM call.
+// 'system' is always included separately (always-on tools).
+const DOMAIN_KEYWORDS: Record<Exclude<ToolDomain, 'system'>, string[]> = {
+  'google-workspace': [
+    'gmail', 'email', 'inbox', 'mail', 'send', 'compose', 'draft', 'reply',
+    'calendar', 'schedule', 'event', 'meeting', 'appointment', 'invite', 'rsvp', 'free slot', 'freebusy',
+    'drive', 'folder', 'file', 'doc', 'document', 'sheet', 'spreadsheet', 'slide', 'presentation',
+    'google doc', 'google sheet', 'google slide',
+  ],
+  'google-marketing': [
+    'search console', 'gsc', 'seo', 'ranking', 'impressions', 'ctr', 'organic',
+    'analytics', 'ga4', 'traffic', 'sessions', 'pageviews', 'bounce', 'conversion rate',
+    'tag manager', 'gtm',
+  ],
+  'crm': [
+    'ghl', 'gohighlevel', 'go high level', 'highlevel', 'crm', 'contact', 'lead', 'opportunity',
+    'pipeline', 'campaign', 'workflow', 'invoice', 'subscription', 'product',
+    'sub-account', 'sub account', 'location', 'snapshot', 'blog post', 'social post',
+  ],
+  'projects': [
+    'clickup', 'task', 'subtask', 'list', 'space', 'checklist', 'time entry', 'timer',
+    'priority', 'assignee', 'due date', 'tag', 'dependency', 'comment',
+  ],
+  'finance': [
+    'plaid', 'bank', 'banking', 'transaction', 'balance', 'account', 'spend', 'spending',
+    'budget', 'expense', 'income',
+  ],
+  'memory': [
+    'remember', 'recall', 'last time', 'you said', 'we discussed', 'previously',
+    'my preference', 'i told you', 'you know that', 'memory', 'standing order', 'rule',
+    'goal', 'objective',
+  ],
+  'creative': [
+    'image', 'photo', 'picture', 'generate image', 'edit image', 'video', 'render',
+    'higgsfield', 'thumbnail', 'art', 'illustration', 'youtube upload', 'upload video',
+  ],
+};
+
+function detectDomains(text: string): ToolDomain[] {
+  const lower = text.toLowerCase();
+  const found = new Set<ToolDomain>(['system']); // always-on
+  for (const [domain, kws] of Object.entries(DOMAIN_KEYWORDS)) {
+    if (kws.some(k => lower.includes(k))) found.add(domain as ToolDomain);
+  }
+  return [...found];
 }
 
 function classifyMessage(messages: { role: string; content: string }[]): InfinityClassification {
@@ -7199,6 +7263,7 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
     needs_multimodal: multimodalKw.some(k => lower.includes(k)),
     needs_live_data: liveDataKw.some(k => lower.includes(k)),
     confidence: len < 20 ? 0.9 : len > 5000 ? 0.5 : 0.7,
+    domains: detectDomains(text),
   };
 }
 
