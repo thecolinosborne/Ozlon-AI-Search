@@ -6427,7 +6427,51 @@ function getValidatedTools(): ToolDef[] {
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
 // ============================================================================
 
-function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): ToolDef[] {
+// Service → domain mapping (Tool Sectioning v2). Used to gate tool exposure
+// per turn based on the Infinity Router's domain classification.
+const SERVICE_TO_DOMAIN: Record<string, string> = {
+  'google-mail': 'google-workspace',
+  'google-calendar': 'google-workspace',
+  'google-drive': 'google-workspace',
+  'google-docs': 'google-workspace',
+  'google-sheets': 'google-workspace',
+  'google-slides': 'google-workspace',
+  'google-search-console': 'google-marketing',
+  'google-analytics': 'google-marketing',
+  'google-tag-manager': 'google-marketing',
+  'ghl': 'crm',
+  'plaid': 'finance',
+  // ClickUp tools currently use '_always_' (no auth required at the tool layer);
+  // we steer them via name-prefix below so they only load when projects intent fires.
+};
+
+// Tools tagged '_always_' that we still want to gate by domain (name-prefix steering).
+const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
+  { prefix: 'clickup', domain: 'projects' },
+  { prefix: 'higgsfield_', domain: 'creative' },
+  { prefix: 'generate_image', domain: 'creative' },
+  { prefix: 'edit_image', domain: 'creative' },
+  { prefix: 'generate_video', domain: 'creative' },
+  { prefix: 'upload_youtube_video', domain: 'creative' },
+  { prefix: 'save_memory', domain: 'memory' },
+  { prefix: 'add_standing_order', domain: 'memory' },
+  { prefix: 'remove_standing_order', domain: 'memory' },
+  { prefix: 'add_goal', domain: 'memory' },
+  { prefix: 'update_goal_progress', domain: 'memory' },
+  { prefix: 'complete_goal', domain: 'memory' },
+];
+
+// 'system' tools are ALWAYS loaded regardless of router domain decisions.
+const SYSTEM_TOOL_NAMES = new Set<string>([
+  'web_search_google',
+  'deep_research',
+  'scrape_events',
+  'list_events',
+  'create_work_task',
+  'update_work_task',
+]);
+
+function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
   const toolToService: Record<string, string> = {
@@ -6678,12 +6722,41 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
 
   // Use the validated tool array — broken schemas have already been dropped.
   const validated = getValidatedTools();
-  const filtered = validated.filter(tool => {
+
+  // Step 1: connection-based filter (existing behavior)
+  const connectionFiltered = validated.filter(tool => {
     const requiredService = toolToService[tool.function.name];
     if (requiredService === 'ghl') return hasGHL;
     if (requiredService === '_always_') return true;
     return requiredService ? connMap.has(requiredService) : true;
   });
+
+  // Step 2: Tool Sectioning v2 — domain gating
+  // If allowedDomains is undefined (router off / fallback / low confidence),
+  // skip gating entirely → identical to v1 behavior. Zero regression risk.
+  let filtered = connectionFiltered;
+  let domainGateApplied = false;
+  if (allowedDomains && allowedDomains.length > 0) {
+    const domainSet = new Set(allowedDomains);
+    domainSet.add('system'); // always include system tools
+    filtered = connectionFiltered.filter(tool => {
+      const name = tool.function.name;
+      // Always-on system tools
+      if (SYSTEM_TOOL_NAMES.has(name)) return true;
+      const svc = toolToService[name];
+      // Map service → domain
+      if (svc && svc !== '_always_') {
+        const domain = SERVICE_TO_DOMAIN[svc];
+        if (domain) return domainSet.has(domain);
+      }
+      // '_always_' or unmapped → check name-prefix steering
+      const prefixMatch = NAME_PREFIX_DOMAIN.find(p => name.startsWith(p.prefix));
+      if (prefixMatch) return domainSet.has(prefixMatch.domain);
+      // Unscoped fallback: keep it (safer to over-include than drop a real tool)
+      return true;
+    });
+    domainGateApplied = true;
+  }
 
   // Per-domain distribution log — observability for the sectioning plan.
   const byDomain: Record<string, number> = {};
@@ -6691,7 +6764,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean): Too
     const svc = toolToService[t.function.name] || 'unscoped';
     byDomain[svc] = (byDomain[svc] || 0) + 1;
   }
-  console.log(`[tool-sections] ${filtered.length} tools available. By domain:`, byDomain);
+  console.log(
+    `[tool-sections] ${filtered.length}/${connectionFiltered.length} tools loaded. ` +
+    `Gate=${domainGateApplied ? `[${allowedDomains?.join(',')}]` : 'OFF'}. By service:`, byDomain
+  );
   if (_droppedTools.length > 0) {
     console.warn(`[tool-sections] ${_droppedTools.length} tool(s) permanently disabled (bad schema):`, _droppedTools);
   }
@@ -7158,6 +7234,22 @@ async function runToolLoop(
 // INFINITY ROUTER — Intelligent Pre-processing Layer
 // ============================================================================
 
+// 8 high-level domains used to gate tools per turn (Tool Sectioning v2).
+// 'system' is always loaded (memory, goals, web search, work tasks, creative gen).
+export type ToolDomain =
+  | 'google-workspace'
+  | 'google-marketing'
+  | 'crm'
+  | 'projects'
+  | 'finance'
+  | 'memory'
+  | 'creative'
+  | 'system';
+
+export const ALL_DOMAINS: ToolDomain[] = [
+  'google-workspace', 'google-marketing', 'crm', 'projects', 'finance', 'memory', 'creative', 'system',
+];
+
 interface InfinityClassification {
   intent: string;
   input_length: number;
@@ -7166,6 +7258,7 @@ interface InfinityClassification {
   needs_multimodal: boolean;
   needs_live_data: boolean;
   confidence: number;
+  domains: ToolDomain[];
 }
 
 type InfinityPath = 'gemini_flash' | 'gemini_pro' | 'retrieval' | 'action' | 'default_chat';
@@ -7177,6 +7270,53 @@ interface InfinityRouterResult {
   enrichment: string | null;
   timing_ms: number;
   fallback: boolean;
+}
+
+// Keyword → domain map. Cheap, deterministic, works without an extra LLM call.
+// 'system' is always included separately (always-on tools).
+const DOMAIN_KEYWORDS: Record<Exclude<ToolDomain, 'system'>, string[]> = {
+  'google-workspace': [
+    'gmail', 'email', 'inbox', 'mail', 'send', 'compose', 'draft', 'reply',
+    'calendar', 'schedule', 'event', 'meeting', 'appointment', 'invite', 'rsvp', 'free slot', 'freebusy',
+    'drive', 'folder', 'file', 'doc', 'document', 'sheet', 'spreadsheet', 'slide', 'presentation',
+    'google doc', 'google sheet', 'google slide',
+  ],
+  'google-marketing': [
+    'search console', 'gsc', 'seo', 'ranking', 'impressions', 'ctr', 'organic',
+    'analytics', 'ga4', 'traffic', 'sessions', 'pageviews', 'bounce', 'conversion rate',
+    'tag manager', 'gtm',
+  ],
+  'crm': [
+    'ghl', 'gohighlevel', 'go high level', 'highlevel', 'crm', 'contact', 'lead', 'opportunity',
+    'pipeline', 'campaign', 'workflow', 'invoice', 'subscription', 'product',
+    'sub-account', 'sub account', 'location', 'snapshot', 'blog post', 'social post',
+  ],
+  'projects': [
+    'clickup', 'task', 'subtask', 'list', 'space', 'checklist', 'time entry', 'timer',
+    'priority', 'assignee', 'due date', 'tag', 'dependency', 'comment',
+  ],
+  'finance': [
+    'plaid', 'bank', 'banking', 'transaction', 'balance', 'account', 'spend', 'spending',
+    'budget', 'expense', 'income',
+  ],
+  'memory': [
+    'remember', 'recall', 'last time', 'you said', 'we discussed', 'previously',
+    'my preference', 'i told you', 'you know that', 'memory', 'standing order', 'rule',
+    'goal', 'objective',
+  ],
+  'creative': [
+    'image', 'photo', 'picture', 'generate image', 'edit image', 'video', 'render',
+    'higgsfield', 'thumbnail', 'art', 'illustration', 'youtube upload', 'upload video',
+  ],
+};
+
+function detectDomains(text: string): ToolDomain[] {
+  const lower = text.toLowerCase();
+  const found = new Set<ToolDomain>(['system']); // always-on
+  for (const [domain, kws] of Object.entries(DOMAIN_KEYWORDS)) {
+    if (kws.some(k => lower.includes(k))) found.add(domain as ToolDomain);
+  }
+  return [...found];
 }
 
 function classifyMessage(messages: { role: string; content: string }[]): InfinityClassification {
@@ -7199,6 +7339,7 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
     needs_multimodal: multimodalKw.some(k => lower.includes(k)),
     needs_live_data: liveDataKw.some(k => lower.includes(k)),
     confidence: len < 20 ? 0.9 : len > 5000 ? 0.5 : 0.7,
+    domains: detectDomains(text),
   };
 }
 
@@ -7296,7 +7437,7 @@ ${content}`;
 async function runInfinityRouter(
   messages: { role: string; content: string }[],
   debugMode: boolean,
-): Promise<{ enrichment: string | null; debug: InfinityRouterResult | null }> {
+): Promise<{ enrichment: string | null; debug: InfinityRouterResult | null; classification: InfinityClassification | null; fallback: boolean }> {
   const start = Date.now();
   let fallback = false;
 
@@ -7305,7 +7446,7 @@ async function runInfinityRouter(
     const scores = scoreRoutes(classification);
     const path = pickRoute(scores);
 
-    console.log(`[InfinityRouter] Path: ${path}, Scores:`, scores);
+    console.log(`[InfinityRouter] Path: ${path}, Scores:`, scores, 'Domains:', classification.domains);
 
     let enrichment: string | null = null;
 
@@ -7322,10 +7463,12 @@ async function runInfinityRouter(
     return {
       enrichment,
       debug: debugMode ? result : null,
+      classification,
+      fallback,
     };
   } catch (e) {
     console.error('[InfinityRouter] Error, falling back:', e);
-    return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0 }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null };
+    return { enrichment: null, debug: debugMode ? { path: 'default_chat', scores: { gemini_flash: 0, gemini_pro: 0, retrieval: 0, action: 0, default_chat: 10 }, classification: { intent: 'error', input_length: 0, needs_memory: false, needs_deep_reasoning: false, needs_multimodal: false, needs_live_data: false, confidence: 0, domains: ALL_DOMAINS }, enrichment: null, timing_ms: Date.now() - start, fallback: true } : null, classification: null, fallback: true };
   }
 }
 
@@ -7494,19 +7637,37 @@ serve(async (req) => {
     // Build system prompt
     let systemPrompt = buildSystemPrompt(systemName, userSettings);
 
-    // Infinity Router — additive pre-processing
+    // Infinity Router — additive pre-processing + tool-domain gating (v2)
     let infinityDebug: InfinityRouterResult | null = null;
-    const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
-    if (routerEnabled) {
-      try {
-        const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
-        const routerResult = await runInfinityRouter(messages, debugMode);
-        if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
-        infinityDebug = routerResult.debug;
-        console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
-      } catch (e) {
-        console.error('[InfinityRouter] Fallback to default:', e);
-      }
+    let routerClassification: InfinityClassification | null = null;
+    let routerFallback = false;
+    // We always run the router (cheap — pure keyword classification by default)
+    // because v2 needs `classification.domains` to gate tool exposure.
+    // The opt-in env var still gates the Gemini enrichment hop inside the router.
+    try {
+      const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
+      const routerResult = await runInfinityRouter(messages, debugMode);
+      if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
+      infinityDebug = routerResult.debug;
+      routerClassification = routerResult.classification;
+      routerFallback = routerResult.fallback;
+      console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
+    } catch (e) {
+      console.error('[InfinityRouter] Fallback to default:', e);
+      routerFallback = true;
+    }
+
+    // Compute allowed tool domains for v2 gating.
+    // Safety net: if classification missing OR confidence < 0.5 OR fallback fired,
+    // pass `undefined` → no gating, identical to v1 (zero regression risk).
+    const allowedDomains: string[] | undefined =
+      (routerClassification && !routerFallback && routerClassification.confidence >= 0.5)
+        ? routerClassification.domains
+        : undefined;
+    if (allowedDomains) {
+      console.log('[ToolSectioning] Gating tools to domains:', allowedDomains);
+    } else {
+      console.log('[ToolSectioning] No gating (router fallback or low confidence) — loading all tools');
     }
 
     // Native connection discovery + per-user GHL credential resolution
@@ -7626,7 +7787,7 @@ ${parts.join('\n\n')}
         console.log(`Native connections loaded: ${connMap.size} apps`, Array.from(connMap.keys()));
 
         // Determine available tools based on active connections
-        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
         console.log(`Available action tools: ${availableTools.length}`);
 
         // Add connected services info to system prompt
@@ -7678,7 +7839,7 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
-        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED);
+        availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
       }
     }
 
