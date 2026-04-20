@@ -1,5 +1,5 @@
 // AI Gauntlet Router — picks the best "stone" (provider) for each AI call
-// Actions: select | call | verify | log
+// Actions: select | call | verify | log | list
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -9,21 +9,23 @@ const corsHeaders = {
 
 // ─────────── Stone capability matrix ───────────
 type Stone = {
-  provider: "lovable" | "openai" | "gemini" | "anthropic";
+  provider: "lovable" | "openai" | "gemini" | "anthropic" | "higgsfield";
   defaultModel: string;
   reasoning: number;   // 0-10
   vision: number;      // 0-10
   image: number;       // 0-10
+  video: number;       // 0-10
   speed: number;       // 0-10
   cost: number;        // 1-4 ($ tier)
   maxCtx: number;
 };
 
 const STONES: Record<string, Stone> = {
-  lovable: { provider: "lovable", defaultModel: "google/gemini-3-flash-preview", reasoning: 8, vision: 7, image: 9, speed: 7, cost: 1, maxCtx: 1_000_000 },
-  openai: { provider: "openai", defaultModel: "gpt-5", reasoning: 10, vision: 9, image: 0, speed: 6, cost: 4, maxCtx: 400_000 },
-  gemini: { provider: "gemini", defaultModel: "gemini-2.5-flash", reasoning: 9, vision: 10, image: 10, speed: 9, cost: 2, maxCtx: 2_000_000 },
-  anthropic: { provider: "anthropic", defaultModel: "claude-sonnet-4-5", reasoning: 9, vision: 8, image: 0, speed: 7, cost: 3, maxCtx: 200_000 },
+  lovable:    { provider: "lovable",    defaultModel: "google/gemini-3-flash-preview", reasoning: 8,  vision: 7,  image: 9,  video: 7, speed: 7, cost: 1, maxCtx: 1_000_000 },
+  openai:     { provider: "openai",     defaultModel: "gpt-5",                          reasoning: 10, vision: 9,  image: 0,  video: 0, speed: 6, cost: 4, maxCtx: 400_000 },
+  gemini:     { provider: "gemini",     defaultModel: "gemini-2.5-flash",               reasoning: 9,  vision: 10, image: 10, video: 8, speed: 9, cost: 2, maxCtx: 2_000_000 },
+  anthropic:  { provider: "anthropic",  defaultModel: "claude-sonnet-4-5",              reasoning: 9,  vision: 8,  image: 0,  video: 0, speed: 7, cost: 3, maxCtx: 200_000 },
+  higgsfield: { provider: "higgsfield", defaultModel: "higgsfield-ai/dop/standard",     reasoning: 0,  vision: 0,  image: 9,  video: 10, speed: 6, cost: 2, maxCtx: 32_000 },
 };
 
 // ─────────── Scoring function ───────────
@@ -53,41 +55,40 @@ export function pickStone(
 
   const scored = candidates.map((s) => {
     let score = 0;
-    let why: string[] = [];
+    const why: string[] = [];
 
-    // Modality fit (×3 weight)
     if (modality === "video_gen") {
       score += s.video * 3;
-      if (s.video > 0) why.push(`video-capable (${s.video}/10)`);
+      if (s.video > 0) why.push(`video ${s.video}/10`);
+      else score -= 50; // disqualify non-video stones
     } else if (modality === "image_gen") {
       score += s.image * 3;
-      if (s.image > 0) why.push(`image-capable (${s.image}/10)`);
+      if (s.image > 0) why.push(`image ${s.image}/10`);
+      else score -= 50;
     } else if (modality === "vision") {
       score += s.vision * 3;
       why.push(`vision ${s.vision}/10`);
     } else {
-      score += s.reasoning * 1.5; // text uses reasoning as proxy
+      score += s.reasoning * 1.5;
+      // text-only stones (no reasoning) shouldn't pick higgsfield
+      if (s.reasoning === 0) score -= 100;
     }
 
-    // Reasoning fit (×2)
     const wantReason = complexity === "high" ? 9 : complexity === "medium" ? 6 : 3;
     score += (10 - Math.abs(s.reasoning - wantReason)) * 2;
     if (complexity === "high") why.push(`heavy reasoning`);
 
-    // Speed fit (×1)
     const wantSpeed = latency === "fast" ? 10 : latency === "normal" ? 7 : 4;
     score += 10 - Math.abs(s.speed - wantSpeed);
-    if (latency === "fast") why.push(`fast response needed`);
+    if (latency === "fast") why.push(`fast`);
 
-    // Cost penalty
     const costMultiplier = costSens === "high" ? 3 : costSens === "medium" ? 1 : 0.3;
     score -= s.cost * costMultiplier;
-    if (costSens === "high" && s.cost <= 2) why.push(`cost-efficient`);
+    if (costSens === "high" && s.cost <= 2) why.push(`cheap`);
 
-    // Context overflow penalty
     if (ctxSize > s.maxCtx) {
       score -= 100;
-      why.push(`context overflow`);
+      why.push(`ctx overflow`);
     }
 
     return { stone: s, score, why: why.join(", ") };
@@ -95,11 +96,11 @@ export function pickStone(
 
   scored.sort((a, b) => b.score - a.score);
   const winner = scored[0];
-  const fallbacks = scored.slice(1).map((x) => x.stone);
+  const fallbacks = scored.slice(1).filter((x) => x.score > -50).map((x) => x.stone);
 
   return {
     stone: winner.stone,
-    reason: `Picked ${winner.stone.provider}: ${winner.why || "best overall fit"}`,
+    reason: `${winner.stone.provider}: ${winner.why || "best fit"}`,
     fallbacks,
   };
 }
@@ -132,7 +133,6 @@ async function callOpenAI(model: string, messages: any[], tools?: any[]): Promis
 }
 
 async function callGemini(model: string, messages: any[]): Promise<any> {
-  // Use OpenAI-compatible endpoint
   const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
     headers: {
@@ -159,7 +159,6 @@ async function callAnthropic(model: string, messages: any[]): Promise<any> {
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  // Normalize to OpenAI-ish shape
   return {
     choices: [{ message: { role: "assistant", content: data.content?.[0]?.text ?? "" } }],
     usage: data.usage,
@@ -167,43 +166,65 @@ async function callAnthropic(model: string, messages: any[]): Promise<any> {
   };
 }
 
-async function callHiggsfield(prompt: string): Promise<any> {
-  const apiKey = Deno.env.get("HIGGSFIELD_API_KEY");
-  if (!apiKey) throw new Error("HIGGSFIELD_API_KEY missing");
-  // Lightweight ping — Higgsfield is a video/image gen service, no chat endpoint.
-  // For verify we just confirm the key exists; real generation goes through the higgsfield edge function.
+// Real Higgsfield dispatch: forward to higgsfield edge function
+async function callHiggsfield(needs: Needs, messages: any[], authHeader?: string): Promise<any> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Build prompt from messages
+  const prompt = messages
+    .filter((m: any) => m.role === "user" || m.role === "system")
+    .map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content))
+    .join("\n");
+
+  const action = needs.modality === "video_gen" ? "generate_video" : "generate_image";
+  const params: Record<string, unknown> = needs.modality === "video_gen"
+    ? { image_url: (messages.find((m: any) => m.image_url) as any)?.image_url, prompt, duration: 5 }
+    : { prompt, aspect_ratio: "16:9", resolution: "720p" };
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/higgsfield`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader || `Bearer ${serviceKey}`,
+      "Content-Type": "application/json",
+      apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+    },
+    body: JSON.stringify({ action, ...params }),
+  });
+  if (!res.ok) throw new Error(`Higgsfield ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "higgsfield failed");
+
+  // Normalize to OpenAI-ish chat completion shape
+  const data = json.data;
+  const url = data?.url || data?.video_url || data?.image_url || "";
+  const requestId = data?.request_id || data?.id || "";
+  const content = url || `Higgsfield job started: ${requestId}`;
   return {
-    choices: [{ message: { role: "assistant", content: `[higgsfield] queued: ${prompt}` } }],
-    model: "higgsfield-video-v1",
+    choices: [{ message: { role: "assistant", content }, finish_reason: url ? "stop" : "in_progress" }],
+    model: action === "generate_video" ? "higgsfield-video" : "higgsfield-image",
+    higgsfield: { request_id: requestId, url },
   };
 }
 
-async function dispatch(provider: string, model: string, messages: any[], tools?: any[]) {
+async function dispatch(provider: string, model: string, messages: any[], tools?: any[], needs?: Needs, authHeader?: string) {
   switch (provider) {
-    case "lovable": return callLovable(model, messages, tools);
-    case "openai": return callOpenAI(model, messages, tools);
-    case "gemini": return callGemini(model, messages);
+    case "lovable":   return callLovable(model, messages, tools);
+    case "openai":    return callOpenAI(model, messages, tools);
+    case "gemini":    return callGemini(model, messages);
     case "anthropic": return callAnthropic(model, messages);
-    case "higgsfield": {
-      const prompt = messages.map((m: any) => m.content).join("\n");
-      return callHiggsfield(prompt);
-    }
+    case "higgsfield": return callHiggsfield(needs ?? {}, messages, authHeader);
     default: throw new Error(`Unknown provider: ${provider}`);
   }
 }
 
-// ─────────── Verify each provider has a working key ───────────
-async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: string }> {
+// ─────────── Verify each provider has a working key (returns keyTail) ───────────
+async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: string; keyTail?: string }> {
   try {
     const stone = STONES[provider];
     if (!stone) return { ok: false, error: "unknown provider" };
 
-    // Lovable is always considered active if LOVABLE_API_KEY exists
-    if (provider === "lovable") {
-      return { ok: !!Deno.env.get("LOVABLE_API_KEY") };
-    }
-
     const keyMap: Record<string, string> = {
+      lovable: "LOVABLE_API_KEY",
       openai: "OPENAI_API_KEY",
       gemini: "GEMINI_API_KEY",
       anthropic: "ANTHROPIC_API_KEY",
@@ -211,13 +232,14 @@ async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: 
     };
     const key = Deno.env.get(keyMap[provider]);
     if (!key) return { ok: false, error: "no API key" };
+    const keyTail = key.length >= 4 ? key.slice(-4) : key;
 
-    // Higgsfield: key presence is enough (no cheap ping endpoint)
-    if (provider === "higgsfield") return { ok: true };
+    if (provider === "lovable") return { ok: true, keyTail };
+    if (provider === "higgsfield") return { ok: true, keyTail };
 
-    // Light ping
+    // Light ping for chat-capable providers
     await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }]);
-    return { ok: true };
+    return { ok: true, keyTail };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -233,7 +255,6 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const authHeader = req.headers.get("Authorization") ?? "";
 
-    // Resolve user from JWT (best-effort)
     let userId: string | null = null;
     if (authHeader.startsWith("Bearer ")) {
       const sb = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -245,14 +266,11 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // ── ACTION: select ──
     if (action === "select") {
       const { needs } = payload;
       const active = await getActiveProviders(admin, userId);
       const result = pickStone(needs ?? {}, active);
-      if (!result) {
-        return json({ error: "no active stones" }, 400);
-      }
+      if (!result) return json({ error: "no active stones" }, 400);
       return json({
         provider: result.stone.provider,
         model: result.stone.defaultModel,
@@ -261,7 +279,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── ACTION: call ── (select + dispatch + log + auto-fallback)
     if (action === "call") {
       const { needs, messages, tools, run_id, node_type } = payload;
       const active = await getActiveProviders(admin, userId);
@@ -275,9 +292,8 @@ Deno.serve(async (req) => {
       for (const stone of chain) {
         const start = Date.now();
         try {
-          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools);
+          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader);
           const latency = Date.now() - start;
-          // Log success
           if (userId) {
             await admin.from("gauntlet_routing_log").insert({
               user_id: userId, run_id, node_type,
@@ -298,7 +314,6 @@ Deno.serve(async (req) => {
         }
       }
 
-      // All failed
       if (userId) {
         await admin.from("gauntlet_routing_log").insert({
           user_id: userId, run_id, node_type,
@@ -310,36 +325,60 @@ Deno.serve(async (req) => {
       return json({ error: "all stones failed", detail: lastError }, 502);
     }
 
-    // ── ACTION: verify ──
     if (action === "verify") {
       const results: Record<string, any> = {};
       for (const p of Object.keys(STONES)) {
         results[p] = await verifyProvider(p);
       }
-      // Persist for the user if logged in
       if (userId) {
         for (const [provider, res] of Object.entries(results)) {
+          const r = res as any;
           await admin.from("ai_providers").upsert({
             user_id: userId,
             provider,
-            status: (res as any).ok ? "active" : "error",
+            status: r.ok ? "active" : "error",
             last_verified_at: new Date().toISOString(),
-            last_error: (res as any).error ?? null,
-            capabilities: STONES[provider],
+            last_error: r.error ?? null,
+            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null },
           }, { onConflict: "user_id,provider" });
         }
       }
       return json({ providers: results });
     }
 
-    // ── ACTION: list ──
     if (action === "list") {
       if (!userId) return json({ providers: [] });
-      const { data } = await admin
+      let { data } = await admin
         .from("ai_providers")
         .select("*")
         .eq("user_id", userId)
         .order("priority", { ascending: true });
+
+      // Auto-verify on first load if user has no rows
+      if (!data || data.length === 0) {
+        const results: Record<string, any> = {};
+        for (const p of Object.keys(STONES)) {
+          results[p] = await verifyProvider(p);
+        }
+        for (const [provider, res] of Object.entries(results)) {
+          const r = res as any;
+          await admin.from("ai_providers").upsert({
+            user_id: userId,
+            provider,
+            status: r.ok ? "active" : "error",
+            last_verified_at: new Date().toISOString(),
+            last_error: r.error ?? null,
+            capabilities: { ...STONES[provider], keyTail: r.keyTail ?? null },
+          }, { onConflict: "user_id,provider" });
+        }
+        const refetched = await admin
+          .from("ai_providers")
+          .select("*")
+          .eq("user_id", userId)
+          .order("priority", { ascending: true });
+        data = refetched.data;
+      }
+
       return json({ providers: data ?? [], stones: STONES });
     }
 
@@ -351,7 +390,6 @@ Deno.serve(async (req) => {
 });
 
 async function getActiveProviders(admin: any, userId: string | null): Promise<string[]> {
-  // If no user, only Lovable is available (always-on default)
   if (!userId) return ["lovable"];
   const { data } = await admin
     .from("ai_providers")
@@ -359,9 +397,18 @@ async function getActiveProviders(admin: any, userId: string | null): Promise<st
     .eq("user_id", userId)
     .eq("status", "active");
   const active = (data ?? []).map((r: any) => r.provider);
-  // Lovable is always available even if not in table
   if (!active.includes("lovable") && Deno.env.get("LOVABLE_API_KEY")) {
     active.push("lovable");
+  }
+  // Also include any provider with system key set, even if user has no row yet
+  const sysKeys: Record<string, string> = {
+    openai: "OPENAI_API_KEY",
+    gemini: "GEMINI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    higgsfield: "HIGGSFIELD_API_KEY",
+  };
+  for (const [p, env] of Object.entries(sysKeys)) {
+    if (!active.includes(p) && Deno.env.get(env)) active.push(p);
   }
   return active;
 }

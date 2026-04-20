@@ -7,9 +7,11 @@ export type StoneCapability = {
   reasoning: number;
   vision: number;
   image: number;
+  video?: number;
   speed: number;
   cost: number;
   maxCtx: number;
+  keyTail?: string | null;
 };
 
 export type ProviderRow = {
@@ -36,7 +38,6 @@ export type RoutingLogEntry = {
 };
 
 // System stones are powered by project-level secrets (always-on for everyone).
-// Personal stones would be BYOK keys. Currently all our stones run on system keys.
 export const STONE_SOURCE: Record<string, "system" | "personal"> = {
   lovable: "system",
   openai: "system",
@@ -58,6 +59,7 @@ export function useGauntlet() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      // The 'list' action now auto-verifies on first load if no rows exist
       const { data, error } = await supabase.functions.invoke("gauntlet-router", {
         body: { action: "list" },
         headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
@@ -67,7 +69,6 @@ export function useGauntlet() {
         setStones(data.stones ?? {});
       }
 
-      // Fetch recent routing log
       const { data: logData } = await supabase
         .from("gauntlet_routing_log")
         .select("id, chosen_stone, chosen_model, reason, fallback_used, latency_ms, success, created_at")
@@ -115,11 +116,13 @@ export function useGauntlet() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Compute usage breakdown from logs
   const usage = ALL_STONES.map((stone) => {
     const count = logs.filter((l) => l.chosen_stone === stone).length;
     return { stone, count, pct: logs.length > 0 ? Math.round((count / logs.length) * 100) : 0 };
   });
 
-  return { providers, stones, logs, usage, loading, verifying, refresh, verifyAll, setMode, toggleStatus, ALL_STONES };
+  // Count of stones with detected keys (active, not error)
+  const keysDetected = providers.filter((p) => p.status === "active").length;
+
+  return { providers, stones, logs, usage, loading, verifying, refresh, verifyAll, setMode, toggleStatus, ALL_STONES, keysDetected };
 }

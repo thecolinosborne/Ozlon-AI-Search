@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const GauntletPanel = () => {
-  const { providers, stones, usage, verifying, verifyAll, setMode, toggleStatus, ALL_STONES } = useGauntlet();
+  const { providers, stones, usage, verifying, verifyAll, setMode, toggleStatus, ALL_STONES, keysDetected } = useGauntlet();
   const [globalMode, setGlobalMode] = useState<"auto" | "manual">("auto");
 
   // Derive global mode from any provider row (they share a mode)
@@ -58,6 +58,14 @@ export const GauntletPanel = () => {
       <p className="text-xs text-muted-foreground">
         Each stone is an AI provider. In <strong>Auto</strong> mode, the system picks the best stone per task — vision goes to Gemini, heavy reasoning to GPT-5, fast classification to Flash. Add API keys to light up new stones.
       </p>
+
+      {/* Keys-detected banner */}
+      {keysDetected > 0 && (
+        <div className="px-3 py-2 rounded-lg border border-primary/30 bg-primary/5 text-xs text-foreground">
+          <strong className="text-primary">{keysDetected} {keysDetected === 1 ? "key" : "keys"} detected.</strong>{" "}
+          Auto mode is picking the best stone per task. Your direct provider keys are the primary execution path.
+        </div>
+      )}
 
       {/* Mode toggle */}
       <AutoModeToggle mode={globalMode} onChange={handleModeChange} />

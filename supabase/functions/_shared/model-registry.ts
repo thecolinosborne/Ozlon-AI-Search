@@ -373,6 +373,29 @@ export interface CallResult {
  */
 export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   const prefs = opts.prefs || DEFAULT_PREFS;
+
+  // ── GAUNTLET SHIM ──
+  // If USE_GAUNTLET=1 (or per-user prefs.use_gauntlet), route through
+  // gauntlet-router which picks a stone (OpenAI/Gemini/Anthropic/Higgsfield/Lovable)
+  // based on capability + cost, falling back automatically.
+  const useGauntlet = (prefs as any).use_gauntlet === true
+    || ((prefs as any).use_gauntlet !== false && Deno.env.get("USE_GAUNTLET") === "1");
+  if (useGauntlet) {
+    try {
+      const { gauntletCall } = await import("./gauntlet-call.ts");
+      const result = await gauntletCall({
+        agent: opts.agent,
+        messages: opts.messages,
+        tools: (opts.body as any)?.tools,
+      });
+      // If gauntlet succeeded, return it. If it failed entirely, fall through to legacy.
+      if (result.ok) return result;
+      console.warn("[Gauntlet shim] failed, falling back to legacy gateway:", result.errorText);
+    } catch (e) {
+      console.warn("[Gauntlet shim] threw, falling back:", e);
+    }
+  }
+
   const registry = opts.registry || MODEL_REGISTRY;
   const route = pickModel(opts.agent, prefs, registry);
   const candidates = [route.primary, ...route.fallbackChain];

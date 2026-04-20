@@ -83,6 +83,53 @@ serve(async (req) => {
     let modelUsed = "";
     let lastError = "";
 
+    // ── GAUNTLET SHIM: route through gauntlet-router when enabled ──
+    const useGauntlet = Deno.env.get("USE_GAUNTLET") === "1";
+    if (useGauntlet) {
+      try {
+        const gRes = await fetch(`${supabaseUrl}/functions/v1/gauntlet-router`, {
+          method: "POST",
+          headers: {
+            Authorization: authHeader || `Bearer ${serviceKey}`,
+            "Content-Type": "application/json",
+            apikey: anonKey,
+          },
+          body: JSON.stringify({
+            action: "call",
+            needs: { modality: "video_gen", complexity: "medium" },
+            messages: [{ role: "user", content: body.prompt }],
+            node_type: "video_director",
+          }),
+        });
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (gData?.stone === "higgsfield") {
+            const reqId = gData?.result?.higgsfield?.request_id;
+            const hfUrl = gData?.result?.higgsfield?.url;
+            if (hfUrl) {
+              return new Response(
+                JSON.stringify({ url: hfUrl, model: "higgsfield", hosted: false, stone: "higgsfield" }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+            if (reqId) {
+              return new Response(
+                JSON.stringify({
+                  pending: true,
+                  provider: "higgsfield",
+                  request_id: reqId,
+                  message: "Higgsfield video job started. Use higgsfield_get_job_status to poll.",
+                }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[video-gen] gauntlet shim failed:", e);
+      }
+    }
+
     for (const modelId of chain) {
       try {
         const resp = await fetch(GATEWAY_URL, {
