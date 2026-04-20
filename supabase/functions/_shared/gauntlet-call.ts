@@ -3,6 +3,8 @@
 // without code changes.
 import type { CallResult, AgentName, ChatMessage } from "./model-registry.ts";
 
+export type RoutingMode = "speed" | "balanced" | "quality";
+
 export interface GauntletCallOptions {
   agent: AgentName;
   messages: ChatMessage[];
@@ -13,6 +15,7 @@ export interface GauntletCallOptions {
   modality?: "text" | "vision" | "image_gen" | "video_gen" | "audio";
   complexity?: "low" | "medium" | "high";
   latency_priority?: "fast" | "normal" | "relaxed";
+  routing_mode?: RoutingMode;
 }
 
 // ─────────── Per-message classification ───────────
