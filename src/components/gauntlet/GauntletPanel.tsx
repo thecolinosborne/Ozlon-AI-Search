@@ -143,7 +143,7 @@ export const GauntletPanel = () => {
                   <span className="text-muted-foreground tabular-nums">{fmtAgo(d.created_at)}</span>
                   <span className={cn(
                     "px-1.5 py-0.5 rounded text-[10px] font-medium",
-                    d.success ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive",
+                    d.success ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
                   )}>
                     {d.modality ?? "text"}
                   </span>
@@ -151,7 +151,7 @@ export const GauntletPanel = () => {
                     <span className="font-medium">{d.chosen_stone}</span>
                     {d.chosen_model && <span className="text-muted-foreground"> · {d.chosen_model}</span>}
                     {d.reason && <span className="text-muted-foreground"> — {d.reason}</span>}
-                    {d.fallback_used && <span className="ml-1 text-amber-500">↻ fallback</span>}
+                    {d.fallback_used && <span className="ml-1 text-foreground/60">↻ fallback</span>}
                   </span>
                   <span className="text-muted-foreground tabular-nums">
                     {d.latency_ms ? `${d.latency_ms}ms` : "—"}
