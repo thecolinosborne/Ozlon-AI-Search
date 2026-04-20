@@ -234,7 +234,12 @@ async function verifyProvider(provider: string): Promise<{ ok: boolean; error?: 
     if (!key) return { ok: false, error: "no API key" };
     const keyTail = key.length >= 4 ? key.slice(-4) : key;
 
-    if (provider === "higgsfield") return { ok: true, keyTail };
+    if (provider === "higgsfield") {
+      // Higgsfield needs both API key and APP ID
+      const appId = Deno.env.get("HIGGSFIELD_APP_ID");
+      if (!appId) return { ok: false, error: "missing HIGGSFIELD_APP_ID" };
+      return { ok: true, keyTail };
+    }
 
     // Light ping for chat-capable providers (including lovable to detect dead/expired keys)
     await dispatch(provider, stone.defaultModel, [{ role: "user", content: "ping" }]);
