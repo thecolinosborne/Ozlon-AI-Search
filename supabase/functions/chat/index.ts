@@ -7637,19 +7637,37 @@ serve(async (req) => {
     // Build system prompt
     let systemPrompt = buildSystemPrompt(systemName, userSettings);
 
-    // Infinity Router — additive pre-processing
+    // Infinity Router — additive pre-processing + tool-domain gating (v2)
     let infinityDebug: InfinityRouterResult | null = null;
-    const routerEnabled = Deno.env.get('INFINITY_ROUTER_ENABLED') === 'true';
-    if (routerEnabled) {
-      try {
-        const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
-        const routerResult = await runInfinityRouter(messages, debugMode);
-        if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
-        infinityDebug = routerResult.debug;
-        console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
-      } catch (e) {
-        console.error('[InfinityRouter] Fallback to default:', e);
-      }
+    let routerClassification: InfinityClassification | null = null;
+    let routerFallback = false;
+    // We always run the router (cheap — pure keyword classification by default)
+    // because v2 needs `classification.domains` to gate tool exposure.
+    // The opt-in env var still gates the Gemini enrichment hop inside the router.
+    try {
+      const debugMode = Deno.env.get('INFINITY_ROUTER_DEBUG') === 'true';
+      const routerResult = await runInfinityRouter(messages, debugMode);
+      if (routerResult.enrichment) systemPrompt += routerResult.enrichment;
+      infinityDebug = routerResult.debug;
+      routerClassification = routerResult.classification;
+      routerFallback = routerResult.fallback;
+      console.log('[InfinityRouter] Complete', infinityDebug?.path, infinityDebug?.timing_ms + 'ms');
+    } catch (e) {
+      console.error('[InfinityRouter] Fallback to default:', e);
+      routerFallback = true;
+    }
+
+    // Compute allowed tool domains for v2 gating.
+    // Safety net: if classification missing OR confidence < 0.5 OR fallback fired,
+    // pass `undefined` → no gating, identical to v1 (zero regression risk).
+    const allowedDomains: string[] | undefined =
+      (routerClassification && !routerFallback && routerClassification.confidence >= 0.5)
+        ? routerClassification.domains
+        : undefined;
+    if (allowedDomains) {
+      console.log('[ToolSectioning] Gating tools to domains:', allowedDomains);
+    } else {
+      console.log('[ToolSectioning] No gating (router fallback or low confidence) — loading all tools');
     }
 
     // Native connection discovery + per-user GHL credential resolution
