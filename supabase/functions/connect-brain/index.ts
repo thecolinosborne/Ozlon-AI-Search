@@ -304,5 +304,6 @@ function inferPlatformIdFromModelId(modelId: string): string | null {
   if (prefix === "xai") return "xai";
   if (prefix === "mistral") return "mistral";
   if (prefix === "deepseek") return "deepseek";
+  if (prefix === "higgsfield") return "higgsfield";
   return null;
 }
