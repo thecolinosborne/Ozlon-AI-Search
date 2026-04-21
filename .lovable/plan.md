@@ -1,90 +1,118 @@
 
 
-## Stop Guessing Search Atlas — Probe & Pin the Real API
+## Scalable Tool Routing — Make Adding Integrations a 30-Second Job
 
-### Why we're stuck
+### Your question, plainly
 
-Two rounds of "fix" have shipped guessed endpoints (`/api/v2/`, then `/api/v3/`, then `/api/customer/`). All still return Cloudflare 404. The function has zero diagnostic logging, so we can't see what host/path/auth combination Search Atlas actually accepts for **your specific token**.
+> "Can this scale to hundreds of integrations where one voice command fans out to many tools, and adding a new one is trivial?"
 
-We need to stop guessing and probe.
+**Today: no.** Each integration is hand-wired in 3+ places (`chat/index.ts` switch, `NATIVE_GOOGLE_ROUTES`, tool defs, frontend detail page). Adding YouTube Shorts publishing means editing the chat function, redeploying, and hoping nothing breaks. That doesn't scale past ~20 integrations.
 
-### Step 1 — Add a `diagnose` action to the edge function
+**After this plan: yes.** Add an integration by writing one manifest file. Chat function picks it up automatically. One voice command can fan out to N tools in parallel.
 
-One new action in `supabase/functions/search-atlas/index.ts` that systematically probes the Search Atlas API surface and returns a full report. No UI needed — you'll just call it from the Detail page with one button.
+### The architecture shift (still surgical, no rewrites)
 
-It probes a matrix of `[host] × [path] × [auth scheme]`:
+**1. Integration manifest registry** — single source of truth
 
-**Hosts:**
-- `https://api.searchatlas.com`
-- `https://sa.searchatlas.com`
-- `https://app.searchatlas.com`
+Each integration becomes one file: `supabase/functions/_shared/integrations/<name>.ts` exporting:
 
-**Paths (cheap, likely-existing endpoints):**
-- `/api/customer/account/`
-- `/api/customer/projects/`
-- `/api/v2/customer/account/`
-- `/api/v3/customer/account/`
-- `/api/account/`
-- `/api/projects/`
-- `/api/keyword-researcher/`
-- `/v2/account/`
-
-**Auth schemes:**
-- `Authorization: Token <key>`
-- `Authorization: Bearer <key>`
-- `Authorization: ApiKey <key>`
-- `?user_token=<key>` query param
-- `?api_key=<key>` query param
-- `?token=<key>` query param
-
-For each combo it records: `status`, `content-type`, first 120 chars of response body. Returns the full matrix as JSON, sorted with any `2xx` results first.
-
-This single call (~30 requests, runs in parallel) will conclusively show: *which host responds at all, which paths exist, and which auth scheme your token uses.* No more guessing.
-
-### Step 2 — Add a "Run Diagnostics" button on the Detail page
-
-In `src/pages/integrations/SearchAtlasDetail.tsx`, below the Test Connection button, add a small "Run API Diagnostics" button that calls `search-atlas/diagnose` and renders the result as a compact table:
-
-```text
-✓ 200  api.searchatlas.com  /api/customer/account/   Token <key>
-✗ 404  api.searchatlas.com  /api/v3/site-audits/     Token <key>
-✗ 401  api.searchatlas.com  /api/customer/account/   Bearer <key>
-...
+```ts
+export const youtubeIntegration: IntegrationManifest = {
+  id: "youtube",
+  edgeFunction: "youtube",
+  envelope: "nested",  // or "flat" — handles the bug we just fixed, permanently
+  authResolver: "google-oauth",  // or "per-user-key" | "env" | "oauth-custom"
+  tools: [
+    {
+      name: "youtube_upload_video",
+      description: "Upload a video to the user's YouTube channel.",
+      schema: { /* JSON schema */ },
+      action: "upload_video",
+      mapArgs: (args) => ({ ...args }),
+    },
+    // ... more tools
+  ],
+};
 ```
 
-The first green row tells us the right host + path + auth. Everything after that is mechanical: rewrite the 8 action handlers to use that base + scheme.
+The chat function imports a barrel `_shared/integrations/index.ts` that aggregates all manifests. Tool list, dispatcher routes, and envelope handling are all generated from the registry at boot. **No more editing `executeToolCall` to add tools.**
 
-### Step 3 — Pin the working combo + rewrite handlers
+**2. Universal dispatcher** replaces the current `tryNativeGoogleCall` + giant switch
 
-Once diagnostics returns at least one `2xx`, I'll:
+```ts
+async function dispatchTool(toolName, args, userId, jwt) {
+  const route = TOOL_REGISTRY.get(toolName);  // built from manifests at boot
+  if (!route) return { success: false, result: `Unknown tool: ${toolName}` };
+  const payload = route.envelope === "nested"
+    ? { action: route.action, params: route.mapArgs(args) }
+    : { action: route.action, ...route.mapArgs(args) };
+  return await callEdge(route.edgeFunction, payload, jwt);
+}
+```
 
-1. Update `BASE_URL` and the auth probe to lock in the winning scheme (drop the multi-scheme probe — it's just slowing every call down).
-2. Rewrite each of the 8 action handlers (`audit_site`, `site_explorer`, `keyword_research`, `serp_snapshot`, `backlinks_overview`, `backlinks_list`, `list_projects`, `rank_tracker`) to use paths *relative to the verified prefix*. If a specific path 404s, the diagnostic output usually reveals the sibling path that works (e.g. if `/api/customer/projects/` works, `/api/customer/site-audits/` is likely the audit path).
-3. Re-test each chat tool via `supabase--curl_edge_functions` so we know they all return real data before declaring done.
+This permanently kills the envelope-mismatch class of bugs (the `docs_insert_text` failure you keep hitting).
 
-### Step 4 — If diagnostics returns zero 2xx responses
+**3. Parallel fan-out for "speak once → do many"**
 
-That means the token itself isn't a valid SEO API token (likely a partner/dashboard session token instead). The diagnostic table will show this clearly — typically every row will be `403 {"detail":"Authentication credentials were not provided"}` or similar. In that case I'll surface a clear UI message in the Detail page telling you exactly where in the Search Atlas dashboard to grab the right token (Settings → API → "SEO Data API Key"), and stop until you paste that one in.
+New tool: `multi_action` that takes an array of tool calls and runs them concurrently with `Promise.allSettled`. Example voice command:
 
-### Files touched
+> "Post the new product to Instagram via GHL, schedule a YouTube Short, draft a Gmail to the launch list, and add a row to the launch tracker sheet."
 
-- `supabase/functions/search-atlas/index.ts` — add `diagnose` action (~80 lines, no other changes).
-- `src/pages/integrations/SearchAtlasDetail.tsx` — add "Run API Diagnostics" button + result table (~60 lines).
+The AI emits one `multi_action` call with 4 sub-calls. Dispatcher runs them in parallel, returns a structured report (3 succeeded, 1 failed with reason). Latency = slowest single call, not sum.
 
-### After Step 3 — verification
+**4. Frontend auto-discovery**
 
-1. Diagnostics shows ≥1 green row → I pin host/path/auth.
-2. Test Connection passes.
-3. Sync Now on `ozlon.ai` returns real audit/explorer/backlinks data.
-4. From chat: *"Audit ozlon.ai with Search Atlas"* → tool returns structured data, not an error.
+Currently every integration needs its own `*Detail.tsx`. New approach: a generic `IntegrationDetailLayout` (already exists) reads the manifest's UI block (`{ icon, displayName, fields, testAction }`) and renders the page. New integration = no new React file unless it has unusual UI needs.
 
-### Out of scope
+### What ships in this implementation pass
 
-- No new connectors, secrets, DB changes, or UI redesigns.
-- No edits to chat tools, vault, snapshots table, or any other integration.
-- No changes to the 8 chat tool definitions — only their underlying URLs.
+**Phase 1 — Foundation (this PR, ~4 files)**
+- `_shared/integrations/types.ts` — `IntegrationManifest` + `ToolManifest` types
+- `_shared/integrations/index.ts` — registry barrel that aggregates manifests
+- `_shared/integrations/_dispatcher.ts` — universal `dispatchTool` with envelope handling, JWT forwarding, structured errors
+- Migrate **5 existing integrations** to manifests as proof: `google-docs`, `google-sheets`, `google-calendar`, `gohighlevel`, `clickup`
+- Wire `chat/index.ts` to: (a) build tool list from registry, (b) route through `dispatchTool` first, (c) fall back to legacy switch for not-yet-migrated ones (descript, search-atlas, plaid, etc. — migrate in Phase 2)
 
-### Why this approach instead of more guessing
+**Phase 2 — Migrate the rest (follow-up, no plan needed)**
+- Move remaining edge functions to manifests one by one. Each migration is ~30 lines and removes ~50 lines of switch-case bloat. Net code shrinks.
 
-Search Atlas doesn't publish their REST docs publicly and the sandbox can't reach their dashboard. Instead of a third round of guessed paths, we let *your* token tell us — in one diagnostic call — exactly what works. That's the only way to break the 404 loop reliably.
+**Phase 3 — `multi_action` tool**
+- Add the parallel fan-out tool definition + executor in `chat/index.ts` (~40 lines).
+- AI prompt gets one new instruction: *"For multi-step requests, prefer `multi_action` over sequential calls."*
+
+### Files touched this pass
+
+- **New**: `supabase/functions/_shared/integrations/types.ts`, `index.ts`, `_dispatcher.ts`, `google-docs.ts`, `google-sheets.ts`, `google-calendar.ts`, `gohighlevel.ts`, `clickup.ts`
+- **Edited**: `supabase/functions/chat/index.ts` — wire registry + dispatcher, add `multi_action`, fix the existing envelope bug as part of the dispatcher (so `docs_insert_text` works), keep legacy switch as fallback for unmigrated tools.
+- **Verified, not edited**: `google-docs/index.ts`, `google-sheets/index.ts`, `google-calendar/index.ts` — confirm they accept `{ action, params }` (they do).
+
+### Verification
+
+1. Curl chat with `docs_insert_text` → 200 + text actually inserted in target doc.
+2. Curl chat with `multi_action` containing `[gmail_send, sheets_append_row, ghl_create_contact]` → all three execute in parallel, structured per-tool result returned.
+3. Voice test in preview: *"Send a test email to me, log it in my CRM, and add it to today's tracker sheet"* → AI emits one `multi_action`, all three complete.
+4. Add a throwaway 6th manifest (`example_ping`) to prove zero-config registration works → tool appears in AI's tool list on next chat without touching `chat/index.ts`.
+
+### Out of scope this pass
+
+- No new integrations beyond the 5 migrated ones (descript, search-atlas, GA4, GTM stay on legacy path until Phase 2).
+- No DB changes, no new secrets, no UI redesign of the integrations hub.
+- No changes to voice/realtime layer — it already calls the chat function so it inherits everything.
+- No changes to GHL or ClickUp tool *definitions* — only how they're wired (functionally identical).
+
+### Why this is the right scaling move (and not over-engineering)
+
+- **Adds an abstraction only where you have repetition** — 4 integrations was fine, 14+ is where hand-wiring breaks down.
+- **Backwards compatible** — legacy switch stays until each function is migrated. Nothing breaks during transition.
+- **Permanently kills the envelope-bug class** — every future integration uses one dispatcher with explicit `envelope` field, no more silent param-drop failures.
+- **Unlocks "speak once → do many"** via `multi_action`, which is the user-facing capability you're describing.
+- **Frontend stays declarative** — manifests carry UI metadata, so adding an integration doesn't require a new React file.
+
+### After Phase 1, adding a new integration looks like this
+
+1. Write `_shared/integrations/notion.ts` manifest (~40 lines).
+2. Drop in `supabase/functions/notion/index.ts` edge function (or use connector gateway).
+3. Done. Tools appear in chat, hub page renders automatically, voice can call them.
+
+That's the scalability you're asking for.
 
