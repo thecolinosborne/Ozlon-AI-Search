@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
+import { SyncRunsList } from "@/components/integrations/SyncRunsList";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
