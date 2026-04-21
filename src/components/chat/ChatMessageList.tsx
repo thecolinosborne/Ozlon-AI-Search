@@ -113,6 +113,12 @@ export const ChatMessageList = ({
             >
               {message.role === "assistant" ? (
                 <div className="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-headings:tracking-tight prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-1.5 prose-p:my-2 prose-p:leading-relaxed prose-strong:text-foreground prose-strong:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-li:marker:text-muted-foreground prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none prose-pre:bg-muted prose-pre:border prose-pre:border-border/40 prose-pre:rounded-lg prose-blockquote:border-l-2 prose-blockquote:border-primary/40 prose-blockquote:bg-muted/30 prose-blockquote:py-1 prose-blockquote:px-3 prose-blockquote:not-italic prose-table:text-xs prose-th:bg-muted/50 prose-th:font-semibold prose-td:border prose-td:border-border/30 prose-th:border prose-th:border-border/30 prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-hr:border-border/40">
+                  {message.liveSteps && message.liveSteps.length > 0 && (
+                    <LiveStepsStrip
+                      steps={message.liveSteps}
+                      collapsed={Boolean(message.content)}
+                    />
+                  )}
                   {message.content ? (
                     <ReactMarkdown
                       components={{
@@ -127,13 +133,13 @@ export const ChatMessageList = ({
                     >
                       {linkifyPlainUrls(message.content)}
                     </ReactMarkdown>
-                  ) : (
+                  ) : (!message.liveSteps || message.liveSteps.length === 0) ? (
                     <span className="inline-flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse" />
-                      <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-75" />
-                      <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-pulse delay-150" />
+                      <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-pulse" />
+                      <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-pulse delay-75" />
+                      <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-pulse delay-150" />
                     </span>
-                  )}
+                  ) : null}
                   {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0) || message.orchestration) && (
                     <div className="mt-2 not-prose flex flex-wrap items-center gap-2">
                       {message.provider ? (
