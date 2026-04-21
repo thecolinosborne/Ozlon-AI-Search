@@ -1,74 +1,41 @@
 
 
-## Split Google Workspace into Per-Service Integration Cards with Category Filter
+## Make YouTube its Own Integration Page (Remove Google Workspace Branding)
 
-The current single "Google Workspace" card on `/integrations` will be split into 10 individual cards (one per Google service), all sharing a single OAuth connection underneath. A category filter at the top of the Integrations page lets users narrow to "Google Apps" or other groups.
-
-### Architecture (no breaking backend changes)
-
-All 10 Google services already share **one** `integration_connections` row (`provider="youtube"`, OAuth tokens used by `_shared/google-token.ts`). We keep that — splitting is a UI/routing concern only. Each service card reads from the same shared OAuth state but tests/syncs its own API independently.
-
-```text
-integration_connections (provider="youtube", oauth tokens)
-        │
-        ├─ /integrations/youtube         → YouTube card + Data API key
-        ├─ /integrations/gmail           → Gmail card
-        ├─ /integrations/google-drive    → Drive card
-        ├─ /integrations/google-calendar → Calendar card
-        ├─ /integrations/google-sheets   → Sheets card
-        ├─ /integrations/google-docs     → Docs card
-        ├─ /integrations/google-slides   → Slides card
-        ├─ /integrations/google-analytics→ Analytics card
-        ├─ /integrations/google-search-console → GSC card
-        └─ /integrations/google-tag-manager    → GTM card
-```
+The `/integrations/youtube` page currently still renders as the old "Google Workspace" hub — wrong title, wrong description, and a cross-service test grid for Gmail/Drive/Calendar/etc. Now that each Google service has its own dedicated page, the YouTube page should be YouTube-only.
 
 ### Changes
 
-**1. `src/pages/Integrations.tsx` — registry + filter**
-- Add a `category` field to each integration entry: `"google" | "crm" | "media" | "productivity"`.
-- Replace the single "Google Workspace" entry with 10 entries (YouTube, Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, Tag Manager) — all `category: "google"`, each pointing at its own detail route.
-- Add a horizontal pill filter bar above the grid: `All · Google Apps · CRM · Media · Productivity`. Filtering is client-side, defaults to "All".
-- Status hydration: all 10 google cards read from the **same** `provider="youtube"` row in `integration_connections` (shared OAuth). Each card shows "Connected" if the shared OAuth row is connected.
+**File: `src/pages/integrations/YouTubeDetail.tsx`**
 
-**2. `src/components/integrations/GoogleServiceDetail.tsx` — new shared component**
-- Generic detail page used by all 9 non-YouTube Google services. Takes config: `{ serviceId, name, icon, fnName, testAction, description, scopeNote }`.
-- Sections:
-  - **Header**: service name, icon, OAuth status badge (shared from the master row).
-  - **Connection card**: shows "Authorized via Google Workspace OAuth" + a "Re-authorize" button that triggers the same OAuth flow (`youtube/oauth_authorize`) since all scopes live on one consent.
-  - **Test connection**: button calls the service's `testAction` (e.g. `google-gmail/get_profile`) and shows success/error inline. Reuses the same pattern already in `YouTubeDetail`.
-  - **Quick stats** (where available, additive only): e.g. Gmail unread count, Drive quota, Calendar count. Lazy-loaded after successful test.
+1. **Header (lines 499–517)** — change both the loading-state and main `IntegrationDetailLayout`:
+   - `name`: `"Google Workspace"` → `"YouTube"`
+   - `description`: `"YouTube, Gmail, Drive, ... — one OAuth."` → `"Channel data, video uploads, and the YouTube Data API."`
+   - `icon`: keep `Youtube`
 
-**3. `src/pages/integrations/` — 9 thin route files**
-- `GmailDetail.tsx`, `GoogleDriveDetail.tsx`, `GoogleCalendarDetail.tsx`, `GoogleSheetsDetail.tsx`, `GoogleDocsDetail.tsx`, `GoogleSlidesDetail.tsx`, `GoogleAnalyticsDetail.tsx`, `GoogleSearchConsoleDetail.tsx`, `GoogleTagManagerDetail.tsx`.
-- Each is ~10 lines: imports `GoogleServiceDetail` and passes its config.
+2. **OAuth section (lines 589–658)**:
+   - Rename heading `"Google OAuth Connection"` → `"Google Account (shared OAuth)"`
+   - Update copy in the not-connected state from "Authorize with Google to enable YouTube uploads, Gmail, Drive, …" → "Authorize with Google to enable YouTube uploads and the Data API. The same authorization also powers Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, and Tag Manager — manage each from its own card on the Integrations page."
+   - Update the "Authorize Google Workspace" button label → "Authorize Google"
 
-**4. `src/pages/integrations/YouTubeDetail.tsx` — slim down**
-- Remove the embedded "Google Services" multi-row tester (lines using `GOOGLE_SERVICES`). Each service now has its own page.
-- Keep YouTube-specific functionality: API key input, channel ID, upload form, sync controls, OAuth (which still authorizes the full Google Workspace scope set).
-- Add a small "Other Google services" footer link grid pointing at the new per-service pages.
+3. **Remove the "Connected Google APIs" grid (lines 660–699)** — delete the entire block including the `GOOGLE_SERVICES` map, `serviceTests` state, `testService` function, and the `callFunction` helper. Each service now has its own detail page that handles its own test.
 
-**5. `src/App.tsx` — add 9 new routes**
-- Register the 9 new detail routes alongside the existing `/integrations/youtube`.
+4. **Cleanup** — remove the now-unused imports: `Mail, HardDrive, Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, CheckCircle2, XCircle` (keep `Youtube`, `AlertCircle`, `Loader2`, `Upload`, `Shield`, `ChevronDown`, `ChevronUp`).
 
-**6. Connect/disconnect flow (debug the current "connect failed")**
-- After splitting, the YouTube page's OAuth button continues to authorize all Google scopes in one consent (no scope changes). The reported "connect failed" is most likely the API-key validation step rejecting an invalid/restricted key. Add a clearer toast that distinguishes:
-  - API key invalid (HTTP 400 from `videos?chart=mostPopular`)
-  - API key restricted to wrong referrer/IP (HTTP 403 + `accessNotConfigured`)
-  - YouTube Data API v3 not enabled in the key's Google Cloud project (HTTP 403 + `SERVICE_DISABLED`)
-- No backend logic change required — only swap the generic error string in `youtube/index.ts`'s `connect` action for one that surfaces Google's `error.errors[0].reason`.
+5. **Add a small footer link grid** below the OAuth section linking to the 9 sister Google service pages (Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, Tag Manager). Lightweight pill links — purely navigational, no test buttons.
+
+6. **OAuth-success toast (line 253)** — change `"Google Workspace OAuth connected!"` → `"Google account connected — all services authorized"`.
 
 ### Out of scope
 
-- No changes to `_shared/google-token.ts`, OAuth scope list, or the master `provider="youtube"` row schema.
-- No new database migrations.
-- ClickUp redundant "Sync Now" cleanup (separate request — can fold in if you want).
-- No changes to the chat edge function tools — they already call each Google service's edge function directly.
+- No backend, OAuth scope, or `_shared/google-token.ts` changes.
+- No changes to the 9 per-service detail pages (they already exist and work).
+- No changes to the Integrations registry or category filter.
+- The shared OAuth row in `integration_connections` (`provider="youtube"`) stays as-is — every Google service card continues to read from it.
 
 ### Technical notes
 
-- Filter pills use the existing `PillButton` component for visual parity.
-- `IntegrationCard` already supports any icon — the 10 lucide icons (`Youtube`, `Mail`, `HardDrive`, `Calendar`, `FileSpreadsheet`, `FileText`, `Presentation`, `BarChart3`, `Search`, `Tag`) are already imported in `YouTubeDetail.tsx`, so we'll reuse the same set.
-- All 10 google cards share status — when OAuth is connected, all 10 light up green simultaneously. Disconnecting from any one card disconnects the shared OAuth (with a clear confirm dialog: "This will sign out of all Google services").
-- `PROVIDER_BY_ID` map gets 9 new entries all pointing to `"youtube"` provider so hydration works without new DB rows.
+- The page-level `status` chip will continue to show "Connected" once either the API key or OAuth is present, matching the existing `isConnected` derived state.
+- Removing `GOOGLE_SERVICES`, `serviceTests`, `testService`, and `callFunction` reduces ~35 lines of dead state and removes confusion about where to test each service.
+- Footer pill grid uses simple `react-router-dom` `<Link>` elements styled like the existing `secondaryBtnClass` for visual parity — no new components.
 
