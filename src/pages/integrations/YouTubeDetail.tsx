@@ -526,6 +526,84 @@ export default function YouTubeDetail() {
         );
       })()}
 
+      {/* ── Connected channel identity card (only when channel ID has been saved) ── */}
+      {savedConn?.channelId && (
+        <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+            <h3 className="text-sm font-medium text-foreground">Connected channel</h3>
+          </div>
+          {channelInfo ? (
+            <>
+              <div className="flex items-center gap-3">
+                {channelInfo.thumbnail_url ? (
+                  <img
+                    src={channelInfo.thumbnail_url}
+                    alt={channelInfo.title || "Channel thumbnail"}
+                    className="w-10 h-10 rounded-full object-cover border border-border/40"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center">
+                    <Youtube className="w-5 h-5 text-muted-foreground" strokeWidth={1.5} />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {channelInfo.title || "Untitled channel"}
+                  </p>
+                  <p className="text-[11px] font-mono text-muted-foreground truncate">
+                    {channelInfo.channel_id}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                {channelInfo.subscriber_count != null && (
+                  <span><span className="text-foreground font-medium">{channelInfo.subscriber_count.toLocaleString()}</span> subscribers</span>
+                )}
+                {channelInfo.video_count != null && (
+                  <span>• <span className="text-foreground font-medium">{channelInfo.video_count.toLocaleString()}</span> videos</span>
+                )}
+                {channelInfo.view_count != null && (
+                  <span>• <span className="text-foreground font-medium">{channelInfo.view_count.toLocaleString()}</span> views</span>
+                )}
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>
+                  {channelInfo.fetched_at
+                    ? `Last synced ${new Date(channelInfo.fetched_at).toLocaleString()}`
+                    : "Not yet synced"}
+                </span>
+                <button
+                  onClick={() => void syncYouTubeData()}
+                  disabled={syncing}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-muted/40 transition-colors disabled:opacity-50"
+                >
+                  {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  Sync now
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Channel ID saved but channel details haven't been synced yet. This usually means the YouTube Data API key is missing or invalid.
+              </p>
+              <p className="text-[11px] font-mono text-muted-foreground break-all">
+                {savedConn.channelId}
+              </p>
+              <button
+                onClick={() => void syncYouTubeData()}
+                disabled={syncing || !savedConn.apiKeyConfigured}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border/60 bg-background hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                Sync channel details
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── YouTube Data API & Channel (always visible, validated, masked) ── */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
         <div className="flex items-center gap-2">
@@ -569,7 +647,7 @@ export default function YouTubeDetail() {
             }
           }}
           saving={savingKey}
-          maskedHint={savedConn?.channelId ? `${savedConn.channelId.slice(0, 4)}…${savedConn.channelId.slice(-4)}` : undefined}
+          maskedHint={savedConn?.channelId || undefined}
         />
         <div>
           <label className="text-[11px] text-muted-foreground">Account label (optional)</label>
