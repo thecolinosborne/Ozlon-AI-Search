@@ -49,7 +49,23 @@ async function ytFetch(path: string, apiKey: string): Promise<AnyJson> {
   const sep = path.includes("?") ? "&" : "?";
   const res = await fetch(`${YT_BASE}${path}${sep}key=${encodeURIComponent(apiKey)}`);
   const data = await res.json();
-  if (!res.ok) throw new Error(`YouTube API ${res.status}: ${JSON.stringify(data)}`);
+  if (!res.ok) {
+    // Surface Google's specific error reason instead of dumping the raw payload.
+    const err = (data as AnyJson)?.error;
+    const reason = err?.errors?.[0]?.reason || err?.status;
+    const message = err?.message || "Unknown error";
+    let hint = "";
+    if (reason === "API_KEY_INVALID" || res.status === 400) {
+      hint = "Your YouTube Data API key looks invalid. Double-check the value in Google Cloud Console → Credentials.";
+    } else if (reason === "SERVICE_DISABLED" || reason === "accessNotConfigured") {
+      hint = "YouTube Data API v3 is not enabled in this key's Google Cloud project. Enable it under APIs & Services → Library.";
+    } else if (reason === "ipRefererBlocked" || reason === "referrerNotPermitted") {
+      hint = "This API key is restricted to a referrer/IP that doesn't include this server. Edit the key's restrictions in Google Cloud Console.";
+    } else if (reason === "quotaExceeded" || reason === "rateLimitExceeded") {
+      hint = "YouTube Data API quota exceeded for this key.";
+    }
+    throw new Error(hint ? `${hint} (${reason || res.status}: ${message})` : `YouTube API ${res.status}: ${message}${reason ? ` [${reason}]` : ""}`);
+  }
   return data;
 }
 
