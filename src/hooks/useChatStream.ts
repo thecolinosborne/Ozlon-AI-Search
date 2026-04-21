@@ -2,6 +2,11 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
+export type LiveStep = {
+  label: string;
+  status: "in_progress" | "done" | "error";
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -9,6 +14,7 @@ export type ChatMessage = {
   provider?: ProviderUsedEvent;
   toolsUsed?: ToolUsedInfo[];
   orchestration?: OrchestrationTraceEvent;
+  liveSteps?: LiveStep[];
 };
 
 /**
