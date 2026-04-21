@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Save, Sparkles, User2, BookOpen, Scale, Drama, Plus, X, ListChecks, Target, Trash2, Calendar, Mail, Globe, MapPin, Watch, Mic, FileText, CreditCard, Brain } from "lucide-react";
+import { ArrowLeft, Save, Sparkles, User2, BookOpen, Scale, Drama, Plus, X, ListChecks, Target, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import ProposalInbox from "@/components/personality/ProposalInbox";
-import type { MemorySettings as MemorySettingsType } from "@/core/types";
 
 interface ToneSettings {
   formality?: number;
@@ -105,16 +103,6 @@ const IdentityMemory = () => {
   const [newOrder, setNewOrder] = useState("");
   const [newGoal, setNewGoal] = useState("");
   const [memLoading, setMemLoading] = useState(true);
-  const [dataSources, setDataSources] = useState<MemorySettingsType>({
-    calendar: false,
-    email: false,
-    browsing: false,
-    location: false,
-    wearable: false,
-    voice: false,
-    documents: true,
-    transactions: false,
-  });
 
   useEffect(() => {
     const load = async () => {
@@ -233,21 +221,6 @@ const IdentityMemory = () => {
     await supabase.from("user_goals").update({ status: "completed" }).eq("id", id);
     loadMemory();
   };
-
-  const toggleDataSource = (key: keyof MemorySettingsType) => {
-    setDataSources((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const memoryOptions = [
-    { key: "calendar" as const, icon: Calendar, label: "Calendar Memory", description: "Remember events and scheduling patterns" },
-    { key: "email" as const, icon: Mail, label: "Email Memory", description: "Learn from email content and patterns" },
-    { key: "browsing" as const, icon: Globe, label: "Browsing Memory", description: "Track browsing history for context" },
-    { key: "location" as const, icon: MapPin, label: "Location Memory", description: "Remember places and movement patterns" },
-    { key: "wearable" as const, icon: Watch, label: "Wearable Memory", description: "Track health and fitness data" },
-    { key: "voice" as const, icon: Mic, label: "Voice Memory", description: "Remember voice notes and conversations" },
-    { key: "documents" as const, icon: FileText, label: "Document Memory", description: "Learn from documents you upload" },
-    { key: "transactions" as const, icon: CreditCard, label: "Transaction Memory", description: "Track spending and financial patterns" },
-  ];
 
   if (authLoading || loading) {
     return (
@@ -487,33 +460,8 @@ const IdentityMemory = () => {
           </div>
         </Section>
 
-        <Section
-          icon={Brain}
-          title="Data sources"
-          description="Toggle which memory streams the worker is allowed to learn from."
-        >
-          <div className="space-y-2">
-            {memoryOptions.map(({ key, icon: Icon, label, description }) => (
-              <button
-                key={key}
-                onClick={() => toggleDataSource(key)}
-                className="w-full flex items-center gap-4 p-3 bg-muted/30 rounded-xl border border-border/30 hover:bg-muted/50 transition-colors"
-              >
-                <div className="p-2 rounded-xl bg-background/50">
-                  <Icon className="w-4 h-4 text-muted-foreground" />
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="text-sm font-medium text-foreground">{label}</div>
-                  <div className="text-[11px] text-muted-foreground">{description}</div>
-                </div>
-                <Switch checked={dataSources[key]} />
-              </button>
-            ))}
-          </div>
-        </Section>
-
         <div className="rounded-2xl border border-border/30 bg-muted/30 p-5 text-xs text-muted-foreground leading-relaxed">
-          Your identity profile, standing orders, and active goals are loaded into the system prompt at the top of every conversation. Changes apply on the next message you send.
+          Your identity profile, standing orders, and active goals are loaded into the system prompt at the top of every conversation. Memory ingestion follows your connected integrations — manage those on the Integrations page. Changes apply on the next message you send.
         </div>
       </div>
     </div>
