@@ -276,7 +276,7 @@ serve(async (req) => {
       const channelId = String((params as AnyJson).channelId || "").trim();
       const accountLabel = String((params as AnyJson).accountLabel || "Primary YouTube").trim();
 
-      // If no API key provided, allow updating channel/label on existing connection
+      // Find existing api_key row
       const { data: existing } = await adminClient
         .from("integration_connections")
         .select("id, metadata")
@@ -286,31 +286,49 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      if (!apiKey && existing) {
-        // Update channel/label only, keep existing key
-        const existingMeta = (existing.metadata || {}) as AnyJson;
-        if (!existingMeta.api_key) throw new Error("No existing API key — please provide one");
-
-        const { data: updated, error } = await adminClient
-          .from("integration_connections")
-          .update({
-            external_account_id: channelId || null,
-            external_account_label: accountLabel,
-          })
-          .eq("id", existing.id)
-          .select("*")
-          .single();
-        if (error) throw error;
-
-        return jsonOk({
-          success: true,
-          connection: updated,
-          apiKeyMasked: String(existingMeta.api_key_masked || maskKey(String(existingMeta.api_key))),
-        });
+      // Resolve effective key: provided OR stored (vault-first)
+      let effectiveKey = apiKey;
+      if (!effectiveKey && existing) {
+        try {
+          effectiveKey = await getStoredApiKey(adminClient, existing.id, userId);
+        } catch {
+          /* fallthrough */
+        }
       }
 
-      if (!apiKey) throw new Error("apiKey is required");
-      await validateApiKey(apiKey);
+      if (!effectiveKey) {
+        throw new Error("apiKey is required — save your YouTube Data API key first");
+      }
+
+      // Validate API key against YouTube
+      await validateApiKey(effectiveKey);
+
+      // If a channelId was supplied, validate it resolves to an actual channel
+      let resolvedChannelLabel = accountLabel;
+      if (channelId) {
+        try {
+          const ch = (await ytFetch(
+            `/channels?part=snippet&id=${encodeURIComponent(channelId)}`,
+            effectiveKey,
+          )) as { items?: AnyJson[] };
+          if (!ch.items || ch.items.length === 0) {
+            throw new Error(`Channel ID "${channelId}" not found on YouTube`);
+          }
+          const snippet = (ch.items[0].snippet || {}) as AnyJson;
+          if (snippet.title) resolvedChannelLabel = String(snippet.title);
+        } catch (e) {
+          throw new Error(
+            `Channel validation failed: ${e instanceof Error ? e.message : "unknown"}`,
+          );
+        }
+      }
+
+      const existingMeta = (existing?.metadata || {}) as AnyJson;
+      const newMeta: AnyJson = {
+        ...existingMeta,
+        api_key: effectiveKey,
+        api_key_masked: maskKey(effectiveKey),
+      };
 
       let data;
       if (existing) {
@@ -319,14 +337,11 @@ serve(async (req) => {
           .update({
             credential_ref: "server_stored_api_key",
             status: "connected",
-            external_account_id: channelId || null,
-            external_account_label: accountLabel,
+            external_account_id: channelId || existing && (existingMeta as AnyJson) ? channelId || null : null,
+            external_account_label: resolvedChannelLabel,
             last_validated_at: new Date().toISOString(),
             last_error: null,
-            metadata: {
-              api_key: apiKey,
-              api_key_masked: maskKey(apiKey),
-            },
+            metadata: newMeta,
           })
           .eq("id", existing.id)
           .select("*")
@@ -343,13 +358,10 @@ serve(async (req) => {
             credential_ref: "server_stored_api_key",
             status: "connected",
             external_account_id: channelId || null,
-            external_account_label: accountLabel,
+            external_account_label: resolvedChannelLabel,
             last_validated_at: new Date().toISOString(),
             last_error: null,
-            metadata: {
-              api_key: apiKey,
-              api_key_masked: maskKey(apiKey),
-            },
+            metadata: newMeta,
           })
           .select("*")
           .single();
