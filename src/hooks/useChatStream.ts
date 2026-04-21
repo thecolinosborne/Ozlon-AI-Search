@@ -323,11 +323,17 @@ export function useChatStream({
         safeSetIsLoading(false);
 
         const taskIds = requestTaskIdsRef.current;
+        const currentInflight = inflightMessages;
+        const inflightAssistant =
+          currentInflight.find((m) => m.id === assistantId) ?? null;
         const finalAssistantMessage: ChatMessage | null = assistantContent
           ? {
               id: assistantId,
               role: "assistant",
               content: assistantContent,
+              provider: inflightAssistant?.provider,
+              toolsUsed: inflightAssistant?.toolsUsed,
+              orchestration: inflightAssistant?.orchestration,
             }
           : null;
 
@@ -343,8 +349,19 @@ export function useChatStream({
             playMessage(assistantId, assistantContent);
           }
 
-          // Persist asynchronously — do NOT block the phase machine
+          // Stash chip metadata so it survives the inflight → persisted handoff.
           if (finalAssistantMessage) {
+            const overlay = {
+              provider: finalAssistantMessage.provider,
+              toolsUsed: finalAssistantMessage.toolsUsed,
+              orchestration: finalAssistantMessage.orchestration,
+            };
+            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration;
+            if (hasAny) {
+              metadataOverlayRef.current.set(assistantId, overlay);
+              setMetadataOverlayVersion((v) => v + 1);
+            }
+
             persistAssistantMessage(finalAssistantMessage).catch((err) => {
               console.error("[useChatStream] Failed to persist assistant message:", err);
             });
