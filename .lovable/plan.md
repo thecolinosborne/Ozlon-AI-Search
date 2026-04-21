@@ -1,73 +1,53 @@
 
 
-## Fix Routing Decisions Log + Show Live Work in Reply Bubble
+## Confirm: Gemini Key + Add Google Docs Styling Tools + Model Visibility
 
-### Issue 1: "Recent routing decisions (0)" never populates
+### On your Gemini API key
 
-**Root cause:** The Brain page reads from `gauntlet_routing_log`, which is only written when calls go through `gauntletCall`. But `gauntletCall` is only used when either:
-- Project env var `USE_GAUNTLET=1` is set, **or**
-- The user explicitly sets `prefs.use_gauntlet = true`
+Yes — you have `GEMINI_API_KEY` set, **and** you have `LOVABLE_API_KEY` (the Lovable AI Gateway, which routes to Gemini 2.5/3 Pro/Flash, GPT-5, etc. without per-provider keys). The chat backend already uses both. Gemini access is **not** the blocker.
 
-Neither condition is true today, so every chat call goes down the legacy `callWithFallback` path that writes to a different table (`model_routing_log`). The Brain page never sees those rows.
+The actual gap is what the AI *does* with that access — it doesn't know how to apply rich Google Docs styling, and it doesn't tell you which model handled your turn. Both are fixable now.
 
-The Speed/Balanced/Quality toggle on the Brain page also only affects routing when gauntlet is active — so right now the toggle is cosmetic too.
+### What we're building
 
-**Fix:** Default `useGauntlet` to ON unless the user opts out.
+**1. Four new high-level Google Docs styling tools** (`supabase/functions/google-docs/index.ts`)
 
-In `supabase/functions/_shared/model-registry.ts` (line 382–385), change:
+Wraps the raw Docs API into actions the AI can actually use:
 
-```
-const envGauntlet = Deno.env.get("USE_GAUNTLET") === "1";
-const userOptOut = (prefs as any).use_gauntlet === false;
-const userOptIn  = (prefs as any).use_gauntlet === true;
-const useGauntlet = !userOptOut && (envGauntlet || userOptIn);
-```
+- `apply_markdown` — `{ documentId, markdown, replaceAll? }`. Parses markdown server-side and emits one `batchUpdate` with `insertText` + `updateTextStyle` (bold/italic/code) + `updateParagraphStyle` (HEADING_1/2/3, NORMAL_TEXT) + `createParagraphBullets`. The killer tool: AI writes markdown → fully styled doc.
+- `format_as_report` — `{ documentId }`. Reads the doc, detects title/headings, applies a clean theme (Inter/Arial, 24/16/11pt, line spacing 1.15). One-shot "make this look professional."
+- `style_range` — `{ documentId, startIndex, endIndex, bold?, italic?, fontSize?, foregroundColor?, link? }`. Surgical span styling.
+- `clear_formatting` — strips styling on a range or whole doc.
 
-to:
+**2. Wire the 4 tools into the chat function** (`supabase/functions/chat/index.ts`)
 
-```
-const userOptOut = (prefs as any).use_gauntlet === false;
-const useGauntlet = !userOptOut;   // gauntlet by default
-```
+Add tool schemas, routing entries, and label/domain map entries (matching the existing `docs_*` pattern). Add a `DOCUMENT STYLING PROTOCOL` block to the system prompt:
 
-Result: every chat call goes through `gauntlet-router`, which writes to `gauntlet_routing_log`, which the Brain page already reads. The Speed/Balanced/Quality toggle becomes real on the same change. Existing fallback path is preserved (any gauntlet failure still falls back to the legacy gateway exactly as today).
+> When the user asks you to create, update, restyle, or "make a doc look nice":
+> 1. Creating with content → `create_google_doc` (title only) → `docs_apply_markdown` with the body.
+> 2. Restyling existing doc → `docs_get_document` → `docs_apply_markdown` with `replaceAll: true`, OR `docs_format_as_report`.
+> 3. Surgical edits → `docs_style_range`.
+> 4. Never say "I can't edit/style this doc" — you have full Docs read/write. If a call fails, report the actual error.
 
-### Issue 2: Reply bubble should show live work, not just placeholder
+**3. Model attribution in the reply** (`src/components/chat/ChatMessageList.tsx`)
 
-**Today:** While streaming, the empty assistant bubble shows three pulsing dots until tokens arrive. Tool calls/plan steps are surfaced separately in the floating `TaskActivityBubble` in the bottom-right corner — disconnected from the conversation. The chat already streams `task_update`, `tool_call`, `provider_used`, and `orchestration_trace` SSE events to the frontend, but the message bubble itself doesn't render them inline.
-
-**Fix:** Render live work *inside* the assistant bubble while it's streaming.
-
-1. **Surface task/tool events to the bubble.** Extend `ChatMessage` (in `useChatStream.ts`) with a transient `liveSteps: { label: string; status: 'in_progress' | 'done' | 'error' }[]` array. Populate it from the existing `onTaskUpdate` and `onToolCall` callbacks (we already receive these — currently they only feed the floating bubble). Push a new step on `in_progress`, mark matching label `done` on completion. Strip `liveSteps` before persisting (UI-only, ephemeral).
-
-2. **Render a "Working" strip inside the empty/streaming bubble** (`ChatMessageList.tsx`). When the assistant bubble has no content yet but has `liveSteps`, replace the three-dots placeholder with a compact list:
-
-   ```
-   ⚙ Routing through Infinity Router…   ✓
-   ⚙ Searching Gmail (last 7 days)…     ⏳
-   ⚙ Drafting reply…                    ·
-   ```
-
-   Each row: small spinner/check/bullet icon + step label in muted text, animating in. Once tokens start arriving, the strip collapses into a thin "Done in X steps" line above the markdown content (click to expand). Same translucent card aesthetic as the bubble — no new visual surface.
-
-3. **Keep the floating `TaskActivityBubble`** for long-running background tasks (so users can navigate away), but it's no longer the *only* place work shows up. The inline strip is the primary surface for "what is the AI doing right now" during the active reply.
+Add a small muted footer under each assistant bubble: *"via google/gemini-3-flash-preview · 1.2s"*. Data already arrives via the `provider_used` SSE event captured in `useChatStream.ts` — just needs rendering. Click to expand the full routing trace (already on the message as `orchestration`).
 
 ### Files touched
 
-- `supabase/functions/_shared/model-registry.ts` — default gauntlet ON (3-line change).
-- `src/hooks/useChatStream.ts` — add `liveSteps` to inflight assistant message; populate from existing `onTaskUpdate` / `onToolCall`; clear after persistence.
-- `src/components/chat/ChatMessageList.tsx` — render `liveSteps` strip inside the assistant bubble (replaces dots placeholder while streaming, collapses to one-liner once content arrives).
+- `supabase/functions/google-docs/index.ts` — add 4 actions (~150 lines additive, existing actions untouched).
+- `supabase/functions/chat/index.ts` — 4 tool schemas + routing + protocol prompt (~50 lines additive).
+- `src/components/chat/ChatMessageList.tsx` — model/latency footer under assistant bubble (~15 lines).
 
 ### Out of scope
 
-- No schema changes (`gauntlet_routing_log` already exists and is read by the Brain page).
-- No changes to the gauntlet-router edge function itself.
-- No changes to TaskActivityBubble/Portal — they keep working as-is.
-- No voice / onboarding / settings changes.
+- No changes to Gmail, Calendar, Drive, Sheets, Slides, GSC, GA4 — already fully wired.
+- No new connectors or API keys (Gemini already routed via gateway).
+- No changes to gauntlet routing, voice, onboarding, or auth.
 
-### Verification after implementation
+### Verification
 
-1. Send any chat message → open Brain page → "Recent routing decisions" shows the new entry with chosen stone, model, latency.
-2. Toggle Speed → ask the same question → next entry shows a faster/cheaper stone in the log.
-3. Send a question that triggers a tool (e.g. *"summarize my last 3 emails"*) → assistant bubble shows live "Searching Gmail…" step *inside* the bubble before the answer streams in.
+1. *"Create a Google Doc titled 'Q2 Plan' with a bolded title, two H2 sections with bullets, and a 3-row table"* → opens fully styled.
+2. *"Open my last doc and reformat it as a clean report"* → `format_as_report` runs, doc visibly restyled.
+3. Assistant bubble shows *"via google/gemini-3-flash-preview · 0.8s"* footer.
 
