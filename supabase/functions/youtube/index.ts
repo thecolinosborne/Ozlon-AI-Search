@@ -416,7 +416,7 @@ serve(async (req) => {
             const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
               _connection_id: data.id,
               _user_id: userId,
-              _plaintext: apiKey,
+              _plaintext: effectiveKey,
               _encryption_key: hexKey,
               _secret_name: "api_key",
             });
