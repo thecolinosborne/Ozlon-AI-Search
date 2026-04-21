@@ -321,36 +321,42 @@ serve(async (req) => {
         throw new Error(`Failed to load existing connection: ${existingErr.message}`);
       }
 
-      // Resolve effective key: provided OR stored (vault-first)
-      let effectiveKey = apiKey;
-      if (!effectiveKey && existing) {
+      // Must provide at least one of apiKey or channelId
+      if (!apiKey && !channelId) {
+        throw new Error("Provide an API key or Channel ID to save");
+      }
+
+      // Validate apiKey ONLY if provided
+      if (apiKey) {
         try {
-          effectiveKey = await getStoredApiKey(adminClient, existing.id, userId);
+          await validateApiKey(apiKey);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[youtube/connect] validateApiKey failed:", msg);
+          throw new Error(msg);
+        }
+      }
+
+      // Resolve a key to use for channel-ID validation (new key OR stored)
+      let keyForChannelValidation = apiKey;
+      if (!keyForChannelValidation && channelId && existing) {
+        try {
+          keyForChannelValidation = await getStoredApiKey(adminClient, existing.id, userId);
         } catch (e) {
           console.warn("[youtube/connect] getStoredApiKey failed:", e instanceof Error ? e.message : e);
         }
       }
 
-      if (!effectiveKey) {
-        throw new Error("apiKey is required — save your YouTube Data API key first");
-      }
-
-      // Validate API key against YouTube
-      try {
-        await validateApiKey(effectiveKey);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[youtube/connect] validateApiKey failed:", msg);
-        throw new Error(msg);
-      }
-
-      // If a channelId was supplied, validate it resolves to an actual channel
+      // If a channelId was supplied, validate it (requires a key)
       let resolvedChannelLabel = accountLabel;
       if (channelId) {
+        if (!keyForChannelValidation) {
+          throw new Error("Cannot validate Channel ID — save your YouTube Data API key first");
+        }
         try {
           const ch = (await ytFetch(
             `/channels?part=snippet&id=${encodeURIComponent(channelId)}`,
-            effectiveKey,
+            keyForChannelValidation,
           )) as { items?: AnyJson[] };
           if (!ch.items || ch.items.length === 0) {
             throw new Error(`Channel ID "${channelId}" not found on YouTube`);
@@ -364,24 +370,30 @@ serve(async (req) => {
         }
       }
 
+      // Build incremental metadata patch — merge into existing to preserve OAuth tokens + other keys
       const existingMeta = (existing?.metadata || {}) as AnyJson;
-      const newMeta: AnyJson = {
-        ...existingMeta,
-        api_key: effectiveKey,
-        api_key_masked: maskKey(effectiveKey),
-      };
+      const metaPatch: AnyJson = {};
+      if (apiKey) {
+        metaPatch.api_key = apiKey;
+        metaPatch.api_key_masked = maskKey(apiKey);
+      }
+      const newMeta: AnyJson = { ...existingMeta, ...metaPatch };
 
       let data;
       if (existing) {
-        // Preserve existing credential_ref (e.g. "oauth_tokens") if already set.
         const updatePayload: AnyJson = {
           status: "connected",
-          external_account_id: channelId || existing.external_account_id || null,
-          external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
           last_validated_at: new Date().toISOString(),
           last_error: null,
           metadata: newMeta,
         };
+        // Always write external_account_id when channelId provided; otherwise preserve existing
+        if (channelId) {
+          updatePayload.external_account_id = channelId;
+          updatePayload.external_account_label = resolvedChannelLabel || existing.external_account_label || "Primary YouTube";
+        } else if (!existing.external_account_label && accountLabel) {
+          updatePayload.external_account_label = accountLabel;
+        }
         // Only set credential_ref if the row doesn't already track OAuth tokens
         if (existing.auth_type !== "oauth" && existing.auth_type !== "oauth2") {
           updatePayload.credential_ref = "server_stored_api_key";
@@ -415,45 +427,48 @@ serve(async (req) => {
         data = inserted;
       }
 
-      // Dual-write: mirror api_key into encrypted vault (best-effort, non-blocking)
-      try {
-        const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
-        if (vaultKey) {
-          const keyBytes = new TextEncoder().encode(vaultKey);
-          if (keyBytes.length === 32) {
-            const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-            const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
-              _connection_id: data.id,
-              _user_id: userId,
-              _plaintext: effectiveKey,
-              _encryption_key: hexKey,
-              _secret_name: "api_key",
-            });
-            if (rpcErr) {
-              console.warn("[youtube/connect] vault store_user_secret failed:", rpcErr.message);
-            } else {
-              await adminClient.from("credential_audit_log").insert({
-                user_id: userId,
-                connection_id: data.id,
-                provider: "youtube",
-                action: "vault_store",
-                detail: "api_key",
+      // Dual-write: mirror api_key into encrypted vault ONLY when a new key was provided
+      if (apiKey) {
+        try {
+          const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
+          if (vaultKey) {
+            const keyBytes = new TextEncoder().encode(vaultKey);
+            if (keyBytes.length === 32) {
+              const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+              const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
+                _connection_id: data.id,
+                _user_id: userId,
+                _plaintext: apiKey,
+                _encryption_key: hexKey,
+                _secret_name: "api_key",
               });
+              if (rpcErr) {
+                console.warn("[youtube/connect] vault store_user_secret failed:", rpcErr.message);
+              } else {
+                await adminClient.from("credential_audit_log").insert({
+                  user_id: userId,
+                  connection_id: data.id,
+                  provider: "youtube",
+                  action: "vault_store",
+                  detail: "api_key",
+                });
+              }
+            } else {
+              console.warn(`[youtube/connect] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
             }
           } else {
-            console.warn(`[youtube/connect] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
+            console.warn("[youtube/connect] VAULT_ENCRYPTION_KEY not set, skipping vault mirror");
           }
-        } else {
-          console.warn("[youtube/connect] VAULT_ENCRYPTION_KEY not set, skipping vault mirror");
+        } catch (e) {
+          console.warn("[youtube/connect] vault mirror threw:", e instanceof Error ? e.message : e);
         }
-      } catch (e) {
-        console.warn("[youtube/connect] vault mirror threw:", e instanceof Error ? e.message : e);
       }
 
+      const finalMaskedKey = String(((data?.metadata || {}) as AnyJson).api_key_masked || "");
       return jsonOk({
         success: true,
         connection: data,
-        apiKeyMasked: maskKey(effectiveKey),
+        apiKeyMasked: finalMaskedKey,
       });
     }
 
