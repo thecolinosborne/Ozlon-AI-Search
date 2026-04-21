@@ -147,7 +147,14 @@ serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const wantList = url.searchParams.get('list') === '1' || req.method === 'GET';
+    let body: any = null;
+    if (req.method !== 'GET') {
+      try { body = await req.json(); } catch { body = null; }
+    }
+    const wantList =
+      url.searchParams.get('list') === '1' ||
+      req.method === 'GET' ||
+      body?.list === true;
 
     if (wantList) {
       return new Response(JSON.stringify({
@@ -157,7 +164,7 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { pack_id } = await req.json();
+    const pack_id = body?.pack_id;
     if (!pack_id || !PACKS[pack_id]) {
       return new Response(JSON.stringify({ error: 'Unknown pack_id', available: Object.keys(PACKS) }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
