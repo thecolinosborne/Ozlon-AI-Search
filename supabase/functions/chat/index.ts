@@ -6719,6 +6719,23 @@ SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
 ===========================================================
+SEARCH ATLAS PROTOCOL
+===========================================================
+You have full Search Atlas access via these tools:
+- searchatlas_audit_site — technical/on-page audit for a domain
+- searchatlas_site_explorer — domain overview, traffic estimates, top pages
+- searchatlas_keyword_research — volume / KD / CPC / intent for a keyword
+- searchatlas_serp_snapshot — live SERP for a keyword + country
+- searchatlas_backlinks_overview / searchatlas_backlinks_list — backlink profile
+- searchatlas_list_projects + searchatlas_rank_tracker — tracked keyword positions
+
+When the user asks about SEO performance, audits, keyword opportunities, backlinks, or rankings:
+1. Prefer Search Atlas for third-party estimates and competitive data.
+2. Cross-reference with gsc_* (real query/click data) and ga4_* (real traffic) when the user wants ground-truth numbers.
+3. Use searchatlas_list_projects first when the user references "my projects" or "tracked keywords" before calling searchatlas_rank_tracker.
+4. Never claim you cannot pull SEO data — you have full Search Atlas access. If a call fails, surface the actual error.
+
+===========================================================
 WORK TASK MANAGEMENT & SMART ORCHESTRATION
 ===========================================================
 You have create_work_task and update_work_task tools for the user's AI operations workspace.
@@ -7117,6 +7134,14 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'gsc_query': 'google-search-console',
     'gsc_save_snapshot': 'google-search-console',
     'gsc_compare_snapshots': 'google-search-console',
+    'searchatlas_audit_site': '_always_',
+    'searchatlas_site_explorer': '_always_',
+    'searchatlas_keyword_research': '_always_',
+    'searchatlas_serp_snapshot': '_always_',
+    'searchatlas_backlinks_overview': '_always_',
+    'searchatlas_backlinks_list': '_always_',
+    'searchatlas_list_projects': '_always_',
+    'searchatlas_rank_tracker': '_always_',
     'web_search_google': '_always_',
     'save_memory': '_always_',
     'add_standing_order': '_always_',
@@ -7235,6 +7260,14 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_query': 'Querying Search Console',
   'gsc_save_snapshot': 'Saving SEO snapshot',
   'gsc_compare_snapshots': 'Loading SEO snapshots',
+  'searchatlas_audit_site': 'Auditing site',
+  'searchatlas_site_explorer': 'Exploring domain',
+  'searchatlas_keyword_research': 'Researching keywords',
+  'searchatlas_serp_snapshot': 'Snapshotting SERP',
+  'searchatlas_backlinks_overview': 'Loading backlinks overview',
+  'searchatlas_backlinks_list': 'Listing backlinks',
+  'searchatlas_list_projects': 'Listing rank-tracker projects',
+  'searchatlas_rank_tracker': 'Loading tracked rankings',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'add_standing_order': 'Setting standing order',
@@ -7425,6 +7458,7 @@ async function runToolLoop(
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
         if (name.startsWith('ghl_')) return 'ghl';
+        if (name.startsWith('searchatlas_')) return 'search-atlas';
         if (name.startsWith('gsc_')) return 'gsc';
         if (name.includes('clickup')) return 'clickup';
         if (name.includes('youtube')) return 'youtube';
