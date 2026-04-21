@@ -454,6 +454,98 @@ async function actionRecentSnapshots(auth: AuthCtx, params: Record<string, unkno
 }
 
 // ============================================================================
+// DIAGNOSE — probe host × path × auth-scheme matrix
+// ============================================================================
+
+async function actionDiagnose(auth: AuthCtx) {
+  const hosts = [
+    "https://api.searchatlas.com",
+    "https://sa.searchatlas.com",
+    "https://app.searchatlas.com",
+  ];
+  const paths = [
+    "/api/customer/account/",
+    "/api/customer/projects/",
+    "/api/v2/customer/account/",
+    "/api/v3/customer/account/",
+    "/api/v3/customer/projects/",
+    "/api/account/",
+    "/api/projects/",
+    "/api/keyword-researcher/",
+    "/v2/account/",
+  ];
+  const schemes: Array<{ name: string; build: (url: string) => { url: string; headers: Record<string, string> } }> = [
+    { name: "Token <key>", build: (url) => ({ url, headers: { Authorization: `Token ${auth.apiKey}`, Accept: "application/json" } }) },
+    { name: "Bearer <key>", build: (url) => ({ url, headers: { Authorization: `Bearer ${auth.apiKey}`, Accept: "application/json" } }) },
+    { name: "ApiKey <key>", build: (url) => ({ url, headers: { Authorization: `ApiKey ${auth.apiKey}`, Accept: "application/json" } }) },
+    { name: "?user_token=", build: (url) => ({ url: `${url}${url.includes("?") ? "&" : "?"}user_token=${encodeURIComponent(auth.apiKey)}`, headers: { Accept: "application/json" } }) },
+    { name: "?api_key=", build: (url) => ({ url: `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(auth.apiKey)}`, headers: { Accept: "application/json" } }) },
+    { name: "?token=", build: (url) => ({ url: `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(auth.apiKey)}`, headers: { Accept: "application/json" } }) },
+  ];
+
+  const probes: Array<Promise<Record<string, unknown>>> = [];
+  for (const host of hosts) {
+    for (const path of paths) {
+      for (const scheme of schemes) {
+        const { url, headers } = scheme.build(`${host}${path}`);
+        probes.push(
+          (async () => {
+            const startedAt = Date.now();
+            try {
+              const res = await fetch(url, { method: "GET", headers });
+              const text = await res.text();
+              const ct = res.headers.get("content-type") || "";
+              const bodySnippet = text.trim().startsWith("<")
+                ? "<HTML response>"
+                : text.slice(0, 120);
+              return {
+                ok: res.ok,
+                status: res.status,
+                host: host.replace("https://", ""),
+                path,
+                scheme: scheme.name,
+                contentType: ct.split(";")[0],
+                body: bodySnippet,
+                ms: Date.now() - startedAt,
+              };
+            } catch (e) {
+              return {
+                ok: false,
+                status: 0,
+                host: host.replace("https://", ""),
+                path,
+                scheme: scheme.name,
+                contentType: "",
+                body: e instanceof Error ? e.message : "fetch failed",
+                ms: Date.now() - startedAt,
+              };
+            }
+          })(),
+        );
+      }
+    }
+  }
+
+  const results = await Promise.all(probes);
+  // Sort: 2xx first, then 401/403 (auth-shaped), then others
+  results.sort((a, b) => {
+    const sa = a.status as number;
+    const sb = b.status as number;
+    const rank = (s: number) => (s >= 200 && s < 300 ? 0 : s === 401 || s === 403 ? 1 : s === 404 ? 3 : 2);
+    return rank(sa) - rank(sb);
+  });
+  const successes = results.filter((r) => r.ok);
+  return ok({
+    total: results.length,
+    successes: successes.length,
+    results,
+    summary: successes.length > 0
+      ? `Found ${successes.length} working combination(s). First green row is the right host/path/auth.`
+      : "No 2xx responses — token likely lacks SEO Data API access. Check Search Atlas → Settings → API.",
+  });
+}
+
+// ============================================================================
 // MAIN
 // ============================================================================
 
@@ -497,6 +589,8 @@ serve(async (req) => {
         return await actionSyncNow(auth, params);
       case "recent_snapshots":
         return await actionRecentSnapshots(auth, params);
+      case "diagnose":
+        return await actionDiagnose(auth);
       default:
         return fail(`Unknown action: ${action}`, 400);
     }

@@ -69,6 +69,9 @@ const SearchAtlasDetail = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncRefreshKey, setSyncRefreshKey] = useState(0);
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<Array<Record<string, unknown>> | null>(null);
+  const [diagnosticsSummary, setDiagnosticsSummary] = useState<string | null>(null);
 
   const [domain, setDomain] = useState(stored.domain || "");
   const [projectId, setProjectId] = useState(stored.projectId || "");
@@ -219,6 +222,24 @@ const SearchAtlasDetail = () => {
     toast.success("Defaults saved");
   };
 
+  const handleDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnostics(null);
+    setDiagnosticsSummary(null);
+    try {
+      const data = await callSA("diagnose");
+      setDiagnostics((data?.results || []) as Array<Record<string, unknown>>);
+      setDiagnosticsSummary(String(data?.summary || ""));
+      const successes = Number(data?.successes || 0);
+      if (successes > 0) toast.success(`Found ${successes} working endpoint(s)`);
+      else toast.error("No working endpoints — token likely lacks API access");
+    } catch (err) {
+      toast.error(`Diagnostics failed: ${(err as Error).message}`);
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
   const handleSync = async () => {
     if (!domain.trim() && !projectId.trim()) {
       toast.error("Set a default domain or project first");
@@ -293,6 +314,64 @@ const SearchAtlasDetail = () => {
         saving={savingKey}
         maskedHint={stored.apiKeyMask || (isConnected ? "•••••••• (server)" : undefined)}
       />
+
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">API Diagnostics</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Probe Search Atlas to find the correct host, path, and auth scheme for your token.
+            </p>
+          </div>
+          <button
+            onClick={handleDiagnose}
+            disabled={diagnosing || (!stored.apiKeyMask && !isConnected)}
+            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {diagnosing ? "Probing…" : "Run Diagnostics"}
+          </button>
+        </div>
+
+        {diagnosticsSummary && (
+          <p className="text-xs text-foreground/80 bg-muted/40 rounded-lg px-3 py-2">
+            {diagnosticsSummary}
+          </p>
+        )}
+
+        {diagnostics && diagnostics.length > 0 && (
+          <div className="max-h-80 overflow-y-auto rounded-lg border border-border/30">
+            <table className="w-full text-[11px] font-mono">
+              <thead className="bg-muted/40 text-muted-foreground sticky top-0">
+                <tr>
+                  <th className="text-left px-2 py-1.5 w-8"></th>
+                  <th className="text-left px-2 py-1.5 w-12">Status</th>
+                  <th className="text-left px-2 py-1.5">Host</th>
+                  <th className="text-left px-2 py-1.5">Path</th>
+                  <th className="text-left px-2 py-1.5">Auth</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diagnostics.slice(0, 60).map((r, i) => {
+                  const status = Number(r.status);
+                  const isOk = status >= 200 && status < 300;
+                  const isAuth = status === 401 || status === 403;
+                  return (
+                    <tr key={i} className="border-t border-border/20 hover:bg-muted/20">
+                      <td className="px-2 py-1">{isOk ? "✓" : "✗"}</td>
+                      <td className={`px-2 py-1 ${isOk ? "text-emerald-500" : isAuth ? "text-amber-500" : "text-muted-foreground"}`}>
+                        {status || "—"}
+                      </td>
+                      <td className="px-2 py-1 text-foreground/70">{String(r.host)}</td>
+                      <td className="px-2 py-1 text-foreground/70">{String(r.path)}</td>
+                      <td className="px-2 py-1 text-foreground/70">{String(r.scheme)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {isConnected && (
         <>
