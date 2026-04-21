@@ -1,104 +1,73 @@
 
 
-## Wisdom Library → Cosmic Orchestration Integration
+## End-to-End Wisdom Integration Test
 
-Right now Wisdom is bolted onto the side: the chat function does its own one-shot RAG lookup at the start of each turn. That's a flashlight, not gravity. To make it part of the orchestration — felt by every agent, every router, every tool decision — we wire it into the **Infinity Router** (the pre-processing brain) and the **agent registry** so wisdom *shapes routing decisions, tool selection, and agent persona*, not just reply text.
+I'll drive the preview as the signed-in user, ingest a distinctive source, ask a related question, verify the `KnowledgeChip` renders with that source cited, then unplug it and confirm the influence vanishes from the next reply.
 
-## What changes
+## Test sequence
 
-### 1. Wisdom becomes a first-class signal in the Infinity Router
+### Setup
+1. `navigate_to_sandbox` → `/` to confirm auth state. If signed out, stop and ask the user to sign in (per browser auth rules — won't fill login forms without approval).
 
-The Infinity Router (`supabase/functions/chat/index.ts` orchestration layer) currently does 6-path Gemini pre-processing for intent, identity, etc. Add a **7th path: Wisdom Resonance**.
+### Phase 1 — Ingest a distinctive source
+2. Navigate to `/wisdom`
+3. Use Add Source → Paste Text mode with a deliberately unique, identifiable text so attribution is unambiguous:
+   - **Title**: "Einstein — Relativity Primer"
+   - **Source/Person**: "Albert Einstein"
+   - **Type**: book
+   - **Body**: ~3 short paragraphs covering time dilation, the equivalence principle, and spacetime curvature (long enough to clear the 200-char minimum, distinctive enough that a generic model wouldn't phrase it the same way)
+4. Click Ingest, wait for the success toast
+5. Confirm the new source appears in the library list with "Plugged in" state and entry count > 0
+6. Verify DB-side via `supabase--read_query`:
+   ```sql
+   select id, title, person, is_active, entry_count
+   from knowledge_sources
+   where user_id = <current> order by created_at desc limit 1;
+   ```
 
-- Runs in parallel with the other router paths (no latency cost — they're already concurrent)
-- Calls `match_knowledge` + `match_wisdom_memories` + `match_reflections` against the user message *plus* the resolved intent
-- Returns a structured `wisdom_signal`:
-  ```
-  {
-    resonant_sources: [{id, person, title, similarity}],
-    dominant_domains: ['negotiation', 'pricing'],
-    framework_hits: ['Value Equation', 'First Principles'],
-    confidence: 0.82
-  }
-  ```
-- This signal is passed into every downstream stage, not just the system prompt
+### Phase 2 — Ask a related question (plugged in)
+7. Navigate to `/` (chat)
+8. Send: *"In simple terms, what does Einstein's relativity say about time dilation?"*
+9. Wait for the assistant reply to finish streaming
+10. **Verify**: a `KnowledgeChip` ("Drew from …") appears under the assistant message
+11. Open the chip popover → confirm it lists the Einstein source with a similarity %
+12. Capture screenshot of the message + open chip
+13. Verify backend trace via `supabase--edge_function_logs` for `chat` filtered on `wisdom_signal` → confirm `framework_hits` / `resonant_sources` includes the new Einstein entry
 
-### 2. Wisdom-aware agent routing
+### Phase 3 — Unplug and re-ask
+14. Navigate back to `/wisdom`
+15. Click the plug toggle on the Einstein source → confirm "Unplugged" toast and visual state change
+16. Verify DB: `is_active = false` for that source row
+17. Navigate to `/` and start a fresh chat session (sidebar → New) so prior context doesn't carry the Einstein framing
+18. Send a near-identical question: *"Explain Einstein's view on time dilation simply."*
+19. Wait for reply to finish
+20. **Verify**: no `KnowledgeChip` appears (orchestration filtered out the unplugged source)
+21. Capture screenshot
+22. Confirm via edge function logs that `wisdom_signal.resonant_sources` no longer contains the Einstein source
 
-In `src/core/orchestrator.ts` and the agent dispatcher, the routing decision (which agent handles the turn) currently uses intent only. Upgrade it:
+### Phase 4 — Re-plug and confirm gravity returns
+23. Back to `/wisdom` → toggle plug on
+24. New chat → ask the same question once more → confirm chip reappears
+25. Quick DB check on `recurrence_count` for the cited entry — should have ticked up across the plugged turns:
+   ```sql
+   select id, title, recurrence_count, last_accessed_at
+   from knowledge_entries
+   where source_id = <einstein_source_id>;
+   ```
 
-- `wisdom_signal.dominant_domains` becomes a tiebreaker and amplifier
-- Example: intent = "general advice" + dominant_domain = "negotiation" → route to a Negotiation specialist persona instead of base agent
-- New helper `selectAgentWithWisdom(intent, wisdomSignal)` in `src/core/agents/index.ts`
+## Pass criteria
 
-### 3. Wisdom-shaped system prompt (structured, not appended)
+- Plugged: `KnowledgeChip` visible with Einstein listed, edge logs show source in `wisdom_signal`
+- Unplugged: no chip on a fresh session, edge logs show empty/other resonant sources
+- Re-plugged: chip returns
+- `recurrence_count` increments across cited turns (gravitational compounding working)
 
-Currently the chat function appends a `## Relevant Wisdom` block. Restructure into three named blocks the model treats differently:
+## If something fails mid-test
 
-- **`## Active Frameworks`** — the named frameworks (Value Equation, etc.) the model is *expected to apply by name*
-- **`## Personal Memories`** — durable memories from `wisdom_memories` (user's own facts/preferences) framed as ground truth
-- **`## Reflections`** — synthesized notes framed as prior conclusions
+- **Chip doesn't appear when plugged**: inspect `useChatStream.ts` orchestration_trace handling + `ChatMessageList.tsx` rendering, plus chat function SSE emit
+- **Chip still appears when unplugged**: inspect the `is_active` filter in `chat/index.ts` wisdom queries
+- **No source created**: inspect `knowledge-ingest` edge function logs
+- **Auth gate**: stop and report; do not attempt to log in without explicit approval
 
-Each block carries source IDs so attribution survives. Plus a routing instruction: *"Cite frameworks by name. If a Personal Memory contradicts a Framework, the Memory wins."*
-
-### 4. Tool selection biased by wisdom
-
-When `enableTools: true` and `wisdom_signal.framework_hits` includes operational frameworks (e.g. anything tagged `domain: ops` or `domain: marketing`), the tool list passed to the model is reordered so domain-relevant tools (GHL, Maton, Calendar, etc.) appear first. Models honor tool ordering when choosing. Implemented as a small `prioritizeToolsByDomain(tools, domains)` helper in the chat function.
-
-### 5. Plug-state honored end-to-end
-
-Every wisdom query in steps 1-4 filters by `knowledge_sources.is_active = true` (the plug toggle). Pulling a stone instantly removes its influence from routing, prompt, *and* tool ordering — not just the citation block.
-
-### 6. Telemetry: prove it's orchestrating
-
-Emit a new SSE event `orchestration_trace` once per turn containing:
-```
-{
-  intent, agent_chosen, wisdom_signal,
-  frameworks_injected: [...], memories_injected: [...],
-  tools_reordered: bool
-}
-```
-Client stores it on the message; new debug-only chip "Show orchestration" (visible when developer mode is on) opens a popover with the full trace. This is how you *see* the gravity.
-
-### 7. Wisdom feedback loop (closes the orchestration ring)
-
-After the model replies, a lightweight post-turn task:
-- If the model cited a framework → increment `recurrence_count` and `last_accessed_at` on the relevant `knowledge_entries` / `wisdom_memories` (already-existing columns)
-- High-recurrence entries get boosted similarity in future matches (multiply score by `1 + log(recurrence_count) * 0.05`)
-- This is the gravitational compounding: the more a piece of wisdom proves useful, the more it pulls future turns toward itself
-
-### 8. Settings & Wisdom page surfaces
-
-- Wisdom page header gets a live "Orchestration: Active · Influencing routing" indicator (green dot when ≥1 source is plugged)
-- Settings → Wisdom card shows new line: `Frameworks influencing chat: N`
-
-## Files
-
-**Edited**:
-- `supabase/functions/chat/index.ts` — add 7th router path, structured wisdom blocks, tool prioritization, SSE trace event, post-turn recurrence updates, plug filter on all queries
-- `src/core/orchestrator.ts` — accept and apply `wisdom_signal` in routing
-- `src/core/agents/index.ts` — `selectAgentWithWisdom` helper
-- `src/hooks/useChatStream.ts` — parse `orchestration_trace` SSE event
-- `src/components/chat/MessageBubble.tsx` — orchestration trace popover (dev mode)
-- `src/pages/Wisdom.tsx` — orchestration-active indicator
-- `src/components/settings/WisdomLibraryCard.tsx` — frameworks-influencing line
-- `src/services/wisdomService.ts` — `getActiveSourceCount()`, `getInfluencingCount()`
-
-**No new tables, no new edge functions.** All wiring uses existing schema (`recurrence_count`, `last_accessed_at`, `is_active` already exist on the wisdom tables).
-
-## Verification
-
-1. Plug in a Hormozi pack, ask "how should I price my new offer" → orchestration trace shows `framework_hits: ['Value Equation']`, agent persona shifted, reply cites the framework by name
-2. Unplug Hormozi mid-session, ask same question → trace shows empty `framework_hits`, no citation, generic reply
-3. Plug it back in, ask 5 more pricing questions → `recurrence_count` on Value Equation entry increments each turn (verify in DB)
-4. Ingest a personal memory ("I prefer recurring revenue over one-time sales") → next pricing question, the memory appears in `## Personal Memories` block and reply respects it even when a framework would suggest otherwise
-5. Wisdom page shows "Orchestration: Active" green dot when sources plugged, neutral when all unplugged
-6. Settings card shows accurate "Frameworks influencing chat: N" count
-7. Dev-mode message popover reveals full orchestration trace (intent, agent, wisdom signal, tool reorder)
-8. Empty library → orchestration runs cleanly, no errors, no trace clutter
-
-## Outcome
-
-Wisdom stops being a citation feature and becomes the gravitational core of every turn: it bends routing, persona, tool selection, and prompt structure simultaneously. Plug a mind in → the entire orchestration tilts toward it. Pull it out → influence vanishes instantly, capability remains. The system gets measurably smarter the more you use the wisdom you've ingested, because frequently-cited entries gain pull over time. That's the cosmic orchestration — every component in unison, weighted by what's plugged in.
+I'll report each phase's outcome with screenshots and the actual edge-log/DB confirmations, not just UI impressions.
 
