@@ -1413,6 +1413,8 @@ export type Database = {
           priority: number
           rule: string
           scope: string
+          superseded_at: string | null
+          superseded_by: string | null
           updated_at: string
           user_id: string
         }
@@ -1423,6 +1425,8 @@ export type Database = {
           priority?: number
           rule: string
           scope?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
           updated_at?: string
           user_id: string
         }
@@ -1433,10 +1437,20 @@ export type Database = {
           priority?: number
           rule?: string
           scope?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "standing_orders_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "standing_orders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       system_evolution_proposals: {
         Row: {
@@ -1755,6 +1769,8 @@ export type Database = {
           recurrence_count: number | null
           salience: number | null
           summary: string | null
+          superseded_at: string | null
+          superseded_by: string | null
           updated_at: string
           user_id: string
         }
@@ -1770,6 +1786,8 @@ export type Database = {
           recurrence_count?: number | null
           salience?: number | null
           summary?: string | null
+          superseded_at?: string | null
+          superseded_by?: string | null
           updated_at?: string
           user_id: string
         }
@@ -1785,10 +1803,20 @@ export type Database = {
           recurrence_count?: number | null
           salience?: number | null
           summary?: string | null
+          superseded_at?: string | null
+          superseded_by?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "wisdom_memories_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "wisdom_memories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       work_tasks: {
         Row: {
