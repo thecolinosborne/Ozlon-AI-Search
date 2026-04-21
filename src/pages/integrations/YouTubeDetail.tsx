@@ -585,7 +585,7 @@ export default function YouTubeDetail() {
             </>
           ) : (
             <div className="space-y-2">
-              <p className="text-xs text-amber-600 dark:text-amber-400">
+              <p className="text-xs text-warning">
                 Channel ID saved but channel details haven't been synced yet. This usually means the YouTube Data API key is missing or invalid.
               </p>
               <p className="text-[11px] font-mono text-muted-foreground break-all">
