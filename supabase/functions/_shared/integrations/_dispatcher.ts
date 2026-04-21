@@ -22,6 +22,8 @@ export async function dispatchTool(
   if (!route) {
     return { success: false, routed: false, result: `Tool not in registry: ${toolName}` };
   }
+  // Harden against null/undefined args (AI sometimes omits the args object entirely).
+  const safeArgs: Record<string, unknown> = (args && typeof args === "object") ? args : {};
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
@@ -29,7 +31,13 @@ export async function dispatchTool(
     return { success: false, routed: true, result: "Missing SUPABASE_URL / SUPABASE_ANON_KEY in dispatcher" };
   }
 
-  const mapped = route.mapArgs(args);
+  let mapped: Record<string, unknown>;
+  try {
+    mapped = route.mapArgs(safeArgs) ?? {};
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, routed: true, result: `Tool ${toolName} arg mapping failed: ${msg}` };
+  }
   const payload = route.envelope === "nested"
     ? { action: route.action, params: mapped }
     : { action: route.action, ...mapped };
@@ -85,7 +93,8 @@ export async function dispatchMulti(
   fallback?: (name: string, args: Record<string, unknown>) => Promise<{ success: boolean; result: string }>,
 ): Promise<MultiResult[]> {
   const promises = calls.map(async (c): Promise<MultiResult> => {
-    const r = await dispatchTool(c.name, c.args, authHeader);
+    const safe = (c.args && typeof c.args === "object") ? c.args : {};
+    const r = await dispatchTool(c.name, safe, authHeader);
     if (r.routed) return { name: c.name, success: r.success, result: r.result };
     if (fallback) {
       const f = await fallback(c.name, c.args);
