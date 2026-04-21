@@ -529,6 +529,63 @@ export default function YouTubeDetail() {
         ) : undefined
       }
     >
+      {/* ── YouTube Data API & Channel (always visible, validated, masked) ── */}
+      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
+        <div className="flex items-center gap-2">
+          <Youtube className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+          <h3 className="text-sm font-medium text-foreground">YouTube Data API & Channel</h3>
+        </div>
+        <ApiKeyInput
+          label="YouTube Data API Key"
+          placeholder="Enter YouTube API key…"
+          configured={!!savedConn?.apiKeyConfigured}
+          onSave={handleSaveApiKey}
+          saving={savingKey}
+          maskedHint={savedConn?.apiKeyMasked}
+        />
+        <ApiKeyInput
+          label="Channel ID"
+          placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+          configured={!!savedConn?.channelId}
+          onSave={async (value) => {
+            const trimmed = value.trim();
+            if (!trimmed) { toast.error("Channel ID required"); return false; }
+            setChannelId(trimmed);
+            setSavingKey(true);
+            try {
+              const result = await callYouTube("connect", {
+                apiKey: "",
+                channelId: trimmed,
+                accountLabel: accountLabel.trim() || "Primary YouTube",
+              });
+              const connection = result.connection as { id: string; external_account_id?: string | null };
+              updateSettings("youtube", { connectionId: connection.id, channelId: trimmed });
+              setSavedConn((prev) => prev ? { ...prev, channelId: trimmed } : prev);
+              toast.success("Channel ID saved");
+              await syncYouTubeData({ connectionId: connection.id, channelId: trimmed, silent: false });
+              return true;
+            } catch (e) {
+              toast.error(`Save failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+              return false;
+            } finally {
+              setSavingKey(false);
+            }
+          }}
+          saving={savingKey}
+          maskedHint={savedConn?.channelId ? `${savedConn.channelId.slice(0, 4)}…${savedConn.channelId.slice(-4)}` : undefined}
+        />
+        <div>
+          <label className="text-[11px] text-muted-foreground">Account label (optional)</label>
+          <input
+            type="text"
+            value={accountLabel}
+            onChange={(e) => setAccountLabel(e.target.value)}
+            placeholder="Primary YouTube"
+            className={cn(inputClass, "mt-1")}
+          />
+        </div>
+      </div>
+
       {/* ── OAuth Connection ── */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center gap-2">
