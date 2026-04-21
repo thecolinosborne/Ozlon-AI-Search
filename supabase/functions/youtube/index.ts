@@ -379,7 +379,7 @@ serve(async (req) => {
           metadata: newMeta,
         };
         // Only set credential_ref if the row doesn't already track OAuth tokens
-        if (existing.auth_type !== "oauth") {
+        if (existing.auth_type !== "oauth" && existing.auth_type !== "oauth2") {
           updatePayload.credential_ref = "server_stored_api_key";
         }
         const { data: updated, error } = await adminClient
