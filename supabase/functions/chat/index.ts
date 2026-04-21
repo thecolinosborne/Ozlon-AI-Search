@@ -5304,7 +5304,33 @@ async function executeToolCall(
         } catch (e) { return { success: false, result: `Snapshot comparison error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
       }
 
-      case 'web_search_google': {
+      // ============ Search Atlas (SEO intelligence) ============
+      case 'searchatlas_audit_site':
+      case 'searchatlas_site_explorer':
+      case 'searchatlas_keyword_research':
+      case 'searchatlas_serp_snapshot':
+      case 'searchatlas_backlinks_overview':
+      case 'searchatlas_backlinks_list':
+      case 'searchatlas_list_projects':
+      case 'searchatlas_rank_tracker': {
+        const actionMap: Record<string, string> = {
+          searchatlas_audit_site: 'audit_site',
+          searchatlas_site_explorer: 'site_explorer',
+          searchatlas_keyword_research: 'keyword_research',
+          searchatlas_serp_snapshot: 'serp_snapshot',
+          searchatlas_backlinks_overview: 'backlinks_overview',
+          searchatlas_backlinks_list: 'backlinks_list',
+          searchatlas_list_projects: 'list_projects',
+          searchatlas_rank_tracker: 'rank_tracker_keywords',
+        };
+        try {
+          const data = await callNativeEdge('search-atlas', actionMap[toolName], args as Record<string, unknown>);
+          return { success: true, result: `**Search Atlas (${actionMap[toolName]}):**\n\`\`\`json\n${JSON.stringify(data, null, 2).slice(0, 6000)}\n\`\`\`` };
+        } catch (e) {
+          return { success: false, result: `Search Atlas error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
         try {
           const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
           if (!LOVABLE_API_KEY) return { success: false, result: 'Search API not configured.' };
