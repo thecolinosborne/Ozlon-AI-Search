@@ -701,6 +701,93 @@ serve(async (req) => {
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      // ============ SYNC ============
+      case 'sync_tasks': {
+        if (!authCtx.userId || !authCtx.connectionId) {
+          throw new Error('sync_tasks requires authenticated user with a saved ClickUp connection');
+        }
+        const supabase = getSupabase();
+
+        // Lifecycle: insert run as 'running' → list tasks → update to 'succeeded'/'failed'
+        const { data: runRow, error: runErr } = await supabase
+          .from('integration_sync_runs')
+          .insert({
+            user_id: authCtx.userId,
+            connection_id: authCtx.connectionId,
+            sync_type: 'manual',
+            direction: 'inbound',
+            status: 'running',
+            started_at: new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+        if (runErr) throw runErr;
+
+        try {
+          const listId = await getListId(params, resolvedToken, authCtx);
+          let recordsProcessed = 0;
+          const summary: Record<string, unknown> = { list_id: listId || null };
+
+          if (listId) {
+            const data = await clickupCall(`/list/${listId}/task?include_closed=true`);
+            const tasks = (data?.tasks || []) as Array<Record<string, unknown>>;
+            recordsProcessed = tasks.length;
+            summary.task_count = tasks.length;
+            summary.statuses = Object.entries(
+              tasks.reduce<Record<string, number>>((acc, t) => {
+                const s = String((t.status as { status?: string } | undefined)?.status ?? 'unknown');
+                acc[s] = (acc[s] ?? 0) + 1;
+                return acc;
+              }, {})
+            ).map(([status, count]) => ({ status, count }));
+          } else {
+            // No default list — fall back to team-level count only
+            const resolved = await resolveTeamId(resolvedToken);
+            const data = await clickupCall(`/team/${resolved.teamId}/task?page=0`);
+            const tasks = (data?.tasks || []) as Array<unknown>;
+            recordsProcessed = tasks.length;
+            summary.team_id = resolved.teamId;
+            summary.note = 'No default list configured — synced first page of workspace tasks';
+          }
+
+          await supabase
+            .from('integration_sync_runs')
+            .update({
+              status: 'succeeded',
+              completed_at: new Date().toISOString(),
+              records_processed: recordsProcessed,
+            })
+            .eq('id', runRow.id);
+
+          await supabase
+            .from('integration_connections')
+            .update({ last_sync_at: new Date().toISOString(), last_error: null })
+            .eq('id', authCtx.connectionId);
+
+          return new Response(JSON.stringify({
+            success: true,
+            run_id: runRow.id,
+            records_processed: recordsProcessed,
+            summary,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (syncErr) {
+          const message = syncErr instanceof Error ? syncErr.message : String(syncErr);
+          await supabase
+            .from('integration_sync_runs')
+            .update({
+              status: 'failed',
+              completed_at: new Date().toISOString(),
+              error_message: message.slice(0, 500),
+            })
+            .eq('id', runRow.id);
+          await supabase
+            .from('integration_connections')
+            .update({ last_error: message.slice(0, 500) })
+            .eq('id', authCtx.connectionId);
+          throw syncErr;
+        }
+      }
+
       // ============ TASKS ============
       case 'create_task': {
         const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);

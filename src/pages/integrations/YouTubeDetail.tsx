@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
+import { SyncRunsList } from "@/components/integrations/SyncRunsList";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
@@ -104,6 +105,7 @@ export default function YouTubeDetail() {
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; title: string }>>([]);
   const [playlistsList, setPlaylistsList] = useState<Array<{ id: string; title: string }>>([]);
   const [syncing, setSyncing] = useState(false);
+  const [syncRefreshKey, setSyncRefreshKey] = useState(0);
 
   const [youtubeOpen, setYoutubeOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -232,6 +234,7 @@ export default function YouTubeDetail() {
       const now = new Date().toISOString();
       setLastSync("youtube", now);
       setSavedConn((prev) => prev ? { ...prev, lastSyncAt: now, channelId: nextChannelId } : prev);
+      setSyncRefreshKey((k) => k + 1);
       if (!options?.silent) toast.success("YouTube data synced");
       return true;
     } catch (e) {
@@ -677,7 +680,12 @@ export default function YouTubeDetail() {
         )}
       </div>
 
-      {/* ── Upload Video (Collapsible) ── */}
+      {/* ── Sync Runs ── */}
+      {isApiKeyConnected && savedConn?.id && (
+        <SyncRunsList connectionId={savedConn.id} refreshKey={syncRefreshKey} />
+      )}
+
+
       {oauthConnected && (
         <div className="rounded-2xl border border-border/40 bg-card/60 overflow-hidden">
           <button

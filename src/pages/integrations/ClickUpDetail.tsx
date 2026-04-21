@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
+import { SyncRunsList } from "@/components/integrations/SyncRunsList";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -91,6 +92,19 @@ const ClickUpDetail = () => {
         setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
         updateSettings("clickup", { team_id: result.team_id, list_id: result.list_id });
+        // Resolve the user's connection_id for sync runs UI
+        try {
+          const { data: conn } = await supabase
+            .from("integration_connections")
+            .select("id")
+            .eq("user_id", session.user.id)
+            .eq("provider", "clickup")
+            .eq("status", "connected")
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (conn?.id) setConnectionId(conn.id);
+        } catch { /* best effort */ }
         try {
           const config = await callClickUp("get_config", getAuthParams());
           if (config) {
@@ -188,16 +202,25 @@ const ClickUpDetail = () => {
     toast.success("ClickUp disconnected");
   };
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncRefreshKey, setSyncRefreshKey] = useState(0);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+
   const handleSync = async () => {
+    setSyncing(true);
     setStatus("clickup", "syncing");
     try {
-      const tasks = await callClickUp("list_tasks", getAuthParams());
+      const result = await callClickUp("sync_tasks", getAuthParams());
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
-      toast.success(`Synced ${tasks.tasks?.length || 0} tasks`);
-    } catch {
+      setSyncRefreshKey((k) => k + 1);
+      toast.success(`Synced ${result?.records_processed ?? 0} tasks`);
+    } catch (err) {
       setStatus("clickup", "error");
-      toast.error("Sync failed");
+      setSyncRefreshKey((k) => k + 1);
+      toast.error(`Sync failed: ${(err as Error).message}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -552,15 +575,27 @@ const ClickUpDetail = () => {
             )}
           </div>
 
-          {/* Diagnostics */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Diagnostics</h3>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={handleSync} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
-                <RefreshCw className="w-3.5 h-3.5" /> Test Connection
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Sync
+              </h3>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Syncing…" : "Sync Now"}
               </button>
             </div>
+            <p className="text-[11px] text-muted-foreground/70">
+              Pulls tasks from your default ClickUp list and records the run in history.
+            </p>
           </div>
+
+          <SyncRunsList connectionId={connectionId} refreshKey={syncRefreshKey} />
         </>
       )}
     </IntegrationDetailLayout>
