@@ -279,7 +279,7 @@ serve(async (req) => {
       // Find existing api_key row
       const { data: existing } = await adminClient
         .from("integration_connections")
-        .select("id, metadata")
+        .select("id, metadata, external_account_id, external_account_label")
         .eq("user_id", userId)
         .eq("provider", "youtube")
         .eq("auth_type", "api_key")
