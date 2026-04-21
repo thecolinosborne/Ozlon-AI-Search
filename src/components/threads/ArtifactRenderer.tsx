@@ -208,7 +208,7 @@ function renderBody(artifact: Artifact) {
         </div>
       );
     case 'image':
-      return c.url ? <img src={String(c.url)} alt={artifact.title ?? ''} className="rounded-lg max-h-80" /> : null;
+      return c.url ? <RefreshableImage url={String(c.url)} alt={artifact.title ?? ''} /> : null;
     case 'file':
       return (
         <div className="text-sm flex items-center gap-2">
@@ -232,4 +232,23 @@ function renderBody(artifact: Artifact) {
     default:
       return <pre className="text-xs text-muted-foreground overflow-x-auto">{JSON.stringify(c, null, 2)}</pre>;
   }
+}
+
+// Image with lazy signed-URL refresh on load failure (handles 7-day TTL expiry)
+function RefreshableImage({ url, alt }: { url: string; alt: string }) {
+  const [src, setSrc] = useState(url);
+  const [tried, setTried] = useState(false);
+  const handleError = async () => {
+    if (tried) return;
+    setTried(true);
+    // Parse bucket + path from a Supabase signed/public URL
+    const match = src.match(/\/storage\/v1\/object\/(?:sign|public)\/([^/]+)\/(.+?)(?:\?|$)/);
+    if (!match) return;
+    const [, bucket, path] = match;
+    try {
+      const { data } = await supabase.functions.invoke('media-signed-url', { body: { bucket, path } });
+      if (data?.url) setSrc(data.url);
+    } catch { /* leave broken */ }
+  };
+  return <img src={src} alt={alt} onError={handleError} className="rounded-lg max-h-80" />;
 }
