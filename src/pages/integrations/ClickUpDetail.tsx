@@ -575,15 +575,27 @@ const ClickUpDetail = () => {
             )}
           </div>
 
-          {/* Diagnostics */}
           <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-            <h3 className="text-sm font-medium text-foreground">Diagnostics</h3>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={handleSync} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border hover:bg-muted/60 transition-colors text-foreground">
-                <RefreshCw className="w-3.5 h-3.5" /> Test Connection
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                Sync
+              </h3>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Syncing…" : "Sync Now"}
               </button>
             </div>
+            <p className="text-[11px] text-muted-foreground/70">
+              Pulls tasks from your default ClickUp list and records the run in history.
+            </p>
           </div>
+
+          <SyncRunsList connectionId={connectionId} refreshKey={syncRefreshKey} />
         </>
       )}
     </IntegrationDetailLayout>
