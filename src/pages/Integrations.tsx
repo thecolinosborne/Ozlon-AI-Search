@@ -33,6 +33,7 @@ const FILTERS: Array<{ id: "all" | Category; label: string }> = [
   { id: "crm", label: "CRM" },
   { id: "media", label: "Media" },
   { id: "productivity", label: "Productivity" },
+  { id: "knowledge", label: "Knowledge" },
 ];
 
 const Integrations = () => {
