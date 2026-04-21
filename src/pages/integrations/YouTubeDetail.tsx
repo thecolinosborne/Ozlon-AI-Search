@@ -1,8 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
 import {
   Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
-  Mail, HardDrive, Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -37,18 +35,6 @@ interface SavedConnection {
 type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "expired_no_refresh" | "disconnected" | "unknown";
 
 const YOUTUBE_PENDING_OAUTH_CODE_KEY = "youtube_pending_oauth_code";
-
-const SISTER_GOOGLE_SERVICES = [
-  { id: "gmail", name: "Gmail", icon: Mail, path: "/integrations/gmail" },
-  { id: "google-drive", name: "Drive", icon: HardDrive, path: "/integrations/google-drive" },
-  { id: "google-calendar", name: "Calendar", icon: Calendar, path: "/integrations/google-calendar" },
-  { id: "google-sheets", name: "Sheets", icon: FileSpreadsheet, path: "/integrations/google-sheets" },
-  { id: "google-docs", name: "Docs", icon: FileText, path: "/integrations/google-docs" },
-  { id: "google-slides", name: "Slides", icon: Presentation, path: "/integrations/google-slides" },
-  { id: "google-analytics", name: "Analytics", icon: BarChart3, path: "/integrations/google-analytics" },
-  { id: "google-search-console", name: "Search Console", icon: Search, path: "/integrations/google-search-console" },
-  { id: "google-tag-manager", name: "Tag Manager", icon: Tag, path: "/integrations/google-tag-manager" },
-] as const;
 
 export default function YouTubeDetail() {
   const { session, authLoading } = useAuth();
@@ -620,29 +606,6 @@ export default function YouTubeDetail() {
           <p className="text-[10px] text-muted-foreground/60 font-mono select-all break-all">
             Redirect URI: {window.location.origin}/integrations/youtube
           </p>
-        </div>
-      </div>
-
-      {/* ── Other Google services ── */}
-      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Other Google services</h3>
-        <p className="text-xs text-muted-foreground">
-          The same Google authorization powers these services. Each has its own card with tests and settings.
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {SISTER_GOOGLE_SERVICES.map((svc) => {
-            const Icon = svc.icon;
-            return (
-              <Link
-                key={svc.id}
-                to={svc.path}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/40 bg-card/40 hover:bg-muted/40 transition-colors"
-              >
-                <Icon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-                <span className="text-xs font-medium text-foreground">{svc.name}</span>
-              </Link>
-            );
-          })}
         </div>
       </div>
 
