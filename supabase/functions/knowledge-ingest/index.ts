@@ -10,6 +10,7 @@ const corsHeaders = {
 // KNOWLEDGE INGEST - Enhanced with memory extraction + reflection
 // Accepts: text, title, source metadata
 // Outputs: knowledge entries + optional wisdom memories + optional reflection
+// v2: Lovable AI Gateway
 // ============================================================
 
 async function generateEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
