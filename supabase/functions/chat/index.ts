@@ -3572,6 +3572,14 @@ async function executeToolCall(
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
 ): Promise<{ success: boolean; result: string }> {
   try {
+    // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
+    // dispatched via NATIVE_GOOGLE_ROUTES → their dedicated edge function. This MUST
+    // run before the switch so tools listed only in the route map (e.g. docs_apply_markdown,
+    // docs_format_as_report, docs_style_range, docs_clear_formatting) don't fall through
+    // to "Unknown tool".
+    const native = await tryNativeGoogleCall(toolName, args);
+    if (native) return native;
+
     switch (toolName) {
       // ============ Gmail ============
       case 'send_email': {
