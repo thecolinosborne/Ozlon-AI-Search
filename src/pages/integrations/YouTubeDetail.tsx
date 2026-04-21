@@ -623,29 +623,6 @@ export default function YouTubeDetail() {
         </div>
       </div>
 
-      {/* ── Other Google services ── */}
-      <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Other Google services</h3>
-        <p className="text-xs text-muted-foreground">
-          The same Google authorization powers these services. Each has its own card with tests and settings.
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {SISTER_GOOGLE_SERVICES.map((svc) => {
-            const Icon = svc.icon;
-            return (
-              <Link
-                key={svc.id}
-                to={svc.path}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/40 bg-card/40 hover:bg-muted/40 transition-colors"
-              >
-                <Icon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-                <span className="text-xs font-medium text-foreground">{svc.name}</span>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-
       {/* ── Sync Runs ── */}
       {isApiKeyConnected && savedConn?.id && (
         <SyncRunsList connectionId={savedConn.id} refreshKey={syncRefreshKey} />
