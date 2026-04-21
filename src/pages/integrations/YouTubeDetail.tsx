@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import {
-  Youtube, AlertCircle, Loader2, Upload, Shield, Mail, HardDrive,
-  Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, ChevronDown, ChevronUp, CheckCircle2, XCircle,
+  Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
+  Mail, HardDrive, Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
