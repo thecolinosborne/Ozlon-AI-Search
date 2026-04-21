@@ -464,6 +464,55 @@ serve(async (req) => {
         }
       }
 
+      // ── Auto-sync channel details immediately so the "Connected channel" card populates ──
+      // Best-effort: failure here doesn't block the save response.
+      const finalChannelId = String(data?.external_account_id || "");
+      const keyForAutoSync = apiKey || keyForChannelValidation || "";
+      if (finalChannelId && keyForAutoSync) {
+        try {
+          const ytCh = (await ytFetch(
+            `/channels?part=snippet,statistics&id=${encodeURIComponent(finalChannelId)}`,
+            keyForAutoSync,
+          )) as { items?: AnyJson[] };
+          const items = ytCh.items || [];
+          if (items.length > 0) {
+            const item = items[0];
+            const snippet = (item.snippet || {}) as AnyJson;
+            const stats = (item.statistics || {}) as AnyJson;
+            const thumbs = (snippet.thumbnails || {}) as AnyJson;
+            const high = (thumbs.high || thumbs.medium || thumbs.default || {}) as AnyJson;
+            const row = {
+              user_id: userId,
+              connection_id: data.id,
+              channel_id: String(item.id || finalChannelId),
+              title: String(snippet.title || ""),
+              description: String(snippet.description || ""),
+              thumbnail_url: String(high.url || ""),
+              subscriber_count: Number(stats.subscriberCount || 0),
+              video_count: Number(stats.videoCount || 0),
+              view_count: Number(stats.viewCount || 0),
+              raw: item,
+              fetched_at: new Date().toISOString(),
+            };
+            const { error: upErr } = await adminClient
+              .from("youtube_channels")
+              .upsert(row, { onConflict: "user_id,channel_id" });
+            if (upErr) {
+              console.warn("[youtube/connect] auto-sync upsert failed:", upErr.message);
+            } else {
+              await adminClient
+                .from("integration_connections")
+                .update({ last_sync_at: new Date().toISOString(), last_error: null })
+                .eq("id", data.id);
+            }
+          } else {
+            console.warn("[youtube/connect] auto-sync: channel returned no items");
+          }
+        } catch (e) {
+          console.warn("[youtube/connect] auto-sync threw:", e instanceof Error ? e.message : e);
+        }
+      }
+
       const finalMaskedKey = String(((data?.metadata || {}) as AnyJson).api_key_masked || "");
       return jsonOk({
         success: true,
