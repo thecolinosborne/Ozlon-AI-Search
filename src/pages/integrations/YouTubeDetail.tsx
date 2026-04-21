@@ -105,6 +105,7 @@ export default function YouTubeDetail() {
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; title: string }>>([]);
   const [playlistsList, setPlaylistsList] = useState<Array<{ id: string; title: string }>>([]);
   const [syncing, setSyncing] = useState(false);
+  const [syncRefreshKey, setSyncRefreshKey] = useState(0);
 
   const [youtubeOpen, setYoutubeOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -233,6 +234,7 @@ export default function YouTubeDetail() {
       const now = new Date().toISOString();
       setLastSync("youtube", now);
       setSavedConn((prev) => prev ? { ...prev, lastSyncAt: now, channelId: nextChannelId } : prev);
+      setSyncRefreshKey((k) => k + 1);
       if (!options?.silent) toast.success("YouTube data synced");
       return true;
     } catch (e) {
