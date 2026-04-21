@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
-  Settings2, ExternalLink,
+  Settings2, ExternalLink, RefreshCw, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -50,6 +50,15 @@ export default function YouTubeDetail() {
   const [loadingConnection, setLoadingConnection] = useState(true);
 
   const [savedConn, setSavedConn] = useState<SavedConnection | null>(null);
+  const [channelInfo, setChannelInfo] = useState<{
+    channel_id: string;
+    title: string | null;
+    thumbnail_url: string | null;
+    subscriber_count: number | null;
+    video_count: number | null;
+    view_count: number | null;
+    fetched_at: string | null;
+  } | null>(null);
   const [savingKey, setSavingKey] = useState(false);
 
   const [oauthConnected, setOauthConnected] = useState(false);
@@ -144,6 +153,7 @@ export default function YouTubeDetail() {
       setOauthDetail(oauthStatus);
       setOauthConnected(oauthStatus === "connected" || oauthStatus === "refreshed");
       setGrantedScopes(String(result.grantedScopes || ""));
+      setChannelInfo((result.channelInfo as typeof channelInfo) ?? null);
 
       if (oauthStatus === "connected" || oauthStatus === "refreshed") {
         return oauthStatus;
