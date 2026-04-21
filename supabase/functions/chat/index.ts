@@ -3505,28 +3505,39 @@ async function tryNativeGoogleCall(
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    // FIX: All native Google receivers expect { action, params: {...} } (nested envelope).
+    // The old code spread mapped args at the top level, so receivers saw params={} and
+    // every required field read as empty (e.g. "documentId and text are required").
     const payload = {
       action: route.action,
-      ...(route.mapArgs ? route.mapArgs(args) : args),
+      params: route.mapArgs ? route.mapArgs(args) : args,
     };
     const res = await fetch(`${supabaseUrl}/functions/v1/${route.fn}`, {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
+        'apikey': anonKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let data: Record<string, unknown> = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     if (!res.ok || data?.success === false) {
-      console.warn(`[NativeGoogle] ${toolName} failed:`, res.status, JSON.stringify(data).slice(0, 300));
-      return null; // caller handles failure
+      const errMsg = (data?.error as string) || (data?.raw as string) || `HTTP ${res.status}`;
+      console.warn(`[NativeGoogle] ${toolName} → ${route.fn}/${route.action} FAILED: ${errMsg}`);
+      // Surface the real error to the AI instead of swallowing it (which previously
+      // caused "Unknown tool" fall-through and hid actionable failures).
+      return { success: false, result: `${toolName} failed: ${errMsg}` };
     }
     console.log(`[NativeGoogle] ${toolName} → ${route.fn}/${route.action} OK`);
     return { success: true, result: `[Native Google Workspace] ${JSON.stringify(data).slice(0, 4000)}` };
   } catch (e) {
-    console.warn(`[NativeGoogle] ${toolName} error:`, e instanceof Error ? e.message : e);
-    return null;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[NativeGoogle] ${toolName} error:`, msg);
+    return { success: false, result: `${toolName} error: ${msg}` };
   }
 }
 
@@ -3572,6 +3583,34 @@ async function executeToolCall(
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
 ): Promise<{ success: boolean; result: string }> {
   try {
+    // ---- multi_action: parallel fan-out ----
+    if (toolName === 'multi_action') {
+      const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      const calls = Array.isArray(args.calls) ? (args.calls as { name: string; args: Record<string, unknown> }[]) : [];
+      if (!authHeader || calls.length === 0) {
+        return { success: false, result: 'multi_action requires auth and at least one call' };
+      }
+      const results = await dispatchMulti(
+        calls,
+        authHeader,
+        // Fallback: tools not in registry → recurse into legacy switch via executeToolCall.
+        async (name, a) => await executeToolCall(name, a, _connMap, _userMessage, _aliasMap, ghlCreds),
+      );
+      const okCount = results.filter((r) => r.success).length;
+      return {
+        success: okCount === results.length,
+        result: `multi_action: ${okCount}/${results.length} succeeded\n` +
+          results.map((r) => `  • ${r.success ? '✓' : '✗'} ${r.name}: ${r.result.slice(0, 200)}`).join('\n'),
+      };
+    }
+
+    // ---- Registry dispatcher (manifest-driven tools) ----
+    const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+    if (authHeader) {
+      const dispatched = await dispatchTool(toolName, args, authHeader);
+      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result };
+    }
+
     // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
     // dispatched via NATIVE_GOOGLE_ROUTES → their dedicated edge function. This MUST
     // run before the switch so tools listed only in the route map (e.g. docs_apply_markdown,
@@ -7227,6 +7266,52 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
   );
   if (_droppedTools.length > 0) {
     console.warn(`[tool-sections] ${_droppedTools.length} tool(s) permanently disabled (bad schema):`, _droppedTools);
+  }
+
+  // ===== Registry-driven tools (manifests in _shared/integrations/) =====
+  // Append any registered tools that aren't already in the legacy list, plus
+  // the `multi_action` parallel fan-out tool. Adding a new integration manifest
+  // automatically surfaces its tools here without touching this function.
+  const existingNames = new Set(filtered.map((t) => t.function.name));
+  for (const t of getAllRegisteredTools()) {
+    if (existingNames.has(t.name)) continue;
+    filtered.push({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.schema as Record<string, unknown>,
+      },
+    } as ToolDef);
+  }
+  if (!existingNames.has("multi_action")) {
+    filtered.push({
+      type: "function",
+      function: {
+        name: "multi_action",
+        description:
+          "Run multiple tool calls in PARALLEL. Use whenever the user asks for several independent actions in one request " +
+          "(e.g. 'send the email, log it in CRM, and add a row to the tracker'). Returns per-call success/failure.",
+        parameters: {
+          type: "object",
+          properties: {
+            calls: {
+              type: "array",
+              minItems: 2,
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Tool name to invoke" },
+                  args: { type: "object", description: "Arguments object for that tool" },
+                },
+                required: ["name", "args"],
+              },
+            },
+          },
+          required: ["calls"],
+        },
+      },
+    } as ToolDef);
   }
 
   return filtered;
