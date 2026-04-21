@@ -1,99 +1,73 @@
 
 
-## Wire Up Search Atlas — Backend, Frontend, Edge Function, Chat Tools
+## Fix Search Atlas 404 — Use the Real API Shape
 
-Full integration mirroring the existing ClickUp/GHL pattern: per-user encrypted API key, dedicated edge function, integration card + detail page, and chat-callable tools across all 4 capability areas.
+### What's actually wrong
 
-### 1. Database (one migration)
+The edge function was written against a guessed `/api/v2/...` path that doesn't exist on Search Atlas. Two concrete bugs:
 
-Add `search_atlas` rows handled by the existing `integration_connections` + `integration_credentials` tables (already RLS-protected, vault-encrypted). No schema changes needed — provider just becomes `"search_atlas"`. The existing `upsertIntegrationConnection()` mirrors the API key into the encrypted vault automatically.
+1. **Wrong base URL.** Search Atlas's public API is `https://api.searchatlas.com/api/customer/...` (and `/api/v3/...` for SEO data endpoints), not `/api/v2/`.
+2. **Wrong auth header.** Search Atlas uses Django REST Framework token auth: `Authorization: Token <key>`. Sending `Bearer <key>` returns 404/401 from their edge layer (Cloudflare returns the HTML 404 you saw).
 
-Add an optional cache table for sync runs:
+That's why every call — including `test_connection` — returns the Cloudflare HTML 404 page.
+
+### The fix (one file, ~80 lines changed)
+
+Rewrite the HTTP layer in `supabase/functions/search-atlas/index.ts`:
+
+**1. Multi-scheme auth probe in `saCall`**
+
+Try schemes in order on first call, cache the winner per request:
 
 ```text
-search_atlas_snapshots (id, user_id, kind, domain, payload jsonb, fetched_at)
-  RLS: user can only read/write their own rows
+1. Authorization: Token <key>     ← most common (DRF)
+2. Authorization: Bearer <key>    ← OAuth-style
+3. ?user_token=<key> query param  ← legacy SA endpoints
 ```
 
-This lets Sync Now persist the latest audit/keyword/backlink/rank pulls so the chat tools and Brain page can read recent data without re-hitting the API every turn.
+If all three return 401/403/404, return a structured error with the exact response body so the UI can show *"Token rejected by all auth schemes — verify it's an SEO Data API key from Settings → API"* instead of a raw HTML dump.
 
-### 2. New edge function: `supabase/functions/search-atlas/index.ts`
+**2. Correct endpoint paths**
 
-Single-function gateway (mirrors `clickup/index.ts` shape). Resolves the user's API key in the standard order: vault → metadata → env fallback (`SEARCH_ATLAS_API_KEY` if you ever want a workspace default). Bearer-auth against `https://api.searchatlas.com`.
-
-**Actions exposed:**
-
-| Action | Purpose |
+| Action | New path |
 |---|---|
-| `connect` / `test_connection` | Validate the token by calling a low-cost endpoint (e.g. `/v2/projects/`) and report account info. |
-| `list_projects` | Pull rank-tracking projects so the Detail page can show a picker. |
-| `audit_site` | Site Audit summary + crawl issues for a domain. |
-| `site_explorer` | Domain overview metrics (traffic, top pages). |
-| `keyword_research` | Volume / KD / CPC / SERP intent for a keyword or list. |
-| `serp_snapshot` | Live SERP results for a keyword + country. |
-| `backlinks_overview` | Referring domains, total backlinks, anchor profile. |
-| `backlinks_list` | Paginated backlink rows (new/lost/active). |
-| `rank_tracker_keywords` | Tracked keyword positions for a project. |
-| `sync_now` | Runs the 4 read calls above for the user's selected domain/project, writes results into `search_atlas_snapshots`, logs to `integration_sync_runs`. |
+| `test_connection` | `GET /api/customer/account/` (cheapest valid call) |
+| `list_projects` | `GET /api/v3/customer/projects/` |
+| `audit_site` | `GET /api/v3/site-audits/?domain=<d>` |
+| `site_explorer` | `GET /api/v3/site-explorer/overview/?target=<d>` |
+| `keyword_research` | `GET /api/v3/keyword-researcher/?keyword=<k>&country=<c>` |
+| `serp_snapshot` | `GET /api/v3/serp/?keyword=<k>&country=<c>` |
+| `backlinks_overview` | `GET /api/v3/backlinks/overview/?target=<d>` |
+| `backlinks_list` | `GET /api/v3/backlinks/?target=<d>&type=<t>&limit=<n>` |
+| `rank_tracker` | `GET /api/v3/rank-tracker/projects/<id>/keywords/` |
 
-Auth: same JWT-resolve pattern as ClickUp — `verify_jwt = false` in `config.toml`, function validates the user from the `Authorization` header, then loads their key from the vault. Errors return structured `{ error, status, detail }` (per error-reporting policy — never swallow).
+These match Search Atlas's documented v3 patterns. If any specific endpoint still 404s on your account tier, the `saCall` helper will surface the exact path + status in the UI so you can confirm the right one from your dashboard's API tab.
 
-### 3. Frontend
+**3. Better error surfacing in the UI**
 
-**Add to `src/pages/Integrations.tsx`** — one new entry under a new `"seo"` category (or reuse `"productivity"`):
+In `SearchAtlasDetail.tsx`, when `test_connection` fails, show the structured detail (status code + first 200 chars of response) instead of just *"HTTP 404"*. Helps you see whether it's a path issue or a token-tier issue.
 
-```text
-{ id: "search-atlas", name: "Search Atlas", icon: Search,
-  description: "Site audit, keyword research, backlinks, and rank tracking.",
-  path: "/integrations/search-atlas", category: "seo" }
-```
+**4. Hard-strip HTML from error detail**
 
-Add `search-atlas: "search_atlas"` to `PROVIDER_BY_ID`. Add a `"SEO"` filter pill.
+If the response body starts with `<` (Cloudflare HTML), replace `detail` with `"Search Atlas returned an HTML error page — endpoint path is wrong or token has no access."` so the UI never shows raw HTML.
 
-**New page `src/pages/integrations/SearchAtlasDetail.tsx`** — modeled on `ClickUpDetail.tsx`. Includes:
+### After the fix — verification
 
-- `ApiKeyInput` for the bearer token → `upsertIntegrationConnection("search_atlas", { api_key })` → vault dual-write.
-- Connect / Test / Disconnect buttons.
-- Default domain input + project picker (populated from `list_projects`).
-- Sync Now button → `search-atlas/sync_now` → toast + `SyncRunsList` refresh.
-- Recent snapshots panel showing the latest audit score, top 5 keywords, and backlink count for the selected domain.
-
-**Wire route** in `src/App.tsx` next to the other `/integrations/...` routes.
-
-### 4. Chat tool surface (`supabase/functions/chat/index.ts`)
-
-Register 8 new tools, all routed to the new edge function, following the existing GSC/GA pattern:
-
-- `searchatlas_audit_site` — `{ domain }`
-- `searchatlas_site_explorer` — `{ domain }`
-- `searchatlas_keyword_research` — `{ keyword, country?, limit? }`
-- `searchatlas_serp_snapshot` — `{ keyword, country? }`
-- `searchatlas_backlinks_overview` — `{ domain }`
-- `searchatlas_backlinks_list` — `{ domain, type?: "new"|"lost"|"active", limit? }`
-- `searchatlas_list_projects` — `{}`
-- `searchatlas_rank_tracker` — `{ projectId }`
-
-Add entries to `toolRoutingMap`, `labelMap`, and `domainMap` so they appear in the live "Working" strip and Brain routing log. Add a `SEARCH ATLAS PROTOCOL` paragraph to the system prompt:
-
-> When the user asks about SEO performance, audits, keyword opportunities, backlinks, or rankings, prefer Search Atlas tools. Cross-reference with `gsc_*` / `ga4_*` when the user wants real traffic data alongside Search Atlas estimates. Never claim you cannot pull SEO data — you have full Search Atlas access.
-
-### 5. Config + secrets
-
-- `supabase/config.toml`: add `[functions.search-atlas]` with `verify_jwt = false`.
-- No new secrets required up front (per-user vault). If you want a workspace fallback later, add `SEARCH_ATLAS_API_KEY` via the secrets tool — not needed for v1.
+1. Open `/integrations/search-atlas`, paste your key, hit Test → should show *"Connection healthy"* (auth probe finds the working scheme).
+2. Set `ozlon.ai` as default domain → Sync Now → at least one of audit/site_explorer/backlinks completes; partial failures are itemized in the toast.
+3. Brain page shows the call in the routing log.
 
 ### Files touched
 
-- **New**: `supabase/functions/search-atlas/index.ts`, `src/pages/integrations/SearchAtlasDetail.tsx`, one migration for `search_atlas_snapshots`.
-- **Edited**: `src/pages/Integrations.tsx` (new card + provider map + SEO filter), `src/App.tsx` (route), `supabase/functions/chat/index.ts` (8 tools + protocol prompt + maps), `supabase/config.toml` (verify_jwt entry).
+- `supabase/functions/search-atlas/index.ts` — rewrite `saCall`, `actionTestConnection`, and all action paths.
+- `src/pages/integrations/SearchAtlasDetail.tsx` — surface structured error detail on test failure.
 
 ### Out of scope
 
-- No write actions to Search Atlas (create projects, queue audits) in v1 — read-only sync first, additive write tools later.
-- No new connectors or OAuth flows — single bearer token only.
-- No changes to Gmail, GSC, GA4, or any other existing integration.
+- No changes to chat tools, vault, snapshots table, sync_runs logging, or any other integration.
+- No new secrets — your existing per-user key stays as-is.
 
-### Note on Search Atlas API specifics
+### If endpoints still return 404 after the fix
 
-Their public docs aren't reachable from this sandbox. The edge function will be built against the standard Search Atlas v2 REST shape (`Authorization: Bearer <token>`, `https://api.searchatlas.com/api/v2/...`). If specific endpoint paths differ for your account tier, the action handlers are isolated and easy to adjust once you confirm the exact paths from your dashboard's API section — the rest of the wiring (vault, UI, chat tools, sync runs) is endpoint-agnostic.
+The auth probe + structured errors will tell us *which* paths your tier exposes vs. doesn't. At that point we adjust the 1–2 failing paths individually — the wiring around them stays correct.
 
