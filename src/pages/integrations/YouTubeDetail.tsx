@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import {
-  Youtube, AlertCircle, Loader2, Upload, Shield, Mail, HardDrive,
-  Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, ChevronDown, ChevronUp, CheckCircle2, XCircle,
+  Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
+  Mail, HardDrive, Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -37,22 +38,16 @@ type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "e
 
 const YOUTUBE_PENDING_OAUTH_CODE_KEY = "youtube_pending_oauth_code";
 
-interface ServiceTestResult {
-  status: "idle" | "testing" | "ok" | "error";
-  message?: string;
-}
-
-const GOOGLE_SERVICES = [
-  { id: "youtube", name: "YouTube", icon: Youtube, fn: "youtube", testAction: "get_connection", testLabel: "Data API" },
-  { id: "gmail", name: "Gmail", icon: Mail, fn: "google-gmail", testAction: "get_profile", testLabel: "Profile" },
-  { id: "drive", name: "Google Drive", icon: HardDrive, fn: "google-drive", testAction: "get_storage_quota", testLabel: "Quota" },
-  { id: "calendar", name: "Google Calendar", icon: Calendar, fn: "google-calendar", testAction: "list_calendars", testLabel: "Calendars" },
-  { id: "sheets", name: "Google Sheets", icon: FileSpreadsheet, fn: "google-sheets", testAction: "list_spreadsheets", testLabel: "Spreadsheets" },
-  { id: "docs", name: "Google Docs", icon: FileText, fn: "google-docs", testAction: "list_documents", testLabel: "Documents" },
-  { id: "slides", name: "Google Slides", icon: Presentation, fn: "google-slides", testAction: "list_presentations", testLabel: "Presentations" },
-  { id: "analytics", name: "Google Analytics", icon: BarChart3, fn: "google-analytics", testAction: "list_accounts", testLabel: "Accounts" },
-  { id: "search-console", name: "Search Console", icon: Search, fn: "google-search-console", testAction: "list_sites", testLabel: "Sites" },
-  { id: "tag-manager", name: "Tag Manager", icon: Tag, fn: "google-tag-manager", testAction: "list_accounts", testLabel: "GTM Accounts" },
+const SISTER_GOOGLE_SERVICES = [
+  { id: "gmail", name: "Gmail", icon: Mail, path: "/integrations/gmail" },
+  { id: "google-drive", name: "Drive", icon: HardDrive, path: "/integrations/google-drive" },
+  { id: "google-calendar", name: "Calendar", icon: Calendar, path: "/integrations/google-calendar" },
+  { id: "google-sheets", name: "Sheets", icon: FileSpreadsheet, path: "/integrations/google-sheets" },
+  { id: "google-docs", name: "Docs", icon: FileText, path: "/integrations/google-docs" },
+  { id: "google-slides", name: "Slides", icon: Presentation, path: "/integrations/google-slides" },
+  { id: "google-analytics", name: "Analytics", icon: BarChart3, path: "/integrations/google-analytics" },
+  { id: "google-search-console", name: "Search Console", icon: Search, path: "/integrations/google-search-console" },
+  { id: "google-tag-manager", name: "Tag Manager", icon: Tag, path: "/integrations/google-tag-manager" },
 ] as const;
 
 export default function YouTubeDetail() {
@@ -110,7 +105,7 @@ export default function YouTubeDetail() {
   const [youtubeOpen, setYoutubeOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  const [serviceTests, setServiceTests] = useState<Record<string, ServiceTestResult>>({});
+  
 
   const hasLoadedOnce = useRef(false);
   const oauthHandledRef = useRef(false);
@@ -132,35 +127,6 @@ export default function YouTubeDetail() {
     if (error) throw new Error(error.message);
     if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
     return data;
-  };
-
-  const callFunction = async (fnName: string, action: string, params: Record<string, unknown> = {}) => {
-    const { data, error } = await supabase.functions.invoke(fnName, {
-      headers: session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : undefined,
-      body: { action, params },
-    });
-    if (error) throw new Error(error.message);
-    if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
-    return data;
-  };
-
-  const testService = async (serviceId: string) => {
-    const svc = GOOGLE_SERVICES.find((s) => s.id === serviceId);
-    if (!svc) return;
-    setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "testing" } }));
-    try {
-      if (serviceId === "youtube") {
-        await callYouTube(svc.testAction);
-      } else {
-        await callFunction(svc.fn, svc.testAction);
-      }
-      setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "ok", message: "Connected" } }));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed";
-      setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "error", message: msg.slice(0, 120) } }));
-    }
   };
 
   const loadConnectionWithRetry = useCallback(async (attempts = 4) => {
@@ -250,7 +216,7 @@ export default function YouTubeDetail() {
       await callYouTube("oauth_callback", { code, redirectUri: `${window.location.origin}/integrations/youtube` });
       const oauthStatus = await loadConnectionWithRetry();
       if (oauthStatus === "connected" || oauthStatus === "refreshed") {
-        toast.success("Google Workspace OAuth connected!");
+        toast.success("Google account connected — all services authorized");
         return;
       }
       throw new Error("OAuth completed but the connection status did not persist");
@@ -497,8 +463,8 @@ export default function YouTubeDetail() {
   if (loadingConnection || authLoading) {
     return (
       <IntegrationDetailLayout
-        name="Google Workspace"
-        description="YouTube, Gmail, Drive, Calendar, Sheets, Docs, Analytics, Search Console — one OAuth."
+        name="YouTube"
+        description="Channel data, video uploads, and the YouTube Data API."
         icon={Youtube}
         status={integration.status}
       >
@@ -511,8 +477,8 @@ export default function YouTubeDetail() {
 
   return (
     <IntegrationDetailLayout
-      name="Google Workspace"
-      description="YouTube, Gmail, Drive, Calendar, Sheets, Docs, Analytics, Search Console — one OAuth."
+      name="YouTube"
+      description="Channel data, video uploads, and the YouTube Data API."
       icon={Youtube}
       status={integration.status}
       actions={
@@ -590,7 +556,7 @@ export default function YouTubeDetail() {
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-          <h3 className="text-sm font-medium text-foreground">Google OAuth Connection</h3>
+          <h3 className="text-sm font-medium text-foreground">Google Account (shared OAuth)</h3>
           {oauthConnected && (
             <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Active</span>
           )}
@@ -642,11 +608,11 @@ export default function YouTubeDetail() {
             <p className="text-xs text-muted-foreground">
               {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh"
                 ? "Your OAuth token has expired. Re-authorize to enable all Google services."
-                : "Authorize with Google to enable YouTube uploads, Gmail, Drive, Calendar, Sheets, Docs, Analytics, and Search Console."}
+                : "Authorize with Google to enable YouTube uploads and the Data API. The same authorization also powers Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, and Tag Manager — manage each from its own card on the Integrations page."}
             </p>
             <button onClick={handleAuthorize} disabled={authorizing} className={actionBtnClass}>
               {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
-              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "Re-authorize Google" : "Authorize Google Workspace"}
+              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "Re-authorize Google" : "Authorize Google"}
             </button>
           </div>
         )}
@@ -657,42 +623,24 @@ export default function YouTubeDetail() {
         </div>
       </div>
 
-      {/* ── Connected APIs Grid ── */}
+      {/* ── Other Google services ── */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Connected Google APIs</h3>
+        <h3 className="text-sm font-medium text-foreground">Other Google services</h3>
         <p className="text-xs text-muted-foreground">
-          {oauthConnected
-            ? "All services below share the same OAuth token. Test each to verify the API is enabled in your Google Cloud project."
-            : "Connect OAuth above to enable these services."}
+          The same Google authorization powers these services. Each has its own card with tests and settings.
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {GOOGLE_SERVICES.map((svc) => {
-            const test = serviceTests[svc.id];
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {SISTER_GOOGLE_SERVICES.map((svc) => {
             const Icon = svc.icon;
             return (
-              <button
+              <Link
                 key={svc.id}
-                disabled={!oauthConnected || test?.status === "testing"}
-                onClick={() => testService(svc.id)}
-                className={cn(
-                  "flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors text-center",
-                  test?.status === "ok" ? "border-primary/40 bg-primary/5" :
-                  test?.status === "error" ? "border-destructive/40 bg-destructive/5" :
-                  "border-border/40 bg-card/40 hover:bg-muted/40",
-                  !oauthConnected && "opacity-40 cursor-not-allowed",
-                )}
+                to={svc.path}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/40 bg-card/40 hover:bg-muted/40 transition-colors"
               >
-                <div className="relative">
-                  <Icon className="w-5 h-5 text-foreground" strokeWidth={1.5} />
-                  {test?.status === "ok" && <CheckCircle2 className="w-3 h-3 text-primary absolute -top-1 -right-2" />}
-                  {test?.status === "error" && <XCircle className="w-3 h-3 text-destructive absolute -top-1 -right-2" />}
-                  {test?.status === "testing" && <Loader2 className="w-3 h-3 text-muted-foreground animate-spin absolute -top-1 -right-2" />}
-                </div>
-                <span className="text-[11px] font-medium text-foreground leading-tight">{svc.name}</span>
-                {test?.status === "error" && (
-                  <span className="text-[9px] text-destructive leading-tight line-clamp-2">{test.message}</span>
-                )}
-              </button>
+                <Icon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                <span className="text-xs font-medium text-foreground">{svc.name}</span>
+              </Link>
             );
           })}
         </div>
