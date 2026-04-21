@@ -10,6 +10,7 @@ const corsHeaders = {
 // KNOWLEDGE INGEST - Enhanced with memory extraction + reflection
 // Accepts: text, title, source metadata
 // Outputs: knowledge entries + optional wisdom memories + optional reflection
+// v2: Lovable AI Gateway
 // ============================================================
 
 async function generateEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
@@ -23,18 +24,23 @@ async function generateEmbeddings(texts: string[], apiKey: string): Promise<numb
   return data.data.map((d: { embedding: number[] }) => d.embedding);
 }
 
-async function callAI(apiKey: string, systemPrompt: string, userPrompt: string, maxTokens = 4096): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+async function callAI(_apiKey: string, systemPrompt: string, userPrompt: string, maxTokens = 4096): Promise<string> {
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!lovableKey) throw new Error('LOVABLE_API_KEY not configured');
+  const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${lovableKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-5.4',
+      model: 'google/gemini-2.5-flash',
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      max_tokens: maxTokens,
-      temperature: 0.3,
+      max_completion_tokens: maxTokens,
     }),
   });
-  if (!res.ok) throw new Error('AI extraction failed');
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    console.error('AI extraction failed:', res.status, errText);
+    throw new Error(`AI extraction failed: ${res.status}`);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '[]';
 }
