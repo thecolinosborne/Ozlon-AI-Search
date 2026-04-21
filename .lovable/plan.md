@@ -1,63 +1,65 @@
 
 
-## Show Connected YouTube Channel Card (Title, Thumbnail, Stats)
+## Fix: Repopulate Saved YouTube Credentials + Persist Channel ID Correctly
 
-Right now the YouTube page shows the Channel ID as a masked string (`UCxx…xxxx`) with no way to confirm *which* channel is actually connected. The backend already validates the channel against YouTube on save (`/channels?part=snippet&id=…`) and the `sync_channels` action stores title/thumbnail/subscriber/video/view counts in the `youtube_channels` table — we're just not surfacing any of it.
+### What's actually in your database right now
 
-Add a "Connected channel" card that pulls from the synced row and shows real channel identity, plus a clear sync state.
+Queried your `integration_connections` row directly:
 
-### Changes (1 file backend, 1 file frontend)
+| Field | Value |
+|---|---|
+| `metadata.api_key` | ✅ Present (masked `***XyGY`) |
+| `metadata.api_key_masked` | ✅ `***XyGY` |
+| `external_account_id` (Channel ID) | ❌ **NULL** |
+| `external_account_label` | `Primary YouTube` |
+| `auth_type` | `oauth2` |
+| OAuth scopes | ✅ All granted |
 
-**1. `supabase/functions/youtube/index.ts` — extend `get_connection`**
+**So the answer to "is it already there?":**
+- **API Key**: yes, it's saved. The page *should* already be showing "Configured ✓ ***XyGY".
+- **Channel ID**: no, it was never persisted. Every save attempt for the Channel ID silently failed to write `external_account_id`.
 
-After the existing connection lookup, when `external_account_id` (channel ID) is present, fetch the matching row from `youtube_channels` and return it on the response:
+### Two bugs to fix (1 file)
 
-```ts
-let channelInfo = null;
-if (conn?.external_account_id) {
-  const { data: ch } = await adminClient
-    .from("youtube_channels")
-    .select("channel_id, title, thumbnail_url, subscriber_count, video_count, view_count, fetched_at")
-    .eq("user_id", userId)
-    .eq("channel_id", conn.external_account_id)
-    .maybeSingle();
-  if (ch) channelInfo = ch;
-}
-// add to response payload:
-return jsonOk({ connection, oauthStatus, grantedScopes, channelInfo });
-```
+**`supabase/functions/youtube/index.ts` — `connect` action**
 
-No schema changes. No new RLS work. The `youtube_channels` table is already populated by the existing `sync_channels` action.
+1. **Channel ID is being lost on save.** Walking the `connect` handler: when the user submits just a Channel ID (no new API key), the code paths that UPDATE the existing row only set `external_account_id` inside certain branches. Need to always write `external_account_id` + `external_account_label` to the row whenever `channelId` is provided and validated — independent of whether `apiKey` was also provided.
 
-**2. `src/pages/integrations/YouTubeDetail.tsx` — render the connected channel card**
+2. **API-key-only saves must not clobber OAuth tokens, and Channel-ID-only saves must not clobber the API key.** The UPDATE should merge into existing `metadata` (spread), not replace it. Verify the current code does this for all three input combinations: (apiKey only), (channelId only), (both).
 
-- Add `channelInfo` to component state, hydrate from `result.channelInfo` inside `loadConnectionWithRetry`.
-- Above the "YouTube Data API & Channel" inputs section, render a new card **only when** `savedConn?.channelId` exists:
-  - **If `channelInfo` exists** (sync ran successfully): show channel thumbnail (40px circle), title, channel ID (small, monospace, fully visible — not masked), subscriber + video + view counts, and `Last synced • ${relativeTime(channelInfo.fetched_at)}`. Add a small "Sync Now" link that calls existing `syncYouTubeData()`.
-  - **If `channelInfo` is null but channel ID is set**: show amber "Channel saved but not yet synced — click Sync to fetch channel details" with a Sync button.
-  - **If channel ID isn't set yet**: render nothing (existing inputs still show).
-- Replace the masked Channel ID hint (`UCxx…xxxx`) under the input with the full Channel ID once configured — no value masking is needed for a public channel identifier.
+Concretely, in the `connect` handler:
+- Validate `apiKey` against Google only if provided (`/videos?id=dQw4w9WgXcQ`).
+- Validate `channelId` against Google only if provided (`/channels?part=snippet&id=…`) — using either the newly-submitted key OR the existing stored `metadata.api_key` so channel-ID-only saves still validate.
+- Build the UPDATE payload incrementally:
+  - If `apiKey` given → set `metadata.api_key`, `metadata.api_key_masked`.
+  - If `channelId` given → set top-level `external_account_id = channelId` and `external_account_label = accountLabel || existing`.
+  - Always merge: `metadata: { ...existing.metadata, ...patch }`.
+- Kick the existing auto-sync only when a channel ID is present (new or previously stored).
 
-### What you'll see
+No changes to `get_connection` — it already correctly reads `external_account_id` and `metadata.api_key_masked`.
 
-- After saving a valid Channel ID (and the auto-sync that already runs on save), a card appears at the top showing:
-  - The actual channel **avatar + name** (e.g. "Your Channel Name")
-  - Full channel ID visible
-  - "1.2K subscribers • 45 videos • 320K views"
-  - "Last synced 2 minutes ago" with a Sync Now control
-- If sync hasn't run yet (e.g. API key missing when channel ID was saved), an amber prompt explains exactly why and offers a one-click Sync.
-- The Channel ID input keeps its existing Update flow — paste a new ID, it re-validates with Google, syncs, and the card refreshes.
+### Frontend
+
+No changes needed. Once the backend persists the Channel ID correctly, `YouTubeDetail.tsx` will render:
+- "YouTube Data API Key" → **Configured ✓ ***XyGY** (already works — this is already saved)
+- "Channel ID" → **Configured ✓ UC…** (will work once you re-paste it and the fixed backend stores it)
+- "Connected channel" card with title/avatar/stats once the auto-sync completes (already wired up).
+
+### What you'll do after the fix ships
+
+1. Reload `/integrations/youtube` → API Key shows **Configured ✓ ***XyGY** immediately (it was already saved).
+2. Paste your Channel ID into the Channel ID field → Save. Backend validates it with Google, writes `external_account_id`, kicks auto-sync.
+3. Within a few seconds the "Connected channel" card appears with your channel's avatar, title, subscriber/video/view counts, and "Last synced" timestamp.
 
 ### Out of scope
 
-- No new tables, RLS policies, or migrations.
-- No changes to OAuth, sync_videos, upload form, or sister Google service pages.
-- No changes to `googleScopes.ts`, Integrations hub, or `useIntegrationsStore`.
-- No new edge function actions — purely a payload extension to `get_connection`.
+- No DB migration. No data backfill needed — your API key row stays; we're only fixing the write path for Channel ID going forward.
+- No frontend changes. No OAuth changes. No sister-service changes.
+- No cleanup of the other user's orphan row (different account — not yours).
 
 ### Technical notes
 
-- `youtube_channels` rows are upserted on `(user_id, channel_id)` by `sync_channels`, so re-saving a different channel ID + sync produces a fresh row without stale data.
-- `channelInfo` is null on first load until the auto-sync (which `useEffect` already triggers when `savedConn.lastSyncAt` is null) finishes — the existing 900ms-retry loop in `loadConnectionWithRetry` will pick up the synced row on its next poll.
-- Channel ID is public information (visible in any YouTube channel URL) — no security reason to mask it.
+- The `(user_id, provider)` unique constraint guarantees one row per user — confirmed in your data.
+- `api_key` presence is preserved because UPDATE always merges metadata via spread; the bug is only that `external_account_id` wasn't being written on channel-ID-only saves.
+- Validation uses the cheap 1-quota `/videos` probe for key + `/channels?part=snippet&id=…` for channel ID; both surface Google's specific error reasons on failure.
 
