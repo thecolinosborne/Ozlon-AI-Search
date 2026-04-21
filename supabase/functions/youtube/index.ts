@@ -289,11 +289,21 @@ serve(async (req) => {
     // ── Connect (API key) ──
     if (action === "connect") {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
-      const channelId = String((params as AnyJson).channelId || "").trim();
+      const channelIdRaw = (params as AnyJson).channelId;
+      const channelId = channelIdRaw == null ? "" : String(channelIdRaw).trim();
       const accountLabel = String((params as AnyJson).accountLabel || "Primary YouTube").trim();
 
+      console.log("[youtube/connect] start", {
+        userId,
+        hasApiKey: !!apiKey,
+        apiKeyLen: apiKey.length,
+        apiKeyPrefix: apiKey.slice(0, 4),
+        apiKeySuffix: apiKey.slice(-4),
+        channelId: channelId || null,
+      });
+
       // Find existing api_key row
-      const { data: existing } = await adminClient
+      const { data: existing, error: existingErr } = await adminClient
         .from("integration_connections")
         .select("id, metadata, external_account_id, external_account_label")
         .eq("user_id", userId)
@@ -302,13 +312,18 @@ serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
+      if (existingErr) {
+        console.error("[youtube/connect] existing lookup failed:", existingErr);
+        throw new Error(`Failed to load existing connection: ${existingErr.message}`);
+      }
+
       // Resolve effective key: provided OR stored (vault-first)
       let effectiveKey = apiKey;
       if (!effectiveKey && existing) {
         try {
           effectiveKey = await getStoredApiKey(adminClient, existing.id, userId);
-        } catch {
-          /* fallthrough */
+        } catch (e) {
+          console.warn("[youtube/connect] getStoredApiKey failed:", e instanceof Error ? e.message : e);
         }
       }
 
@@ -317,7 +332,13 @@ serve(async (req) => {
       }
 
       // Validate API key against YouTube
-      await validateApiKey(effectiveKey);
+      try {
+        await validateApiKey(effectiveKey);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[youtube/connect] validateApiKey failed:", msg);
+        throw new Error(msg);
+      }
 
       // If a channelId was supplied, validate it resolves to an actual channel
       let resolvedChannelLabel = accountLabel;
