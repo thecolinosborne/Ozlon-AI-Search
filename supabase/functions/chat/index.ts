@@ -2963,6 +2963,38 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_standing_order',
+      description: 'REPLACE an existing standing order with a new version. Call this — NOT add_standing_order — when the user phrases a change like "now do X, not Y", "instead of … do …", "change the rule about …", or "actually, from now on …". Performs a fuzzy match against active rules, deactivates the old one (linked via superseded_by), and inserts the new one. Always confirm the replacement in your reply ("Updated: previously \'X\', now \'Y\'.").',
+      parameters: {
+        type: 'object',
+        properties: {
+          old_rule_match: { type: 'string', description: 'A short phrase or keyword from the existing rule to find and replace (e.g. "two sentences", "Drive links").' },
+          new_rule: { type: 'string', description: 'The new rule text. Pass empty string to simply deactivate the old rule with no replacement.' },
+          scope: { type: 'string', description: 'global | finance | email | creative | research', enum: ['global', 'finance', 'email', 'creative', 'research'] },
+        },
+        required: ['old_rule_match', 'new_rule'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_memory',
+      description: 'REPLACE an existing saved memory with a new version. Call this — NOT save_memory — when the user changes a previously stated preference, fact, or pattern (e.g. "actually I prefer X, not Y"). Performs a fuzzy match against existing memory summaries/content, supersedes the old one, and inserts the new one. Always confirm the replacement in your reply.',
+      parameters: {
+        type: 'object',
+        properties: {
+          old_summary_match: { type: 'string', description: 'A short phrase or keyword from the existing memory to find and replace.' },
+          new_content: { type: 'string', description: 'The new memory content (1-3 specific sentences).' },
+          memory_type: { type: 'string', description: 'fact | preference | context | pattern | goal | value', enum: ['fact', 'preference', 'context', 'pattern', 'goal', 'value'] },
+        },
+        required: ['old_summary_match', 'new_content'],
+      },
+    },
+  },
   // ============ User Goals ============
   {
     type: 'function',
@@ -5501,6 +5533,102 @@ async function executeToolCall(
         }
       }
 
+      case 'update_standing_order': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const oldMatch = String(args.old_rule_match || '').trim();
+          const newRule = String(args.new_rule || '').trim();
+          if (!oldMatch) return { success: false, result: 'old_rule_match is required.' };
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          // Find the best-matching active rule via case-insensitive ILIKE on any keyword from old_match
+          const { data: candidates, error: findErr } = await admin
+            .from('standing_orders')
+            .select('id, rule, scope, priority')
+            .eq('user_id', userId)
+            .eq('active', true)
+            .ilike('rule', `%${oldMatch}%`)
+            .limit(1);
+          if (findErr) return { success: false, result: `Lookup failed: ${findErr.message}` };
+          const oldRow = candidates?.[0];
+          if (!oldRow) {
+            return { success: false, result: `No active rule matched "${oldMatch}". Use add_standing_order if it should be brand new.` };
+          }
+          const nowIso = new Date().toISOString();
+          let newId: string | null = null;
+          if (newRule) {
+            const { data: inserted, error: insErr } = await admin.from('standing_orders').insert({
+              user_id: userId,
+              rule: newRule,
+              scope: (args.scope as string) || oldRow.scope || 'global',
+              priority: oldRow.priority || 5,
+            }).select('id').single();
+            if (insErr) return { success: false, result: `Insert failed: ${insErr.message}` };
+            newId = inserted?.id || null;
+          }
+          const { error: updErr } = await admin.from('standing_orders')
+            .update({ active: false, superseded_at: nowIso, superseded_by: newId })
+            .eq('id', oldRow.id)
+            .eq('user_id', userId);
+          if (updErr) return { success: false, result: `Supersede failed: ${updErr.message}` };
+          if (newRule) {
+            return { success: true, result: `Replaced rule. Previously: "${oldRow.rule}". Now: "${newRule}". Confirm this change to the user.` };
+          }
+          return { success: true, result: `Deactivated rule: "${oldRow.rule}". Confirm to the user.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'update_memory': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+          const oldMatch = String(args.old_summary_match || '').trim();
+          const newContent = String(args.new_content || '').trim();
+          if (!oldMatch || !newContent) return { success: false, result: 'old_summary_match and new_content are required.' };
+          const memoryType = (args.memory_type as string) || 'preference';
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          // Match against summary OR content, only non-superseded rows
+          const { data: candidates, error: findErr } = await admin
+            .from('wisdom_memories')
+            .select('id, summary, content, memory_type, salience, confidence')
+            .eq('user_id', userId)
+            .is('superseded_at', null)
+            .or(`summary.ilike.%${oldMatch}%,content.ilike.%${oldMatch}%`)
+            .limit(1);
+          if (findErr) return { success: false, result: `Lookup failed: ${findErr.message}` };
+          const oldRow = candidates?.[0];
+          if (!oldRow) {
+            return { success: false, result: `No memory matched "${oldMatch}". Use save_memory if this is brand new.` };
+          }
+          const { data: inserted, error: insErr } = await admin.from('wisdom_memories').insert({
+            user_id: userId,
+            memory_type: memoryType,
+            content: newContent,
+            summary: newContent.length > 120 ? newContent.slice(0, 117) + '…' : newContent,
+            salience: oldRow.salience ?? 0.6,
+            confidence: oldRow.confidence ?? 0.85,
+          }).select('id').single();
+          if (insErr) return { success: false, result: `Insert failed: ${insErr.message}` };
+          const { error: updErr } = await admin.from('wisdom_memories')
+            .update({ superseded_at: new Date().toISOString(), superseded_by: inserted?.id || null })
+            .eq('id', oldRow.id)
+            .eq('user_id', userId);
+          if (updErr) return { success: false, result: `Supersede failed: ${updErr.message}` };
+          const prev = oldRow.summary || oldRow.content;
+          return { success: true, result: `Replaced memory. Previously: "${prev}". Now: "${newContent}". Confirm this change to the user.` };
+        } catch (e) {
+          return { success: false, result: `Error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       case 'add_goal': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
@@ -6581,6 +6709,8 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'save_memory', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
   { prefix: 'remove_standing_order', domain: 'memory' },
+  { prefix: 'update_standing_order', domain: 'memory' },
+  { prefix: 'update_memory', domain: 'memory' },
   { prefix: 'add_goal', domain: 'memory' },
   { prefix: 'update_goal_progress', domain: 'memory' },
   { prefix: 'complete_goal', domain: 'memory' },
@@ -6827,6 +6957,8 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'save_memory': '_always_',
     'add_standing_order': '_always_',
     'remove_standing_order': '_always_',
+    'update_standing_order': '_always_',
+    'update_memory': '_always_',
     'add_goal': '_always_',
     'update_goal_progress': '_always_',
     'complete_goal': '_always_',
@@ -6939,6 +7071,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'save_memory': 'Saving to memory',
   'add_standing_order': 'Setting standing order',
   'remove_standing_order': 'Removing standing order',
+  'update_standing_order': 'Updating standing order',
+  'update_memory': 'Updating memory',
   'add_goal': 'Tracking new goal',
   'update_goal_progress': 'Logging goal progress',
   'complete_goal': 'Completing goal',
@@ -7182,7 +7316,7 @@ async function runToolLoop(
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
-        'add_standing_order', 'remove_standing_order',
+        'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task',
         'deep_research', 'web_search_google',
@@ -7316,7 +7450,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -7866,7 +8000,7 @@ serve(async (req) => {
           }
           const rules = Array.isArray(persona.house_rules) ? (persona.house_rules as string[]).filter(Boolean) : [];
           if (rules.length) {
-            parts.push(`HOUSE RULES (these override defaults — never violate):\n${rules.map(r => `- ${r}`).join('\n')}`);
+            parts.push(`HOUSE RULES (these override defaults — never violate):\n${rules.map(r => `- ${r}`).join('\n')}\n\nRULE-UPDATE PROTOCOL: When the user phrases a change as "now do X, not Y", "instead of … do …", "change the rule about …", or "actually, from now on …", call update_standing_order or update_memory (NOT add_standing_order or save_memory) so the old rule is superseded instead of stacking. Always confirm in your reply: "Updated: previously '…', now '…'."`);
           }
           const tone = (persona.tone_settings || {}) as Record<string, unknown>;
           const toneLines = Object.entries(tone)
