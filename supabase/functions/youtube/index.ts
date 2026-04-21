@@ -218,63 +218,51 @@ serve(async (req) => {
 
     if (!action) throw new Error("Missing action");
 
-    // ── Get Connection — returns BOTH api_key and oauth2 states ──
+    // ── Get Connection — single row holds BOTH api_key and oauth2 state ──
     if (action === "get_connection") {
-      // Fetch api_key connection
-      const { data: apiKeyConn } = await adminClient
+      const { data: conn } = await adminClient
         .from("integration_connections")
-        .select("id, status, external_account_id, external_account_label, metadata, last_sync_at, last_error")
+        .select("id, status, auth_type, external_account_id, external_account_label, metadata, last_sync_at, last_error")
         .eq("user_id", userId)
         .eq("provider", "youtube")
-        .eq("auth_type", "api_key")
-        .order("created_at", { ascending: false })
-        .limit(1)
         .maybeSingle();
 
-      // Fetch oauth2 connection
-      const { data: oauthConn } = await adminClient
-        .from("integration_connections")
-        .select("status, metadata")
-        .eq("user_id", userId)
-        .eq("provider", "youtube")
-        .eq("auth_type", "oauth2")
-        .maybeSingle();
-
-      // Build api_key connection response
       let apiKeyResponse = null;
-      if (apiKeyConn) {
-        const meta = (apiKeyConn.metadata || {}) as AnyJson;
-        apiKeyResponse = {
-          id: apiKeyConn.id,
-          status: apiKeyConn.status,
-          channelId: apiKeyConn.external_account_id || "",
-          accountLabel: apiKeyConn.external_account_label || "",
-          apiKeyMasked: String(meta.api_key_masked || ""),
-          apiKeyConfigured: !!meta.api_key,
-          lastSyncAt: apiKeyConn.last_sync_at,
-          lastError: apiKeyConn.last_error,
-        };
-      }
-
-      // Build oauth status — attempt token refresh if expired
       let oauthStatus: "connected" | "expired" | "disconnected" = "disconnected";
-      if (oauthConn && oauthConn.status === "connected") {
-        const oMeta = (oauthConn.metadata || {}) as AnyJson;
-        const expiresAt = oMeta.expires_at as string | undefined;
-        const hasRefreshToken = !!oMeta.refresh_token;
+
+      if (conn) {
+        const meta = (conn.metadata || {}) as AnyJson;
+
+        // Derive API key state from metadata.api_key (regardless of auth_type)
+        if (meta.api_key) {
+          apiKeyResponse = {
+            id: conn.id,
+            status: "connected",
+            channelId: conn.external_account_id || "",
+            accountLabel: conn.external_account_label || "",
+            apiKeyMasked: String(meta.api_key_masked || ""),
+            apiKeyConfigured: true,
+            lastSyncAt: conn.last_sync_at,
+            lastError: conn.last_error,
+          };
+        }
+
+        // Derive OAuth state from metadata tokens (regardless of auth_type)
+        const hasAccessToken = !!meta.access_token;
+        const hasRefreshToken = !!meta.refresh_token;
+        const expiresAt = meta.expires_at as string | undefined;
         const expired = expiresAt ? new Date(expiresAt) < new Date() : true;
 
-        if (!expired) {
+        if (hasAccessToken && !expired) {
           oauthStatus = "connected";
         } else if (hasRefreshToken) {
-          // Try to refresh the token
           try {
-            await refreshOAuthIfNeeded(adminClient, userId, oMeta);
+            await refreshOAuthIfNeeded(adminClient, userId, meta);
             oauthStatus = "connected";
           } catch {
             oauthStatus = "expired";
           }
-        } else {
+        } else if (hasAccessToken) {
           oauthStatus = "expired";
         }
       }
