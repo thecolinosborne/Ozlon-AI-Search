@@ -3262,6 +3262,9 @@ const ACTION_TOOLS: ToolDef[] = [
           embeddable: { type: 'boolean' },
           public_stats_viewable: { type: 'boolean' },
           notify_subscribers: { type: 'boolean', description: 'Default true. Set false for silent uploads.' },
+        },
+        required: ['title', 'video_url'],
+      },
     },
   },
   // ============ Search Atlas (SEO intelligence) ============
