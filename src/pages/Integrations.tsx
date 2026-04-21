@@ -128,6 +128,14 @@ const integrations: IntegrationEntry[] = [
     path: "/integrations/google-tag-manager",
     category: "google",
   },
+  {
+    id: "search-atlas",
+    name: "Search Atlas",
+    description: "Site audit, keyword research, backlinks, and rank tracking.",
+    icon: Search,
+    path: "/integrations/search-atlas",
+    category: "seo",
+  },
 ];
 
 // Map UI ids to provider names in integration_connections.
@@ -146,11 +154,13 @@ const PROVIDER_BY_ID: Record<string, string> = {
   "google-analytics": "youtube",
   "google-search-console": "youtube",
   "google-tag-manager": "youtube",
+  "search-atlas": "search_atlas",
 };
 
 const FILTERS: Array<{ id: "all" | Category; label: string }> = [
   { id: "all", label: "All" },
   { id: "google", label: "Google Apps" },
+  { id: "seo", label: "SEO" },
   { id: "crm", label: "CRM" },
   { id: "media", label: "Media" },
   { id: "productivity", label: "Productivity" },
