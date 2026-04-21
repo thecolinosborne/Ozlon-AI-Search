@@ -9,11 +9,23 @@ import type { CompiledRoute, IntegrationManifest, ToolManifest } from "./types.t
 import { googleDocsIntegration } from "./google-docs.ts";
 import { googleSheetsIntegration } from "./google-sheets.ts";
 import { googleCalendarIntegration } from "./google-calendar.ts";
+import { googleSlidesIntegration } from "./google-slides.ts";
+import { googleDriveIntegration } from "./google-drive.ts";
+import { googleAnalyticsIntegration } from "./google-analytics.ts";
+import { googleTagManagerIntegration } from "./google-tag-manager.ts";
+import { descriptIntegration } from "./descript.ts";
+import { searchAtlasIntegration } from "./search-atlas.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   googleDocsIntegration,
   googleSheetsIntegration,
   googleCalendarIntegration,
+  googleSlidesIntegration,
+  googleDriveIntegration,
+  googleAnalyticsIntegration,
+  googleTagManagerIntegration,
+  descriptIntegration,
+  searchAtlasIntegration,
 ];
 
 /** Map: tool name → compiled route. Built once at module load. */
