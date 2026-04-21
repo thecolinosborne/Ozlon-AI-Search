@@ -92,6 +92,19 @@ const ClickUpDetail = () => {
         setApiKeyConfigured("clickup", true);
         setLastSync("clickup", new Date().toISOString());
         updateSettings("clickup", { team_id: result.team_id, list_id: result.list_id });
+        // Resolve the user's connection_id for sync runs UI
+        try {
+          const { data: conn } = await supabase
+            .from("integration_connections")
+            .select("id")
+            .eq("user_id", session.user.id)
+            .eq("provider", "clickup")
+            .eq("status", "connected")
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (conn?.id) setConnectionId(conn.id);
+        } catch { /* best effort */ }
         try {
           const config = await callClickUp("get_config", getAuthParams());
           if (config) {
