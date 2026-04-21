@@ -36,18 +36,6 @@ type OAuthDetail = "connected" | "refreshed" | "expired" | "refresh_failed" | "e
 
 const YOUTUBE_PENDING_OAUTH_CODE_KEY = "youtube_pending_oauth_code";
 
-const SISTER_GOOGLE_SERVICES = [
-  { id: "gmail", name: "Gmail", icon: Mail, path: "/integrations/gmail" },
-  { id: "google-drive", name: "Drive", icon: HardDrive, path: "/integrations/google-drive" },
-  { id: "google-calendar", name: "Calendar", icon: Calendar, path: "/integrations/google-calendar" },
-  { id: "google-sheets", name: "Sheets", icon: FileSpreadsheet, path: "/integrations/google-sheets" },
-  { id: "google-docs", name: "Docs", icon: FileText, path: "/integrations/google-docs" },
-  { id: "google-slides", name: "Slides", icon: Presentation, path: "/integrations/google-slides" },
-  { id: "google-analytics", name: "Analytics", icon: BarChart3, path: "/integrations/google-analytics" },
-  { id: "google-search-console", name: "Search Console", icon: Search, path: "/integrations/google-search-console" },
-  { id: "google-tag-manager", name: "Tag Manager", icon: Tag, path: "/integrations/google-tag-manager" },
-] as const;
-
 export default function YouTubeDetail() {
   const { session, authLoading } = useAuth();
   const { getIntegration, setStatus, setLastSync, setApiKeyConfigured, updateSettings } =
