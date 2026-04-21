@@ -1,56 +1,55 @@
 
 
-## Reorder Settings + Merge Personality into Memory
+## Remove Data Sources Toggles + Add Conversational Memory Updates
 
-### Current state
+### Part 1: Delete the Data Sources section
 
-Settings page has these rows (in order):
-1. Profile
-2. Brain Stones (`/settings/brain`)
-3. Personality & Identity (`/settings/personality`)
-4. Memory Settings (`/settings/memory`) ← currently 404, route never registered
-5. (other rows)
+The 8 toggles (Calendar, Email, Browsing, Location, Wearable, Voice, Documents, Transactions) are cosmetic and conceptually wrong — memory ingestion should follow integration connection state automatically, not a redundant on/off switch.
 
-**Are Personality and Memory redundant?** Largely yes, with some overlap and some distinct concerns:
+**Change:** Remove the entire "Data sources" section from `src/pages/IdentityMemory.tsx` (the section block, the `memoryOptions` array, the `settings` state, and the `toggleSetting` handler). Keep Identity, Standing Orders, and Active Goals untouched.
 
-| Concern | Personality page | Memory page |
-|---|---|---|
-| System name / wake word | ✅ | ❌ |
-| Tone & voice persona | ✅ | ❌ |
-| Evolution proposals (AI-suggested changes) | ✅ | ❌ |
-| Standing orders (rules AI obeys) | ❌ | ✅ |
-| Active goals | ❌ | ✅ |
-| Data source toggles (calendar, email, etc.) | ❌ | ✅ |
+**Result:** Memory ingestion is governed by which integrations the user has connected on `/integrations` (single source of truth). No phantom switches.
 
-They're **complementary, not redundant** — Personality = *who the AI is*, Memory = *what the AI knows and obeys*. But they're conceptually one thing from a user's mental model: "shape my AI." Worth merging into a single **Identity & Memory** page with clear sections, eliminating the split.
+### Part 2: Conversational memory updates ("now we do X, not Y")
 
-### Plan
+This already partially works but needs a sharper write-path. Here's how it works today and what we add:
 
-**1. Register the missing Memory route + reorder Settings**
-- `src/App.tsx`: add `<Route path="/settings/memory" element={<MemorySettings />} />`
-- `src/pages/Settings.tsx`: move Memory row to sit **directly below Brain Stones**, above Personality.
+**Today (already wired):**
+- The chat backend has a `save_memory` tool the AI calls when it detects a new durable preference. It writes to `wisdom_memories` (pgvector) and is loaded into the system prompt on future turns.
+- Standing orders and goals are also writable from chat, but the AI is conservative about it.
 
-**2. Merge Personality + Memory into one unified page**
-- Create `/settings/identity` (new route) rendering a single page with sectioned content:
-  - **Identity** (from PersonalitySettings): system name, tone/persona, evolution proposals
-  - **Standing Orders** (from MemorySettings)
-  - **Active Goals** (from MemorySettings)
-  - **Data Sources** (from MemorySettings)
-- Settings page collapses two rows ("Personality & Identity" + "Memory Settings") into one row: **"Identity & Memory"** → `/settings/identity`, placed directly below Brain Stones.
-- Keep `/settings/personality` and `/settings/memory` as redirects to `/settings/identity` so existing links don't break.
+**What's missing (the "update, don't duplicate" part):**
+When you say *"actually, from now on do X instead of Y"*, the AI should:
+1. **Find** the existing standing order / memory that conflicts (semantic match against `standing_orders.rule` and `wisdom_memories`).
+2. **Supersede** it (mark old one inactive with a `superseded_by` link) and **insert** the new one — instead of stacking contradictory rules.
+3. **Confirm** the change in chat: *"Updated: previously '…', now '…'."*
+
+**Changes (backend only, no UI work):**
+
+1. **`supabase/functions/chat/index.ts`** — extend the existing identity/memory tool surface:
+   - Add `update_standing_order(old_rule_match: string, new_rule: string, scope?: string)` — does a fuzzy/semantic match against active orders, deactivates the old one, inserts the new one, returns both for the confirmation message.
+   - Add `update_memory(old_summary_match: string, new_content: string)` — same pattern for `wisdom_memories`.
+   - Strengthen the system prompt's House Rules block with: *"When the user phrases a change as 'now do X, not Y' / 'instead of … do …' / 'change the rule …', call update_standing_order or update_memory rather than save_memory or add_standing_order. Always confirm what was replaced."*
+
+2. **Migration** — add `superseded_by uuid` and `superseded_at timestamptz` columns to `standing_orders` and `wisdom_memories` (nullable, additive only). Active-row queries already filter on `active = true` / equivalent, so this is non-breaking. Add an index on `(user_id, active)` if missing.
+
+3. **No frontend work** — the existing Identity & Memory page already lists active standing orders/goals; superseded ones simply drop off the list automatically because they get marked inactive. Users can keep typing rules manually too.
+
+### Behavior after this change
+
+- *"Always reply in two sentences"* → AI calls `add_standing_order`. Appears in your list.
+- *"Actually, three sentences from now on"* → AI calls `update_standing_order`, the two-sentence rule is deactivated, three-sentence rule replaces it. AI replies: *"Updated: previously 'two sentences', now 'three sentences'."*
+- *"Forget the rule about sentence length"* → AI calls `update_standing_order` with empty new rule (deactivate path) or the existing trash icon still works manually.
 
 ### Files touched
-- `src/App.tsx` — add new route + 2 redirects
-- `src/pages/Settings.tsx` — collapse two rows into one, reorder
-- `src/pages/IdentityMemory.tsx` (new) — composes existing PersonalitySettings + MemorySettings section content
-- Existing `MemorySettings.tsx` and `PersonalitySettings.tsx` stay on disk as building blocks (their internal sections get reused) — no behavior loss.
+
+- `src/pages/IdentityMemory.tsx` — remove Data Sources section + related state.
+- `supabase/functions/chat/index.ts` — add 2 tools, strengthen House Rules prompt language.
+- New migration — add `superseded_by` + `superseded_at` to `standing_orders` and `wisdom_memories`.
 
 ### Out of scope
-- No changes to standing-order, goal, or evolution-proposal logic — pure UI composition.
-- No nav bar changes. No changes to other settings rows.
-- No schema/RLS/edge function changes.
 
-### If you'd rather keep them separate
-
-Say the word and I'll skip the merge — just register `/settings/memory` and reorder Memory to sit below Brain Stones, leaving Personality as its own row underneath.
+- No changes to integrations, voice, onboarding, or any other settings page.
+- No schema changes to `user_goals` (goals already have a `completed` status path that serves the same purpose).
+- No changes to the existing manual add/delete UI for standing orders and goals — purely additive on the AI write-path side.
 
