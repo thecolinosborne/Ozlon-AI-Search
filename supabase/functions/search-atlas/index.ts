@@ -6,7 +6,38 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SEARCH_ATLAS_BASE = "https://api.searchatlas.com/api/v2";
+const SEARCH_ATLAS_BASE = "https://api.searchatlas.com";
+
+// Auth schemes to probe in order on first failed call. The winning scheme is
+// cached per-request via authSchemeCache so subsequent calls skip the probe.
+type AuthScheme = "token" | "bearer" | "query";
+const AUTH_SCHEMES: AuthScheme[] = ["token", "bearer", "query"];
+let cachedScheme: AuthScheme | null = null;
+
+function buildAuthRequest(apiKey: string, url: string, scheme: AuthScheme, init: RequestInit) {
+  const headers: Record<string, string> = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  let finalUrl = url;
+  if (scheme === "token") headers["Authorization"] = `Token ${apiKey}`;
+  else if (scheme === "bearer") headers["Authorization"] = `Bearer ${apiKey}`;
+  else if (scheme === "query") {
+    const sep = url.includes("?") ? "&" : "?";
+    finalUrl = `${url}${sep}user_token=${encodeURIComponent(apiKey)}`;
+  }
+  return { finalUrl, headers };
+}
+
+function sanitizeDetail(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("<")) {
+    return "Search Atlas returned an HTML error page — endpoint path is wrong or token has no access.";
+  }
+  return trimmed.slice(0, 400);
+}
 
 // ============================================================================
 // AUTH RESOLUTION (vault → metadata → env fallback)
