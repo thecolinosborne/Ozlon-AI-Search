@@ -6709,6 +6709,8 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'save_memory', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
   { prefix: 'remove_standing_order', domain: 'memory' },
+  { prefix: 'update_standing_order', domain: 'memory' },
+  { prefix: 'update_memory', domain: 'memory' },
   { prefix: 'add_goal', domain: 'memory' },
   { prefix: 'update_goal_progress', domain: 'memory' },
   { prefix: 'complete_goal', domain: 'memory' },
@@ -6955,6 +6957,8 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'save_memory': '_always_',
     'add_standing_order': '_always_',
     'remove_standing_order': '_always_',
+    'update_standing_order': '_always_',
+    'update_memory': '_always_',
     'add_goal': '_always_',
     'update_goal_progress': '_always_',
     'complete_goal': '_always_',
@@ -7067,6 +7071,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'save_memory': 'Saving to memory',
   'add_standing_order': 'Setting standing order',
   'remove_standing_order': 'Removing standing order',
+  'update_standing_order': 'Updating standing order',
+  'update_memory': 'Updating memory',
   'add_goal': 'Tracking new goal',
   'update_goal_progress': 'Logging goal progress',
   'complete_goal': 'Completing goal',
@@ -7310,7 +7316,7 @@ async function runToolLoop(
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
-        'add_standing_order', 'remove_standing_order',
+        'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task',
         'deep_research', 'web_search_google',
@@ -7444,7 +7450,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
