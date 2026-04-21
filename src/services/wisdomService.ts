@@ -99,9 +99,10 @@ export const wisdomService = {
   },
 
   async listPacks(): Promise<WisdomPack[]> {
-    // Edge function expects ?list=1 (query param), not body, for the list branch.
-    const { data, error } = await supabase.functions.invoke("knowledge-pack-ingest?list=1", {
-      method: "GET",
+    // Use POST with { list: true } — invoke() can't append query strings to the function name,
+    // and putting "?list=1" in the name breaks the SDK's auth header injection.
+    const { data, error } = await supabase.functions.invoke("knowledge-pack-ingest", {
+      body: { list: true },
     });
     if (error) {
       console.error("Failed to list wisdom packs:", error);
