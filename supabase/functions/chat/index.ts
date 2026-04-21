@@ -1,6 +1,8 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
+import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
+import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
