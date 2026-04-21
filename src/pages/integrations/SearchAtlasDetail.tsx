@@ -69,6 +69,9 @@ const SearchAtlasDetail = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncRefreshKey, setSyncRefreshKey] = useState(0);
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<Array<Record<string, unknown>> | null>(null);
+  const [diagnosticsSummary, setDiagnosticsSummary] = useState<string | null>(null);
 
   const [domain, setDomain] = useState(stored.domain || "");
   const [projectId, setProjectId] = useState(stored.projectId || "");
