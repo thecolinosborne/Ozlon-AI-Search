@@ -141,26 +141,48 @@ async function saCall(
   apiKey: string,
   path: string,
   init: RequestInit = {},
-): Promise<{ ok: boolean; status: number; data: unknown; raw: string }> {
-  const url = path.startsWith("http") ? path : `${SEARCH_ATLAS_BASE}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-  const raw = await res.text();
-  let data: unknown = raw;
-  try { data = raw ? JSON.parse(raw) : {}; } catch { /* keep raw */ }
-  return { ok: res.ok, status: res.status, data, raw };
+): Promise<{ ok: boolean; status: number; data: unknown; raw: string; scheme?: AuthScheme }> {
+  const baseUrl = path.startsWith("http") ? path : `${SEARCH_ATLAS_BASE}${path}`;
+
+  const order: AuthScheme[] = cachedScheme
+    ? [cachedScheme, ...AUTH_SCHEMES.filter((s) => s !== cachedScheme)]
+    : AUTH_SCHEMES;
+
+  let last: { ok: boolean; status: number; data: unknown; raw: string; scheme: AuthScheme } | null = null;
+  for (const scheme of order) {
+    const { finalUrl, headers } = buildAuthRequest(apiKey, baseUrl, scheme, init);
+    try {
+      const res = await fetch(finalUrl, { ...init, headers });
+      const raw = await res.text();
+      let data: unknown = raw;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = sanitizeDetail(raw); }
+      last = { ok: res.ok, status: res.status, data, raw, scheme };
+      if (res.ok) {
+        cachedScheme = scheme;
+        return last;
+      }
+      // 401/403/404 → try next scheme. Other errors (5xx, 429) → return immediately.
+      if (![401, 403, 404].includes(res.status)) {
+        return last;
+      }
+    } catch (e) {
+      last = {
+        ok: false,
+        status: 0,
+        data: e instanceof Error ? e.message : "fetch failed",
+        raw: "",
+        scheme,
+      };
+    }
+  }
+  return last!;
 }
 
 function fail(message: string, status = 400, detail?: unknown): Response {
+  let cleanDetail = detail;
+  if (typeof detail === "string") cleanDetail = sanitizeDetail(detail);
   return new Response(
-    JSON.stringify({ success: false, error: message, status, detail }),
+    JSON.stringify({ success: false, error: message, status, detail: cleanDetail }),
     { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 }
