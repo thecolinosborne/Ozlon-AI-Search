@@ -20,6 +20,7 @@ import Billing from "@/pages/Billing";
 import Onboarding from "@/pages/onboarding";
 import Integrations from "@/pages/Integrations";
 import Wisdom from "@/pages/Wisdom";
+import IdentityMemory from "@/pages/IdentityMemory";
 
 import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
 import DescriptDetail from "@/pages/integrations/DescriptDetail";
@@ -69,7 +70,9 @@ const AppRoutes = () => {
         <Route path="/profile" element={<Profile />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/personality" element={<PersonalitySettings />} />
+        <Route path="/settings/identity" element={<IdentityMemory />} />
+        <Route path="/settings/personality" element={<Navigate to="/settings/identity" replace />} />
+        <Route path="/settings/memory" element={<Navigate to="/settings/identity" replace />} />
         <Route path="/settings/routing" element={<Navigate to="/settings/brain" replace />} />
         <Route path="/settings/brain" element={<ModelRouting />} />
         <Route path="/integrations/ai-processor" element={<Navigate to="/settings/brain" replace />} />

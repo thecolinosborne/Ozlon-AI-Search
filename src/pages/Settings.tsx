@@ -212,16 +212,16 @@ const Settings = () => {
             editPlaceholder="Enter system name"
           />
           <SettingsRow
-            icon={Sparkles}
-            label="AI Identity & Persona"
-            description="How your AI speaks and what it knows about you"
-            onClick={() => navigate("/settings/personality")}
-          />
-          <SettingsRow
             icon={Brain}
             label="Brain Stones"
             description="Stones picked automatically. Swap lobes anytime."
             onClick={() => navigate("/settings/brain")}
+          />
+          <SettingsRow
+            icon={Sparkles}
+            label="Identity & Memory"
+            description="Who your AI is, what it remembers, and the rules it obeys"
+            onClick={() => navigate("/settings/identity")}
           />
         </SettingsSection>
 
@@ -282,16 +282,6 @@ const Settings = () => {
         {/* Wisdom Library — its own featured section */}
         <SettingsSection title="Wisdom Library" grouped={false}>
           <WisdomLibraryCard />
-        </SettingsSection>
-
-        {/* Memory */}
-        <SettingsSection title="Memory">
-          <SettingsRow
-            icon={Database}
-            label="Memory Settings"
-            description="What your AI remembers about you"
-            onClick={() => navigate("/settings/memory")}
-          />
         </SettingsSection>
 
         {/* Integrations */}
