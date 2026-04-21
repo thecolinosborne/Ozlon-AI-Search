@@ -109,12 +109,6 @@ export const wisdomService = {
     }
     return data?.packs ?? [];
   },
-    if (error) {
-      console.error("listPacks error:", error);
-      return [];
-    }
-    return (data?.packs as WisdomPack[]) || [];
-  },
 
   async installPack(packId: string): Promise<IngestResult & { already_installed?: boolean }> {
     const { data, error } = await supabase.functions.invoke("knowledge-pack-ingest", {
