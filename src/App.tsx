@@ -37,6 +37,7 @@ import GoogleAnalyticsDetail from "@/pages/integrations/GoogleAnalyticsDetail";
 import GoogleSearchConsoleDetail from "@/pages/integrations/GoogleSearchConsoleDetail";
 import GoogleTagManagerDetail from "@/pages/integrations/GoogleTagManagerDetail";
 import SearchAtlasDetail from "@/pages/integrations/SearchAtlasDetail";
+import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
 import Finance from "@/pages/Finance";
 import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
@@ -97,6 +98,10 @@ const AppRoutes = () => {
         <Route path="/integrations/google-search-console" element={<GoogleSearchConsoleDetail />} />
         <Route path="/integrations/google-tag-manager" element={<GoogleTagManagerDetail />} />
         <Route path="/integrations/search-atlas" element={<SearchAtlasDetail />} />
+        {/* Catch-all: any registered integration without a custom *Detail.tsx
+            page renders via AutoIntegrationDetail. New integrations only need
+            a manifest entry in src/integrations/registry.ts. */}
+        <Route path="/integrations/:id" element={<AutoIntegrationDetail />} />
         <Route path="/events" element={<Events />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
