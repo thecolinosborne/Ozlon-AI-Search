@@ -608,11 +608,11 @@ export default function YouTubeDetail() {
             <p className="text-xs text-muted-foreground">
               {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh"
                 ? "Your OAuth token has expired. Re-authorize to enable all Google services."
-                : "Authorize with Google to enable YouTube uploads, Gmail, Drive, Calendar, Sheets, Docs, Analytics, and Search Console."}
+                : "Authorize with Google to enable YouTube uploads and the Data API. The same authorization also powers Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, and Tag Manager — manage each from its own card on the Integrations page."}
             </p>
             <button onClick={handleAuthorize} disabled={authorizing} className={actionBtnClass}>
               {authorizing ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : <Shield className="w-4 h-4 inline mr-1" />}
-              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "Re-authorize Google" : "Authorize Google Workspace"}
+              {oauthDetail === "refresh_failed" || oauthDetail === "expired_no_refresh" ? "Re-authorize Google" : "Authorize Google"}
             </button>
           </div>
         )}
