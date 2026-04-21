@@ -269,11 +269,24 @@ serve(async (req) => {
 
       const grantedScopes = conn ? String(((conn.metadata || {}) as AnyJson).scope || "") : "";
 
+      // Surface the synced YouTube channel identity so the UI can confirm which channel is connected
+      let channelInfo: AnyJson | null = null;
+      if (conn?.external_account_id) {
+        const { data: ch } = await adminClient
+          .from("youtube_channels")
+          .select("channel_id, title, thumbnail_url, subscriber_count, video_count, view_count, fetched_at")
+          .eq("user_id", userId)
+          .eq("channel_id", conn.external_account_id)
+          .maybeSingle();
+        if (ch) channelInfo = ch as AnyJson;
+      }
+
       return jsonOk({
         success: true,
         connection: apiKeyResponse,
         oauthStatus,
         grantedScopes,
+        channelInfo,
       });
     }
 
