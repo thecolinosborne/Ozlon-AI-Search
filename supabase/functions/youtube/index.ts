@@ -444,7 +444,7 @@ serve(async (req) => {
       return jsonOk({
         success: true,
         connection: data,
-        apiKeyMasked: maskKey(apiKey),
+        apiKeyMasked: maskKey(effectiveKey),
       });
     }
 
