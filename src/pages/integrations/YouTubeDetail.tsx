@@ -680,7 +680,12 @@ export default function YouTubeDetail() {
         )}
       </div>
 
-      {/* ── Upload Video (Collapsible) ── */}
+      {/* ── Sync Runs ── */}
+      {isApiKeyConnected && savedConn?.id && (
+        <SyncRunsList connectionId={savedConn.id} refreshKey={syncRefreshKey} />
+      )}
+
+
       {oauthConnected && (
         <div className="rounded-2xl border border-border/40 bg-card/60 overflow-hidden">
           <button
