@@ -1,60 +1,34 @@
 
 
-## Next Steps — Prioritized
+## Add API Key + Channel ID Inputs to YouTube Detail Page
 
-The previous round shipped P1.1, P1.2, P2 (private buckets + signed URLs), and P3.1 (dedupe + unique index). Two items from that plan were deferred, plus a few new opportunities surfaced. Here's what's left.
+The YouTube detail page currently lacks the masked, validated input fields for the YouTube Data API key and Channel ID that other integration pages have. Add them with the same `ApiKeyInput` pattern used elsewhere (ClickUp, GHL), with live validation against the YouTube Data API and persistence into `integration_connections.metadata`.
 
-### Priority 1 — Wire up "Sync Now" for ClickUp + YouTube (deferred from last round)
+### Changes
 
-The `SyncControl` component already has a "Sync Now" button and `integration_sync_runs` table is ready, but no `onSync` handler is wired in the detail pages. All `last_sync_at` columns remain null.
+**File: `src/pages/integrations/YouTubeDetail.tsx`**
+- Add a "YouTube Data API & Channel" section using two `ApiKeyInput` components:
+  - **YouTube Data API Key** — saves into `metadata.youtube_api_key`
+  - **Channel ID** — saves into `metadata.channel_id` (with same masked/configured/edit pattern)
+- On save:
+  1. Validate the API key by calling `https://www.googleapis.com/youtube/v3/channels?part=id&mine=true&key=…` (or `id=<channel_id>` if both present).
+  2. On success → `upsertIntegrationConnection("youtube", { youtube_api_key, channel_id }, "api_key_plus_oauth")` and toast "API key validated".
+  3. On failure → toast the error and return `false` from the save handler so the input stays in edit mode.
+- Hydrate `configured` state and `maskedHint` (last 4 chars) from the existing `integration_connections` row on mount, alongside the OAuth status that's already shown.
+- Place the new section directly above the existing "Channel Settings" / connection card so it reads top-to-bottom: API Key → Channel → OAuth status.
 
-**Work:**
-- Add `youtube/sync_videos` and `clickup/sync_tasks` actions to the existing edge functions
-  - Lifecycle: insert `integration_sync_runs` row → `queued` → `running` → `succeeded`/`failed`
-  - YouTube: fetch latest 50 videos for the connected channel, store metadata
-  - ClickUp: fetch tasks from the user's default list, store summary in `metadata`
-- Add a `sync_runs` table viewer (last 5 runs) to each detail page
-- Wire `onSync` prop on `SyncControl` in `YouTubeDetail.tsx` and `ClickUpDetail.tsx`
+**File: `supabase/functions/youtube/index.ts`** (small additive change)
+- When resolving credentials for native YouTube Data API calls (search, list videos, etc.), prefer `metadata.youtube_api_key` from the user's connection over the env-var `YOUTUBE_API_KEY` fallback. OAuth-scoped calls (`mine=true`, uploads) continue to use the OAuth bearer token via `_shared/google-token.ts`.
 
-### Priority 2 — Realtime channel authorization (deferred P1.3)
+### Out of scope
 
-`realtime.messages` has no RLS, so any authenticated user can subscribe to any topic. The fix requires a small client-side channel naming convention change.
-
-**Work:**
-- Add RLS policy on `realtime.messages`:
-  `realtime.topic() like auth.uid()::text || ':%'`
-- Refactor channel names in `useChatStream.ts`, `ThreadView.tsx`, `TaskActivityPortal.tsx` to use `<uid>:<resource>` prefix (e.g. `chat_sessions` → `${uid}:chat_sessions`)
-- Backend publishers (edge functions) must broadcast to the same prefixed channel
-
-### Priority 3 — Storage signed-URL refresh helper
-
-Signed URLs expire after 7 days. Old generated images/videos referenced in chat history will 404 after that window.
-
-**Work:**
-- Add lightweight `media-signed-url` edge function: takes `{ bucket, path }`, returns a fresh signed URL
-- Wire `<ArtifactRenderer>` to call it lazily on image/video render if URL is expired (catch 403/expired token)
-
-### Priority 4 — Document service-role-only writes
-
-Three tables (`task_events`, `model_routing_log`, `routine_runs`) lack user INSERT policies — intentional, since only edge functions (service_role) write to them. The linter still flags these as warnings.
-
-**Work:**
-- Add a memory note documenting the design intent
-- Mark the three findings as "intentional" in the security scanner
-
-### Recommended sequence
-
-```text
-1. P1 — Sync Now wiring (highest user value, unblocks integration sync UX)
-2. P2 — Realtime RLS + channel rename (security, low UI risk)
-3. P3 — Signed URL refresh (prevents future broken media)
-4. P4 — Documentation pass
-```
+- No changes to OAuth flow, Google Workspace scopes, or the `_shared/google-token.ts` helper.
+- No new tables or migrations — `metadata` jsonb already holds these values per existing pattern (`SECRET_METADATA_KEYS` in `integrationConnectionService.ts` will mirror `youtube_api_key` into the vault if we add it to the map; otherwise it stays in metadata only). I'll add `youtube_api_key` to the vault mirror map for parity.
+- ClickUp redundant "Sync Now" removal (separate prior request) — not bundled here unless you want it.
 
 ### Technical notes
 
-- Sync runs should set `started_at` on insert and `completed_at` on terminal status
-- Update `integration_connections.last_sync_at` on successful run completion via trigger or in-function update
-- For Realtime RLS, channels broadcast from edge functions need to use `supabase.realtime.send()` to a uid-prefixed topic; existing `postgres_changes` subscriptions are filtered by RLS automatically once the policy is in place
-- Signed URL TTL trade-off: longer (30 days) reduces refresh calls; shorter (1 day) limits exposure if a URL leaks. 7 days is a reasonable middle ground.
+- Validation endpoint requires only the API key for public-data calls; `mine=true` requires OAuth, so the validator uses a lightweight public call: `GET /youtube/v3/videos?part=id&chart=mostPopular&maxResults=1&key=…` which returns 200 on a valid key and 400 on invalid.
+- `ApiKeyInput` already handles masked display, eye toggle, and edit/cancel states — no new UI primitives needed.
+- Channel ID is not a secret but reusing `ApiKeyInput` keeps visual parity; pass `type="text"` semantics by leaving `visible` toggle (harmless for non-secret).
 
