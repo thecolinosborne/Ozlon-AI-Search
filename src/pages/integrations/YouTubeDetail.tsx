@@ -698,45 +698,6 @@ export default function YouTubeDetail() {
         </div>
       </div>
 
-      {/* ── YouTube Data API (Collapsible) ── */}
-      <div className="rounded-2xl border border-border/40 bg-card/60 overflow-hidden">
-        <button
-          onClick={() => setYoutubeOpen(!youtubeOpen)}
-          className="w-full flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Youtube className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-            <h3 className="text-sm font-medium text-foreground">YouTube Data API & Channel</h3>
-          </div>
-          {youtubeOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </button>
-        {youtubeOpen && (
-          <div className="px-4 pb-4 space-y-3 border-t border-border/20">
-            <div className="pt-3">
-              <ApiKeyInput
-                label="YouTube Data API Key"
-                placeholder="Enter YouTube API key..."
-                configured={!!savedConn?.apiKeyConfigured}
-                onSave={handleSaveApiKey}
-                saving={savingKey}
-                maskedHint={savedConn?.apiKeyMasked}
-              />
-            </div>
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-muted-foreground">Channel Settings</h4>
-              <input type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="Channel ID (UC...)" className={inputClass} />
-              <input type="text" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} placeholder="Account label" className={inputClass} />
-              {isConnected && channelId !== (savedConn?.channelId || "") && (
-                <button onClick={handleUpdateChannel} disabled={savingKey} className={secondaryBtnClass}>
-                  {savingKey ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
-                  Update Channel
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* ── Sync Runs ── */}
       {isApiKeyConnected && savedConn?.id && (
         <SyncRunsList connectionId={savedConn.id} refreshKey={syncRefreshKey} />
