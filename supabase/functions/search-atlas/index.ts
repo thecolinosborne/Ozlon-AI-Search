@@ -6,7 +6,38 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SEARCH_ATLAS_BASE = "https://api.searchatlas.com/api/v2";
+const SEARCH_ATLAS_BASE = "https://api.searchatlas.com";
+
+// Auth schemes to probe in order on first failed call. The winning scheme is
+// cached per-request via authSchemeCache so subsequent calls skip the probe.
+type AuthScheme = "token" | "bearer" | "query";
+const AUTH_SCHEMES: AuthScheme[] = ["token", "bearer", "query"];
+let cachedScheme: AuthScheme | null = null;
+
+function buildAuthRequest(apiKey: string, url: string, scheme: AuthScheme, init: RequestInit) {
+  const headers: Record<string, string> = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  let finalUrl = url;
+  if (scheme === "token") headers["Authorization"] = `Token ${apiKey}`;
+  else if (scheme === "bearer") headers["Authorization"] = `Bearer ${apiKey}`;
+  else if (scheme === "query") {
+    const sep = url.includes("?") ? "&" : "?";
+    finalUrl = `${url}${sep}user_token=${encodeURIComponent(apiKey)}`;
+  }
+  return { finalUrl, headers };
+}
+
+function sanitizeDetail(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("<")) {
+    return "Search Atlas returned an HTML error page — endpoint path is wrong or token has no access.";
+  }
+  return trimmed.slice(0, 400);
+}
 
 // ============================================================================
 // AUTH RESOLUTION (vault → metadata → env fallback)
@@ -110,26 +141,48 @@ async function saCall(
   apiKey: string,
   path: string,
   init: RequestInit = {},
-): Promise<{ ok: boolean; status: number; data: unknown; raw: string }> {
-  const url = path.startsWith("http") ? path : `${SEARCH_ATLAS_BASE}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-  const raw = await res.text();
-  let data: unknown = raw;
-  try { data = raw ? JSON.parse(raw) : {}; } catch { /* keep raw */ }
-  return { ok: res.ok, status: res.status, data, raw };
+): Promise<{ ok: boolean; status: number; data: unknown; raw: string; scheme?: AuthScheme }> {
+  const baseUrl = path.startsWith("http") ? path : `${SEARCH_ATLAS_BASE}${path}`;
+
+  const order: AuthScheme[] = cachedScheme
+    ? [cachedScheme, ...AUTH_SCHEMES.filter((s) => s !== cachedScheme)]
+    : AUTH_SCHEMES;
+
+  let last: { ok: boolean; status: number; data: unknown; raw: string; scheme: AuthScheme } | null = null;
+  for (const scheme of order) {
+    const { finalUrl, headers } = buildAuthRequest(apiKey, baseUrl, scheme, init);
+    try {
+      const res = await fetch(finalUrl, { ...init, headers });
+      const raw = await res.text();
+      let data: unknown = raw;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = sanitizeDetail(raw); }
+      last = { ok: res.ok, status: res.status, data, raw, scheme };
+      if (res.ok) {
+        cachedScheme = scheme;
+        return last;
+      }
+      // 401/403/404 → try next scheme. Other errors (5xx, 429) → return immediately.
+      if (![401, 403, 404].includes(res.status)) {
+        return last;
+      }
+    } catch (e) {
+      last = {
+        ok: false,
+        status: 0,
+        data: e instanceof Error ? e.message : "fetch failed",
+        raw: "",
+        scheme,
+      };
+    }
+  }
+  return last!;
 }
 
 function fail(message: string, status = 400, detail?: unknown): Response {
+  let cleanDetail = detail;
+  if (typeof detail === "string") cleanDetail = sanitizeDetail(detail);
   return new Response(
-    JSON.stringify({ success: false, error: message, status, detail }),
+    JSON.stringify({ success: false, error: message, status, detail: cleanDetail }),
     { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 }
@@ -203,18 +256,24 @@ async function logSyncRun(
 // ============================================================================
 
 async function actionTestConnection(auth: AuthCtx) {
-  // Try the projects endpoint as a low-cost validation.
-  const r = await saCall(auth.apiKey, "/projects/?page_size=1");
-  if (!r.ok) return fail(`Search Atlas auth failed (HTTP ${r.status})`, r.status, r.data);
+  // Cheapest valid call to validate token against the customer account endpoint.
+  const r = await saCall(auth.apiKey, "/api/customer/account/");
+  if (!r.ok) {
+    return fail(
+      `Search Atlas auth failed (HTTP ${r.status})`,
+      r.status,
+      typeof r.data === "string" ? r.data : JSON.stringify(r.data).slice(0, 400),
+    );
+  }
   return ok({
     connected: true,
-    detail: "Token validated against /projects/",
+    detail: `Token validated via /api/customer/account/ (auth scheme: ${r.scheme})`,
     sample: r.data,
   });
 }
 
 async function actionListProjects(auth: AuthCtx) {
-  const r = await saCall(auth.apiKey, "/projects/?page_size=100");
+  const r = await saCall(auth.apiKey, "/api/v3/customer/projects/?page_size=100");
   if (!r.ok) return fail(`list_projects failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ projects: r.data });
 }
@@ -222,10 +281,9 @@ async function actionListProjects(auth: AuthCtx) {
 async function actionAuditSite(auth: AuthCtx, params: Record<string, unknown>) {
   const domain = String(params.domain || "").trim();
   if (!domain) return fail("domain is required", 400);
-  // Search Atlas Site Audit endpoint shape
   const r = await saCall(
     auth.apiKey,
-    `/site-audit/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/site-audits/?domain=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`audit_site failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "audit", domain, r.data);
@@ -237,7 +295,7 @@ async function actionSiteExplorer(auth: AuthCtx, params: Record<string, unknown>
   if (!domain) return fail("domain is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/site-explorer/overview/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/site-explorer/overview/?target=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`site_explorer failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "site_explorer", domain, r.data);
@@ -251,7 +309,7 @@ async function actionKeywordResearch(auth: AuthCtx, params: Record<string, unkno
   const limit = Math.min(Number(params.limit) || 50, 200);
   const r = await saCall(
     auth.apiKey,
-    `/keyword-research/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}&limit=${limit}`,
+    `/api/v3/keyword-researcher/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}&limit=${limit}`,
   );
   if (!r.ok) return fail(`keyword_research failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "keywords", keyword, r.data);
@@ -264,7 +322,7 @@ async function actionSerpSnapshot(auth: AuthCtx, params: Record<string, unknown>
   const country = String(params.country || "us").toLowerCase();
   const r = await saCall(
     auth.apiKey,
-    `/serp/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}`,
+    `/api/v3/serp/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}`,
   );
   if (!r.ok) return fail(`serp_snapshot failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ keyword, country, serp: r.data });
@@ -275,7 +333,7 @@ async function actionBacklinksOverview(auth: AuthCtx, params: Record<string, unk
   if (!domain) return fail("domain is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/backlinks/overview/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/backlinks/overview/?target=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`backlinks_overview failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "backlinks_overview", domain, r.data);
@@ -289,7 +347,7 @@ async function actionBacklinksList(auth: AuthCtx, params: Record<string, unknown
   const limit = Math.min(Number(params.limit) || 50, 500);
   const r = await saCall(
     auth.apiKey,
-    `/backlinks/?domain=${encodeURIComponent(domain)}&type=${encodeURIComponent(type)}&limit=${limit}`,
+    `/api/v3/backlinks/?target=${encodeURIComponent(domain)}&type=${encodeURIComponent(type)}&limit=${limit}`,
   );
   if (!r.ok) return fail(`backlinks_list failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ domain, type, backlinks: r.data });
@@ -300,7 +358,7 @@ async function actionRankTracker(auth: AuthCtx, params: Record<string, unknown>)
   if (!projectId) return fail("projectId is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/rank-tracker/${encodeURIComponent(projectId)}/keywords/`,
+    `/api/v3/rank-tracker/projects/${encodeURIComponent(projectId)}/keywords/`,
   );
   if (!r.ok) return fail(`rank_tracker failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "rank_tracker", null, r.data, projectId);
@@ -321,9 +379,9 @@ async function actionSyncNow(auth: AuthCtx, params: Record<string, unknown>) {
 
   if (domain) {
     for (const [key, path] of [
-      ["audit", `/site-audit/?domain=${encodeURIComponent(domain)}`],
-      ["site_explorer", `/site-explorer/overview/?domain=${encodeURIComponent(domain)}`],
-      ["backlinks_overview", `/backlinks/overview/?domain=${encodeURIComponent(domain)}`],
+      ["audit", `/api/v3/site-audits/?domain=${encodeURIComponent(domain)}`],
+      ["site_explorer", `/api/v3/site-explorer/overview/?target=${encodeURIComponent(domain)}`],
+      ["backlinks_overview", `/api/v3/backlinks/overview/?target=${encodeURIComponent(domain)}`],
     ] as const) {
       try {
         const r = await saCall(auth.apiKey, path);
@@ -344,7 +402,7 @@ async function actionSyncNow(auth: AuthCtx, params: Record<string, unknown>) {
     try {
       const r = await saCall(
         auth.apiKey,
-        `/rank-tracker/${encodeURIComponent(projectId)}/keywords/`,
+        `/api/v3/rank-tracker/projects/${encodeURIComponent(projectId)}/keywords/`,
       );
       if (r.ok) {
         results.rank_tracker = r.data;

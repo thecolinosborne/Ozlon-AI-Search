@@ -34,14 +34,23 @@ async function callSA(action: string, params?: Record<string, unknown>) {
   });
   if (error) {
     let serverMsg: string | null = null;
+    let serverDetail: string | null = null;
+    let serverStatus: number | null = null;
     try {
-      const ctx = (error as unknown as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+      const ctx = (error as unknown as { context?: { json?: () => Promise<{ error?: string; detail?: unknown; status?: number }> } }).context;
       if (ctx?.json) {
         const parsed = await ctx.json();
         serverMsg = parsed?.error ?? null;
+        serverStatus = typeof parsed?.status === "number" ? parsed.status : null;
+        if (parsed?.detail != null) {
+          serverDetail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail).slice(0, 300);
+        }
       }
     } catch { /* ignore */ }
-    throw new Error(serverMsg || error.message || "Request failed");
+    const parts = [serverMsg || error.message || "Request failed"];
+    if (serverStatus && !parts[0].includes(String(serverStatus))) parts.push(`(HTTP ${serverStatus})`);
+    if (serverDetail) parts.push(`— ${serverDetail}`);
+    throw new Error(parts.join(" "));
   }
   if (data?.error) throw new Error(data.error);
   return data;
