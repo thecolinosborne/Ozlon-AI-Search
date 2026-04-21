@@ -477,8 +477,8 @@ export default function YouTubeDetail() {
 
   return (
     <IntegrationDetailLayout
-      name="Google Workspace"
-      description="YouTube, Gmail, Drive, Calendar, Sheets, Docs, Analytics, Search Console — one OAuth."
+      name="YouTube"
+      description="Channel data, video uploads, and the YouTube Data API."
       icon={Youtube}
       status={integration.status}
       actions={
