@@ -556,7 +556,7 @@ export default function YouTubeDetail() {
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
-          <h3 className="text-sm font-medium text-foreground">Google OAuth Connection</h3>
+          <h3 className="text-sm font-medium text-foreground">Google Account (shared OAuth)</h3>
           {oauthConnected && (
             <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Active</span>
           )}
