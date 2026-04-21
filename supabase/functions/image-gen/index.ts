@@ -192,10 +192,17 @@ serve(async (req) => {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const { data: pub } = admin.storage.from("generated-images").getPublicUrl(path);
+    const { data: signed, error: signErr } = await admin.storage
+      .from("generated-images")
+      .createSignedUrl(path, 60 * 60 * 24 * 7); // 7 days
+    if (signErr || !signed?.signedUrl) {
+      return new Response(JSON.stringify({ error: "Sign URL failed", detail: signErr?.message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     return new Response(
-      JSON.stringify({ url: pub.publicUrl, model: modelUsed, mode: body.inputImageUrl ? "edit" : "generate" }),
+      JSON.stringify({ url: signed.signedUrl, model: modelUsed, mode: body.inputImageUrl ? "edit" : "generate" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
