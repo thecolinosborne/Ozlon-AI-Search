@@ -26,6 +26,15 @@ import DescriptDetail from "@/pages/integrations/DescriptDetail";
 import HiggsFieldDetail from "@/pages/integrations/HiggsFieldDetail";
 import ClickUpDetail from "@/pages/integrations/ClickUpDetail";
 import YouTubeDetail from "@/pages/integrations/YouTubeDetail";
+import GmailDetail from "@/pages/integrations/GmailDetail";
+import GoogleDriveDetail from "@/pages/integrations/GoogleDriveDetail";
+import GoogleCalendarDetail from "@/pages/integrations/GoogleCalendarDetail";
+import GoogleSheetsDetail from "@/pages/integrations/GoogleSheetsDetail";
+import GoogleDocsDetail from "@/pages/integrations/GoogleDocsDetail";
+import GoogleSlidesDetail from "@/pages/integrations/GoogleSlidesDetail";
+import GoogleAnalyticsDetail from "@/pages/integrations/GoogleAnalyticsDetail";
+import GoogleSearchConsoleDetail from "@/pages/integrations/GoogleSearchConsoleDetail";
+import GoogleTagManagerDetail from "@/pages/integrations/GoogleTagManagerDetail";
 import Events from "@/pages/Events";
 import Finance from "@/pages/Finance";
 import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
@@ -74,6 +83,15 @@ const AppRoutes = () => {
         <Route path="/integrations/higgsfield" element={<HiggsFieldDetail />} />
         <Route path="/integrations/clickup" element={<ClickUpDetail />} />
         <Route path="/integrations/youtube" element={<YouTubeDetail />} />
+        <Route path="/integrations/gmail" element={<GmailDetail />} />
+        <Route path="/integrations/google-drive" element={<GoogleDriveDetail />} />
+        <Route path="/integrations/google-calendar" element={<GoogleCalendarDetail />} />
+        <Route path="/integrations/google-sheets" element={<GoogleSheetsDetail />} />
+        <Route path="/integrations/google-docs" element={<GoogleDocsDetail />} />
+        <Route path="/integrations/google-slides" element={<GoogleSlidesDetail />} />
+        <Route path="/integrations/google-analytics" element={<GoogleAnalyticsDetail />} />
+        <Route path="/integrations/google-search-console" element={<GoogleSearchConsoleDetail />} />
+        <Route path="/integrations/google-tag-manager" element={<GoogleTagManagerDetail />} />
         <Route path="/events" element={<Events />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
