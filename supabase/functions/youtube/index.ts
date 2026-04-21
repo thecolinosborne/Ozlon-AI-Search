@@ -427,45 +427,48 @@ serve(async (req) => {
         data = inserted;
       }
 
-      // Dual-write: mirror api_key into encrypted vault (best-effort, non-blocking)
-      try {
-        const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
-        if (vaultKey) {
-          const keyBytes = new TextEncoder().encode(vaultKey);
-          if (keyBytes.length === 32) {
-            const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-            const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
-              _connection_id: data.id,
-              _user_id: userId,
-              _plaintext: effectiveKey,
-              _encryption_key: hexKey,
-              _secret_name: "api_key",
-            });
-            if (rpcErr) {
-              console.warn("[youtube/connect] vault store_user_secret failed:", rpcErr.message);
-            } else {
-              await adminClient.from("credential_audit_log").insert({
-                user_id: userId,
-                connection_id: data.id,
-                provider: "youtube",
-                action: "vault_store",
-                detail: "api_key",
+      // Dual-write: mirror api_key into encrypted vault ONLY when a new key was provided
+      if (apiKey) {
+        try {
+          const vaultKey = Deno.env.get("VAULT_ENCRYPTION_KEY");
+          if (vaultKey) {
+            const keyBytes = new TextEncoder().encode(vaultKey);
+            if (keyBytes.length === 32) {
+              const hexKey = "\\x" + Array.from(keyBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+              const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
+                _connection_id: data.id,
+                _user_id: userId,
+                _plaintext: apiKey,
+                _encryption_key: hexKey,
+                _secret_name: "api_key",
               });
+              if (rpcErr) {
+                console.warn("[youtube/connect] vault store_user_secret failed:", rpcErr.message);
+              } else {
+                await adminClient.from("credential_audit_log").insert({
+                  user_id: userId,
+                  connection_id: data.id,
+                  provider: "youtube",
+                  action: "vault_store",
+                  detail: "api_key",
+                });
+              }
+            } else {
+              console.warn(`[youtube/connect] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
             }
           } else {
-            console.warn(`[youtube/connect] VAULT_ENCRYPTION_KEY wrong length: ${keyBytes.length}`);
+            console.warn("[youtube/connect] VAULT_ENCRYPTION_KEY not set, skipping vault mirror");
           }
-        } else {
-          console.warn("[youtube/connect] VAULT_ENCRYPTION_KEY not set, skipping vault mirror");
+        } catch (e) {
+          console.warn("[youtube/connect] vault mirror threw:", e instanceof Error ? e.message : e);
         }
-      } catch (e) {
-        console.warn("[youtube/connect] vault mirror threw:", e instanceof Error ? e.message : e);
       }
 
+      const finalMaskedKey = String(((data?.metadata || {}) as AnyJson).api_key_masked || "");
       return jsonOk({
         success: true,
         connection: data,
-        apiKeyMasked: maskKey(effectiveKey),
+        apiKeyMasked: finalMaskedKey,
       });
     }
 
