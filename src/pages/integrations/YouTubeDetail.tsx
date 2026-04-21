@@ -216,7 +216,7 @@ export default function YouTubeDetail() {
       await callYouTube("oauth_callback", { code, redirectUri: `${window.location.origin}/integrations/youtube` });
       const oauthStatus = await loadConnectionWithRetry();
       if (oauthStatus === "connected" || oauthStatus === "refreshed") {
-        toast.success("Google Workspace OAuth connected!");
+        toast.success("Google account connected — all services authorized");
         return;
       }
       throw new Error("OAuth completed but the connection status did not persist");
