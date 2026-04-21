@@ -623,42 +623,24 @@ export default function YouTubeDetail() {
         </div>
       </div>
 
-      {/* ── Connected APIs Grid ── */}
+      {/* ── Other Google services ── */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">Connected Google APIs</h3>
+        <h3 className="text-sm font-medium text-foreground">Other Google services</h3>
         <p className="text-xs text-muted-foreground">
-          {oauthConnected
-            ? "All services below share the same OAuth token. Test each to verify the API is enabled in your Google Cloud project."
-            : "Connect OAuth above to enable these services."}
+          The same Google authorization powers these services. Each has its own card with tests and settings.
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {GOOGLE_SERVICES.map((svc) => {
-            const test = serviceTests[svc.id];
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {SISTER_GOOGLE_SERVICES.map((svc) => {
             const Icon = svc.icon;
             return (
-              <button
+              <Link
                 key={svc.id}
-                disabled={!oauthConnected || test?.status === "testing"}
-                onClick={() => testService(svc.id)}
-                className={cn(
-                  "flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors text-center",
-                  test?.status === "ok" ? "border-primary/40 bg-primary/5" :
-                  test?.status === "error" ? "border-destructive/40 bg-destructive/5" :
-                  "border-border/40 bg-card/40 hover:bg-muted/40",
-                  !oauthConnected && "opacity-40 cursor-not-allowed",
-                )}
+                to={svc.path}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/40 bg-card/40 hover:bg-muted/40 transition-colors"
               >
-                <div className="relative">
-                  <Icon className="w-5 h-5 text-foreground" strokeWidth={1.5} />
-                  {test?.status === "ok" && <CheckCircle2 className="w-3 h-3 text-primary absolute -top-1 -right-2" />}
-                  {test?.status === "error" && <XCircle className="w-3 h-3 text-destructive absolute -top-1 -right-2" />}
-                  {test?.status === "testing" && <Loader2 className="w-3 h-3 text-muted-foreground animate-spin absolute -top-1 -right-2" />}
-                </div>
-                <span className="text-[11px] font-medium text-foreground leading-tight">{svc.name}</span>
-                {test?.status === "error" && (
-                  <span className="text-[9px] text-destructive leading-tight line-clamp-2">{test.message}</span>
-                )}
-              </button>
+                <Icon className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
+                <span className="text-xs font-medium text-foreground">{svc.name}</span>
+              </Link>
             );
           })}
         </div>
