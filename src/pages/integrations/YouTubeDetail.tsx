@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
+  Settings2, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -10,6 +11,7 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { isServiceGranted, getGoogleServiceConfig } from "@/lib/googleScopes";
 
 function normalizeVideoUrl(url: string): string {
   const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
@@ -52,6 +54,7 @@ export default function YouTubeDetail() {
 
   const [oauthConnected, setOauthConnected] = useState(false);
   const [oauthDetail, setOauthDetail] = useState<OAuthDetail>("unknown");
+  const [grantedScopes, setGrantedScopes] = useState<string>("");
   const [authorizing, setAuthorizing] = useState(false);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
@@ -140,6 +143,7 @@ export default function YouTubeDetail() {
       lastOauthStatus = oauthStatus;
       setOauthDetail(oauthStatus);
       setOauthConnected(oauthStatus === "connected" || oauthStatus === "refreshed");
+      setGrantedScopes(String(result.grantedScopes || ""));
 
       if (oauthStatus === "connected" || oauthStatus === "refreshed") {
         return oauthStatus;
@@ -481,6 +485,37 @@ export default function YouTubeDetail() {
         ) : undefined
       }
     >
+      {/* ── Google Cloud setup guide for YouTube Data API ── */}
+      {(() => {
+        const scopeCfg = getGoogleServiceConfig("youtube");
+        if (!scopeCfg) return null;
+        return (
+          <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-3">
+            <div className="flex items-start gap-2">
+              <Settings2 className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" strokeWidth={1.5} />
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-foreground">Google Cloud setup</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enable <span className="font-medium text-foreground">{scopeCfg.apiName}</span> in your Google Cloud project before authorizing. The same OAuth client powers all sister Google services, but each API must be enabled individually.
+                </p>
+                <p className="text-xs text-muted-foreground/80 mt-2">
+                  <span className="font-medium text-foreground/90">Scope summary:</span> {scopeCfg.scopeSummary}.
+                </p>
+              </div>
+            </div>
+            <a
+              href={scopeCfg.cloudConsoleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-border/60 bg-background hover:bg-muted/40 transition-colors"
+            >
+              Enable {scopeCfg.apiName} in Google Cloud
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        );
+      })()}
+
       {/* ── YouTube Data API & Channel (always visible, validated, masked) ── */}
       <div className="p-4 rounded-2xl border border-border/40 bg-card/60 space-y-4">
         <div className="flex items-center gap-2">
