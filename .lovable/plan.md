@@ -1,41 +1,49 @@
 
 
-## Make YouTube its Own Integration Page (Remove Google Workspace Branding)
+## Fix: YouTube API Key & Channel ID Not Showing as Configured
 
-The `/integrations/youtube` page currently still renders as the old "Google Workspace" hub — wrong title, wrong description, and a cross-service test grid for Gmail/Drive/Calendar/etc. Now that each Google service has its own dedicated page, the YouTube page should be YouTube-only.
+### Root cause
 
-### Changes
+There is exactly **one** `integration_connections` row per `(user_id, provider="youtube")` (enforced by unique index). That single row holds *both* the OAuth tokens *and* the API key in `metadata`.
 
-**File: `src/pages/integrations/YouTubeDetail.tsx`**
+- The `connect` action (saving API key + Channel ID) correctly **updates** that single row's `metadata.api_key`, `metadata.api_key_masked`, and `external_account_id` (channel ID) — but it preserves the existing `auth_type` (which is `"oauth2"` because you authorized OAuth previously).
+- The `get_connection` action reads the API key state with `.eq("auth_type", "api_key")` — which **excludes** your row because its `auth_type` is `"oauth2"`. So the UI gets `connection: null` and shows the inputs as not configured, even though your key + channel ID are saved.
 
-1. **Header (lines 499–517)** — change both the loading-state and main `IntegrationDetailLayout`:
-   - `name`: `"Google Workspace"` → `"YouTube"`
-   - `description`: `"YouTube, Gmail, Drive, ... — one OAuth."` → `"Channel data, video uploads, and the YouTube Data API."`
-   - `icon`: keep `Youtube`
+This also blocks update flows: when `ApiKeyInput` shows "Configured ✓", clicking **Update** would let you paste a new key — but you never see "Configured", so the saved values appear lost.
 
-2. **OAuth section (lines 589–658)**:
-   - Rename heading `"Google OAuth Connection"` → `"Google Account (shared OAuth)"`
-   - Update copy in the not-connected state from "Authorize with Google to enable YouTube uploads, Gmail, Drive, …" → "Authorize with Google to enable YouTube uploads and the Data API. The same authorization also powers Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, and Tag Manager — manage each from its own card on the Integrations page."
-   - Update the "Authorize Google Workspace" button label → "Authorize Google"
+### Fix (1 file)
 
-3. **Remove the "Connected Google APIs" grid (lines 660–699)** — delete the entire block including the `GOOGLE_SERVICES` map, `serviceTests` state, `testService` function, and the `callFunction` helper. Each service now has its own detail page that handles its own test.
+**`supabase/functions/youtube/index.ts` — `get_connection` action (lines ~221–287)**
 
-4. **Cleanup** — remove the now-unused imports: `Mail, HardDrive, Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, CheckCircle2, XCircle` (keep `Youtube`, `AlertCircle`, `Loader2`, `Upload`, `Shield`, `ChevronDown`, `ChevronUp`).
+Stop filtering by `auth_type`. There's only one row per provider; read it directly and derive both states from a single fetch:
 
-5. **Add a small footer link grid** below the OAuth section linking to the 9 sister Google service pages (Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, Tag Manager). Lightweight pill links — purely navigational, no test buttons.
+1. Replace the two filtered queries with **one** query: `.eq("user_id", userId).eq("provider", "youtube").maybeSingle()`.
+2. Build `apiKeyResponse` whenever `metadata.api_key` is present (regardless of `auth_type`). The masked hint comes from `metadata.api_key_masked`, channel ID from `external_account_id`, label from `external_account_label`.
+3. Build `oauthStatus` from the same row using `metadata.access_token` / `metadata.refresh_token` / `metadata.expires_at` (regardless of `auth_type`). Keep the existing refresh-on-expired logic.
+4. Set `apiKeyResponse.status = "connected"` whenever a valid `metadata.api_key` exists.
 
-6. **OAuth-success toast (line 253)** — change `"Google Workspace OAuth connected!"` → `"Google account connected — all services authorized"`.
+**`connect` action (lines ~289–454) — small hardening**
+
+When updating an existing row whose `auth_type` is `oauth2`, ALSO write a clear flag so future reads aren't ambiguous. Two tiny touches:
+- Always set `metadata.api_key_masked` (already done).
+- After UPDATE, if the row's `auth_type` was `oauth2`, leave it as-is (OAuth still works) — no schema/auth_type change needed once the read side is fixed.
+
+### What you'll see after the fix
+
+- Reload `/integrations/youtube` → "YouTube Data API Key" shows **Configured ✓** with the masked tail (`***xxxx`).
+- "Channel ID" shows **Configured ✓** with `UCxx…xxxx`.
+- Clicking **Update** on either reveals an input prefilled-empty so you can paste a new value; saving runs the same `connect` action which validates with Google (`/videos?part=snippet&id=…`) before overwriting.
+- The same one row continues to power OAuth for all 9 sister Google services — no migration, no data loss.
 
 ### Out of scope
 
-- No backend, OAuth scope, or `_shared/google-token.ts` changes.
-- No changes to the 9 per-service detail pages (they already exist and work).
-- No changes to the Integrations registry or category filter.
-- The shared OAuth row in `integration_connections` (`provider="youtube"`) stays as-is — every Google service card continues to read from it.
+- No DB migration. No schema changes. No frontend changes (the inputs already render correctly when `apiKeyConfigured` and `channelId` come back true).
+- No changes to OAuth flow, sync logic, upload form, or sister Google service pages.
+- The `auth_type` column stays as a soft hint only; the source of truth is `metadata.api_key` + `metadata.access_token`.
 
 ### Technical notes
 
-- The page-level `status` chip will continue to show "Connected" once either the API key or OAuth is present, matching the existing `isConnected` derived state.
-- Removing `GOOGLE_SERVICES`, `serviceTests`, `testService`, and `callFunction` reduces ~35 lines of dead state and removes confusion about where to test each service.
-- Footer pill grid uses simple `react-router-dom` `<Link>` elements styled like the existing `secondaryBtnClass` for visual parity — no new components.
+- The unique index on `(user_id, provider)` guarantees `maybeSingle()` is safe.
+- Existing rows already have `metadata.api_key` and `metadata.api_key_masked` populated from your earlier saves — no backfill needed; the fix is purely on the read path.
+- `validateApiKey` continues to use the cheap 1-quota `/videos?id=dQw4w9WgXcQ` call, and channel-ID validation continues to use `/channels?part=snippet&id=…`, both surfacing Google's specific error reasons (`API_KEY_INVALID`, `SERVICE_DISABLED`, etc.) on failure.
 
