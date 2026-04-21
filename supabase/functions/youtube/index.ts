@@ -302,13 +302,13 @@ serve(async (req) => {
         channelId: channelId || null,
       });
 
-      // Find existing api_key row
+      // Find existing youtube connection (any auth_type — unique constraint is on (user_id, provider))
       const { data: existing, error: existingErr } = await adminClient
         .from("integration_connections")
-        .select("id, metadata, external_account_id, external_account_label")
+        .select("id, metadata, external_account_id, external_account_label, auth_type, status")
         .eq("user_id", userId)
         .eq("provider", "youtube")
-        .eq("auth_type", "api_key")
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
