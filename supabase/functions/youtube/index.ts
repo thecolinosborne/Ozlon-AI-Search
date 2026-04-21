@@ -369,17 +369,22 @@ serve(async (req) => {
 
       let data;
       if (existing) {
+        // Preserve existing credential_ref (e.g. "oauth_tokens") if already set.
+        const updatePayload: AnyJson = {
+          status: "connected",
+          external_account_id: channelId || existing.external_account_id || null,
+          external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
+          last_validated_at: new Date().toISOString(),
+          last_error: null,
+          metadata: newMeta,
+        };
+        // Only set credential_ref if the row doesn't already track OAuth tokens
+        if (existing.auth_type !== "oauth") {
+          updatePayload.credential_ref = "server_stored_api_key";
+        }
         const { data: updated, error } = await adminClient
           .from("integration_connections")
-          .update({
-            credential_ref: "server_stored_api_key",
-            status: "connected",
-            external_account_id: channelId || existing.external_account_id || null,
-            external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
-            last_validated_at: new Date().toISOString(),
-            last_error: null,
-            metadata: newMeta,
-          })
+          .update(updatePayload)
           .eq("id", existing.id)
           .select("*")
           .single();
