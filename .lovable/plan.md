@@ -1,49 +1,93 @@
 
 
-## Fix: YouTube API Key & Channel ID Not Showing as Configured
+## Per-Service Google Status + Setup Guide (One Cloud Project, Many Services)
 
-### Root cause
+Right now all 9 sister Google cards (Gmail, Drive, Calendar, Sheets, Docs, Slides, Analytics, Search Console, Tag Manager) light up "Connected" the moment YouTube OAuth completes — because the Integrations page reads a single `provider="youtube"` row and treats any green status as green for everyone. That's wrong: a card should only show "Connected" if the user actually granted that service's scope. We'll also add a clear, per-service Google Cloud setup guide so users know what API to enable and what they're authorizing.
 
-There is exactly **one** `integration_connections` row per `(user_id, provider="youtube")` (enforced by unique index). That single row holds *both* the OAuth tokens *and* the API key in `metadata`.
+### Architecture
 
-- The `connect` action (saving API key + Channel ID) correctly **updates** that single row's `metadata.api_key`, `metadata.api_key_masked`, and `external_account_id` (channel ID) — but it preserves the existing `auth_type` (which is `"oauth2"` because you authorized OAuth previously).
-- The `get_connection` action reads the API key state with `.eq("auth_type", "api_key")` — which **excludes** your row because its `auth_type` is `"oauth2"`. So the UI gets `connection: null` and shows the inputs as not configured, even though your key + channel ID are saved.
+The shared OAuth row stays as-is (one row, all tokens). What changes is **how status is derived** and **what each service page tells the user about setup**.
 
-This also blocks update flows: when `ApiKeyInput` shows "Configured ✓", clicking **Update** would let you paste a new key — but you never see "Configured", so the saved values appear lost.
+```text
+integration_connections (provider="youtube")
+  metadata.scope = "https://...youtube.upload https://...gmail.readonly ..."
+                                  │
+                  ┌───────────────┴────────────────┐
+                  ▼                                ▼
+         Integrations page              Per-service detail page
+         (parses scope string,          (shows green only if
+         lights up only granted         this service's scope is
+         service cards)                 in metadata.scope)
+```
 
-### Fix (1 file)
+### Changes
 
-**`supabase/functions/youtube/index.ts` — `get_connection` action (lines ~221–287)**
+**1. New: `src/lib/googleScopes.ts`** — single source of truth
 
-Stop filtering by `auth_type`. There's only one row per provider; read it directly and derive both states from a single fetch:
+Map each service id to the OAuth scope(s) that signal it's actually granted, plus its Google Cloud setup metadata:
 
-1. Replace the two filtered queries with **one** query: `.eq("user_id", userId).eq("provider", "youtube").maybeSingle()`.
-2. Build `apiKeyResponse` whenever `metadata.api_key` is present (regardless of `auth_type`). The masked hint comes from `metadata.api_key_masked`, channel ID from `external_account_id`, label from `external_account_label`.
-3. Build `oauthStatus` from the same row using `metadata.access_token` / `metadata.refresh_token` / `metadata.expires_at` (regardless of `auth_type`). Keep the existing refresh-on-expired logic.
-4. Set `apiKeyResponse.status = "connected"` whenever a valid `metadata.api_key` exists.
+```ts
+export const GOOGLE_SERVICE_SCOPES: Record<string, {
+  requiredScopes: string[];      // any one match = granted
+  apiName: string;                // shown in setup guide
+  cloudConsoleUrl: string;        // direct link to enable the API
+  scopeSummary: string;           // human description for setup card
+}> = {
+  youtube:                { requiredScopes: ["youtube.upload","youtube.readonly"], apiName: "YouTube Data API v3", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", scopeSummary: "Upload videos, read channel + analytics" },
+  gmail:                  { requiredScopes: ["gmail.readonly","gmail.send","gmail.modify"], apiName: "Gmail API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/gmail.googleapis.com", scopeSummary: "Read, send, and trash messages" },
+  "google-drive":         { requiredScopes: ["drive.readonly","drive.file"], apiName: "Google Drive API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/drive.googleapis.com", scopeSummary: "List files, upload, read content" },
+  "google-calendar":      { requiredScopes: ["calendar","calendar.events"], apiName: "Google Calendar API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com", scopeSummary: "Create and manage events" },
+  "google-sheets":        { requiredScopes: ["spreadsheets"], apiName: "Google Sheets API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/sheets.googleapis.com", scopeSummary: "Read/write spreadsheet ranges" },
+  "google-docs":          { requiredScopes: ["documents"], apiName: "Google Docs API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/docs.googleapis.com", scopeSummary: "Create and edit documents" },
+  "google-slides":        { requiredScopes: ["presentations"], apiName: "Google Slides API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/slides.googleapis.com", scopeSummary: "Create and edit presentations" },
+  "google-analytics":     { requiredScopes: ["analytics.readonly"], apiName: "Analytics Data API (GA4)", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com", scopeSummary: "Query GA4 reports" },
+  "google-search-console":{ requiredScopes: ["webmasters.readonly"], apiName: "Search Console API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/searchconsole.googleapis.com", scopeSummary: "Read SEO performance data" },
+  "google-tag-manager":   { requiredScopes: ["tagmanager.readonly","tagmanager.edit.containers","tagmanager.publish"], apiName: "Tag Manager API", cloudConsoleUrl: "https://console.cloud.google.com/apis/library/tagmanager.googleapis.com", scopeSummary: "Read and edit GTM containers" },
+};
 
-**`connect` action (lines ~289–454) — small hardening**
+export function isServiceGranted(serviceId: string, grantedScopeString: string | null | undefined): boolean {
+  const cfg = GOOGLE_SERVICE_SCOPES[serviceId];
+  if (!cfg || !grantedScopeString) return false;
+  return cfg.requiredScopes.some(s => grantedScopeString.includes(s));
+}
+```
 
-When updating an existing row whose `auth_type` is `oauth2`, ALSO write a clear flag so future reads aren't ambiguous. Two tiny touches:
-- Always set `metadata.api_key_masked` (already done).
-- After UPDATE, if the row's `auth_type` was `oauth2`, leave it as-is (OAuth still works) — no schema/auth_type change needed once the read side is fixed.
+**2. `src/pages/Integrations.tsx` — derive per-service status from scope**
 
-### What you'll see after the fix
+In the hydrate effect, when the `youtube` provider row is found, fetch its `metadata->>scope` (extend the select). For each Google card, set status to `connected` only when `isServiceGranted(id, scope)` is true. The `youtube` card itself uses the same check (won't false-positive). Non-Google integrations (gohighlevel, descript, clickup) keep current behavior.
 
-- Reload `/integrations/youtube` → "YouTube Data API Key" shows **Configured ✓** with the masked tail (`***xxxx`).
-- "Channel ID" shows **Configured ✓** with `UCxx…xxxx`.
-- Clicking **Update** on either reveals an input prefilled-empty so you can paste a new value; saving runs the same `connect` action which validates with Google (`/videos?part=snippet&id=…`) before overwriting.
-- The same one row continues to power OAuth for all 9 sister Google services — no migration, no data loss.
+**3. `src/components/integrations/GoogleServiceDetail.tsx` — per-service truth + setup card**
+
+- Read the granted `scope` from the existing `get_connection` response (already returns `oauthStatus`; we'll also surface `grantedScopes` from `metadata.scope` — small additive field in the YouTube edge function `get_connection` action).
+- "Authorized" badge becomes green ONLY when `isServiceGranted(config.serviceId, grantedScopes)` is true. If OAuth row exists but this scope isn't granted, show amber "Authorized at the account level — re-authorize to grant <ServiceName>".
+- Replace the "Re-authorize" button copy with **"Authorize <ServiceName>"** (still hits the shared OAuth flow — Google's consent screen will list the same scope set; this messaging just makes it accurate).
+- New **Setup card** above the OAuth card: shows `apiName`, `scopeSummary`, and a primary link to `cloudConsoleUrl` ("Enable <API name> in Google Cloud") plus a one-line note that the same OAuth client (`YOUTUBE_CLIENT_ID`) authorizes all Google services. This gives users a clear path before they hit "Authorize".
+
+**4. `src/pages/integrations/YouTubeDetail.tsx` — same treatment**
+
+Add the same Setup card at the top (YouTube Data API v3 + console link), and gate its "Connected" pill on `isServiceGranted("youtube", scope)` — so YouTube alone (not Drive/Gmail/etc.) drives the YouTube card's status. The existing API key + Channel ID inputs remain unchanged and continue to work via the fix that just shipped.
+
+**5. `supabase/functions/youtube/index.ts` — `get_connection` returns `grantedScopes`**
+
+Tiny additive change to the response payload (no schema change): include `grantedScopes: meta.scope ?? null` alongside `oauthStatus`. Frontend uses it for the per-service gating above. No other backend logic changes — token refresh, validation, sync runs all stay identical.
+
+### What you'll see
+
+- **Integrations page**: After authorizing OAuth, only the cards whose scopes Google actually returned in the consent (`metadata.scope`) light up green. Cards for unauthorized scopes stay grey with "Not authorized".
+- **Each Google service detail page**: At the top, a Setup card explains exactly what API to enable in Google Cloud + a direct console link. Below that, the OAuth status reflects only that service's scope. The Authorize button takes you through the same shared consent — but the page only goes green when *this* service's scope comes back.
+- **YouTube page**: same Setup card pattern. API key + Channel ID still saveable and updatable.
 
 ### Out of scope
 
-- No DB migration. No schema changes. No frontend changes (the inputs already render correctly when `apiKeyConfigured` and `channelId` come back true).
-- No changes to OAuth flow, sync logic, upload form, or sister Google service pages.
-- The `auth_type` column stays as a soft hint only; the source of truth is `metadata.api_key` + `metadata.access_token`.
+- No new OAuth client, no per-service incremental consent, no scope splitting (Google requires re-consent to add scopes — that's already what "Authorize" does).
+- No DB migration. No new tables. No changes to sync logic, edge function tool calls, or the shared `_shared/google-token.ts` helper.
+- No changes to non-Google integrations (GHL, Descript, ClickUp).
+- The `PROVIDER_BY_ID` map stays — all Google services still read from the single `provider="youtube"` OAuth row.
 
 ### Technical notes
 
-- The unique index on `(user_id, provider)` guarantees `maybeSingle()` is safe.
-- Existing rows already have `metadata.api_key` and `metadata.api_key_masked` populated from your earlier saves — no backfill needed; the fix is purely on the read path.
-- `validateApiKey` continues to use the cheap 1-quota `/videos?id=dQw4w9WgXcQ` call, and channel-ID validation continues to use `/channels?part=snippet&id=…`, both surfacing Google's specific error reasons (`API_KEY_INVALID`, `SERVICE_DISABLED`, etc.) on failure.
+- Google returns the granted scope set in `tokenData.scope` (already persisted as `metadata.scope`). Substring matching on the short suffix (e.g. `"gmail.send"`) is safe because Google scope strings are uniquely suffixed.
+- If a user previously authorized with the full scope set (current behavior), all cards correctly light up after this change — no backfill needed.
+- If `metadata.scope` is missing on legacy rows, `isServiceGranted` returns false and the user sees "Not authorized" until they re-authorize once. Acceptable since they can simply click Authorize.
+- Setup-card links are static; no API calls.
 
