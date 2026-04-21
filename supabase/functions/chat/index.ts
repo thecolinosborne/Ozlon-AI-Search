@@ -3262,10 +3262,109 @@ const ACTION_TOOLS: ToolDef[] = [
           embeddable: { type: 'boolean' },
           public_stats_viewable: { type: 'boolean' },
           notify_subscribers: { type: 'boolean', description: 'Default true. Set false for silent uploads.' },
-          pinned_comment: { type: 'string', description: 'Comment to post on the video. Auto-pin attempted but may require manual pin in Studio.' },
+    },
+  },
+  // ============ Search Atlas (SEO intelligence) ============
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_audit_site',
+      description: 'Run a Search Atlas site audit for a domain. Returns crawl issues, on-page SEO scores, and technical health metrics.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string', description: 'Root domain, e.g. "example.com"' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_site_explorer',
+      description: 'Search Atlas Site Explorer overview for a domain — estimated traffic, top pages, authority metrics.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string', description: 'Root domain, e.g. "example.com"' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_keyword_research',
+      description: 'Search Atlas keyword research — volume, difficulty, CPC, and SERP intent for a seed keyword.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          country: { type: 'string', description: 'ISO country code (default "us")' },
+          limit: { type: 'number', description: 'Max related keywords (default 50, max 200)' },
         },
-        required: ['title', 'video_url'],
-        additionalProperties: false,
+        required: ['keyword'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_serp_snapshot',
+      description: 'Live SERP snapshot from Search Atlas for a keyword in a given country.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          country: { type: 'string', description: 'ISO country code (default "us")' },
+        },
+        required: ['keyword'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_backlinks_overview',
+      description: 'Search Atlas backlinks overview — total backlinks, referring domains, anchor text distribution.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_backlinks_list',
+      description: 'Paginated backlink rows from Search Atlas. Filter by type: active, new, or lost.',
+      parameters: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          type: { type: 'string', enum: ['active', 'new', 'lost'], description: 'Filter (default "active")' },
+          limit: { type: 'number', description: 'Max rows (default 50, max 500)' },
+        },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_list_projects',
+      description: 'List the user\'s Search Atlas rank-tracking projects so you can pick a projectId for searchatlas_rank_tracker.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_rank_tracker',
+      description: 'Tracked keyword positions for a Search Atlas rank-tracker project.',
+      parameters: {
+        type: 'object',
+        properties: { projectId: { type: 'string', description: 'Search Atlas project ID' } },
+        required: ['projectId'],
       },
     },
   },
