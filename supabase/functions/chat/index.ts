@@ -5330,9 +5330,8 @@ async function executeToolCall(
           return { success: false, result: `Search Atlas error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
       }
-
+      case 'web_search_google': {
         try {
-          const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
           if (!LOVABLE_API_KEY) return { success: false, result: 'Search API not configured.' };
           const keyword = args.keyword as string;
           const numResults = Math.min((args.num_results as number) || 10, 20);
