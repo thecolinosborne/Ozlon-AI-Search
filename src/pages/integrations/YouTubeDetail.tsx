@@ -105,7 +105,7 @@ export default function YouTubeDetail() {
   const [youtubeOpen, setYoutubeOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  const [serviceTests, setServiceTests] = useState<Record<string, ServiceTestResult>>({});
+  
 
   const hasLoadedOnce = useRef(false);
   const oauthHandledRef = useRef(false);
