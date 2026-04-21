@@ -2,6 +2,11 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
+export type LiveStep = {
+  label: string;
+  status: "in_progress" | "done" | "error";
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -9,6 +14,7 @@ export type ChatMessage = {
   provider?: ProviderUsedEvent;
   toolsUsed?: ToolUsedInfo[];
   orchestration?: OrchestrationTraceEvent;
+  liveSteps?: LiveStep[];
 };
 
 /**
@@ -223,6 +229,17 @@ export function useChatStream({
           onToolCall: (toolName, toolArgs) => {
             if (!isCurrentRequest()) return;
             if (isDev) console.log(`[useChatStream] Tool: ${toolName}`, toolArgs);
+            const label = `Calling ${toolName}…`;
+            safeSetInflight((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const steps = m.liveSteps ? [...m.liveSteps] : [];
+                if (!steps.some((s) => s.label === label)) {
+                  steps.push({ label, status: "in_progress" });
+                }
+                return { ...m, liveSteps: steps };
+              })
+            );
           },
           onDelta: (delta) => {
             if (!isCurrentRequest()) return;
@@ -238,6 +255,27 @@ export function useChatStream({
           onTaskUpdate: (update: TaskUpdate) => {
             if (!isCurrentRequest()) return;
             requestTaskIdsRef.current.add(update.taskId);
+
+            const stepLabel = `${update.title}: ${update.step}`;
+            safeSetInflight((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const steps = m.liveSteps ? [...m.liveSteps] : [];
+                const idx = steps.findIndex((s) => s.label === stepLabel);
+                const nextStatus: LiveStep["status"] =
+                  update.status === "done"
+                    ? "done"
+                    : update.status === "error"
+                    ? "error"
+                    : "in_progress";
+                if (idx >= 0) {
+                  steps[idx] = { ...steps[idx], status: nextStatus };
+                } else {
+                  steps.push({ label: stepLabel, status: nextStatus });
+                }
+                return { ...m, liveSteps: steps };
+              })
+            );
 
             if (update.status === "in_progress") {
               const existing = useTaskActivityStore

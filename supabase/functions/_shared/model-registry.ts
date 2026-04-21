@@ -379,10 +379,8 @@ export async function callWithFallback(opts: CallOptions): Promise<CallResult> {
   // USE_GAUNTLET=1 (project secret) routes through gauntlet-router which picks
   // a stone (OpenAI/Gemini/Anthropic/Higgsfield/Lovable) by capability + cost.
   // User can opt out individually via prefs.use_gauntlet === false.
-  const envGauntlet = Deno.env.get("USE_GAUNTLET") === "1";
   const userOptOut = (prefs as any).use_gauntlet === false;
-  const userOptIn = (prefs as any).use_gauntlet === true;
-  const useGauntlet = !userOptOut && (envGauntlet || userOptIn);
+  const useGauntlet = !userOptOut; // gauntlet by default; logs to gauntlet_routing_log
   if (useGauntlet) {
     try {
       const { gauntletCall } = await import("./gauntlet-call.ts");
