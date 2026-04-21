@@ -90,29 +90,32 @@ serve(async (req) => {
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     // Step 1: Extract knowledge entries via AI
-    const extractionPrompt = `You are a knowledge extraction engine. Given text about business/entrepreneurship/leadership, extract discrete knowledge entries.
+    const extractionPrompt = `You are a knowledge extraction engine. Given text, extract discrete knowledge entries.
 
-Return a JSON array of objects with:
-- title: Short name (e.g. "The Value Equation")
+Return a JSON object: { "entries": [ ... ] } where each entry has:
+- title: Short name
 - content: Detailed explanation (2-5 sentences, actionable)
 - category: One of: framework, principle, strategy, mental_model, quote, playbook
-- domain: One of: marketing, sales, leadership, finance, ops, product, mindset, growth, pricing, hiring, negotiation, decision_making
+- domain: One of: marketing, sales, leadership, finance, ops, product, mindset, growth, pricing, hiring, negotiation, decision_making, science, philosophy, general
 - tags: Array of 2-5 relevant tags
 
-Extract 5-20 entries depending on input length. Focus on actionable, memorable insights.
-Return ONLY the JSON array.`;
+Extract 5-20 entries depending on input length. Focus on memorable, useful insights.
+Return ONLY the JSON object — no prose, no markdown.`;
 
     const rawEntries = await callAI(OPENAI_API_KEY, extractionPrompt, `Source: ${source_person}${source_material ? ` - "${source_material}"` : ''}\n\nText:\n${text}`);
-    
+    console.log('Raw AI output (first 500 chars):', rawEntries.slice(0, 500));
+
     let entries: Array<{ title: string; content: string; category: string; domain: string; tags: string[] }>;
     try {
-      entries = parseJSON(rawEntries);
-    } catch {
-      console.error('Failed to parse entries:', rawEntries);
+      const parsed = parseJSON<{ entries?: typeof entries } | typeof entries>(rawEntries);
+      entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
+    } catch (parseErr) {
+      console.error('Failed to parse entries:', parseErr, 'Raw:', rawEntries.slice(0, 1000));
       throw new Error('Failed to parse extracted entries');
     }
 
     if (!Array.isArray(entries) || entries.length === 0) {
+      console.error('No entries in AI output. Raw:', rawEntries.slice(0, 1000));
       return new Response(JSON.stringify({ error: 'No entries extracted' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
