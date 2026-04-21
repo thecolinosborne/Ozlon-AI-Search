@@ -1,161 +1,30 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft, Globe, Video, CheckSquare, Youtube, Mail, HardDrive,
-  Calendar, FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag, LucideIcon,
-} from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { IntegrationCard } from "@/components/integrations/IntegrationCard";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { isServiceGranted, GOOGLE_SERVICE_SCOPES } from "@/lib/googleScopes";
+import {
+  INTEGRATIONS as REGISTRY_INTEGRATIONS,
+  PROVIDER_BY_ID,
+  type IntegrationCategory,
+} from "@/integrations/registry";
 
-type Category = "google" | "crm" | "media" | "productivity" | "seo";
+type Category = IntegrationCategory;
 
-interface IntegrationEntry {
-  id: string;
-  name: string;
-  description: string;
-  icon: LucideIcon;
-  path: string;
-  category: Category;
-}
-
-const integrations: IntegrationEntry[] = [
-  {
-    id: "gohighlevel",
-    name: "Go High Level",
-    description: "CRM with contacts, pipelines, conversations, and marketing tools.",
-    icon: Globe,
-    path: "/integrations/gohighlevel",
-    category: "crm",
-  },
-  {
-    id: "descript",
-    name: "Descript",
-    description: "Video and podcast editing platform. Sync media and content assets.",
-    icon: Video,
-    path: "/integrations/descript",
-    category: "media",
-  },
-  {
-    id: "clickup",
-    name: "ClickUp",
-    description: "Task management with AI-powered project manager replies inside task comments.",
-    icon: CheckSquare,
-    path: "/integrations/clickup",
-    category: "productivity",
-  },
-  // Google Apps — share one OAuth row but each has its own card.
-  {
-    id: "youtube",
-    name: "YouTube",
-    description: "Channel data, video uploads, and the YouTube Data API.",
-    icon: Youtube,
-    path: "/integrations/youtube",
-    category: "google",
-  },
-  {
-    id: "gmail",
-    name: "Gmail",
-    description: "Read, search, send, and manage email.",
-    icon: Mail,
-    path: "/integrations/gmail",
-    category: "google",
-  },
-  {
-    id: "google-drive",
-    name: "Google Drive",
-    description: "Browse, upload, and manage Drive files.",
-    icon: HardDrive,
-    path: "/integrations/google-drive",
-    category: "google",
-  },
-  {
-    id: "google-calendar",
-    name: "Google Calendar",
-    description: "View, create, and manage calendar events.",
-    icon: Calendar,
-    path: "/integrations/google-calendar",
-    category: "google",
-  },
-  {
-    id: "google-sheets",
-    name: "Google Sheets",
-    description: "Read and write spreadsheet data.",
-    icon: FileSpreadsheet,
-    path: "/integrations/google-sheets",
-    category: "google",
-  },
-  {
-    id: "google-docs",
-    name: "Google Docs",
-    description: "Create and edit Google Documents.",
-    icon: FileText,
-    path: "/integrations/google-docs",
-    category: "google",
-  },
-  {
-    id: "google-slides",
-    name: "Google Slides",
-    description: "Create and edit Google Slides presentations.",
-    icon: Presentation,
-    path: "/integrations/google-slides",
-    category: "google",
-  },
-  {
-    id: "google-analytics",
-    name: "Google Analytics",
-    description: "Query GA4 properties for traffic and conversion data.",
-    icon: BarChart3,
-    path: "/integrations/google-analytics",
-    category: "google",
-  },
-  {
-    id: "google-search-console",
-    name: "Search Console",
-    description: "Pull SEO performance data for verified properties.",
-    icon: Search,
-    path: "/integrations/google-search-console",
-    category: "google",
-  },
-  {
-    id: "google-tag-manager",
-    name: "Tag Manager",
-    description: "Manage GTM containers, tags, and triggers.",
-    icon: Tag,
-    path: "/integrations/google-tag-manager",
-    category: "google",
-  },
-  {
-    id: "search-atlas",
-    name: "Search Atlas",
-    description: "Site audit, keyword research, backlinks, and rank tracking.",
-    icon: Search,
-    path: "/integrations/search-atlas",
-    category: "seo",
-  },
-];
-
-// Map UI ids to provider names in integration_connections.
-// All Google Workspace services share the single provider="youtube" OAuth row.
-const PROVIDER_BY_ID: Record<string, string> = {
-  gohighlevel: "gohighlevel",
-  descript: "descript",
-  clickup: "clickup",
-  youtube: "youtube",
-  gmail: "youtube",
-  "google-drive": "youtube",
-  "google-calendar": "youtube",
-  "google-sheets": "youtube",
-  "google-docs": "youtube",
-  "google-slides": "youtube",
-  "google-analytics": "youtube",
-  "google-search-console": "youtube",
-  "google-tag-manager": "youtube",
-  "search-atlas": "search_atlas",
-};
+// View-model for the hub cards — derived from the registry so adding a new
+// integration is one entry in src/integrations/registry.ts.
+const integrations = REGISTRY_INTEGRATIONS.map((m) => ({
+  id: m.id,
+  name: m.name,
+  description: m.description,
+  icon: m.icon,
+  path: `/integrations/${m.id}`,
+  category: m.category,
+}));
 
 const FILTERS: Array<{ id: "all" | Category; label: string }> = [
   { id: "all", label: "All" },
