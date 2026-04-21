@@ -1274,7 +1274,19 @@ serve(async (req) => {
 
     throw new Error(`Unsupported action: ${action}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    let message = "Unknown error";
+    if (error instanceof Error) {
+      message = error.message || error.toString() || "Unknown error";
+    } else if (typeof error === "string") {
+      message = error;
+    } else if (error && typeof error === "object") {
+      try {
+        message = JSON.stringify(error);
+      } catch {
+        message = String(error);
+      }
+    }
+    console.error("[youtube] handler error:", message, error instanceof Error ? error.stack : undefined);
     return new Response(JSON.stringify({ error: message }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
