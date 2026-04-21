@@ -72,6 +72,7 @@
 - [Deterministic routes](mem://architecture/deterministic-route-logic) — Terminal states (loading, error, empty, loaded) required
 - [Authenticated tools](mem://architecture/authenticated-tool-auth-flow) — Pass JWT to edge functions for user context
 - [Per-user credentials](mem://architecture/per-user-integration-credentials) — All integration keys per-user in integration_connections (RLS)
+- [Storage privacy](mem://architecture/storage-privacy) — generated-images/videos buckets are private; signed URLs (7-day TTL)
 - [Native Google OAuth](mem://integrations/native-google-oauth) — All Google services use direct OAuth via _shared/google-token.ts (Maton permanently removed)
 - [Additive development](mem://constraints/additive-development-policy) — Preserve all existing UI/UX when adding features
 - [Stabilization policy](mem://architecture/stabilization-policy) — No broad refactors, isolated lifecycle fixes only
