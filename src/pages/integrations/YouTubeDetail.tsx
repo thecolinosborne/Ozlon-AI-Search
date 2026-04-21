@@ -54,6 +54,7 @@ export default function YouTubeDetail() {
 
   const [oauthConnected, setOauthConnected] = useState(false);
   const [oauthDetail, setOauthDetail] = useState<OAuthDetail>("unknown");
+  const [grantedScopes, setGrantedScopes] = useState<string>("");
   const [authorizing, setAuthorizing] = useState(false);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
@@ -142,6 +143,7 @@ export default function YouTubeDetail() {
       lastOauthStatus = oauthStatus;
       setOauthDetail(oauthStatus);
       setOauthConnected(oauthStatus === "connected" || oauthStatus === "refreshed");
+      setGrantedScopes(String(result.grantedScopes || ""));
 
       if (oauthStatus === "connected" || oauthStatus === "refreshed") {
         return oauthStatus;
