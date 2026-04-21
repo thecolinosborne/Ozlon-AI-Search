@@ -289,26 +289,41 @@ serve(async (req) => {
     // ── Connect (API key) ──
     if (action === "connect") {
       const apiKey = String((params as AnyJson).apiKey || "").trim();
-      const channelId = String((params as AnyJson).channelId || "").trim();
+      const channelIdRaw = (params as AnyJson).channelId;
+      const channelId = channelIdRaw == null ? "" : String(channelIdRaw).trim();
       const accountLabel = String((params as AnyJson).accountLabel || "Primary YouTube").trim();
 
-      // Find existing api_key row
-      const { data: existing } = await adminClient
+      console.log("[youtube/connect] start", {
+        userId,
+        hasApiKey: !!apiKey,
+        apiKeyLen: apiKey.length,
+        apiKeyPrefix: apiKey.slice(0, 4),
+        apiKeySuffix: apiKey.slice(-4),
+        channelId: channelId || null,
+      });
+
+      // Find existing youtube connection (any auth_type — unique constraint is on (user_id, provider))
+      const { data: existing, error: existingErr } = await adminClient
         .from("integration_connections")
-        .select("id, metadata, external_account_id, external_account_label")
+        .select("id, metadata, external_account_id, external_account_label, auth_type, status")
         .eq("user_id", userId)
         .eq("provider", "youtube")
-        .eq("auth_type", "api_key")
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      if (existingErr) {
+        console.error("[youtube/connect] existing lookup failed:", existingErr);
+        throw new Error(`Failed to load existing connection: ${existingErr.message}`);
+      }
 
       // Resolve effective key: provided OR stored (vault-first)
       let effectiveKey = apiKey;
       if (!effectiveKey && existing) {
         try {
           effectiveKey = await getStoredApiKey(adminClient, existing.id, userId);
-        } catch {
-          /* fallthrough */
+        } catch (e) {
+          console.warn("[youtube/connect] getStoredApiKey failed:", e instanceof Error ? e.message : e);
         }
       }
 
@@ -317,7 +332,13 @@ serve(async (req) => {
       }
 
       // Validate API key against YouTube
-      await validateApiKey(effectiveKey);
+      try {
+        await validateApiKey(effectiveKey);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[youtube/connect] validateApiKey failed:", msg);
+        throw new Error(msg);
+      }
 
       // If a channelId was supplied, validate it resolves to an actual channel
       let resolvedChannelLabel = accountLabel;
@@ -348,17 +369,22 @@ serve(async (req) => {
 
       let data;
       if (existing) {
+        // Preserve existing credential_ref (e.g. "oauth_tokens") if already set.
+        const updatePayload: AnyJson = {
+          status: "connected",
+          external_account_id: channelId || existing.external_account_id || null,
+          external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
+          last_validated_at: new Date().toISOString(),
+          last_error: null,
+          metadata: newMeta,
+        };
+        // Only set credential_ref if the row doesn't already track OAuth tokens
+        if (existing.auth_type !== "oauth" && existing.auth_type !== "oauth2") {
+          updatePayload.credential_ref = "server_stored_api_key";
+        }
         const { data: updated, error } = await adminClient
           .from("integration_connections")
-          .update({
-            credential_ref: "server_stored_api_key",
-            status: "connected",
-            external_account_id: channelId || existing.external_account_id || null,
-            external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
-            last_validated_at: new Date().toISOString(),
-            last_error: null,
-            metadata: newMeta,
-          })
+          .update(updatePayload)
           .eq("id", existing.id)
           .select("*")
           .single();
@@ -395,7 +421,7 @@ serve(async (req) => {
             const { error: rpcErr } = await adminClient.rpc("store_user_secret", {
               _connection_id: data.id,
               _user_id: userId,
-              _plaintext: apiKey,
+              _plaintext: effectiveKey,
               _encryption_key: hexKey,
               _secret_name: "api_key",
             });
@@ -423,7 +449,7 @@ serve(async (req) => {
       return jsonOk({
         success: true,
         connection: data,
-        apiKeyMasked: maskKey(apiKey),
+        apiKeyMasked: maskKey(effectiveKey),
       });
     }
 
@@ -1274,7 +1300,19 @@ serve(async (req) => {
 
     throw new Error(`Unsupported action: ${action}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    let message = "Unknown error";
+    if (error instanceof Error) {
+      message = error.message || error.toString() || "Unknown error";
+    } else if (typeof error === "string") {
+      message = error;
+    } else if (error && typeof error === "object") {
+      try {
+        message = JSON.stringify(error);
+      } catch {
+        message = String(error);
+      }
+    }
+    console.error("[youtube] handler error:", message, error instanceof Error ? error.stack : undefined);
     return new Response(JSON.stringify({ error: message }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
