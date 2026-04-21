@@ -34,6 +34,7 @@ async function callAI(_apiKey: string, systemPrompt: string, userPrompt: string,
       model: 'google/gemini-2.5-flash',
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
       max_completion_tokens: maxTokens,
+      response_format: { type: 'json_object' },
     }),
   });
   if (!res.ok) {
