@@ -58,12 +58,12 @@ export const ChatMessageList = ({
               className={cn(
                 "max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed",
                 message.role === "user"
-                  ? "bg-neutral-900 text-white"
-                  : "bg-neutral-100 text-neutral-800"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card/60 backdrop-blur-md border border-border/30 text-foreground"
               )}
             >
               {message.role === "assistant" ? (
-                <div className="prose prose-sm prose-neutral max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-1 prose-ul:my-2 prose-li:my-0.5 prose-a:text-blue-600 prose-a:underline hover:prose-a:text-blue-700 break-words">
+                <div className="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-headings:tracking-tight prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-1.5 prose-p:my-2 prose-p:leading-relaxed prose-strong:text-foreground prose-strong:font-semibold prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-li:marker:text-muted-foreground prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none prose-pre:bg-muted prose-pre:border prose-pre:border-border/40 prose-pre:rounded-lg prose-blockquote:border-l-2 prose-blockquote:border-primary/40 prose-blockquote:bg-muted/30 prose-blockquote:py-1 prose-blockquote:px-3 prose-blockquote:not-italic prose-table:text-xs prose-th:bg-muted/50 prose-th:font-semibold prose-td:border prose-td:border-border/30 prose-th:border prose-th:border-border/30 prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-hr:border-border/40">
                   {message.content ? (
                     <ReactMarkdown
                       components={{
