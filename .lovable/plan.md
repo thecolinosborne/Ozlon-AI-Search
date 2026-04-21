@@ -1,53 +1,99 @@
 
 
-## Confirm: Gemini Key + Add Google Docs Styling Tools + Model Visibility
+## Wire Up Search Atlas — Backend, Frontend, Edge Function, Chat Tools
 
-### On your Gemini API key
+Full integration mirroring the existing ClickUp/GHL pattern: per-user encrypted API key, dedicated edge function, integration card + detail page, and chat-callable tools across all 4 capability areas.
 
-Yes — you have `GEMINI_API_KEY` set, **and** you have `LOVABLE_API_KEY` (the Lovable AI Gateway, which routes to Gemini 2.5/3 Pro/Flash, GPT-5, etc. without per-provider keys). The chat backend already uses both. Gemini access is **not** the blocker.
+### 1. Database (one migration)
 
-The actual gap is what the AI *does* with that access — it doesn't know how to apply rich Google Docs styling, and it doesn't tell you which model handled your turn. Both are fixable now.
+Add `search_atlas` rows handled by the existing `integration_connections` + `integration_credentials` tables (already RLS-protected, vault-encrypted). No schema changes needed — provider just becomes `"search_atlas"`. The existing `upsertIntegrationConnection()` mirrors the API key into the encrypted vault automatically.
 
-### What we're building
+Add an optional cache table for sync runs:
 
-**1. Four new high-level Google Docs styling tools** (`supabase/functions/google-docs/index.ts`)
+```text
+search_atlas_snapshots (id, user_id, kind, domain, payload jsonb, fetched_at)
+  RLS: user can only read/write their own rows
+```
 
-Wraps the raw Docs API into actions the AI can actually use:
+This lets Sync Now persist the latest audit/keyword/backlink/rank pulls so the chat tools and Brain page can read recent data without re-hitting the API every turn.
 
-- `apply_markdown` — `{ documentId, markdown, replaceAll? }`. Parses markdown server-side and emits one `batchUpdate` with `insertText` + `updateTextStyle` (bold/italic/code) + `updateParagraphStyle` (HEADING_1/2/3, NORMAL_TEXT) + `createParagraphBullets`. The killer tool: AI writes markdown → fully styled doc.
-- `format_as_report` — `{ documentId }`. Reads the doc, detects title/headings, applies a clean theme (Inter/Arial, 24/16/11pt, line spacing 1.15). One-shot "make this look professional."
-- `style_range` — `{ documentId, startIndex, endIndex, bold?, italic?, fontSize?, foregroundColor?, link? }`. Surgical span styling.
-- `clear_formatting` — strips styling on a range or whole doc.
+### 2. New edge function: `supabase/functions/search-atlas/index.ts`
 
-**2. Wire the 4 tools into the chat function** (`supabase/functions/chat/index.ts`)
+Single-function gateway (mirrors `clickup/index.ts` shape). Resolves the user's API key in the standard order: vault → metadata → env fallback (`SEARCH_ATLAS_API_KEY` if you ever want a workspace default). Bearer-auth against `https://api.searchatlas.com`.
 
-Add tool schemas, routing entries, and label/domain map entries (matching the existing `docs_*` pattern). Add a `DOCUMENT STYLING PROTOCOL` block to the system prompt:
+**Actions exposed:**
 
-> When the user asks you to create, update, restyle, or "make a doc look nice":
-> 1. Creating with content → `create_google_doc` (title only) → `docs_apply_markdown` with the body.
-> 2. Restyling existing doc → `docs_get_document` → `docs_apply_markdown` with `replaceAll: true`, OR `docs_format_as_report`.
-> 3. Surgical edits → `docs_style_range`.
-> 4. Never say "I can't edit/style this doc" — you have full Docs read/write. If a call fails, report the actual error.
+| Action | Purpose |
+|---|---|
+| `connect` / `test_connection` | Validate the token by calling a low-cost endpoint (e.g. `/v2/projects/`) and report account info. |
+| `list_projects` | Pull rank-tracking projects so the Detail page can show a picker. |
+| `audit_site` | Site Audit summary + crawl issues for a domain. |
+| `site_explorer` | Domain overview metrics (traffic, top pages). |
+| `keyword_research` | Volume / KD / CPC / SERP intent for a keyword or list. |
+| `serp_snapshot` | Live SERP results for a keyword + country. |
+| `backlinks_overview` | Referring domains, total backlinks, anchor profile. |
+| `backlinks_list` | Paginated backlink rows (new/lost/active). |
+| `rank_tracker_keywords` | Tracked keyword positions for a project. |
+| `sync_now` | Runs the 4 read calls above for the user's selected domain/project, writes results into `search_atlas_snapshots`, logs to `integration_sync_runs`. |
 
-**3. Model attribution in the reply** (`src/components/chat/ChatMessageList.tsx`)
+Auth: same JWT-resolve pattern as ClickUp — `verify_jwt = false` in `config.toml`, function validates the user from the `Authorization` header, then loads their key from the vault. Errors return structured `{ error, status, detail }` (per error-reporting policy — never swallow).
 
-Add a small muted footer under each assistant bubble: *"via google/gemini-3-flash-preview · 1.2s"*. Data already arrives via the `provider_used` SSE event captured in `useChatStream.ts` — just needs rendering. Click to expand the full routing trace (already on the message as `orchestration`).
+### 3. Frontend
+
+**Add to `src/pages/Integrations.tsx`** — one new entry under a new `"seo"` category (or reuse `"productivity"`):
+
+```text
+{ id: "search-atlas", name: "Search Atlas", icon: Search,
+  description: "Site audit, keyword research, backlinks, and rank tracking.",
+  path: "/integrations/search-atlas", category: "seo" }
+```
+
+Add `search-atlas: "search_atlas"` to `PROVIDER_BY_ID`. Add a `"SEO"` filter pill.
+
+**New page `src/pages/integrations/SearchAtlasDetail.tsx`** — modeled on `ClickUpDetail.tsx`. Includes:
+
+- `ApiKeyInput` for the bearer token → `upsertIntegrationConnection("search_atlas", { api_key })` → vault dual-write.
+- Connect / Test / Disconnect buttons.
+- Default domain input + project picker (populated from `list_projects`).
+- Sync Now button → `search-atlas/sync_now` → toast + `SyncRunsList` refresh.
+- Recent snapshots panel showing the latest audit score, top 5 keywords, and backlink count for the selected domain.
+
+**Wire route** in `src/App.tsx` next to the other `/integrations/...` routes.
+
+### 4. Chat tool surface (`supabase/functions/chat/index.ts`)
+
+Register 8 new tools, all routed to the new edge function, following the existing GSC/GA pattern:
+
+- `searchatlas_audit_site` — `{ domain }`
+- `searchatlas_site_explorer` — `{ domain }`
+- `searchatlas_keyword_research` — `{ keyword, country?, limit? }`
+- `searchatlas_serp_snapshot` — `{ keyword, country? }`
+- `searchatlas_backlinks_overview` — `{ domain }`
+- `searchatlas_backlinks_list` — `{ domain, type?: "new"|"lost"|"active", limit? }`
+- `searchatlas_list_projects` — `{}`
+- `searchatlas_rank_tracker` — `{ projectId }`
+
+Add entries to `toolRoutingMap`, `labelMap`, and `domainMap` so they appear in the live "Working" strip and Brain routing log. Add a `SEARCH ATLAS PROTOCOL` paragraph to the system prompt:
+
+> When the user asks about SEO performance, audits, keyword opportunities, backlinks, or rankings, prefer Search Atlas tools. Cross-reference with `gsc_*` / `ga4_*` when the user wants real traffic data alongside Search Atlas estimates. Never claim you cannot pull SEO data — you have full Search Atlas access.
+
+### 5. Config + secrets
+
+- `supabase/config.toml`: add `[functions.search-atlas]` with `verify_jwt = false`.
+- No new secrets required up front (per-user vault). If you want a workspace fallback later, add `SEARCH_ATLAS_API_KEY` via the secrets tool — not needed for v1.
 
 ### Files touched
 
-- `supabase/functions/google-docs/index.ts` — add 4 actions (~150 lines additive, existing actions untouched).
-- `supabase/functions/chat/index.ts` — 4 tool schemas + routing + protocol prompt (~50 lines additive).
-- `src/components/chat/ChatMessageList.tsx` — model/latency footer under assistant bubble (~15 lines).
+- **New**: `supabase/functions/search-atlas/index.ts`, `src/pages/integrations/SearchAtlasDetail.tsx`, one migration for `search_atlas_snapshots`.
+- **Edited**: `src/pages/Integrations.tsx` (new card + provider map + SEO filter), `src/App.tsx` (route), `supabase/functions/chat/index.ts` (8 tools + protocol prompt + maps), `supabase/config.toml` (verify_jwt entry).
 
 ### Out of scope
 
-- No changes to Gmail, Calendar, Drive, Sheets, Slides, GSC, GA4 — already fully wired.
-- No new connectors or API keys (Gemini already routed via gateway).
-- No changes to gauntlet routing, voice, onboarding, or auth.
+- No write actions to Search Atlas (create projects, queue audits) in v1 — read-only sync first, additive write tools later.
+- No new connectors or OAuth flows — single bearer token only.
+- No changes to Gmail, GSC, GA4, or any other existing integration.
 
-### Verification
+### Note on Search Atlas API specifics
 
-1. *"Create a Google Doc titled 'Q2 Plan' with a bolded title, two H2 sections with bullets, and a 3-row table"* → opens fully styled.
-2. *"Open my last doc and reformat it as a clean report"* → `format_as_report` runs, doc visibly restyled.
-3. Assistant bubble shows *"via google/gemini-3-flash-preview · 0.8s"* footer.
+Their public docs aren't reachable from this sandbox. The edge function will be built against the standard Search Atlas v2 REST shape (`Authorization: Bearer <token>`, `https://api.searchatlas.com/api/v2/...`). If specific endpoint paths differ for your account tier, the action handlers are isolated and easy to adjust once you confirm the exact paths from your dashboard's API section — the rest of the wiring (vault, UI, chat tools, sync runs) is endpoint-agnostic.
 
