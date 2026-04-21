@@ -3262,10 +3262,109 @@ const ACTION_TOOLS: ToolDef[] = [
           embeddable: { type: 'boolean' },
           public_stats_viewable: { type: 'boolean' },
           notify_subscribers: { type: 'boolean', description: 'Default true. Set false for silent uploads.' },
-          pinned_comment: { type: 'string', description: 'Comment to post on the video. Auto-pin attempted but may require manual pin in Studio.' },
+    },
+  },
+  // ============ Search Atlas (SEO intelligence) ============
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_audit_site',
+      description: 'Run a Search Atlas site audit for a domain. Returns crawl issues, on-page SEO scores, and technical health metrics.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string', description: 'Root domain, e.g. "example.com"' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_site_explorer',
+      description: 'Search Atlas Site Explorer overview for a domain — estimated traffic, top pages, authority metrics.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string', description: 'Root domain, e.g. "example.com"' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_keyword_research',
+      description: 'Search Atlas keyword research — volume, difficulty, CPC, and SERP intent for a seed keyword.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          country: { type: 'string', description: 'ISO country code (default "us")' },
+          limit: { type: 'number', description: 'Max related keywords (default 50, max 200)' },
         },
-        required: ['title', 'video_url'],
-        additionalProperties: false,
+        required: ['keyword'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_serp_snapshot',
+      description: 'Live SERP snapshot from Search Atlas for a keyword in a given country.',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          country: { type: 'string', description: 'ISO country code (default "us")' },
+        },
+        required: ['keyword'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_backlinks_overview',
+      description: 'Search Atlas backlinks overview — total backlinks, referring domains, anchor text distribution.',
+      parameters: {
+        type: 'object',
+        properties: { domain: { type: 'string' } },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_backlinks_list',
+      description: 'Paginated backlink rows from Search Atlas. Filter by type: active, new, or lost.',
+      parameters: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string' },
+          type: { type: 'string', enum: ['active', 'new', 'lost'], description: 'Filter (default "active")' },
+          limit: { type: 'number', description: 'Max rows (default 50, max 500)' },
+        },
+        required: ['domain'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_list_projects',
+      description: 'List the user\'s Search Atlas rank-tracking projects so you can pick a projectId for searchatlas_rank_tracker.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'searchatlas_rank_tracker',
+      description: 'Tracked keyword positions for a Search Atlas rank-tracker project.',
+      parameters: {
+        type: 'object',
+        properties: { projectId: { type: 'string', description: 'Search Atlas project ID' } },
+        required: ['projectId'],
       },
     },
   },
@@ -5205,9 +5304,34 @@ async function executeToolCall(
         } catch (e) { return { success: false, result: `Snapshot comparison error: ${e instanceof Error ? e.message : 'Unknown'}` }; }
       }
 
+      // ============ Search Atlas (SEO intelligence) ============
+      case 'searchatlas_audit_site':
+      case 'searchatlas_site_explorer':
+      case 'searchatlas_keyword_research':
+      case 'searchatlas_serp_snapshot':
+      case 'searchatlas_backlinks_overview':
+      case 'searchatlas_backlinks_list':
+      case 'searchatlas_list_projects':
+      case 'searchatlas_rank_tracker': {
+        const actionMap: Record<string, string> = {
+          searchatlas_audit_site: 'audit_site',
+          searchatlas_site_explorer: 'site_explorer',
+          searchatlas_keyword_research: 'keyword_research',
+          searchatlas_serp_snapshot: 'serp_snapshot',
+          searchatlas_backlinks_overview: 'backlinks_overview',
+          searchatlas_backlinks_list: 'backlinks_list',
+          searchatlas_list_projects: 'list_projects',
+          searchatlas_rank_tracker: 'rank_tracker_keywords',
+        };
+        try {
+          const data = await callNativeEdge('search-atlas', actionMap[toolName], args as Record<string, unknown>);
+          return { success: true, result: `**Search Atlas (${actionMap[toolName]}):**\n\`\`\`json\n${JSON.stringify(data, null, 2).slice(0, 6000)}\n\`\`\`` };
+        } catch (e) {
+          return { success: false, result: `Search Atlas error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
       case 'web_search_google': {
         try {
-          const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
           if (!LOVABLE_API_KEY) return { success: false, result: 'Search API not configured.' };
           const keyword = args.keyword as string;
           const numResults = Math.min((args.num_results as number) || 10, 20);
@@ -6595,6 +6719,23 @@ SEO INSIGHT GENERATION:
 After every GSC analysis, mentally note key insights. If the user asks you to remember or if you notice a significant trend, suggest storing it as a memory for future reference.
 
 ===========================================================
+SEARCH ATLAS PROTOCOL
+===========================================================
+You have full Search Atlas access via these tools:
+- searchatlas_audit_site — technical/on-page audit for a domain
+- searchatlas_site_explorer — domain overview, traffic estimates, top pages
+- searchatlas_keyword_research — volume / KD / CPC / intent for a keyword
+- searchatlas_serp_snapshot — live SERP for a keyword + country
+- searchatlas_backlinks_overview / searchatlas_backlinks_list — backlink profile
+- searchatlas_list_projects + searchatlas_rank_tracker — tracked keyword positions
+
+When the user asks about SEO performance, audits, keyword opportunities, backlinks, or rankings:
+1. Prefer Search Atlas for third-party estimates and competitive data.
+2. Cross-reference with gsc_* (real query/click data) and ga4_* (real traffic) when the user wants ground-truth numbers.
+3. Use searchatlas_list_projects first when the user references "my projects" or "tracked keywords" before calling searchatlas_rank_tracker.
+4. Never claim you cannot pull SEO data — you have full Search Atlas access. If a call fails, surface the actual error.
+
+===========================================================
 WORK TASK MANAGEMENT & SMART ORCHESTRATION
 ===========================================================
 You have create_work_task and update_work_task tools for the user's AI operations workspace.
@@ -6993,6 +7134,14 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'gsc_query': 'google-search-console',
     'gsc_save_snapshot': 'google-search-console',
     'gsc_compare_snapshots': 'google-search-console',
+    'searchatlas_audit_site': '_always_',
+    'searchatlas_site_explorer': '_always_',
+    'searchatlas_keyword_research': '_always_',
+    'searchatlas_serp_snapshot': '_always_',
+    'searchatlas_backlinks_overview': '_always_',
+    'searchatlas_backlinks_list': '_always_',
+    'searchatlas_list_projects': '_always_',
+    'searchatlas_rank_tracker': '_always_',
     'web_search_google': '_always_',
     'save_memory': '_always_',
     'add_standing_order': '_always_',
@@ -7111,6 +7260,14 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_query': 'Querying Search Console',
   'gsc_save_snapshot': 'Saving SEO snapshot',
   'gsc_compare_snapshots': 'Loading SEO snapshots',
+  'searchatlas_audit_site': 'Auditing site',
+  'searchatlas_site_explorer': 'Exploring domain',
+  'searchatlas_keyword_research': 'Researching keywords',
+  'searchatlas_serp_snapshot': 'Snapshotting SERP',
+  'searchatlas_backlinks_overview': 'Loading backlinks overview',
+  'searchatlas_backlinks_list': 'Listing backlinks',
+  'searchatlas_list_projects': 'Listing rank-tracker projects',
+  'searchatlas_rank_tracker': 'Loading tracked rankings',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'add_standing_order': 'Setting standing order',
@@ -7301,6 +7458,7 @@ async function runToolLoop(
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
         if (name.startsWith('ghl_')) return 'ghl';
+        if (name.startsWith('searchatlas_')) return 'search-atlas';
         if (name.startsWith('gsc_')) return 'gsc';
         if (name.includes('clickup')) return 'clickup';
         if (name.includes('youtube')) return 'youtube';

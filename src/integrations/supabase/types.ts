@@ -1366,6 +1366,39 @@ export type Database = {
         }
         Relationships: []
       }
+      search_atlas_snapshots: {
+        Row: {
+          created_at: string
+          domain: string | null
+          fetched_at: string
+          id: string
+          kind: string
+          payload: Json
+          project_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          domain?: string | null
+          fetched_at?: string
+          id?: string
+          kind: string
+          payload?: Json
+          project_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          domain?: string | null
+          fetched_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          project_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       seo_snapshots: {
         Row: {
           created_at: string
