@@ -1,55 +1,75 @@
 
 
-## Remove Data Sources Toggles + Add Conversational Memory Updates
+## Fix Ugly AI Output: Enforce Markdown Formatting
 
-### Part 1: Delete the Data Sources section
+### Root cause
 
-The 8 toggles (Calendar, Email, Browsing, Location, Wearable, Voice, Documents, Transactions) are cosmetic and conceptually wrong — memory ingestion should follow integration connection state automatically, not a redundant on/off switch.
+Two problems compounding:
 
-**Change:** Remove the entire "Data sources" section from `src/pages/IdentityMemory.tsx` (the section block, the `memoryOptions` array, the `settings` state, and the `toggleSetting` handler). Keep Identity, Standing Orders, and Active Goals untouched.
+1. **Backend isn't asking for markdown.** The chat system prompt (`supabase/functions/chat/index.ts`) never tells the model to format responses with headings, bold, or bullets. The model defaults to wall-of-text prose.
+2. **Frontend renders markdown inconsistently.** `ChatMessageList.tsx` (the component actually used in the unified chat) renders assistant messages in `bg-neutral-100` with `prose-sm prose-neutral` — but **prose styles don't apply to `<strong>`, `<h2>`, lists, etc. with enough visual weight against that background**, and the prose plugin's defaults for headings/spacing are muted. Even when the model *does* emit markdown today, it looks flat.
 
-**Result:** Memory ingestion is governed by which integrations the user has connected on `/integrations` (single source of truth). No phantom switches.
+`MessageBubble.tsx` (a sibling component) has better prose styling but isn't the one rendering in the live chat surface.
 
-### Part 2: Conversational memory updates ("now we do X, not Y")
+### Fix
 
-This already partially works but needs a sharper write-path. Here's how it works today and what we add:
+**1. Backend — teach the model to format (`supabase/functions/chat/index.ts`)**
 
-**Today (already wired):**
-- The chat backend has a `save_memory` tool the AI calls when it detects a new durable preference. It writes to `wisdom_memories` (pgvector) and is loaded into the system prompt on future turns.
-- Standing orders and goals are also writable from chat, but the AI is conservative about it.
+Add a `RESPONSE FORMATTING` block near the top of the system prompt:
 
-**What's missing (the "update, don't duplicate" part):**
-When you say *"actually, from now on do X instead of Y"*, the AI should:
-1. **Find** the existing standing order / memory that conflicts (semantic match against `standing_orders.rule` and `wisdom_memories`).
-2. **Supersede** it (mark old one inactive with a `superseded_by` link) and **insert** the new one — instead of stacking contradictory rules.
-3. **Confirm** the change in chat: *"Updated: previously '…', now '…'."*
+> Always format responses in clean Markdown.
+> - Use `##` headings for sections when the answer has 2+ distinct parts.
+> - Use `**bold**` for key terms, names, numbers, and decisions.
+> - Use bullet lists (`-`) for any enumeration of 2+ items — never inline comma lists.
+> - Use numbered lists for sequential steps.
+> - Use `>` blockquotes for quoted/cited content.
+> - Use fenced code blocks with language tags for code, commands, IDs, or paths.
+> - Use tables for comparisons of 3+ rows.
+> - Keep paragraphs short (≤3 sentences). Add blank lines between blocks.
+> - Lead with the answer, then supporting detail. No filler preambles.
 
-**Changes (backend only, no UI work):**
+This sits alongside existing House Rules and is honored on every turn.
 
-1. **`supabase/functions/chat/index.ts`** — extend the existing identity/memory tool surface:
-   - Add `update_standing_order(old_rule_match: string, new_rule: string, scope?: string)` — does a fuzzy/semantic match against active orders, deactivates the old one, inserts the new one, returns both for the confirmation message.
-   - Add `update_memory(old_summary_match: string, new_content: string)` — same pattern for `wisdom_memories`.
-   - Strengthen the system prompt's House Rules block with: *"When the user phrases a change as 'now do X, not Y' / 'instead of … do …' / 'change the rule …', call update_standing_order or update_memory rather than save_memory or add_standing_order. Always confirm what was replaced."*
+**2. Frontend — make markdown look premium (`src/components/chat/ChatMessageList.tsx`)**
 
-2. **Migration** — add `superseded_by uuid` and `superseded_at timestamptz` columns to `standing_orders` and `wisdom_memories` (nullable, additive only). Active-row queries already filter on `active = true` / equivalent, so this is non-breaking. Add an index on `(user_id, active)` if missing.
+Upgrade the assistant bubble's prose classes so headings, bold, lists, code, and tables render with visible hierarchy:
 
-3. **No frontend work** — the existing Identity & Memory page already lists active standing orders/goals; superseded ones simply drop off the list automatically because they get marked inactive. Users can keep typing rules manually too.
+- Swap `bg-neutral-100 text-neutral-800` → `bg-card/60 backdrop-blur-md border border-border/30 text-foreground` (matches the app's Vision Pro aesthetic and gives prose enough contrast).
+- Expand prose modifiers: stronger heading sizes/weights, tighter list spacing, styled `code`/`pre` (rounded, subtle bg), styled tables (borders, header bg), styled blockquotes (left border + muted bg), bold gets `font-semibold text-foreground`.
+- Keep the existing `linkifyPlainUrls` + `remarkGfm` (already correct for tables, task lists, strikethrough).
 
-### Behavior after this change
+Concretely, the `prose` className becomes:
 
-- *"Always reply in two sentences"* → AI calls `add_standing_order`. Appears in your list.
-- *"Actually, three sentences from now on"* → AI calls `update_standing_order`, the two-sentence rule is deactivated, three-sentence rule replaces it. AI replies: *"Updated: previously 'two sentences', now 'three sentences'."*
-- *"Forget the rule about sentence length"* → AI calls `update_standing_order` with empty new rule (deactivate path) or the existing trash icon still works manually.
+```
+prose prose-sm dark:prose-invert max-w-none break-words
+prose-headings:font-semibold prose-headings:tracking-tight
+prose-h1:text-lg prose-h2:text-base prose-h3:text-sm
+prose-h2:mt-4 prose-h2:mb-2 prose-h3:mt-3 prose-h3:mb-1.5
+prose-p:my-2 prose-p:leading-relaxed
+prose-strong:text-foreground prose-strong:font-semibold
+prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-li:marker:text-muted-foreground
+prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none
+prose-pre:bg-muted prose-pre:border prose-pre:border-border/40 prose-pre:rounded-lg
+prose-blockquote:border-l-2 prose-blockquote:border-primary/40 prose-blockquote:bg-muted/30 prose-blockquote:py-1 prose-blockquote:px-3 prose-blockquote:not-italic
+prose-table:text-xs prose-th:bg-muted/50 prose-th:font-semibold prose-td:border prose-td:border-border/30 prose-th:border prose-th:border-border/30
+prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+prose-hr:border-border/40
+```
+
+User bubble stays as-is (plain text, primary color).
 
 ### Files touched
 
-- `src/pages/IdentityMemory.tsx` — remove Data Sources section + related state.
-- `supabase/functions/chat/index.ts` — add 2 tools, strengthen House Rules prompt language.
-- New migration — add `superseded_by` + `superseded_at` to `standing_orders` and `wisdom_memories`.
+- `supabase/functions/chat/index.ts` — add `RESPONSE FORMATTING` block to system prompt.
+- `src/components/chat/ChatMessageList.tsx` — upgrade assistant bubble background + prose classes.
 
 ### Out of scope
 
-- No changes to integrations, voice, onboarding, or any other settings page.
-- No schema changes to `user_goals` (goals already have a `completed` status path that serves the same purpose).
-- No changes to the existing manual add/delete UI for standing orders and goals — purely additive on the AI write-path side.
+- No changes to `MessageBubble.tsx` (legacy/unused in the unified chat surface today — leaving alone per additive policy).
+- No changes to streaming, tool calls, voice, or any other behavior.
+- No schema or edge function logic changes beyond the prompt string.
+
+### Verification after implementation
+
+Send a multi-part question (e.g., *"compare gpt-5 vs gemini-2.5-pro for our use case"*) — response should render with `##` sections, **bold** model names, bulleted pros/cons, and a styled comparison table instead of a paragraph blob.
 
