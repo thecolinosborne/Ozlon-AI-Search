@@ -222,6 +222,24 @@ const SearchAtlasDetail = () => {
     toast.success("Defaults saved");
   };
 
+  const handleDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnostics(null);
+    setDiagnosticsSummary(null);
+    try {
+      const data = await callSA("diagnose");
+      setDiagnostics((data?.results || []) as Array<Record<string, unknown>>);
+      setDiagnosticsSummary(String(data?.summary || ""));
+      const successes = Number(data?.successes || 0);
+      if (successes > 0) toast.success(`Found ${successes} working endpoint(s)`);
+      else toast.error("No working endpoints — token likely lacks API access");
+    } catch (err) {
+      toast.error(`Diagnostics failed: ${(err as Error).message}`);
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
   const handleSync = async () => {
     if (!domain.trim() && !projectId.trim()) {
       toast.error("Set a default domain or project first");
