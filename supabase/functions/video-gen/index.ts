@@ -256,10 +256,18 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    const { data: pub } = admin.storage.from("generated-videos").getPublicUrl(path);
+    const { data: signed, error: signErr } = await admin.storage
+      .from("generated-videos")
+      .createSignedUrl(path, 60 * 60 * 24 * 7); // 7 days
+    if (signErr || !signed?.signedUrl) {
+      return new Response(
+        JSON.stringify({ url: videoUrl, model: modelUsed, hosted: false, sign_error: signErr?.message }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     return new Response(
-      JSON.stringify({ url: pub.publicUrl, model: modelUsed, hosted: true }),
+      JSON.stringify({ url: signed.signedUrl, model: modelUsed, hosted: true }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
