@@ -438,5 +438,15 @@ export function useChatStream({
     };
   }, [failStaleTasks]);
 
-  return { input, setInput, isLoading, inflightMessages, sendMessage, abortStream };
+  // Touch the version so consumers re-render when overlay updates.
+  void metadataOverlayVersion;
+  return {
+    input,
+    setInput,
+    isLoading,
+    inflightMessages,
+    sendMessage,
+    abortStream,
+    metadataOverlay: metadataOverlayRef.current,
+  };
 }
