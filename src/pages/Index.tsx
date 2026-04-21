@@ -75,7 +75,7 @@ const Index = () => {
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
-  const { input, setInput, isLoading, inflightMessages, sendMessage, abortStream } = useChatStream({
+  const { input, setInput, isLoading, inflightMessages, sendMessage, abortStream, metadataOverlay } = useChatStream({
     persistedMessages, systemName, userSettings, autoPlayEnabled,
     saveMessage, finalizeMessage, playMessage,
   });
@@ -87,8 +87,6 @@ const Index = () => {
 
   // ── Single source of truth for rendered messages ─────────────────────
   // Three layers merged: persisted > inflight > ephemeral.
-  // Inflight wins over persisted (latest streaming content).
-  // Ephemeral is appended only when no real messages exist.
   const visibleMessages: ChatMessage[] = useMemo(() => {
     let merged: ChatMessage[];
     if (inflightMessages.length === 0) {
@@ -99,13 +97,28 @@ const Index = () => {
       merged = [...base, ...inflightMessages];
     }
 
+    // Re-apply chip metadata from the overlay so chips persist
+    // after the inflight → persisted handoff.
+    if (metadataOverlay && metadataOverlay.size > 0) {
+      merged = merged.map((m) => {
+        const overlay = metadataOverlay.get(m.id);
+        if (!overlay) return m;
+        return {
+          ...m,
+          provider: m.provider ?? overlay.provider,
+          toolsUsed: m.toolsUsed ?? overlay.toolsUsed,
+          orchestration: m.orchestration ?? overlay.orchestration,
+        };
+      });
+    }
+
     if (ephemeralMessages.length > 0) {
       if (merged.length === 0) return ephemeralMessages;
       return merged;
     }
 
     return merged;
-  }, [persistedMessages, inflightMessages, ephemeralMessages]);
+  }, [persistedMessages, inflightMessages, ephemeralMessages, metadataOverlay]);
 
   useEffect(() => {
     if (visibleMessages.length === 0) return;
