@@ -12,7 +12,6 @@ import {
   Plug,
   Sparkles,
   Brain,
-  Database,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
