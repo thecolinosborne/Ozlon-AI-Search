@@ -379,9 +379,9 @@ async function actionSyncNow(auth: AuthCtx, params: Record<string, unknown>) {
 
   if (domain) {
     for (const [key, path] of [
-      ["audit", `/site-audit/?domain=${encodeURIComponent(domain)}`],
-      ["site_explorer", `/site-explorer/overview/?domain=${encodeURIComponent(domain)}`],
-      ["backlinks_overview", `/backlinks/overview/?domain=${encodeURIComponent(domain)}`],
+      ["audit", `/api/v3/site-audits/?domain=${encodeURIComponent(domain)}`],
+      ["site_explorer", `/api/v3/site-explorer/overview/?target=${encodeURIComponent(domain)}`],
+      ["backlinks_overview", `/api/v3/backlinks/overview/?target=${encodeURIComponent(domain)}`],
     ] as const) {
       try {
         const r = await saCall(auth.apiKey, path);
@@ -402,7 +402,7 @@ async function actionSyncNow(auth: AuthCtx, params: Record<string, unknown>) {
     try {
       const r = await saCall(
         auth.apiKey,
-        `/rank-tracker/${encodeURIComponent(projectId)}/keywords/`,
+        `/api/v3/rank-tracker/projects/${encodeURIComponent(projectId)}/keywords/`,
       );
       if (r.ok) {
         results.rank_tracker = r.data;
