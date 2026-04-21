@@ -337,8 +337,8 @@ serve(async (req) => {
           .update({
             credential_ref: "server_stored_api_key",
             status: "connected",
-            external_account_id: channelId || null,
-            external_account_label: resolvedChannelLabel,
+            external_account_id: channelId || existing.external_account_id || null,
+            external_account_label: resolvedChannelLabel || existing.external_account_label || "Primary YouTube",
             last_validated_at: new Date().toISOString(),
             last_error: null,
             metadata: newMeta,
