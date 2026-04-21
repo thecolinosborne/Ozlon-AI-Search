@@ -129,35 +129,6 @@ export default function YouTubeDetail() {
     return data;
   };
 
-  const callFunction = async (fnName: string, action: string, params: Record<string, unknown> = {}) => {
-    const { data, error } = await supabase.functions.invoke(fnName, {
-      headers: session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : undefined,
-      body: { action, params },
-    });
-    if (error) throw new Error(error.message);
-    if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
-    return data;
-  };
-
-  const testService = async (serviceId: string) => {
-    const svc = GOOGLE_SERVICES.find((s) => s.id === serviceId);
-    if (!svc) return;
-    setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "testing" } }));
-    try {
-      if (serviceId === "youtube") {
-        await callYouTube(svc.testAction);
-      } else {
-        await callFunction(svc.fn, svc.testAction);
-      }
-      setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "ok", message: "Connected" } }));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed";
-      setServiceTests((prev) => ({ ...prev, [serviceId]: { status: "error", message: msg.slice(0, 120) } }));
-    }
-  };
-
   const loadConnectionWithRetry = useCallback(async (attempts = 4) => {
     let lastOauthStatus: OAuthDetail = "disconnected";
 
