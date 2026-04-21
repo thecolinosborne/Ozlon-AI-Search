@@ -166,6 +166,17 @@ export const ChatMessageList = ({
                       )}
                     </div>
                   )}
+                  {message.content && message.provider && (
+                    <div className="mt-1.5 not-prose text-[10px] text-muted-foreground/60">
+                      via <span className="font-mono text-foreground/70">{message.provider.model}</span>
+                      {typeof message.provider.latency_ms === "number" && (
+                        <> · {(message.provider.latency_ms / 1000).toFixed(1)}s</>
+                      )}
+                      {message.provider.routing_mode && (
+                        <> · {message.provider.routing_mode}</>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <span className="whitespace-pre-wrap">{message.content}</span>

@@ -1416,6 +1416,10 @@ const ACTION_TOOLS: ToolDef[] = [
   { type: 'function', function: { name: 'docs_insert_text', description: 'Insert text into a Google Doc at a given index (default 1 = start).', parameters: { type: 'object', properties: { documentId: { type: 'string' }, text: { type: 'string' }, index: { type: 'number' } }, required: ['documentId', 'text'] } } },
   { type: 'function', function: { name: 'docs_replace_text', description: 'Find and replace all matches of a string in a Google Doc.', parameters: { type: 'object', properties: { documentId: { type: 'string' }, find: { type: 'string' }, replaceText: { type: 'string' } }, required: ['documentId', 'find', 'replaceText'] } } },
   { type: 'function', function: { name: 'docs_batch_update', description: 'Run an arbitrary Google Docs batchUpdate request payload (advanced; pass requests array).', parameters: { type: 'object', properties: { documentId: { type: 'string' }, requests: { type: 'array', items: { type: 'object' } } }, required: ['documentId', 'requests'] } } },
+  { type: 'function', function: { name: 'docs_apply_markdown', description: 'Apply markdown content (headings, bold, italic, code, bullet & numbered lists) to a Google Doc with full styling in ONE call. Use this for creating styled docs or restyling existing ones — preferred over docs_batch_update for content. Set replaceAll=true to wipe existing body first.', parameters: { type: 'object', properties: { documentId: { type: 'string' }, markdown: { type: 'string', description: 'Markdown body. Supports # / ## / ### headings, **bold**, *italic*, `code`, - / * bullets, 1. numbered lists.' }, replaceAll: { type: 'boolean', description: 'If true, deletes existing body content before inserting. Default false (appends).' } }, required: ['documentId', 'markdown'] } } },
+  { type: 'function', function: { name: 'docs_format_as_report', description: 'One-shot: apply a clean professional report theme to an existing Google Doc (Arial 11pt body, 1.15 line spacing, first paragraph promoted to Heading 1 / 24pt bold). Use when the user says "make this look nice/professional/clean".', parameters: { type: 'object', properties: { documentId: { type: 'string' } }, required: ['documentId'] } } },
+  { type: 'function', function: { name: 'docs_style_range', description: 'Apply character styling (bold/italic/fontSize/color/link) to a specific text range in a Google Doc. Use for surgical edits.', parameters: { type: 'object', properties: { documentId: { type: 'string' }, startIndex: { type: 'number' }, endIndex: { type: 'number' }, bold: { type: 'boolean' }, italic: { type: 'boolean' }, fontSize: { type: 'number', description: 'Point size, e.g. 14' }, foregroundColor: { type: 'string', description: 'Hex color "#RRGGBB"' }, link: { type: 'string', description: 'URL to make the range a hyperlink' } }, required: ['documentId', 'startIndex', 'endIndex'] } } },
+  { type: 'function', function: { name: 'docs_clear_formatting', description: 'Strip all character + paragraph formatting (and bullets) on a range in a Google Doc. Omit indices to clear the whole body. Useful before re-styling.', parameters: { type: 'object', properties: { documentId: { type: 'string' }, startIndex: { type: 'number' }, endIndex: { type: 'number' } }, required: ['documentId'] } } },
 
   // ── Sheets Pro
   { type: 'function', function: { name: 'sheets_list_spreadsheets', description: 'List Google Sheets spreadsheets.', parameters: { type: 'object', properties: { pageSize: { type: 'number' } } } } },
@@ -3358,6 +3362,10 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   docs_insert_text: { fn: 'google-docs', action: 'insert_text', mapArgs: (a) => ({ documentId: a.documentId, text: a.text, index: a.index }) },
   docs_replace_text: { fn: 'google-docs', action: 'replace_text', mapArgs: (a) => ({ documentId: a.documentId, find: a.find, replaceText: a.replaceText }) },
   docs_batch_update: { fn: 'google-docs', action: 'batch_update', mapArgs: (a) => ({ documentId: a.documentId, requests: a.requests }) },
+  docs_apply_markdown: { fn: 'google-docs', action: 'apply_markdown', mapArgs: (a) => ({ documentId: a.documentId, markdown: a.markdown, replaceAll: a.replaceAll }) },
+  docs_format_as_report: { fn: 'google-docs', action: 'format_as_report', mapArgs: (a) => ({ documentId: a.documentId }) },
+  docs_style_range: { fn: 'google-docs', action: 'style_range', mapArgs: (a) => ({ documentId: a.documentId, startIndex: a.startIndex, endIndex: a.endIndex, bold: a.bold, italic: a.italic, fontSize: a.fontSize, foregroundColor: a.foregroundColor, link: a.link }) },
+  docs_clear_formatting: { fn: 'google-docs', action: 'clear_formatting', mapArgs: (a) => ({ documentId: a.documentId, startIndex: a.startIndex, endIndex: a.endIndex }) },
   // Tier 3: Sheets Pro — additive
   sheets_list_spreadsheets: { fn: 'google-sheets', action: 'list_spreadsheets', mapArgs: (a) => ({ pageSize: a.pageSize }) },
   sheets_get_spreadsheet: { fn: 'google-sheets', action: 'get_spreadsheet', mapArgs: (a) => ({ spreadsheetId: a.spreadsheetId }) },
@@ -6338,6 +6346,18 @@ Always format every response in clean, well-structured Markdown. Never return wa
 - Lead with the answer, then supporting detail. No filler preambles ("Sure!", "Great question!", "Here is…").
 - For short factual replies (1–2 sentences), plain text is fine — formatting scales with content length.
 
+===========================================================
+DOCUMENT STYLING PROTOCOL (Google Docs)
+===========================================================
+You have FULL read/write access to Google Docs via these tools. Never tell the user you can't edit or style a doc.
+
+When the user asks you to create, update, restyle, or "make a doc look nice":
+1. Creating from scratch with formatted content → \`create_google_doc\` (title only) → \`docs_apply_markdown\` with the full markdown body. Do NOT use raw \`docs_insert_text\` for styled content — \`docs_apply_markdown\` handles headings, bold, italics, bullets, and numbered lists in one call.
+2. Restyling an existing doc → \`docs_get_document\` to see current content → \`docs_apply_markdown\` with \`replaceAll: true\` (rewrite as styled markdown), OR \`docs_format_as_report\` for one-shot professional polish (Arial 11pt body, 1.15 line spacing, first paragraph as Heading 1).
+3. Surgical edits (one phrase bold, one link added) → \`docs_style_range\`.
+4. Wiping styling before re-styling → \`docs_clear_formatting\`.
+5. If a Docs API call fails, report the actual error message — never claim the capability is missing.
+
 IMPORTANT TOOL USAGE RULES:
 1. When the user asks you to DO something (send, create, schedule, post, etc.), USE THE APPROPRIATE TOOL.
 2. Always confirm the action with the user BEFORE executing destructive or important actions.
@@ -6794,6 +6814,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'docs_insert_text': 'google-docs',
     'docs_replace_text': 'google-docs',
     'docs_batch_update': 'google-docs',
+    'docs_apply_markdown': 'google-docs',
+    'docs_format_as_report': 'google-docs',
+    'docs_style_range': 'google-docs',
+    'docs_clear_formatting': 'google-docs',
     'sheets_list_spreadsheets': 'google-sheets',
     'sheets_get_spreadsheet': 'google-sheets',
     'sheets_read_range': 'google-sheets',
@@ -7075,6 +7099,10 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'create_calendar_event': 'Creating calendar event',
   'search_google_drive': 'Searching Google Drive',
   'create_google_doc': 'Creating Google Doc',
+  'docs_apply_markdown': 'Styling Google Doc',
+  'docs_format_as_report': 'Formatting as report',
+  'docs_style_range': 'Styling text range',
+  'docs_clear_formatting': 'Clearing formatting',
   'create_google_sheet': 'Creating Google Sheet',
   'ghl_list_contacts': 'Listing GHL contacts',
   'ghl_create_contact': 'Creating GHL contact',
