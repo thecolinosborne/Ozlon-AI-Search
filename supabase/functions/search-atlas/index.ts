@@ -589,6 +589,8 @@ serve(async (req) => {
         return await actionSyncNow(auth, params);
       case "recent_snapshots":
         return await actionRecentSnapshots(auth, params);
+      case "diagnose":
+        return await actionDiagnose(auth);
       default:
         return fail(`Unknown action: ${action}`, 400);
     }
