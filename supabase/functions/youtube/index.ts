@@ -267,10 +267,13 @@ serve(async (req) => {
         }
       }
 
+      const grantedScopes = conn ? String(((conn.metadata || {}) as AnyJson).scope || "") : "";
+
       return jsonOk({
         success: true,
         connection: apiKeyResponse,
         oauthStatus,
+        grantedScopes,
       });
     }
 

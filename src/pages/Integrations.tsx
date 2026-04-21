@@ -9,6 +9,7 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { isServiceGranted, GOOGLE_SERVICE_SCOPES } from "@/lib/googleScopes";
 
 type Category = "google" | "crm" | "media" | "productivity";
 
@@ -174,25 +175,44 @@ const Integrations = () => {
       try {
         const { data, error } = await supabase
           .from("integration_connections")
-          .select("provider, status, last_validated_at")
+          .select("provider, status, last_validated_at, metadata")
           .eq("user_id", user.id);
         if (cancelled || error) return;
-        const byProvider = new Map<string, { status: string; last_validated_at: string | null }>();
+        const byProvider = new Map<string, { status: string; last_validated_at: string | null; scope: string }>();
         for (const row of data || []) {
+          const meta = (row.metadata || {}) as { scope?: string };
           const existing = byProvider.get(row.provider);
           if (!existing || (row.status === "connected" && existing.status !== "connected")) {
-            byProvider.set(row.provider, { status: row.status, last_validated_at: row.last_validated_at });
+            byProvider.set(row.provider, {
+              status: row.status,
+              last_validated_at: row.last_validated_at,
+              scope: String(meta.scope || ""),
+            });
           }
         }
         for (const i of integrations) {
           const provider = PROVIDER_BY_ID[i.id];
           const row = provider ? byProvider.get(provider) : undefined;
-          if (row && row.status === "connected") {
+          const isGoogleService = !!GOOGLE_SERVICE_SCOPES[i.id];
+
+          if (!row || row.status !== "connected") {
+            disconnect(i.id);
+            continue;
+          }
+
+          // For Google services, only mark connected if this service's scope was granted.
+          if (isGoogleService) {
+            if (isServiceGranted(i.id, row.scope)) {
+              setStatus(i.id, "connected");
+              setApiKeyConfigured(i.id, true);
+              if (row.last_validated_at) setLastSync(i.id, row.last_validated_at);
+            } else {
+              disconnect(i.id);
+            }
+          } else {
             setStatus(i.id, "connected");
             setApiKeyConfigured(i.id, true);
             if (row.last_validated_at) setLastSync(i.id, row.last_validated_at);
-          } else {
-            disconnect(i.id);
           }
         }
       } catch {
