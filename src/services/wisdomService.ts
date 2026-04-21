@@ -99,9 +99,16 @@ export const wisdomService = {
   },
 
   async listPacks(): Promise<WisdomPack[]> {
-    const { data, error } = await supabase.functions.invoke("knowledge-pack-ingest", {
-      body: { list: true },
+    // Edge function expects ?list=1 (query param), not body, for the list branch.
+    const { data, error } = await supabase.functions.invoke("knowledge-pack-ingest?list=1", {
+      method: "GET",
     });
+    if (error) {
+      console.error("Failed to list wisdom packs:", error);
+      return [];
+    }
+    return data?.packs ?? [];
+  },
     if (error) {
       console.error("listPacks error:", error);
       return [];
