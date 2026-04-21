@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { isServiceGranted, GOOGLE_SERVICE_SCOPES } from "@/lib/googleScopes";
 
-type Category = "google" | "crm" | "media" | "productivity";
+type Category = "google" | "crm" | "media" | "productivity" | "seo";
 
 interface IntegrationEntry {
   id: string;
