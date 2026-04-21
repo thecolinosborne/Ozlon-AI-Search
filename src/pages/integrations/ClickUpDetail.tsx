@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { CheckSquare, ListTodo, RefreshCw, Webhook, Plus, X } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
+import { SyncRunsList } from "@/components/integrations/SyncRunsList";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -188,16 +189,25 @@ const ClickUpDetail = () => {
     toast.success("ClickUp disconnected");
   };
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncRefreshKey, setSyncRefreshKey] = useState(0);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+
   const handleSync = async () => {
+    setSyncing(true);
     setStatus("clickup", "syncing");
     try {
-      const tasks = await callClickUp("list_tasks", getAuthParams());
+      const result = await callClickUp("sync_tasks", getAuthParams());
       setStatus("clickup", "connected");
       setLastSync("clickup", new Date().toISOString());
-      toast.success(`Synced ${tasks.tasks?.length || 0} tasks`);
-    } catch {
+      setSyncRefreshKey((k) => k + 1);
+      toast.success(`Synced ${result?.records_processed ?? 0} tasks`);
+    } catch (err) {
       setStatus("clickup", "error");
-      toast.error("Sync failed");
+      setSyncRefreshKey((k) => k + 1);
+      toast.error(`Sync failed: ${(err as Error).message}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
