@@ -256,18 +256,24 @@ async function logSyncRun(
 // ============================================================================
 
 async function actionTestConnection(auth: AuthCtx) {
-  // Try the projects endpoint as a low-cost validation.
-  const r = await saCall(auth.apiKey, "/projects/?page_size=1");
-  if (!r.ok) return fail(`Search Atlas auth failed (HTTP ${r.status})`, r.status, r.data);
+  // Cheapest valid call to validate token against the customer account endpoint.
+  const r = await saCall(auth.apiKey, "/api/customer/account/");
+  if (!r.ok) {
+    return fail(
+      `Search Atlas auth failed (HTTP ${r.status})`,
+      r.status,
+      typeof r.data === "string" ? r.data : JSON.stringify(r.data).slice(0, 400),
+    );
+  }
   return ok({
     connected: true,
-    detail: "Token validated against /projects/",
+    detail: `Token validated via /api/customer/account/ (auth scheme: ${r.scheme})`,
     sample: r.data,
   });
 }
 
 async function actionListProjects(auth: AuthCtx) {
-  const r = await saCall(auth.apiKey, "/projects/?page_size=100");
+  const r = await saCall(auth.apiKey, "/api/v3/customer/projects/?page_size=100");
   if (!r.ok) return fail(`list_projects failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ projects: r.data });
 }
@@ -275,10 +281,9 @@ async function actionListProjects(auth: AuthCtx) {
 async function actionAuditSite(auth: AuthCtx, params: Record<string, unknown>) {
   const domain = String(params.domain || "").trim();
   if (!domain) return fail("domain is required", 400);
-  // Search Atlas Site Audit endpoint shape
   const r = await saCall(
     auth.apiKey,
-    `/site-audit/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/site-audits/?domain=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`audit_site failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "audit", domain, r.data);
@@ -290,7 +295,7 @@ async function actionSiteExplorer(auth: AuthCtx, params: Record<string, unknown>
   if (!domain) return fail("domain is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/site-explorer/overview/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/site-explorer/overview/?target=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`site_explorer failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "site_explorer", domain, r.data);
@@ -304,7 +309,7 @@ async function actionKeywordResearch(auth: AuthCtx, params: Record<string, unkno
   const limit = Math.min(Number(params.limit) || 50, 200);
   const r = await saCall(
     auth.apiKey,
-    `/keyword-research/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}&limit=${limit}`,
+    `/api/v3/keyword-researcher/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}&limit=${limit}`,
   );
   if (!r.ok) return fail(`keyword_research failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "keywords", keyword, r.data);
@@ -317,7 +322,7 @@ async function actionSerpSnapshot(auth: AuthCtx, params: Record<string, unknown>
   const country = String(params.country || "us").toLowerCase();
   const r = await saCall(
     auth.apiKey,
-    `/serp/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}`,
+    `/api/v3/serp/?keyword=${encodeURIComponent(keyword)}&country=${encodeURIComponent(country)}`,
   );
   if (!r.ok) return fail(`serp_snapshot failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ keyword, country, serp: r.data });
@@ -328,7 +333,7 @@ async function actionBacklinksOverview(auth: AuthCtx, params: Record<string, unk
   if (!domain) return fail("domain is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/backlinks/overview/?domain=${encodeURIComponent(domain)}`,
+    `/api/v3/backlinks/overview/?target=${encodeURIComponent(domain)}`,
   );
   if (!r.ok) return fail(`backlinks_overview failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "backlinks_overview", domain, r.data);
@@ -342,7 +347,7 @@ async function actionBacklinksList(auth: AuthCtx, params: Record<string, unknown
   const limit = Math.min(Number(params.limit) || 50, 500);
   const r = await saCall(
     auth.apiKey,
-    `/backlinks/?domain=${encodeURIComponent(domain)}&type=${encodeURIComponent(type)}&limit=${limit}`,
+    `/api/v3/backlinks/?target=${encodeURIComponent(domain)}&type=${encodeURIComponent(type)}&limit=${limit}`,
   );
   if (!r.ok) return fail(`backlinks_list failed (HTTP ${r.status})`, r.status, r.data);
   return ok({ domain, type, backlinks: r.data });
@@ -353,7 +358,7 @@ async function actionRankTracker(auth: AuthCtx, params: Record<string, unknown>)
   if (!projectId) return fail("projectId is required", 400);
   const r = await saCall(
     auth.apiKey,
-    `/rank-tracker/${encodeURIComponent(projectId)}/keywords/`,
+    `/api/v3/rank-tracker/projects/${encodeURIComponent(projectId)}/keywords/`,
   );
   if (!r.ok) return fail(`rank_tracker failed (HTTP ${r.status})`, r.status, r.data);
   await writeSnapshot(auth.userId, "rank_tracker", null, r.data, projectId);
