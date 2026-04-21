@@ -1,11 +1,60 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Loader2, Volume2, VolumeX } from "lucide-react";
+import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRight, Cog } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "@/hooks/useChatStream";
+import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
 import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
+
+const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
+  if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
+  if (status === "error") return <AlertCircle className="w-3 h-3 text-destructive" />;
+  return <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />;
+};
+
+const LiveStepsStrip = ({ steps, collapsed: initialCollapsed }: { steps: LiveStep[]; collapsed: boolean }) => {
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  useEffect(() => { setCollapsed(initialCollapsed); }, [initialCollapsed]);
+
+  if (steps.length === 0) return null;
+
+  if (collapsed) {
+    const doneCount = steps.filter((s) => s.status === "done").length;
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        className="not-prose mb-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ChevronRight className="w-3 h-3" />
+        <Cog className="w-3 h-3" />
+        <span>Done in {doneCount} step{doneCount === 1 ? "" : "s"}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="not-prose mb-2 rounded-lg border border-border/30 bg-muted/30 px-2.5 py-1.5">
+      <button
+        type="button"
+        onClick={() => setCollapsed(true)}
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors mb-1"
+      >
+        <ChevronDown className="w-3 h-3" />
+        <span>Working ({steps.length})</span>
+      </button>
+      <ul className="space-y-1">
+        {steps.map((step, i) => (
+          <li key={`${step.label}-${i}`} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <StepIcon status={step.status} />
+            <span className={cn("truncate", step.status === "done" && "text-foreground/70")}>{step.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
 
 // Auto-link bare URLs (http/https/www.) that aren't already inside a markdown link.
 const linkifyPlainUrls = (text: string): string => {
