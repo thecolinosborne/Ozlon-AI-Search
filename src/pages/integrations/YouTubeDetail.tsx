@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Youtube, AlertCircle, Loader2, Upload, Shield, ChevronDown, ChevronUp,
+  Settings2, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -10,6 +11,7 @@ import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { isServiceGranted, getGoogleServiceConfig } from "@/lib/googleScopes";
 
 function normalizeVideoUrl(url: string): string {
   const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
