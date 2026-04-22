@@ -1,73 +1,81 @@
 
 
-## Two surgical, scalable fixes — shipped in sequence
+## Communications upgrade — surgical, additive
 
-Splitting into two independent PRs so each is reviewable, revertable, and can't break the other. Fix 1 is frontend-only and zero-risk. Fix 2 touches one edge function with additive changes only.
+The replies feel generic because `draftFor()` in `ReplySheet.tsx` returns 4 hardcoded strings — one per channel — with zero awareness of what the message actually says or who sent it. Slack IS in the aggregator and IS in the unified stream, but its reply is the same canned "On it — taking a look now" line every time, which is why it feels missing. The hero summary is also static counts ("X messages across N channels") with no insight.
 
----
-
-### Fix 1 — Descript key visibility (frontend only, ~10 lines)
-
-**Scope:** `src/pages/integrations/DescriptDetail.tsx` only.
-
-**Change:** Add one mount-effect that, when the local store has no `apiKey` but a `descript` row exists in `integration_connections` for the current user, hydrates `metadata.api_key` (or just the last-4 hint) into the local store via `updateSettings("descript", { apiKey })`.
-
-**Why scalable:** Same pattern can be lifted into a tiny `useHydrateConnection(provider)` hook later for every integration page, but we don't refactor now — only Descript page is touched.
-
-**Safety:** RLS already restricts `integration_connections` to `auth.uid()`. Read-only. No backend change. No schema change. If it fails, field stays blank exactly like today.
-
-**Verify:** Hard refresh `/integrations/descript` → masked `•••• xxxx` + "connected" pill, Test Connection passes.
+Three tight fixes, each independently revertable. No redesign of what you like.
 
 ---
 
-### Fix 2 — Multi-task update reliability (backend only)
+### Fix 1 — Real per-message AI drafts (kills the "same reply every time" bug)
 
-**Scope:** `supabase/functions/chat/index.ts` only. No schema, no RLS, no new tables.
+**New edge function:** `supabase/functions/communications-draft/index.ts`
+- Input: `{ channel, fromName, subject?, preview, channelLabel }`
+- Calls Lovable AI (`google/gemini-2.5-flash`) with a channel-aware system prompt:
+  - **email** → 2–4 sentence reply, signature-friendly, matches subject tone
+  - **slack** → 1–2 sentences, lowercase-friendly, no greeting/signoff (matches Slack norms)
+  - **sms** → 1 sentence, casual, under 160 chars
+  - **voicemail** → 1 sentence callback acknowledgment
+- Falls back to current canned line if AI fails (zero regression risk).
 
-Four additive changes inside the existing tool handler:
+**Frontend:** `src/components/communications/ReplySheet.tsx`
+- Replace synchronous `draftFor()` with a `useEffect` that calls the new function when `message` changes.
+- Show existing "AI draft ready" sparkle in a loading state ("Drafting…") then fade in the real draft.
+- Add small "Regenerate" pill next to the sparkle row — calls the function again with a `tone` hint (`shorter` / `friendlier` / `firmer`). Optional, additive.
 
-**2a. Loosen `VALID_TASK_TRANSITIONS`** (~L2879)
-```text
-todo          → in_progress, up_for_review, completed, cancelled
-in_progress   → todo, up_for_review, completed, cancelled
-up_for_review → todo, in_progress, completed, cancelled
-completed     → in_progress, up_for_review
-cancelled     → todo, in_progress
-```
+**Why this fixes Slack specifically:** Slack drafts will now reference the actual message content and channel name instead of the static "On it" line. Same for every other channel.
 
-**2b. Validate against fresh DB row, not cached value**
-In `update_work_task` handler: `SELECT status FROM work_tasks WHERE id=$1 AND user_id=$2` immediately before the transition check. Use that as `from_status`. Kills the "second update in a batch fails" bug caused by stale local state.
+---
 
-**2c. Add `bulk_update_work_tasks` tool**
-New tool, additive — old `update_work_task` stays untouched for backward compat. Accepts `updates: [{id, status?, title?, ...}]`, loops server-side, returns `{ succeeded: [{id}], failed: [{id, reason}] }`. AI gets per-task structured results (matches the no-swallowed-errors policy).
+### Fix 2 — Smarter hero summary
 
-**2d. Refresh task snapshot between tool calls in same turn**
-After any `*_work_task` tool returns inside the tool loop, re-fetch the user's open `work_tasks` before the next model call. Cheap query, eliminates stale-snapshot mismatches on chained edits.
+**Backend:** `supabase/functions/communications-digest/index.ts` (already exists, already calls AI)
+- Currently the heroLine + subLine are computed deterministically before the AI call and never use the AI output. Change: have AI return three short fields — `heroLine`, `subLine`, `briefScript` — in one structured JSON response (use `response_format: { type: "json_object" }`).
+- Prompt the model to write the heroLine like a chief-of-staff: name the single most important thing ("Sarah's contract needs a yes/no today"), not a count.
+- Subline becomes a one-liner of texture: "3 from clients, 1 from your team, nothing on fire." If the model fails or no priorities, fall back to current deterministic strings.
 
-**Why scalable:** Same fresh-read + bulk-tool + per-item failure shape is the template for any future multi-entity tool (emails, contacts, calendar). We're establishing the pattern once on tasks.
+**Frontend:** zero changes — `useCommunicationsFeed` already consumes `heroLine`/`subLine`/`briefScript` from the digest response.
 
-**Safety:**
-- All four changes are additive or relax existing rules. No transition that works today stops working.
-- New `bulk_` tool is opt-in — AI only uses it when it sees multiple updates in one turn.
-- Per-call DB read is one indexed lookup by primary key. Negligible cost.
-- Snapshot refresh is the same query already run at turn start, just repeated.
-- If 2c or 2d misbehave, revert that single block — 2a + 2b stand on their own and already fix the user-reported failures.
+---
 
-**Verify:**
-1. "Mark tasks A, B, C completed and cancel D" in one message → all four resolve; any failure names the specific task + reason.
-2. Move a `todo` task straight to `completed` → succeeds.
-3. Move 5 tasks where one was deleted out-of-band → 4 succeed, 1 reports "not found" with id.
+### Fix 3 — "Ultimate inbox" polish on the existing layout (no redesign)
+
+Small additive UX improvements to what's already there:
+
+**a. Channel filter chips above the stream** (`Communications.tsx`)
+- Replace the single "All" dropdown with a horizontal pill row: `All · Email · Slack · SMS · Voicemail`, each with its tint dot + count badge. Dropdown stays for `Unread` / `Needs reply`. Faster scanning, one-tap filtering.
+
+**b. Snooze + Mark done inline actions on `MessageRow`**
+- On hover (desktop) / left-swipe (mobile, optional later) show two ghost buttons: `✓ Done` and `⏰ Later`. Local-only state for now (no backend write) — purely a focus tool that hides the row from the current view. Survives the session, clears on refresh. Establishes the pattern; persistence comes later.
+
+**c. "Triage mode" toggle in the sub-header**
+- A small `Triage` switch next to the filter. When on, the stream auto-collapses everything except `needsReply` messages, and tapping a row opens the ReplySheet AND advances to the next unread on send/close. Turns the page into a 90-second inbox-zero flow.
+
+**d. Priority cards become tappable**
+- `PriorityCard` already has an `onClick` prop — wire it up in `HeroDigest` to open the matching `CommMessage` in the ReplySheet. Currently tapping does nothing.
 
 ---
 
 ### Out of scope (explicitly not touching)
 
-- Slack flow we just shipped.
-- RLS, work_tasks schema, Descript edge function, vault flow.
-- Any UI redesign on either page.
-- Other integration detail pages (Descript-only hydration this round).
+- The visual style you like — glass, blur, channel tints, hero card shape, BriefMe overlay — all stays.
+- No changes to Gmail/Slack/GHL fetchers, RLS, schema, or auth.
+- No new tables. Snooze/Done are session-only this round; persistence is a follow-up.
+- No changes to the chat function, Descript, or the work_tasks fixes we just shipped.
 
 ### Order of operations
 
-Ship Fix 1 first (zero backend risk, instant user value), confirm in preview, then ship Fix 2.
+1. Fix 1 (real drafts) — biggest UX win, fully isolated to one new function + one component.
+2. Fix 3d (priority cards tappable) — 5-line wire-up, instant value.
+3. Fix 2 (smarter summary) — one edge function edit, zero frontend touch.
+4. Fix 3a, 3b, 3c — UX polish, each independently revertable.
+
+### Verification
+
+- Tap any Slack message → draft references channel name + message content, not the canned line.
+- Tap any email → draft addresses sender by first name and references subject.
+- Refresh page → hero line names a specific item or person, not a count.
+- Tap a priority card → opens that exact message's reply sheet.
+- Toggle Triage → stream collapses to needs-reply only; sending advances to next.
 
