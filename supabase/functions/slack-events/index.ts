@@ -1,12 +1,8 @@
-// Slack Events webhook — receives @mentions, DMs, and thread replies, then
-// generates an AI reply via Lovable AI Gateway and posts it back to Slack.
+// Slack Events webhook — multi-tenant. Each install stores its own bot token
+// in `integration_connections` (provider='slack', auth_type='oauth2'). On each
+// event we look up the workspace by team_id and use that workspace's token.
 //
-// Setup steps for the user:
-// 1. Create custom Slack app from manifest at https://api.slack.com/apps
-// 2. Install app to workspace, copy Bot User OAuth Token + Signing Secret
-// 3. Add SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET as Supabase secrets
-//
-// This function MUST be public (verify_jwt = false) so Slack can hit it.
+// Public function (verify_jwt = false). Signing secret is app-level (single global).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -18,8 +14,8 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const SLACK_BOT_TOKEN = Deno.env.get("SLACK_BOT_TOKEN");
 const SLACK_SIGNING_SECRET = Deno.env.get("SLACK_SIGNING_SECRET");
+const SLACK_BOT_TOKEN_FALLBACK = Deno.env.get("SLACK_BOT_TOKEN"); // back-compat
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -30,7 +26,6 @@ async function verifySlackSignature(req: Request, rawBody: string): Promise<bool
   const ts = req.headers.get("x-slack-request-timestamp");
   const sig = req.headers.get("x-slack-signature");
   if (!ts || !sig) return false;
-  // Reject replays older than 5 minutes
   if (Math.abs(Date.now() / 1000 - Number(ts)) > 60 * 5) return false;
 
   const baseString = `v0:${ts}:${rawBody}`;
@@ -46,19 +41,70 @@ async function verifySlackSignature(req: Request, rawBody: string): Promise<bool
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
   const expected = `v0=${mac}`;
-  // constant-time compare
   if (expected.length !== sig.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
   return diff === 0;
 }
 
-// ---- Slack Web API helpers ----
-async function slackApi(method: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+// ---- Per-team workspace resolution ----
+interface Workspace {
+  token: string;
+  botUserId: string | null;
+  teamId: string;
+  userId: string | null; // owning Ozlon user
+}
+
+const wsCache = new Map<string, { ws: Workspace; at: number }>();
+const WS_CACHE_MS = 5 * 60 * 1000;
+
+async function resolveWorkspace(teamId: string | undefined): Promise<Workspace | null> {
+  if (teamId) {
+    const cached = wsCache.get(teamId);
+    if (cached && Date.now() - cached.at < WS_CACHE_MS) return cached.ws;
+
+    const { data } = await sb
+      .from("integration_connections")
+      .select("user_id, metadata")
+      .eq("provider", "slack")
+      .eq("status", "connected")
+      .filter("metadata->>team_id", "eq", teamId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      const meta = (data.metadata || {}) as Record<string, unknown>;
+      const token = String(meta.access_token || "");
+      if (token) {
+        const ws: Workspace = {
+          token,
+          botUserId: (meta.bot_user_id as string) || null,
+          teamId,
+          userId: data.user_id as string,
+        };
+        wsCache.set(teamId, { ws, at: Date.now() });
+        return ws;
+      }
+    }
+  }
+
+  // Back-compat fallback to global env token (single-workspace legacy mode)
+  if (SLACK_BOT_TOKEN_FALLBACK) {
+    return { token: SLACK_BOT_TOKEN_FALLBACK, botUserId: null, teamId: teamId || "legacy", userId: null };
+  }
+  return null;
+}
+
+async function slackApi(
+  ws: Workspace,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const res = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      Authorization: `Bearer ${ws.token}`,
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(body),
@@ -66,12 +112,11 @@ async function slackApi(method: string, body: Record<string, unknown>): Promise<
   return await res.json();
 }
 
-let cachedBotUserId: string | null = null;
-async function getBotUserId(): Promise<string | null> {
-  if (cachedBotUserId) return cachedBotUserId;
-  const r = await slackApi("auth.test", {});
-  cachedBotUserId = (r.user_id as string) || null;
-  return cachedBotUserId;
+async function ensureBotUserId(ws: Workspace): Promise<string | null> {
+  if (ws.botUserId) return ws.botUserId;
+  const r = await slackApi(ws, "auth.test", {});
+  ws.botUserId = (r.user_id as string) || null;
+  return ws.botUserId;
 }
 
 // ---- AI reply via Lovable AI Gateway ----
@@ -91,14 +136,8 @@ async function generateAiReply(userText: string, contextMessages: string[]): Pro
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-3-flash-preview",
-      messages,
-    }),
+    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "google/gemini-3-flash-preview", messages }),
   });
   if (!res.ok) {
     const txt = await res.text();
@@ -111,13 +150,10 @@ async function generateAiReply(userText: string, contextMessages: string[]): Pro
   return (data.choices?.[0]?.message?.content as string) || "(no response)";
 }
 
-// Strip <@BOTID> mention tokens from text
 function stripBotMention(text: string, botId: string): string {
   return text.replace(new RegExp(`<@${botId}>`, "g"), "").trim();
 }
 
-// ---- Decide whether to respond ----
-// Behavior: @mentions, DMs, and any reply in a thread the bot has already participated in.
 async function shouldRespond(event: Record<string, unknown>, botId: string): Promise<boolean> {
   const type = event.type as string;
   const subtype = event.subtype as string | undefined;
@@ -127,18 +163,13 @@ async function shouldRespond(event: Record<string, unknown>, botId: string): Pro
   const threadTs = event.thread_ts as string | undefined;
   const channel = event.channel as string | undefined;
 
-  // Ignore bot's own messages, message edits/joins/leaves, system subtypes
   if (!user || user === botId) return false;
   if ((event.bot_id as string | undefined)) return false;
   if (subtype && subtype !== "thread_broadcast") return false;
 
-  // app_mention always responds
   if (type === "app_mention") return true;
-
-  // DM: channel_type === "im"
   if (type === "message" && channelType === "im") return true;
 
-  // Thread reply where bot already participated
   if (type === "message" && threadTs && channel) {
     const { data } = await sb
       .from("slack_processed_events")
@@ -150,20 +181,13 @@ async function shouldRespond(event: Record<string, unknown>, botId: string): Pro
     if (data) return true;
   }
 
-  // Direct mention inside a regular channel message (defensive — usually app_mention covers this)
   if (type === "message" && text.includes(`<@${botId}>`)) return true;
-
   return false;
 }
 
-// Fetch a small slice of thread context for better replies
-async function fetchThreadContext(channel: string, threadTs: string, limit = 8): Promise<string[]> {
+async function fetchThreadContext(ws: Workspace, channel: string, threadTs: string, limit = 8): Promise<string[]> {
   try {
-    const r = await slackApi("conversations.replies", {
-      channel,
-      ts: threadTs,
-      limit,
-    });
+    const r = await slackApi(ws, "conversations.replies", { channel, ts: threadTs, limit });
     const msgs = (r.messages as Array<{ text?: string; user?: string }>) || [];
     return msgs.map((m) => m.text || "").filter(Boolean).slice(-limit);
   } catch (e) {
@@ -183,47 +207,50 @@ Deno.serve(async (req) => {
     return new Response("invalid json", { status: 400, headers: corsHeaders });
   }
 
-  // Slack URL verification handshake — must respond with the challenge
+  // Slack URL verification handshake
   if (payload.type === "url_verification") {
-    return new Response(
-      JSON.stringify({ challenge: payload.challenge }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ challenge: payload.challenge }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
-  // Verify signature for everything else
   const valid = await verifySlackSignature(req, rawBody);
   if (!valid) {
     console.warn("[slack-events] invalid signature");
     return new Response("invalid signature", { status: 401, headers: corsHeaders });
   }
 
-  if (!SLACK_BOT_TOKEN) {
-    console.error("SLACK_BOT_TOKEN not configured");
-    return new Response("ok", { headers: corsHeaders }); // ack to avoid retries
-  }
-
-  // Acknowledge fast, then process in background (Slack expects <3s response)
   const eventId = (payload.event_id as string) || crypto.randomUUID();
+  const teamId = (payload.team_id as string) || ((payload.team as string) ?? undefined);
 
-  // Dedupe — Slack retries deliveries
+  // Dedupe
   const { data: existing } = await sb
     .from("slack_processed_events")
     .select("id")
     .eq("event_id", eventId)
     .maybeSingle();
-  if (existing) {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  if (existing) return new Response("ok", { headers: corsHeaders });
 
   const event = (payload.event as Record<string, unknown>) || {};
 
-  // Background work — don't block the Slack ACK
   (async () => {
     try {
-      const botId = await getBotUserId();
+      const ws = await resolveWorkspace(teamId);
+      if (!ws) {
+        console.error("[slack-events] no workspace token for team", teamId);
+        await sb.from("slack_processed_events").insert({
+          event_id: eventId,
+          event_type: (event.type as string) || null,
+          channel: (event.channel as string) || null,
+          status: "error",
+          error_message: `no token for team ${teamId}`,
+        });
+        return;
+      }
+
+      const botId = await ensureBotUserId(ws);
       if (!botId) {
-        console.error("Could not resolve bot user id");
+        console.error("Could not resolve bot user id for team", ws.teamId);
         return;
       }
 
@@ -244,18 +271,17 @@ Deno.serve(async (req) => {
       const userText = stripBotMention((event.text as string) || "", botId);
       const threadTs = (event.thread_ts as string) || (event.ts as string);
 
-      // Pull a little thread context for better replies
       const context =
         threadTs && threadTs !== (event.ts as string)
-          ? await fetchThreadContext(channel, threadTs)
+          ? await fetchThreadContext(ws, channel, threadTs)
           : [];
 
       const reply = await generateAiReply(userText || "(no message text)", context);
 
-      const post = await slackApi("chat.postMessage", {
+      const post = await slackApi(ws, "chat.postMessage", {
         channel,
         text: reply,
-        thread_ts: threadTs, // always reply in-thread
+        thread_ts: threadTs,
       });
 
       const responseTs = (post.ts as string) || null;
