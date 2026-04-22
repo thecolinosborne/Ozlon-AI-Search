@@ -90,6 +90,7 @@
 - [GoHighLevel support](mem://integrations/gohighlevel-tier-3-support) — 50+ tools including Social Planner, Products, Contacts
 - [ClickUp workspace](mem://integrations/clickup-workspace-discovery) — API-driven Space/Folder/List picker, overrides env vars
 - [AI Processor registry](mem://integrations/ai-processor-registry) — Live verification of provider API keys
+- [Slack multi-tenant OAuth](mem://integrations/slack-multi-tenant-oauth) — Per-user "Add to Slack" install; tokens stored in integration_connections, events routed by team_id
 
 ### Google Services & Email (Native)
 - [Account resolution](mem://integrations/identity-context-resolution-rules) — Hierarchy: explicit -> contextual -> inferred
