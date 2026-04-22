@@ -15,11 +15,11 @@
 import {
   Globe, Video, CheckSquare, Youtube, Mail, HardDrive, Calendar,
   FileSpreadsheet, FileText, Presentation, BarChart3, Search, Tag,
-  BookOpen,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
-export type IntegrationCategory = "google" | "crm" | "media" | "productivity" | "seo" | "knowledge";
+export type IntegrationCategory = "google" | "crm" | "media" | "productivity" | "seo" | "communication";
 
 export interface IntegrationManifest {
   /** URL slug + integrations-store id. */
@@ -241,19 +241,19 @@ export const INTEGRATIONS: IntegrationManifest[] = [
     customDetailPage: true,
   },
 
-  // Notion — auto-rendered detail page (no custom UI). Demonstrates the
-  // 30-second integration promise: one backend manifest + one frontend entry.
+  // Slack — auto-rendered detail page (no custom UI). Auth handled by the
+  // Lovable connector gateway, so no API key prompt is needed.
   {
-    id: "notion",
-    name: "Notion",
-    description: "Search, read, create, and append to pages and databases in your Notion workspace.",
-    icon: BookOpen,
-    category: "knowledge",
-    provider: "notion",
-    fnName: "notion",
-    testAction: "search",
-    testLabel: "Workspace Search",
-    auth: "api-key",
+    id: "slack",
+    name: "Slack",
+    description: "Send messages, read channels, search conversations, and manage your Slack workspace.",
+    icon: MessageSquare,
+    category: "communication",
+    provider: "slack",
+    fnName: "slack",
+    testAction: "list_channels",
+    testLabel: "Channels",
+    auth: "none", // Connector gateway handles auth
     // No customDetailPage → uses AutoIntegrationDetail.
   },
 ];
