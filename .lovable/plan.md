@@ -1,82 +1,175 @@
 
+## Orchestration hardening plan — make it work across the whole callable backend
 
-## Communications: full context, threads, smart replies, delete
-
-Three additive fixes layered onto what's already shipped. No redesign — same hero/stream/sheet you like. Each fix is independently revertable.
-
----
-
-### Fix 1 — Full message context in the Reply Sheet
-
-**Problem:** the sheet shows only the 240-char `snippet` from the aggregator. You can't actually read the email/Slack message.
-
-**New edge function:** `supabase/functions/communications-thread/index.ts`
-- Input: `{ source: "gmail" | "slack" | "ghl", threadId, messageId? }`
-- Returns a normalized array `{ messages: ThreadMessage[] }` where each `ThreadMessage` has `{ id, fromName, fromHandle, direction: "in" | "out", body, sentAt, attachments?: [...] }`.
-- Per source:
-  - **gmail** → calls existing `google-gmail` `get_thread` (`format=full`), walks `payload.parts` to extract `text/plain` (fallback `text/html` stripped to text), pulls attachment metadata (filename, mime, size, attachmentId).
-  - **slack** → calls `conversations.replies` via the slack gateway with the channel + thread_ts already on the message id (`slack:<channel>:<ts>`). Resolves user IDs to display names with a small `users.info` cache.
-  - **ghl** → calls existing `gohighlevel` `get_conversation_messages`, normalizes `direction` from GHL's `direction` field.
-- Best-effort: errors return `{ messages: [], error: "..." }` so the sheet never blanks.
-
-**Frontend:** `ReplySheet.tsx`
-- Add `useQuery(["thread", message.id])` that fires when the sheet opens, calls `communications-thread`.
-- Replace the single grey preview card with a vertical thread: each message is a small bubble — incoming (left, neutral) vs outgoing (right, primary tint). Newest at the bottom, auto-scrolled into view.
-- Loading state: 3 skeleton bubbles.
-- The AI draft block stays exactly where it is, below the thread.
-- AI draft prompt now receives the **last 3 messages** in the thread as context, not just the snippet — so replies finally reference the actual conversation.
+### What will be fixed
+The orchestration layer currently fails closed:
+- `chat/index.ts` validates only `ACTION_TOOLS` at `getValidatedTools()` and then appends registry tools afterward, so manifest tools bypass the guard entirely.
+- One malformed tool schema (`google-sheets`) can still poison the whole OpenAI tool payload.
+- Callable edge functions are split between legacy switch logic and the manifest registry, so the orchestration surface is incomplete and inconsistent.
+- Multi-tool execution exists (`multi_action` + `dispatchMulti`) but lacks a unified health/validation layer across all callable functions.
 
 ---
 
-### Fix 2 — Conversation-aware AI replies
+## Implementation
 
-**Update:** `supabase/functions/communications-draft/index.ts`
-- New optional input field: `threadContext?: Array<{ from: string; body: string; direction: "in" | "out" }>` (last 3 messages, oldest → newest).
-- System prompt addition: *"You're continuing an ongoing thread. Match the conversational tone already established. Reference specifics from the prior messages when natural."*
-- User content now includes the thread block above the message-to-reply-to.
-- Falls back to current single-message behavior if `threadContext` not provided (zero regression).
+### 1) Immediate recovery: stop one bad tool from breaking Gmail or anything else
+**Files**
+- `supabase/functions/_shared/integrations/google-sheets.ts`
+- `supabase/functions/chat/index.ts`
 
-**Frontend wiring:** `ReplySheet.tsx`
-- Pass `threadContext` from the loaded thread query into every `generate()` call (initial draft + tone regenerations).
+**Changes**
+- Fix the malformed 2D-array schemas in `sheets_write_range` and `sheets_append_rows`.
+- Replace the current shallow `isValidToolSchema()` with a recursive JSON-schema validator.
+- Move validation to the **final assembled tool list** after legacy tools, manifest tools, and `multi_action` are all merged.
+- Quarantine invalid tools individually instead of failing the whole request.
 
----
-
-### Fix 3 — Delete / archive action
-
-**Backend:** all three providers already support deletion — no new edge function needed.
-- **gmail** → existing `trash_message` action on `google-gmail`.
-- **slack** → already supports `chat.delete` via gateway; add a `slack-delete-message` thin call (5 lines, gateway pass-through). Will only succeed for messages the user posted — gracefully report "Slack only allows deleting your own messages" otherwise.
-- **ghl** → no message-level delete in their API. Show "Mark as read" instead, which calls existing `update_conversation` with `read: true`.
-
-**Frontend:** `ReplySheet.tsx` footer
-- Add a third ghost icon button between Mic and Send: `Trash2` icon.
-- Click → confirm pill ("Delete this message?") → call the right handler based on `message.source`.
-- On success: close sheet, optimistically remove from `stream` (matches existing snooze/done pattern), toast "Deleted" with an Undo (Undo only available for Gmail — calls `untrash_message`).
-
-**Frontend:** `MessageRow.tsx` hover actions
-- Add a third hover button next to Done/Later: `Trash` (red-tinted on hover only). Same handler. Mobile gets it via long-press → action sheet (out of scope this round, hover desktop only).
+**Result**
+One broken tool gets dropped. The other tools still load and run.
 
 ---
 
-### Out of scope (explicitly not touching)
+### 2) Unify orchestration so it covers all AI-callable edge functions
+**Files**
+- `supabase/functions/_shared/integrations/index.ts`
+- `supabase/functions/_shared/integrations/types.ts`
+- new manifest files under `supabase/functions/_shared/integrations/`
+- `supabase/functions/chat/index.ts`
 
-- The hero digest, channel chips, triage mode, filter dropdown — all stays.
-- No schema changes, no new tables, no RLS edits.
-- Gmail signature/threading on **send** — Send button still doesn't post (separate follow-up).
-- Mobile swipe-to-delete gestures.
-- Bulk delete / multi-select.
+**Changes**
+- Treat the manifest registry as the single orchestration entrypoint for every **AI-callable** edge function.
+- Add manifests for callable functions that are still outside the registry today, including the communications/knowledge/media-style functions that should be available to the orchestrator.
+- Keep webhook/internal lifecycle functions out of the callable surface (`slack-events`, `slack-oauth`, scheduled/background-only handlers, etc.) so “all edge functions” becomes “all callable edge functions,” which is the scalable boundary.
 
-### Order of operations
+**Result**
+The orchestrator stops depending on a half-registry / half-switch model.
 
-1. Fix 1 (thread fetch + bubbles) — biggest visible win, fully isolated.
-2. Fix 2 (context-aware drafts) — 15-line edge function diff + 1-line frontend pass.
-3. Fix 3 (delete) — additive, gated by source.
+---
 
-### Verification
+### 3) Normalize every orchestrated function to one response contract
+**Files**
+- new shared helper, e.g. `supabase/functions/_shared/tool-response.ts`
+- callable edge functions that currently vary in shape
+- `supabase/functions/_shared/integrations/_dispatcher.ts`
 
-- Tap any Gmail message → see full body + any prior replies as bubbles, not the snippet.
-- Tap a Slack thread mention → see the reply chain expanded.
-- Open an email reply in a 3-msg thread → AI draft references what was said earlier.
-- Click trash on a Gmail message → confirm → row disappears, undo toast restores it.
-- Click trash on a Slack message you didn't post → friendly error toast.
+**Changes**
+- Standardize success/error envelopes to a single normalized contract:
+  - success path
+  - error path
+  - structured diagnostics
+- Make the dispatcher accept both old and new envelopes during transition, but always normalize what it returns to the AI.
+- Preserve detailed provider errors instead of collapsing them into generic failures.
 
+**Result**
+The orchestrator can reason over failures reliably instead of getting random shapes per function.
+
+---
+
+### 4) Harden multi-task execution so batch work does not collapse
+**Files**
+- `supabase/functions/_shared/integrations/_dispatcher.ts`
+- `supabase/functions/chat/index.ts`
+
+**Changes**
+- Upgrade `multi_action` execution with:
+  - per-call isolation
+  - bounded concurrency
+  - stagger/delay for burst-sensitive providers
+  - retry with backoff for transient failures
+  - partial-success summaries
+- Keep one failed provider call from aborting the entire multi-action turn.
+
+**Result**
+“Check Gmail, update CRM, and append to Sheets” becomes a real scalable pattern, not an all-or-nothing gamble.
+
+---
+
+### 5) Add registry health visibility so breakage is obvious before users feel it
+**Files**
+- `supabase/functions/chat/index.ts`
+- `src/pages/Developer.tsx`
+- optional small debug edge function or debug payload path
+
+**Changes**
+- Emit a cold-start registry report:
+  - total tools
+  - live tools
+  - quarantined tools
+  - counts by integration
+- Show the same health summary in Developer Mode so broken registrations are visible immediately.
+
+**Result**
+You can see “Sheets quarantined, Gmail live” instead of discovering it through a failed chat turn.
+
+---
+
+### 6) Add a preflight validator so broken manifests never reach production again
+**Files**
+- new validator module reused by runtime and tests
+- integration manifest docs / validation entrypoint
+
+**Changes**
+- Reuse the same recursive schema validator outside the tool loop as a preflight check for all manifest files.
+- Validate:
+  - array schemas have `items`
+  - object schemas have sane `properties`
+  - `required` keys exist
+  - duplicate tool names are flagged
+  - invalid enums / malformed branches are flagged
+
+**Result**
+Future integrations fail fast during validation instead of taking down live orchestration.
+
+---
+
+## Technical design notes
+```text
+Current:
+legacy tools -> validated
+manifest tools -> appended later, unvalidated
+OpenAI sees one bad tool -> entire batch rejected
+
+After:
+assemble full callable registry
+        ->
+validate every tool recursively
+        ->
+live tools + quarantined tools
+        ->
+send only live tools to model
+        ->
+dispatcher normalizes all responses
+        ->
+multi_action isolates per-call failures
+```
+
+### Scope boundary
+This plan covers **all AI-callable edge functions in orchestration**.
+It does **not** expose webhook-only, auth bootstrap, or background scheduler functions as chat tools.
+
+---
+
+## Verification
+1. Ask Gmail for a message while a different manifest is intentionally malformed:
+   - Gmail still works
+   - broken tool is quarantined
+2. Run a multi-step turn across 3 integrations:
+   - each call returns independently
+   - one failure does not kill the other two
+3. Confirm registry health shows:
+   - live count
+   - quarantined count
+   - per-integration breakdown
+4. Confirm structured diagnostics from failed provider calls reach the AI and UI instead of generic transport errors.
+5. Add a new manifest with a schema bug:
+   - preflight catches it
+   - runtime quarantine still protects production if one slips through
+
+---
+
+## Order of execution
+1. Hotfix the broken schema and final-list validation.
+2. Move all callable edge functions under the orchestration registry.
+3. Normalize response envelopes + dispatcher handling.
+4. Harden `multi_action`.
+5. Add health visibility.
+6. Add preflight validation so this class of bug stays dead.
