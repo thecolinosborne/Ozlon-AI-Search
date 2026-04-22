@@ -17,6 +17,7 @@ import { descriptIntegration } from "./descript.ts";
 import { searchAtlasIntegration } from "./search-atlas.ts";
 import { slackIntegration } from "./slack.ts";
 import { gmailIntegration } from "./gmail.ts";
+import { clickupIntegration } from "./clickup.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   googleDocsIntegration,
@@ -30,6 +31,7 @@ export const INTEGRATIONS: IntegrationManifest[] = [
   searchAtlasIntegration,
   slackIntegration,
   gmailIntegration,
+  clickupIntegration,
 ];
 
 /** Map: tool name → compiled route. Built once at module load. */
