@@ -18,6 +18,7 @@ import { searchAtlasIntegration } from "./search-atlas.ts";
 import { slackIntegration } from "./slack.ts";
 import { gmailIntegration } from "./gmail.ts";
 import { clickupIntegration } from "./clickup.ts";
+import { goHighLevelIntegration } from "./gohighlevel.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   googleDocsIntegration,
@@ -32,6 +33,7 @@ export const INTEGRATIONS: IntegrationManifest[] = [
   slackIntegration,
   gmailIntegration,
   clickupIntegration,
+  goHighLevelIntegration,
 ];
 
 /** Map: tool name → compiled route. Built once at module load. */

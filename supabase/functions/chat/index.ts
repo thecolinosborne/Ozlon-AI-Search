@@ -6503,11 +6503,16 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
   }
 
   // ===== Registry-driven tools (manifests in _shared/integrations/) =====
-  // Append any registered tools that aren't already in the legacy list, plus
-  // the `multi_action` parallel fan-out tool. Adding a new integration manifest
-  // automatically surfaces its tools here without touching this function.
+  // Registry takes PRECEDENCE over legacy hardcoded tool defs: if a tool name
+  // is registered via a manifest, the manifest schema wins (legacy version is
+  // dropped from OpenAI tool defs). Execution-side, the dispatcher already
+  // short-circuits the legacy switch, so this keeps the two layers in sync.
+  // Adding a new integration manifest automatically surfaces its tools here.
+  const registered = getAllRegisteredTools();
+  const registeredNames = new Set(registered.map((t) => t.name));
+  filtered = filtered.filter((t) => !registeredNames.has(t.function.name));
   const existingNames = new Set(filtered.map((t) => t.function.name));
-  for (const t of getAllRegisteredTools()) {
+  for (const t of registered) {
     if (existingNames.has(t.name)) continue;
     filtered.push({
       type: "function",
