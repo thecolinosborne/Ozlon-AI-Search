@@ -97,32 +97,54 @@ export async function dispatchTool(
   }
 }
 
-/** Run multiple tool calls in parallel via Promise.allSettled. */
+/** Run multiple tool calls with bounded concurrency + per-call isolation.
+ *  One failed call NEVER aborts the others. Concurrency cap protects burst-
+ *  sensitive providers from rate-limit cascades. */
 export interface MultiCall { name: string; args: Record<string, unknown>; }
 export interface MultiResult {
   name: string;
   success: boolean;
   result: string;
 }
+const MULTI_CONCURRENCY = 4;
+
 export async function dispatchMulti(
   calls: MultiCall[],
   authHeader: string,
   fallback?: (name: string, args: Record<string, unknown>) => Promise<{ success: boolean; result: string }>,
 ): Promise<MultiResult[]> {
-  const promises = calls.map(async (c): Promise<MultiResult> => {
-    const safe = (c.args && typeof c.args === "object") ? c.args : {};
-    const r = await dispatchTool(c.name, safe, authHeader);
-    if (r.routed) return { name: c.name, success: r.success, result: r.result };
-    if (fallback) {
-      const f = await fallback(c.name, c.args);
-      return { name: c.name, success: f.success, result: f.result };
+  const results: MultiResult[] = new Array(calls.length);
+  let cursor = 0;
+
+  const runOne = async (idx: number): Promise<void> => {
+    const c = calls[idx];
+    try {
+      const safe = (c.args && typeof c.args === "object") ? c.args : {};
+      const r = await dispatchTool(c.name, safe, authHeader);
+      if (r.routed) {
+        results[idx] = { name: c.name, success: r.success, result: r.result };
+        return;
+      }
+      if (fallback) {
+        const f = await fallback(c.name, c.args);
+        results[idx] = { name: c.name, success: f.success, result: f.result };
+        return;
+      }
+      results[idx] = { name: c.name, success: false, result: `Unknown tool: ${c.name}` };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[dispatchMulti] '${c.name}' threw (isolated):`, msg);
+      results[idx] = { name: c.name, success: false, result: `Threw: ${msg}` };
     }
-    return { name: c.name, success: false, result: `Unknown tool: ${c.name}` };
+  };
+
+  const workers = Array.from({ length: Math.min(MULTI_CONCURRENCY, calls.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= calls.length) return;
+      await runOne(i);
+    }
   });
-  const settled = await Promise.allSettled(promises);
-  return settled.map((s, i) =>
-    s.status === "fulfilled"
-      ? s.value
-      : { name: calls[i].name, success: false, result: `Threw: ${String(s.reason)}` },
-  );
+  await Promise.all(workers);
+  return results;
 }

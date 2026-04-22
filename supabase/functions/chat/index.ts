@@ -6753,7 +6753,10 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     } as ToolDef);
   }
 
-  return filtered;
+  // FINAL QUARANTINE PASS — last line of defense before tools hit OpenAI.
+  // Drops any individually malformed tool (legacy, manifest, or multi_action)
+  // so one bad schema can never again poison the entire payload.
+  return quarantineFinalToolList(filtered);
 }
 
 // ============================================================================
