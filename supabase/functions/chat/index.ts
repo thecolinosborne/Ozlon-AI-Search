@@ -6218,7 +6218,7 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'list_events',
   'create_work_task',
   'update_work_task',
-]);
+  'bulk_update_work_tasks',
 
 function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
@@ -6473,6 +6473,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
+    'bulk_update_work_tasks': '_always_',
     'upload_youtube_video': '_always_',
     'higgsfield_generate_image': '_always_',
     'higgsfield_generate_video': '_always_',
@@ -6650,6 +6651,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
+  'bulk_update_work_tasks': 'Updating work tasks',
   'upload_youtube_video': 'Uploading to YouTube',
 };
 
@@ -6888,7 +6890,7 @@ async function runToolLoop(
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
-        'create_work_task', 'update_work_task',
+        'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
         'deep_research', 'web_search_google',
       ]);
 
@@ -7047,7 +7049,7 @@ async function runToolLoop(
       // GUARD: if user just approved an action and assistant only called task-tracking tools,
       // inject a system reminder to actually execute the action on next iteration.
       const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
-      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task');
+      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task' || n === 'bulk_update_work_tasks');
       // Find last user message (skip tool/assistant) BEFORE this assistant turn
       const lastUser = [...openAIMessages].reverse().find((m) => m.role === 'user');
       const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
