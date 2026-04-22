@@ -5598,7 +5598,92 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
-      // ============ Higgsfield AI Handlers (delegate to higgsfield edge function) ============
+      // ============ Bulk Update Work Tasks Handler ============
+      case 'bulk_update_work_tasks': {
+        try {
+          const updates = (args.updates as Array<Record<string, unknown>>) || [];
+          if (!Array.isArray(updates) || updates.length === 0) {
+            return { success: false, result: 'updates array is required and must be non-empty' };
+          }
+
+          const { createClient: createAdminClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createAdminClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          );
+
+          const succeeded: Array<{ id: string; status_change?: string; title?: string }> = [];
+          const failed: Array<{ id: string; reason: string }> = [];
+
+          for (const upd of updates) {
+            const taskId = upd.task_id as string | undefined;
+            if (!taskId) {
+              failed.push({ id: '(missing)', reason: 'task_id is required' });
+              continue;
+            }
+
+            // Fresh read per-task — kills stale-state mismatches across chained edits in same turn.
+            const { data: existing, error: fetchErr } = await adminClient
+              .from('work_tasks')
+              .select('id, title, status, ai_activity_log')
+              .eq('id', taskId)
+              .is('deleted_at', null)
+              .single();
+
+            if (fetchErr || !existing) {
+              failed.push({ id: taskId, reason: `not found: ${fetchErr?.message || 'no rows'}` });
+              continue;
+            }
+
+            const newStatus = upd.status as string | undefined;
+            if (newStatus && newStatus !== existing.status && !isValidTaskTransition(existing.status, newStatus)) {
+              failed.push({
+                id: taskId,
+                reason: `invalid transition ${existing.status} → ${newStatus}. Allowed: ${VALID_TASK_TRANSITIONS[existing.status]?.join(', ') || 'none'}`,
+              });
+              continue;
+            }
+
+            const updateObj: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
+            if (newStatus) updateObj.status = newStatus;
+            if (upd.ai_status) updateObj.ai_status = upd.ai_status;
+            if (upd.next_action) updateObj.next_action = upd.next_action;
+            if (typeof upd.draft_output === 'string') updateObj.draft_output = upd.draft_output;
+
+            const { error: updateErr } = await adminClient
+              .from('work_tasks')
+              .update(updateObj)
+              .eq('id', taskId)
+              .is('deleted_at', null);
+
+            if (updateErr) {
+              failed.push({ id: taskId, reason: updateErr.message });
+              continue;
+            }
+
+            succeeded.push({
+              id: taskId,
+              title: existing.title,
+              ...(newStatus && newStatus !== existing.status ? { status_change: `${existing.status} → ${newStatus}` } : {}),
+            });
+          }
+
+          return {
+            success: failed.length === 0,
+            result: JSON.stringify({
+              total: updates.length,
+              succeeded_count: succeeded.length,
+              failed_count: failed.length,
+              succeeded,
+              failed,
+            }),
+          };
+        } catch (e) {
+          console.error('[bulk_update_work_tasks] Error:', e);
+          return { success: false, result: `Bulk update error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       case 'higgsfield_generate_image':
       case 'higgsfield_generate_video':
       case 'higgsfield_get_job_status':
