@@ -2877,11 +2877,13 @@ const ACTION_TOOLS: ToolDef[] = [
 
 // --- State transition validator for work tasks ---
 const VALID_TASK_TRANSITIONS: Record<string, string[]> = {
-  todo: ['in_progress'],
-  in_progress: ['up_for_review'],
-  up_for_review: ['in_progress', 'completed'],
-  completed: ['in_progress'],
+  todo: ['in_progress', 'up_for_review', 'completed', 'cancelled'],
+  in_progress: ['todo', 'up_for_review', 'completed', 'cancelled'],
+  up_for_review: ['todo', 'in_progress', 'completed', 'cancelled'],
+  completed: ['in_progress', 'up_for_review'],
+  cancelled: ['todo', 'in_progress'],
 };
+
 
 function isValidTaskTransition(from: string, to: string): boolean {
   if (from === to) return true; // no-op is always safe
