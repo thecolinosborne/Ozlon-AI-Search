@@ -249,7 +249,7 @@ export default function Communications() {
                 onTap={openMessage}
                 onDone={handleDone}
                 onSnooze={handleSnooze}
-                onDelete={handleDeleted}
+                onDelete={handleRowDelete}
               />
             )}
           </section>
