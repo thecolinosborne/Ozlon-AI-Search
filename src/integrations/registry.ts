@@ -241,8 +241,7 @@ export const INTEGRATIONS: IntegrationManifest[] = [
     customDetailPage: true,
   },
 
-  // Slack — auto-rendered detail page (no custom UI). Auth handled by the
-  // Lovable connector gateway, so no API key prompt is needed.
+  // Slack — multi-tenant per-user OAuth install (custom detail page).
   {
     id: "slack",
     name: "Slack",
@@ -253,8 +252,8 @@ export const INTEGRATIONS: IntegrationManifest[] = [
     fnName: "slack",
     testAction: "list_channels",
     testLabel: "Channels",
-    auth: "none", // Connector gateway handles auth
-    // No customDetailPage → uses AutoIntegrationDetail.
+    auth: "api-key",
+    customDetailPage: true,
   },
 ];
 
