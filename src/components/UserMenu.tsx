@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User as UserIcon, Settings, CreditCard, LogOut, Wallet } from "lucide-react";
+import { User as UserIcon, Settings, CreditCard, LogOut, Wallet, MessageCircle } from "lucide-react";
 
 export const UserMenu = () => {
   const navigate = useNavigate();
@@ -130,6 +130,12 @@ export const UserMenu = () => {
           <Link to="/finance" className="cursor-pointer">
             <Wallet className="w-4 h-4 mr-2" />
             Finance
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/communications" className="cursor-pointer">
+            <MessageCircle className="w-4 h-4 mr-2" />
+            Communications
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
