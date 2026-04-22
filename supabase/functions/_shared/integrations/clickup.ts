@@ -1,0 +1,366 @@
+// ClickUp integration manifest — 35 pass-through tools.
+// Receiver (supabase/functions/clickup/index.ts) reads { action, params } (nested envelope).
+// Migrated from chat/index.ts legacy switch (Apr 2026).
+
+import type { IntegrationManifest } from "./types.ts";
+
+// ---- Reusable schema fragments ----
+const taskIdSchema = { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] };
+const checklistOnly = { type: "object", properties: { checklist_id: { type: "string" } }, required: ["checklist_id"] };
+const noArgs = { type: "object", properties: {}, required: [] };
+
+export const clickupIntegration: IntegrationManifest = {
+  id: "clickup",
+  displayName: "ClickUp",
+  edgeFunction: "clickup",
+  envelope: "nested",
+  tools: [
+    // ---- Task CRUD ----
+    {
+      name: "create_clickup_task",
+      action: "create_task",
+      description: "Create a new task in ClickUp. The list_id is optional — if omitted, the configured default list is used.",
+      schema: {
+        type: "object",
+        properties: {
+          list_id: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          priority: { type: "number", description: "1=Urgent, 2=High, 3=Normal, 4=Low" },
+        },
+        required: ["name"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { name: a.name };
+        if (a.list_id) p.listId = a.list_id;
+        if (a.description) p.description = a.description;
+        if (a.priority) p.priority = a.priority;
+        return p;
+      },
+    },
+    {
+      name: "list_clickup_tasks",
+      action: "list_tasks",
+      description: "List tasks from a ClickUp list. If list_id is omitted, uses the configured default list.",
+      schema: { type: "object", properties: { list_id: { type: "string" } }, required: [] },
+      mapArgs: (a) => (a.list_id ? { listId: a.list_id } : {}),
+    },
+    {
+      name: "get_clickup_task",
+      action: "get_task",
+      description: "Get full details of a ClickUp task by ID.",
+      schema: taskIdSchema,
+      mapArgs: (a) => ({ taskId: a.task_id }),
+    },
+    {
+      name: "update_clickup_task",
+      action: "update_task",
+      description: "Update an existing ClickUp task (name, description, priority).",
+      schema: {
+        type: "object",
+        properties: {
+          task_id: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          priority: { type: "number" },
+        },
+        required: ["task_id"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { taskId: a.task_id };
+        if (a.name) p.name = a.name;
+        if (a.description) p.description = a.description;
+        if (a.priority) p.priority = a.priority;
+        return p;
+      },
+    },
+    {
+      name: "delete_clickup_task",
+      action: "delete_task",
+      description: "Delete a ClickUp task permanently.",
+      schema: taskIdSchema,
+      mapArgs: (a) => ({ taskId: a.task_id }),
+    },
+    {
+      name: "set_clickup_task_status",
+      action: "set_task_status",
+      description: "Change the status of a ClickUp task (e.g. 'open', 'in progress', 'complete').",
+      schema: { type: "object", properties: { task_id: { type: "string" }, status: { type: "string" } }, required: ["task_id", "status"] },
+      mapArgs: (a) => ({ taskId: a.task_id, status: a.status }),
+    },
+    {
+      name: "set_clickup_due_date",
+      action: "set_due_date",
+      description: "Set or clear a due date on a ClickUp task. Pass Unix timestamp in ms.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, due_date: { type: "number" } }, required: ["task_id"] },
+      mapArgs: (a) => ({ taskId: a.task_id, due_date: a.due_date ?? null }),
+    },
+    {
+      name: "set_clickup_assignees",
+      action: "set_assignees",
+      description: "Add or remove assignees on a ClickUp task.",
+      schema: {
+        type: "object",
+        properties: {
+          task_id: { type: "string" },
+          add: { type: "array", items: { type: "number" } },
+          rem: { type: "array", items: { type: "number" } },
+        },
+        required: ["task_id"],
+      },
+      mapArgs: (a) => ({ taskId: a.task_id, add: a.add || [], rem: a.rem || [] }),
+    },
+    {
+      name: "create_clickup_subtask",
+      action: "create_subtask",
+      description: "Create a subtask under a parent ClickUp task.",
+      schema: {
+        type: "object",
+        properties: { parent_id: { type: "string" }, name: { type: "string" }, description: { type: "string" } },
+        required: ["parent_id", "name"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { parentId: a.parent_id, name: a.name };
+        if (a.description) p.description = a.description;
+        return p;
+      },
+    },
+    {
+      name: "move_clickup_task",
+      action: "move_task",
+      description: "Move a ClickUp task to a different list.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, list_id: { type: "string" } }, required: ["task_id", "list_id"] },
+      mapArgs: (a) => ({ taskId: a.task_id, listId: a.list_id }),
+    },
+    {
+      name: "set_clickup_priority",
+      action: "update_task",
+      description: "Set the priority of a ClickUp task. 1=Urgent, 2=High, 3=Normal, 4=Low.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, priority: { type: "number" } }, required: ["task_id", "priority"] },
+      mapArgs: (a) => ({ taskId: a.task_id, priority: a.priority }),
+    },
+
+    // ---- Comments ----
+    {
+      name: "create_clickup_comment",
+      action: "create_comment",
+      description: "Add a comment to a ClickUp task.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, comment_text: { type: "string" } }, required: ["task_id", "comment_text"] },
+      mapArgs: (a) => ({ taskId: a.task_id, comment_text: a.comment_text }),
+    },
+    {
+      name: "list_clickup_comments",
+      action: "list_comments",
+      description: "List comments on a ClickUp task.",
+      schema: taskIdSchema,
+      mapArgs: (a) => ({ taskId: a.task_id }),
+    },
+    {
+      name: "update_clickup_comment",
+      action: "update_comment",
+      description: "Edit an existing comment in ClickUp.",
+      schema: { type: "object", properties: { comment_id: { type: "string" }, comment_text: { type: "string" } }, required: ["comment_id", "comment_text"] },
+      mapArgs: (a) => ({ commentId: a.comment_id, comment_text: a.comment_text }),
+    },
+    {
+      name: "delete_clickup_comment",
+      action: "delete_comment",
+      description: "Delete a comment from ClickUp.",
+      schema: { type: "object", properties: { comment_id: { type: "string" } }, required: ["comment_id"] },
+      mapArgs: (a) => ({ commentId: a.comment_id }),
+    },
+
+    // ---- Tags ----
+    {
+      name: "add_clickup_tag",
+      action: "add_tag",
+      description: "Add a tag to a ClickUp task.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, tag: { type: "string" } }, required: ["task_id", "tag"] },
+      mapArgs: (a) => ({ taskId: a.task_id, tag: a.tag }),
+    },
+    {
+      name: "remove_clickup_tag",
+      action: "remove_tag",
+      description: "Remove a tag from a ClickUp task.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, tag: { type: "string" } }, required: ["task_id", "tag"] },
+      mapArgs: (a) => ({ taskId: a.task_id, tag: a.tag }),
+    },
+
+    // ---- Checklists ----
+    {
+      name: "create_clickup_checklist",
+      action: "create_checklist",
+      description: "Add a checklist to a ClickUp task.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, name: { type: "string" } }, required: ["task_id", "name"] },
+      mapArgs: (a) => ({ taskId: a.task_id, name: a.name }),
+    },
+    {
+      name: "create_clickup_checklist_item",
+      action: "create_checklist_item",
+      description: "Add an item to an existing ClickUp checklist.",
+      schema: { type: "object", properties: { checklist_id: { type: "string" }, name: { type: "string" } }, required: ["checklist_id", "name"] },
+      mapArgs: (a) => ({ checklistId: a.checklist_id, name: a.name }),
+    },
+    {
+      name: "update_clickup_checklist_item",
+      action: "update_checklist_item",
+      description: "Toggle resolved or rename a checklist item.",
+      schema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "string" },
+          checklist_item_id: { type: "string" },
+          name: { type: "string" },
+          resolved: { type: "boolean" },
+        },
+        required: ["checklist_id", "checklist_item_id"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { checklistId: a.checklist_id, itemId: a.checklist_item_id };
+        if (a.name) p.name = a.name;
+        if (a.resolved !== undefined) p.resolved = a.resolved;
+        return p;
+      },
+    },
+    {
+      name: "delete_clickup_checklist",
+      action: "delete_checklist",
+      description: "Delete an entire checklist from a ClickUp task.",
+      schema: checklistOnly,
+      mapArgs: (a) => ({ checklistId: a.checklist_id }),
+    },
+    {
+      name: "delete_clickup_checklist_item",
+      action: "delete_checklist_item",
+      description: "Delete an item from a ClickUp checklist.",
+      schema: { type: "object", properties: { checklist_id: { type: "string" }, checklist_item_id: { type: "string" } }, required: ["checklist_id", "checklist_item_id"] },
+      mapArgs: (a) => ({ checklistId: a.checklist_id, checklistItemId: a.checklist_item_id }),
+    },
+
+    // ---- Discovery / search ----
+    {
+      name: "search_clickup_tasks",
+      action: "search_tasks",
+      description: "Search tasks across the entire ClickUp workspace by keyword, status, assignee, tags, or due date.",
+      schema: {
+        type: "object",
+        properties: {
+          statuses: { type: "array", items: { type: "string" } },
+          assignees: { type: "array", items: { type: "number" } },
+          tags: { type: "array", items: { type: "string" } },
+          due_date_gt: { type: "number" },
+          due_date_lt: { type: "number" },
+          include_closed: { type: "boolean" },
+          subtasks: { type: "boolean" },
+        },
+        required: [],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = {};
+        if (a.statuses) p.statuses = a.statuses;
+        if (a.assignees) p.assignees = a.assignees;
+        if (a.tags) p.tags = a.tags;
+        if (a.due_date_gt) p.due_date_gt = a.due_date_gt;
+        if (a.due_date_lt) p.due_date_lt = a.due_date_lt;
+        if (a.include_closed) p.include_closed = true;
+        if (a.subtasks) p.subtasks = true;
+        return p;
+      },
+    },
+    {
+      name: "list_clickup_spaces",
+      action: "list_spaces",
+      description: "List all spaces in the ClickUp workspace.",
+      schema: noArgs,
+    },
+    {
+      name: "list_clickup_lists",
+      action: "list_all_lists",
+      description: "List all lists across the entire ClickUp workspace (all spaces and folders).",
+      schema: noArgs,
+    },
+    {
+      name: "list_clickup_members",
+      action: "list_workspace_members",
+      description: "List all members in the ClickUp workspace. Use to discover user IDs for assignee operations.",
+      schema: noArgs,
+    },
+    {
+      name: "get_clickup_list_statuses",
+      action: "get_list_statuses",
+      description: "Get available statuses for a ClickUp list. Useful to know valid status values before setting task status.",
+      schema: { type: "object", properties: { list_id: { type: "string" } }, required: ["list_id"] },
+      mapArgs: (a) => ({ listId: a.list_id }),
+    },
+
+    // ---- Time tracking ----
+    {
+      name: "start_clickup_timer",
+      action: "start_time_entry",
+      description: "Start a time tracking timer on a ClickUp task.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, description: { type: "string" } }, required: ["task_id"] },
+      mapArgs: (a) => ({ taskId: a.task_id, description: a.description || "" }),
+    },
+    {
+      name: "stop_clickup_timer",
+      action: "stop_time_entry",
+      description: "Stop the currently running ClickUp time tracking timer.",
+      schema: noArgs,
+    },
+    {
+      name: "get_clickup_time_entries",
+      action: "get_time_entries",
+      description: "Get time tracking entries from ClickUp.",
+      schema: { type: "object", properties: { start_date: { type: "number" }, end_date: { type: "number" } }, required: [] },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = {};
+        if (a.start_date) p.start_date = a.start_date;
+        if (a.end_date) p.end_date = a.end_date;
+        return p;
+      },
+    },
+
+    // ---- Custom fields ----
+    {
+      name: "get_clickup_custom_fields",
+      action: "get_custom_fields",
+      description: "List custom fields available on a ClickUp list.",
+      schema: { type: "object", properties: { list_id: { type: "string" } }, required: ["list_id"] },
+      mapArgs: (a) => ({ listId: a.list_id }),
+    },
+    {
+      name: "set_clickup_custom_field",
+      action: "set_custom_field",
+      description: "Set a custom field value on a ClickUp task.",
+      schema: {
+        type: "object",
+        properties: { task_id: { type: "string" }, field_id: { type: "string" }, value: {} },
+        required: ["task_id", "field_id", "value"],
+      },
+      mapArgs: (a) => ({ taskId: a.task_id, fieldId: a.field_id, value: a.value }),
+    },
+
+    // ---- Dependencies ----
+    {
+      name: "list_clickup_task_dependencies",
+      action: "get_task_dependencies",
+      description: "List dependencies and dependents of a ClickUp task.",
+      schema: taskIdSchema,
+      mapArgs: (a) => ({ taskId: a.task_id }),
+    },
+    {
+      name: "add_clickup_dependency",
+      action: "add_dependency",
+      description: "Add a dependency between two ClickUp tasks (task depends on another).",
+      schema: { type: "object", properties: { task_id: { type: "string" }, depends_on: { type: "string" } }, required: ["task_id", "depends_on"] },
+      mapArgs: (a) => ({ taskId: a.task_id, depends_on: a.depends_on }),
+    },
+    {
+      name: "delete_clickup_dependency",
+      action: "delete_dependency",
+      description: "Remove a dependency between two ClickUp tasks.",
+      schema: { type: "object", properties: { task_id: { type: "string" }, depends_on: { type: "string" } }, required: ["task_id", "depends_on"] },
+      mapArgs: (a) => ({ taskId: a.task_id, depends_on: a.depends_on }),
+    },
+  ],
+};
