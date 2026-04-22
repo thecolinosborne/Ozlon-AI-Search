@@ -2907,13 +2907,16 @@ const ACTION_TOOLS: ToolDef[] = [
 // ============================================================================
 
 // --- State transition validator for work tasks ---
+// NOTE: 'cancelled' is intentionally NOT in this map — the work_tasks.status DB CHECK
+// constraint only allows {todo, in_progress, up_for_review, completed}. Adding 'cancelled'
+// here without a schema migration would surface as a hard 23514 from Postgres.
 const VALID_TASK_TRANSITIONS: Record<string, string[]> = {
-  todo: ['in_progress', 'up_for_review', 'completed', 'cancelled'],
-  in_progress: ['todo', 'up_for_review', 'completed', 'cancelled'],
-  up_for_review: ['todo', 'in_progress', 'completed', 'cancelled'],
+  todo: ['in_progress', 'up_for_review', 'completed'],
+  in_progress: ['todo', 'up_for_review', 'completed'],
+  up_for_review: ['todo', 'in_progress', 'completed'],
   completed: ['in_progress', 'up_for_review'],
-  cancelled: ['todo', 'in_progress'],
 };
+
 
 
 function isValidTaskTransition(from: string, to: string): boolean {
