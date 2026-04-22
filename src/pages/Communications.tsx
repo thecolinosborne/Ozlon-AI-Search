@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Mic } from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCommunicationsFeed, type CommMessage } from "@/hooks/useCommunicationsFeed";
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
@@ -11,6 +11,7 @@ import { FilterDropdown, type FilterValue } from "@/components/communications/Fi
 import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
+import { cn } from "@/lib/utils";
 
 function greetingFor(name?: string | null) {
   const h = new Date().getHours();
@@ -21,7 +22,7 @@ function greetingFor(name?: string | null) {
 
 export default function Communications() {
   const { user } = useAuth();
-  const { digest, stream } = useCommunicationsFeed();
+  const { digest, stream, isFetching, refetch } = useCommunicationsFeed();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
 
@@ -54,12 +55,23 @@ export default function Communications() {
           <ArrowLeft className="w-4 h-4" />
           <span>Communications</span>
         </Link>
-        <button
-          className="w-9 h-9 rounded-full bg-card/60 backdrop-blur-xl border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Voice command"
-        >
-          <Mic className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="h-9 px-3 rounded-full bg-card/60 backdrop-blur-xl border border-border/30 flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-60"
+            aria-label="Scan for new messages"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+            <span>{isFetching ? "Scanning" : "Scan"}</span>
+          </button>
+          <button
+            className="w-9 h-9 rounded-full bg-card/60 backdrop-blur-xl border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Voice command"
+          >
+            <Mic className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {/* Scrollable surface */}
