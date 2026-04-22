@@ -1438,6 +1438,45 @@ export type Database = {
         }
         Relationships: []
       }
+      slack_processed_events: {
+        Row: {
+          channel: string | null
+          created_at: string
+          error_message: string | null
+          event_id: string
+          event_type: string | null
+          id: string
+          response_ts: string | null
+          status: string
+          thread_ts: string | null
+          user_id_slack: string | null
+        }
+        Insert: {
+          channel?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_id: string
+          event_type?: string | null
+          id?: string
+          response_ts?: string | null
+          status?: string
+          thread_ts?: string | null
+          user_id_slack?: string | null
+        }
+        Update: {
+          channel?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_id?: string
+          event_type?: string | null
+          id?: string
+          response_ts?: string | null
+          status?: string
+          thread_ts?: string | null
+          user_id_slack?: string | null
+        }
+        Relationships: []
+      }
       standing_orders: {
         Row: {
           active: boolean

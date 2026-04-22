@@ -90,3 +90,7 @@ verify_jwt = false
 [functions.search-atlas]
 verify_jwt = false
 
+[functions.slack-events]
+verify_jwt = false
+
+
