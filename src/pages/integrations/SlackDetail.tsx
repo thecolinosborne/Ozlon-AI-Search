@@ -66,7 +66,7 @@ export default function SlackDetail() {
       return;
     }
     const url = `${SUPABASE_URL}/functions/v1/slack-oauth?action=install&user_id=${encodeURIComponent(user.id)}`;
-    window.location.href = url;
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const handleDisconnect = async () => {
