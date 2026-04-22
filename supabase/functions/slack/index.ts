@@ -1,7 +1,10 @@
 // Slack edge function — proxies to Lovable connector gateway.
 // Envelope: { action, params } (nested, matches manifest).
 
-import { corsHeaders } from "@supabase/supabase-js/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/slack/api";
 
