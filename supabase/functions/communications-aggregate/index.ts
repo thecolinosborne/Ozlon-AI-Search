@@ -165,14 +165,22 @@ async function slackGateway(
 
 async function fetchSlack(): Promise<CommMessage[]> {
   try {
-    // Pull a small set of recent channels, then last few messages from each.
-    const chList = await slackGateway("conversations.list", {
-      types: "public_channel,private_channel,im,mpim",
-      limit: 8,
-      exclude_archived: "true",
-    });
-    if (!chList) return [];
-    const channels = (chList.channels as Array<{ id: string; name?: string; is_im?: boolean; user?: string }>) || [];
+    // Try each channel type independently so a single missing scope (e.g.
+    // `groups:read` for private channels) doesn't blank the whole Slack feed.
+    const types = ["public_channel", "private_channel", "im", "mpim"];
+    const lists = await Promise.all(
+      types.map((t) =>
+        slackGateway("conversations.list", {
+          types: t,
+          limit: 8,
+          exclude_archived: "true",
+        }),
+      ),
+    );
+    const channels = lists.flatMap(
+      (l) => ((l?.channels as Array<{ id: string; name?: string; is_im?: boolean; user?: string }>) || []),
+    );
+    if (channels.length === 0) return [];
 
     // Build a quick user lookup for IMs (best-effort).
     const userIds = Array.from(new Set(channels.filter((c) => c.is_im && c.user).map((c) => c.user!)));
