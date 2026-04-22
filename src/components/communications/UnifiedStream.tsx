@@ -6,9 +6,11 @@ import type { CommMessage } from "@/hooks/useCommunicationsFeed";
 interface UnifiedStreamProps {
   messages: CommMessage[];
   onTap: (m: CommMessage) => void;
+  onDone?: (m: CommMessage) => void;
+  onSnooze?: (m: CommMessage) => void;
 }
 
-export function UnifiedStream({ messages, onTap }: UnifiedStreamProps) {
+export function UnifiedStream({ messages, onTap, onDone, onSnooze }: UnifiedStreamProps) {
   const grouped = useMemo(() => {
     const groups: { bucket: string; items: CommMessage[] }[] = [];
     for (const m of messages) {
@@ -31,7 +33,13 @@ export function UnifiedStream({ messages, onTap }: UnifiedStreamProps) {
           </div>
           <div className="border-t border-border/20">
             {g.items.map((m) => (
-              <MessageRow key={m.id} message={m} onTap={onTap} />
+              <MessageRow
+                key={m.id}
+                message={m}
+                onTap={onTap}
+                onDone={onDone}
+                onSnooze={onSnooze}
+              />
             ))}
           </div>
         </Fragment>

@@ -6,21 +6,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export type FilterValue =
-  | "all"
-  | "email"
-  | "slack"
-  | "sms"
-  | "voicemail"
-  | "unread"
-  | "needs-reply";
+export type FilterValue = "all" | "unread" | "needs-reply";
 
 const OPTIONS: { value: FilterValue; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "email", label: "Email" },
-  { value: "slack", label: "Slack" },
-  { value: "sms", label: "SMS" },
-  { value: "voicemail", label: "Voicemail" },
+  { value: "all", label: "All states" },
   { value: "unread", label: "Unread" },
   { value: "needs-reply", label: "Needs reply" },
 ];
