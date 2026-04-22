@@ -51,18 +51,20 @@ export function MessageRow({ message, onTap }: MessageRowProps) {
         </div>
 
         {message.subject && (
-          <p className="text-[14px] text-foreground/90 truncate mt-0.5">{message.subject}</p>
+          <p className="text-[14px] text-foreground/90 line-clamp-2 mt-0.5 leading-snug">
+            {message.subject}
+          </p>
         )}
 
         {message.audioUrl !== undefined || message.channel === "voicemail" ? (
           <div className="mt-1.5">
             <VoicemailInline durationSec={message.durationSec ?? 0} />
-            <p className="mt-1.5 text-[13px] text-muted-foreground line-clamp-1">
+            <p className="mt-1.5 text-[13px] text-muted-foreground line-clamp-2 leading-snug">
               {message.preview}
             </p>
           </div>
         ) : (
-          <p className="text-[14px] text-muted-foreground line-clamp-1 mt-0.5">
+          <p className="text-[13.5px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
             {message.preview}
           </p>
         )}
