@@ -1,81 +1,82 @@
 
 
-## Communications upgrade — surgical, additive
+## Communications: full context, threads, smart replies, delete
 
-The replies feel generic because `draftFor()` in `ReplySheet.tsx` returns 4 hardcoded strings — one per channel — with zero awareness of what the message actually says or who sent it. Slack IS in the aggregator and IS in the unified stream, but its reply is the same canned "On it — taking a look now" line every time, which is why it feels missing. The hero summary is also static counts ("X messages across N channels") with no insight.
-
-Three tight fixes, each independently revertable. No redesign of what you like.
+Three additive fixes layered onto what's already shipped. No redesign — same hero/stream/sheet you like. Each fix is independently revertable.
 
 ---
 
-### Fix 1 — Real per-message AI drafts (kills the "same reply every time" bug)
+### Fix 1 — Full message context in the Reply Sheet
 
-**New edge function:** `supabase/functions/communications-draft/index.ts`
-- Input: `{ channel, fromName, subject?, preview, channelLabel }`
-- Calls Lovable AI (`google/gemini-2.5-flash`) with a channel-aware system prompt:
-  - **email** → 2–4 sentence reply, signature-friendly, matches subject tone
-  - **slack** → 1–2 sentences, lowercase-friendly, no greeting/signoff (matches Slack norms)
-  - **sms** → 1 sentence, casual, under 160 chars
-  - **voicemail** → 1 sentence callback acknowledgment
-- Falls back to current canned line if AI fails (zero regression risk).
+**Problem:** the sheet shows only the 240-char `snippet` from the aggregator. You can't actually read the email/Slack message.
 
-**Frontend:** `src/components/communications/ReplySheet.tsx`
-- Replace synchronous `draftFor()` with a `useEffect` that calls the new function when `message` changes.
-- Show existing "AI draft ready" sparkle in a loading state ("Drafting…") then fade in the real draft.
-- Add small "Regenerate" pill next to the sparkle row — calls the function again with a `tone` hint (`shorter` / `friendlier` / `firmer`). Optional, additive.
+**New edge function:** `supabase/functions/communications-thread/index.ts`
+- Input: `{ source: "gmail" | "slack" | "ghl", threadId, messageId? }`
+- Returns a normalized array `{ messages: ThreadMessage[] }` where each `ThreadMessage` has `{ id, fromName, fromHandle, direction: "in" | "out", body, sentAt, attachments?: [...] }`.
+- Per source:
+  - **gmail** → calls existing `google-gmail` `get_thread` (`format=full`), walks `payload.parts` to extract `text/plain` (fallback `text/html` stripped to text), pulls attachment metadata (filename, mime, size, attachmentId).
+  - **slack** → calls `conversations.replies` via the slack gateway with the channel + thread_ts already on the message id (`slack:<channel>:<ts>`). Resolves user IDs to display names with a small `users.info` cache.
+  - **ghl** → calls existing `gohighlevel` `get_conversation_messages`, normalizes `direction` from GHL's `direction` field.
+- Best-effort: errors return `{ messages: [], error: "..." }` so the sheet never blanks.
 
-**Why this fixes Slack specifically:** Slack drafts will now reference the actual message content and channel name instead of the static "On it" line. Same for every other channel.
-
----
-
-### Fix 2 — Smarter hero summary
-
-**Backend:** `supabase/functions/communications-digest/index.ts` (already exists, already calls AI)
-- Currently the heroLine + subLine are computed deterministically before the AI call and never use the AI output. Change: have AI return three short fields — `heroLine`, `subLine`, `briefScript` — in one structured JSON response (use `response_format: { type: "json_object" }`).
-- Prompt the model to write the heroLine like a chief-of-staff: name the single most important thing ("Sarah's contract needs a yes/no today"), not a count.
-- Subline becomes a one-liner of texture: "3 from clients, 1 from your team, nothing on fire." If the model fails or no priorities, fall back to current deterministic strings.
-
-**Frontend:** zero changes — `useCommunicationsFeed` already consumes `heroLine`/`subLine`/`briefScript` from the digest response.
+**Frontend:** `ReplySheet.tsx`
+- Add `useQuery(["thread", message.id])` that fires when the sheet opens, calls `communications-thread`.
+- Replace the single grey preview card with a vertical thread: each message is a small bubble — incoming (left, neutral) vs outgoing (right, primary tint). Newest at the bottom, auto-scrolled into view.
+- Loading state: 3 skeleton bubbles.
+- The AI draft block stays exactly where it is, below the thread.
+- AI draft prompt now receives the **last 3 messages** in the thread as context, not just the snippet — so replies finally reference the actual conversation.
 
 ---
 
-### Fix 3 — "Ultimate inbox" polish on the existing layout (no redesign)
+### Fix 2 — Conversation-aware AI replies
 
-Small additive UX improvements to what's already there:
+**Update:** `supabase/functions/communications-draft/index.ts`
+- New optional input field: `threadContext?: Array<{ from: string; body: string; direction: "in" | "out" }>` (last 3 messages, oldest → newest).
+- System prompt addition: *"You're continuing an ongoing thread. Match the conversational tone already established. Reference specifics from the prior messages when natural."*
+- User content now includes the thread block above the message-to-reply-to.
+- Falls back to current single-message behavior if `threadContext` not provided (zero regression).
 
-**a. Channel filter chips above the stream** (`Communications.tsx`)
-- Replace the single "All" dropdown with a horizontal pill row: `All · Email · Slack · SMS · Voicemail`, each with its tint dot + count badge. Dropdown stays for `Unread` / `Needs reply`. Faster scanning, one-tap filtering.
+**Frontend wiring:** `ReplySheet.tsx`
+- Pass `threadContext` from the loaded thread query into every `generate()` call (initial draft + tone regenerations).
 
-**b. Snooze + Mark done inline actions on `MessageRow`**
-- On hover (desktop) / left-swipe (mobile, optional later) show two ghost buttons: `✓ Done` and `⏰ Later`. Local-only state for now (no backend write) — purely a focus tool that hides the row from the current view. Survives the session, clears on refresh. Establishes the pattern; persistence comes later.
+---
 
-**c. "Triage mode" toggle in the sub-header**
-- A small `Triage` switch next to the filter. When on, the stream auto-collapses everything except `needsReply` messages, and tapping a row opens the ReplySheet AND advances to the next unread on send/close. Turns the page into a 90-second inbox-zero flow.
+### Fix 3 — Delete / archive action
 
-**d. Priority cards become tappable**
-- `PriorityCard` already has an `onClick` prop — wire it up in `HeroDigest` to open the matching `CommMessage` in the ReplySheet. Currently tapping does nothing.
+**Backend:** all three providers already support deletion — no new edge function needed.
+- **gmail** → existing `trash_message` action on `google-gmail`.
+- **slack** → already supports `chat.delete` via gateway; add a `slack-delete-message` thin call (5 lines, gateway pass-through). Will only succeed for messages the user posted — gracefully report "Slack only allows deleting your own messages" otherwise.
+- **ghl** → no message-level delete in their API. Show "Mark as read" instead, which calls existing `update_conversation` with `read: true`.
+
+**Frontend:** `ReplySheet.tsx` footer
+- Add a third ghost icon button between Mic and Send: `Trash2` icon.
+- Click → confirm pill ("Delete this message?") → call the right handler based on `message.source`.
+- On success: close sheet, optimistically remove from `stream` (matches existing snooze/done pattern), toast "Deleted" with an Undo (Undo only available for Gmail — calls `untrash_message`).
+
+**Frontend:** `MessageRow.tsx` hover actions
+- Add a third hover button next to Done/Later: `Trash` (red-tinted on hover only). Same handler. Mobile gets it via long-press → action sheet (out of scope this round, hover desktop only).
 
 ---
 
 ### Out of scope (explicitly not touching)
 
-- The visual style you like — glass, blur, channel tints, hero card shape, BriefMe overlay — all stays.
-- No changes to Gmail/Slack/GHL fetchers, RLS, schema, or auth.
-- No new tables. Snooze/Done are session-only this round; persistence is a follow-up.
-- No changes to the chat function, Descript, or the work_tasks fixes we just shipped.
+- The hero digest, channel chips, triage mode, filter dropdown — all stays.
+- No schema changes, no new tables, no RLS edits.
+- Gmail signature/threading on **send** — Send button still doesn't post (separate follow-up).
+- Mobile swipe-to-delete gestures.
+- Bulk delete / multi-select.
 
 ### Order of operations
 
-1. Fix 1 (real drafts) — biggest UX win, fully isolated to one new function + one component.
-2. Fix 3d (priority cards tappable) — 5-line wire-up, instant value.
-3. Fix 2 (smarter summary) — one edge function edit, zero frontend touch.
-4. Fix 3a, 3b, 3c — UX polish, each independently revertable.
+1. Fix 1 (thread fetch + bubbles) — biggest visible win, fully isolated.
+2. Fix 2 (context-aware drafts) — 15-line edge function diff + 1-line frontend pass.
+3. Fix 3 (delete) — additive, gated by source.
 
 ### Verification
 
-- Tap any Slack message → draft references channel name + message content, not the canned line.
-- Tap any email → draft addresses sender by first name and references subject.
-- Refresh page → hero line names a specific item or person, not a count.
-- Tap a priority card → opens that exact message's reply sheet.
-- Toggle Triage → stream collapses to needs-reply only; sending advances to next.
+- Tap any Gmail message → see full body + any prior replies as bubbles, not the snippet.
+- Tap a Slack thread mention → see the reply chain expanded.
+- Open an email reply in a 3-msg thread → AI draft references what was said earlier.
+- Click trash on a Gmail message → confirm → row disappears, undo toast restores it.
+- Click trash on a Slack message you didn't post → friendly error toast.
 
