@@ -6307,6 +6307,7 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'create_work_task',
   'update_work_task',
   'bulk_update_work_tasks',
+]);
 
 function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
