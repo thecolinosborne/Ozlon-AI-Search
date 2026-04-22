@@ -37,6 +37,7 @@ import GoogleAnalyticsDetail from "@/pages/integrations/GoogleAnalyticsDetail";
 import GoogleSearchConsoleDetail from "@/pages/integrations/GoogleSearchConsoleDetail";
 import GoogleTagManagerDetail from "@/pages/integrations/GoogleTagManagerDetail";
 import SearchAtlasDetail from "@/pages/integrations/SearchAtlasDetail";
+import SlackDetail from "@/pages/integrations/SlackDetail";
 import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
 import Finance from "@/pages/Finance";
@@ -99,6 +100,7 @@ const AppRoutes = () => {
         <Route path="/integrations/google-search-console" element={<GoogleSearchConsoleDetail />} />
         <Route path="/integrations/google-tag-manager" element={<GoogleTagManagerDetail />} />
         <Route path="/integrations/search-atlas" element={<SearchAtlasDetail />} />
+        <Route path="/integrations/slack" element={<SlackDetail />} />
         {/* Catch-all: any registered integration without a custom *Detail.tsx
             page renders via AutoIntegrationDetail. New integrations only need
             a manifest entry in src/integrations/registry.ts. */}
