@@ -23,6 +23,34 @@ const DescriptDetail = () => {
   const settings = integration.settings as { apiKey?: string };
 
   const [autoDetecting, setAutoDetecting] = useState(true);
+
+  // Hydrate API key from integration_connections on mount if local store is empty.
+  // RLS restricts this to the current user (auth.uid() = user_id).
+  useEffect(() => {
+    if (settings.apiKey) return;
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      const { data } = await supabase
+        .from("integration_connections")
+        .select("metadata")
+        .eq("user_id", user.id)
+        .eq("provider", "descript")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      const meta = (data?.metadata as { api_key?: string } | null) || null;
+      if (meta?.api_key) {
+        updateSettings("descript", { ...settings, apiKey: meta.api_key });
+        setApiKeyConfigured("descript", true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [testing, setTesting] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");

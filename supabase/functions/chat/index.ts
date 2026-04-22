@@ -2627,7 +2627,7 @@ const ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           task_id: { type: 'string', description: 'The work task ID to update' },
-          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed'], description: 'New status — must follow valid transitions' },
+          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed', 'cancelled'], description: 'New status — must follow valid transitions' },
           draft_output: { type: 'string', description: 'Markdown deliverable content to save' },
           ai_status: { type: 'string', enum: ['idle', 'thinking', 'executing', 'waiting', 'error'], description: 'Current AI processing status' },
           next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state' },
@@ -2649,7 +2649,38 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
-  // ============ Higgsfield AI Tools ============
+  // ============ Bulk Work Task Update Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'bulk_update_work_tasks',
+      description: 'Update multiple work tasks in one call. Use this when the user asks to change status on 2+ tasks in the same turn (e.g. "mark A and B completed and cancel C"). Returns per-task succeeded/failed results so partial failures are surfaced clearly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          updates: {
+            type: 'array',
+            description: 'List of per-task updates. Each item must include task_id and at least one field to change.',
+            items: {
+              type: 'object',
+              properties: {
+                task_id: { type: 'string', description: 'The work task ID to update' },
+                status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed', 'cancelled'] },
+                draft_output: { type: 'string' },
+                ai_status: { type: 'string', enum: ['idle', 'thinking', 'executing', 'waiting', 'error'] },
+                next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'] },
+              },
+              required: ['task_id'],
+              additionalProperties: false,
+            },
+            minItems: 1,
+          },
+        },
+        required: ['updates'],
+        additionalProperties: false,
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -2877,11 +2908,13 @@ const ACTION_TOOLS: ToolDef[] = [
 
 // --- State transition validator for work tasks ---
 const VALID_TASK_TRANSITIONS: Record<string, string[]> = {
-  todo: ['in_progress'],
-  in_progress: ['up_for_review'],
-  up_for_review: ['in_progress', 'completed'],
-  completed: ['in_progress'],
+  todo: ['in_progress', 'up_for_review', 'completed', 'cancelled'],
+  in_progress: ['todo', 'up_for_review', 'completed', 'cancelled'],
+  up_for_review: ['todo', 'in_progress', 'completed', 'cancelled'],
+  completed: ['in_progress', 'up_for_review'],
+  cancelled: ['todo', 'in_progress'],
 };
+
 
 function isValidTaskTransition(from: string, to: string): boolean {
   if (from === to) return true; // no-op is always safe
@@ -5565,7 +5598,92 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
-      // ============ Higgsfield AI Handlers (delegate to higgsfield edge function) ============
+      // ============ Bulk Update Work Tasks Handler ============
+      case 'bulk_update_work_tasks': {
+        try {
+          const updates = (args.updates as Array<Record<string, unknown>>) || [];
+          if (!Array.isArray(updates) || updates.length === 0) {
+            return { success: false, result: 'updates array is required and must be non-empty' };
+          }
+
+          const { createClient: createAdminClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createAdminClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+          );
+
+          const succeeded: Array<{ id: string; status_change?: string; title?: string }> = [];
+          const failed: Array<{ id: string; reason: string }> = [];
+
+          for (const upd of updates) {
+            const taskId = upd.task_id as string | undefined;
+            if (!taskId) {
+              failed.push({ id: '(missing)', reason: 'task_id is required' });
+              continue;
+            }
+
+            // Fresh read per-task — kills stale-state mismatches across chained edits in same turn.
+            const { data: existing, error: fetchErr } = await adminClient
+              .from('work_tasks')
+              .select('id, title, status, ai_activity_log')
+              .eq('id', taskId)
+              .is('deleted_at', null)
+              .single();
+
+            if (fetchErr || !existing) {
+              failed.push({ id: taskId, reason: `not found: ${fetchErr?.message || 'no rows'}` });
+              continue;
+            }
+
+            const newStatus = upd.status as string | undefined;
+            if (newStatus && newStatus !== existing.status && !isValidTaskTransition(existing.status, newStatus)) {
+              failed.push({
+                id: taskId,
+                reason: `invalid transition ${existing.status} → ${newStatus}. Allowed: ${VALID_TASK_TRANSITIONS[existing.status]?.join(', ') || 'none'}`,
+              });
+              continue;
+            }
+
+            const updateObj: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
+            if (newStatus) updateObj.status = newStatus;
+            if (upd.ai_status) updateObj.ai_status = upd.ai_status;
+            if (upd.next_action) updateObj.next_action = upd.next_action;
+            if (typeof upd.draft_output === 'string') updateObj.draft_output = upd.draft_output;
+
+            const { error: updateErr } = await adminClient
+              .from('work_tasks')
+              .update(updateObj)
+              .eq('id', taskId)
+              .is('deleted_at', null);
+
+            if (updateErr) {
+              failed.push({ id: taskId, reason: updateErr.message });
+              continue;
+            }
+
+            succeeded.push({
+              id: taskId,
+              title: existing.title,
+              ...(newStatus && newStatus !== existing.status ? { status_change: `${existing.status} → ${newStatus}` } : {}),
+            });
+          }
+
+          return {
+            success: failed.length === 0,
+            result: JSON.stringify({
+              total: updates.length,
+              succeeded_count: succeeded.length,
+              failed_count: failed.length,
+              succeeded,
+              failed,
+            }),
+          };
+        } catch (e) {
+          console.error('[bulk_update_work_tasks] Error:', e);
+          return { success: false, result: `Bulk update error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       case 'higgsfield_generate_image':
       case 'higgsfield_generate_video':
       case 'higgsfield_get_job_status':
@@ -6185,7 +6303,7 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'list_events',
   'create_work_task',
   'update_work_task',
-]);
+  'bulk_update_work_tasks',
 
 function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
@@ -6440,6 +6558,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
+    'bulk_update_work_tasks': '_always_',
     'upload_youtube_video': '_always_',
     'higgsfield_generate_image': '_always_',
     'higgsfield_generate_video': '_always_',
@@ -6617,6 +6736,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
+  'bulk_update_work_tasks': 'Updating work tasks',
   'upload_youtube_video': 'Uploading to YouTube',
 };
 
@@ -6855,7 +6975,7 @@ async function runToolLoop(
         'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
-        'create_work_task', 'update_work_task',
+        'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
         'deep_research', 'web_search_google',
       ]);
 
@@ -7014,7 +7134,7 @@ async function runToolLoop(
       // GUARD: if user just approved an action and assistant only called task-tracking tools,
       // inject a system reminder to actually execute the action on next iteration.
       const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
-      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task');
+      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task' || n === 'bulk_update_work_tasks');
       // Find last user message (skip tool/assistant) BEFORE this assistant turn
       const lastUser = [...openAIMessages].reverse().find((m) => m.role === 'user');
       const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
