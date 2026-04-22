@@ -48,7 +48,11 @@ export const googleSheetsIntegration: IntegrationManifest = {
         properties: {
           spreadsheetId: { type: "string" },
           range: { type: "string" },
-          values: { type: "array", items: { type: "array" } },
+          values: {
+            type: "array",
+            description: "Rows of cell values; each row is an array of strings/numbers.",
+            items: { type: "array", items: { type: "string" } },
+          },
           valueInputOption: { type: "string", enum: ["RAW", "USER_ENTERED"] },
         },
         required: ["spreadsheetId", "range", "values"],
@@ -64,7 +68,11 @@ export const googleSheetsIntegration: IntegrationManifest = {
         properties: {
           spreadsheetId: { type: "string" },
           range: { type: "string" },
-          values: { type: "array", items: { type: "array" } },
+          values: {
+            type: "array",
+            description: "Rows of cell values; each row is an array of strings/numbers.",
+            items: { type: "array", items: { type: "string" } },
+          },
         },
         required: ["spreadsheetId", "range", "values"],
       },

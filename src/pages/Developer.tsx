@@ -1,17 +1,44 @@
-import { useState } from "react";
-import { Code, Plug, TestTube, Key, Settings, ToggleLeft, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Code, Plug, TestTube, Key, Settings, ToggleLeft, ChevronRight, Shield, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { getAllAgents, getAllHooks, getAllCards, getRegistrySummary } from "@/core/registry";
 import { InfinityRouterDebug } from "@/components/InfinityRouterDebug";
 
+interface RegistryHealth {
+  legacyDropped: string[];
+  live: number;
+  quarantined: { name: string; reason: string }[];
+}
+
 const Developer = () => {
   const [testResults, setTestResults] = useState<string[]>([]);
+  const [health, setHealth] = useState<RegistryHealth | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const summary = getRegistrySummary();
   const agents = getAllAgents();
   const hooks = getAllHooks();
   const cards = getAllCards();
+
+  const loadHealth = async () => {
+    setHealthLoading(true);
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(`https://${projectId}.functions.supabase.co/chat?health=registry`, {
+        method: "GET",
+        headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+      });
+      const json = await res.json();
+      if (json?.registry) setHealth(json.registry);
+    } catch (e) {
+      console.warn("[developer] registry health failed", e);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  useEffect(() => { loadHealth(); }, []);
 
   const runHookTest = async (hookId: string) => {
     setTestResults((prev) => [...prev, `Testing hook: ${hookId}...`]);
@@ -46,6 +73,55 @@ const Developer = () => {
             ))}
           </div>
         </SettingsSection>
+
+        {/* Tool Registry Health — quarantine surface */}
+        <SettingsSection title="Tool Registry Health">
+          <div className="p-4 bg-card rounded-xl border border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">Orchestration tools</span>
+              </div>
+              <Button size="sm" variant="ghost" onClick={loadHealth} disabled={healthLoading}>
+                {healthLoading ? "Checking…" : "Refresh"}
+              </Button>
+            </div>
+            {health ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <div className="text-xl font-semibold text-primary">{health.live}</div>
+                    <div className="text-xs text-muted-foreground">Live</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <div className={`text-xl font-semibold ${health.quarantined.length ? 'text-destructive' : 'text-primary'}`}>
+                      {health.quarantined.length}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Quarantined</div>
+                  </div>
+                </div>
+                {health.quarantined.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs text-destructive">
+                      <AlertTriangle className="w-3 h-3" /> Dropped tools
+                    </div>
+                    {health.quarantined.map((q) => (
+                      <div key={q.name} className="text-xs p-2 rounded-md bg-destructive/5 border border-destructive/20">
+                        <div className="font-mono font-medium">{q.name}</div>
+                        <div className="text-muted-foreground mt-0.5">{q.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                {healthLoading ? "Loading…" : "No data — refresh to probe."}
+              </div>
+            )}
+          </div>
+        </SettingsSection>
+
 
         {/* Agents */}
         <SettingsSection title={`Agents (${agents.length})`}>
