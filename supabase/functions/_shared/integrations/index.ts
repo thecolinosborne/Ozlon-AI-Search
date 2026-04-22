@@ -42,12 +42,18 @@ export const TOOL_REGISTRY: Map<string, CompiledRoute> = (() => {
       if (m.has(t.name)) {
         console.warn(`[registry] duplicate tool name: ${t.name} (overriding)`);
       }
+      const sideEffect = t.sideEffect ?? "read";
       m.set(t.name, {
         integrationId: integ.id,
         edgeFunction: integ.edgeFunction,
         envelope: integ.envelope,
         action: t.action,
         mapArgs: t.mapArgs ?? ((a) => a),
+        formatter: t.formatter,
+        sideEffect,
+        cost: t.cost ?? "cheap",
+        requiresConfirmation: t.requiresConfirmation ?? sideEffect === "destructive",
+        toolName: t.name,
       });
     }
   }

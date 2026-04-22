@@ -66,12 +66,29 @@ export async function dispatchTool(
       return { success: false, routed: true, result: `Tool ${toolName} failed: ${errMsg}` };
     }
 
-    console.log(`[dispatcher] ${toolName} → ${route.edgeFunction}/${route.action} OK`);
+    // Run optional formatter — turns raw API JSON into AI-friendly text.
+    // Failure here MUST NOT break the call; fall back to JSON slice.
+    let pretty: string | null = null;
+    if (route.formatter) {
+      try {
+        pretty = route.formatter(data, safeArgs);
+      } catch (e) {
+        console.warn(`[dispatcher] ${toolName} formatter threw:`, e);
+      }
+    }
+    const body = pretty && pretty.trim().length > 0
+      ? pretty
+      : JSON.stringify(data).slice(0, 4000);
+
+    console.log(
+      `[dispatcher] ${toolName} → ${route.edgeFunction}/${route.action} OK ` +
+        `(side=${route.sideEffect}, cost=${route.cost}, formatted=${pretty ? "yes" : "no"})`,
+    );
     return {
       success: true,
       routed: true,
       data,
-      result: `[${route.integrationId}] ${JSON.stringify(data).slice(0, 4000)}`,
+      result: `[${route.integrationId}] ${body}`,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
