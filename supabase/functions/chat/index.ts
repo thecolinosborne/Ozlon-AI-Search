@@ -6201,41 +6201,89 @@ type ToolDomain =
   | 'memory' | 'creative' | 'finance' | 'system';
 
 /**
- * Validate a single tool schema. Returns true if the schema is structurally
- * sound and safe to ship to the LLM. Logs (but does not throw) on failure.
+ * Recursively validate a JSON-Schema fragment. Catches the entire bug class
+ * where one malformed sub-schema (e.g. `type:"array"` without `items`) causes
+ * OpenAI to reject the ENTIRE tool payload with HTTP 400.
  *
- * This is the failure-isolation guard: if `sheets_write_range` ships malformed
- * JSON-schema, only that tool is dropped — the other 227 still load.
+ * Returns { valid, reason }. Never throws.
  */
-function isValidToolSchema(tool: ToolDef): boolean {
-  try {
-    if (!tool || tool.type !== 'function') return false;
-    const fn = tool.function;
-    if (!fn || typeof fn.name !== 'string' || fn.name.length === 0) return false;
-    if (typeof fn.description !== 'string') return false;
-    const params = fn.parameters as Record<string, unknown> | undefined;
-    if (!params || typeof params !== 'object') return false;
-    if (params.type !== 'object') return false;
-    // properties must be an object if present
-    if (params.properties !== undefined && (typeof params.properties !== 'object' || params.properties === null)) return false;
-    // required must be an array of strings if present
-    if (params.required !== undefined) {
-      if (!Array.isArray(params.required)) return false;
-      if (!params.required.every((r) => typeof r === 'string')) return false;
+function validateJsonSchema(node: unknown, path = "$"): { valid: boolean; reason?: string } {
+  if (node === null || node === undefined) return { valid: true };
+  if (typeof node !== "object") return { valid: true };
+  const n = node as Record<string, unknown>;
+
+  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
+    const arr = n[key];
+    if (arr !== undefined) {
+      if (!Array.isArray(arr) || arr.length === 0) {
+        return { valid: false, reason: `${path}.${key} must be a non-empty array` };
+      }
+      for (let i = 0; i < arr.length; i++) {
+        const r = validateJsonSchema(arr[i], `${path}.${key}[${i}]`);
+        if (!r.valid) return r;
+      }
     }
-    // JSON-serializable check — catches circular refs and exotic values
-    JSON.stringify(tool);
-    return true;
-  } catch (err) {
-    console.error(`[tool-guard] schema validation threw for "${tool?.function?.name ?? 'unknown'}":`, err);
-    return false;
   }
+
+  const t = n.type;
+  if (t === "array") {
+    if (!n.items || typeof n.items !== "object") {
+      return { valid: false, reason: `${path}: type=array missing 'items' schema` };
+    }
+    const r = validateJsonSchema(n.items, `${path}.items`);
+    if (!r.valid) return r;
+  }
+  if (t === "object") {
+    if (n.properties !== undefined) {
+      if (typeof n.properties !== "object" || n.properties === null) {
+        return { valid: false, reason: `${path}.properties must be an object` };
+      }
+      for (const [k, v] of Object.entries(n.properties as Record<string, unknown>)) {
+        const r = validateJsonSchema(v, `${path}.properties.${k}`);
+        if (!r.valid) return r;
+      }
+    }
+    if (n.required !== undefined) {
+      if (!Array.isArray(n.required) || !n.required.every((x) => typeof x === "string")) {
+        return { valid: false, reason: `${path}.required must be string[]` };
+      }
+      const props = (n.properties as Record<string, unknown>) || {};
+      for (const r of n.required as string[]) {
+        if (!(r in props)) {
+          return { valid: false, reason: `${path}.required references missing property '${r}'` };
+        }
+      }
+    }
+  }
+  if (Array.isArray(n.enum) && n.enum.length === 0) {
+    return { valid: false, reason: `${path}.enum is empty` };
+  }
+  return { valid: true };
 }
 
 /**
- * Run validation on the full ACTION_TOOLS array exactly once, on cold-start.
- * Drops broken tools, logs each drop, and caches the clean array.
+ * Validate a single OpenAI tool definition (top-level shape + recursive schema).
+ * Malformed tools are dropped individually so a broken Sheets schema can never
+ * again break Gmail.
  */
+function isValidToolSchema(tool: ToolDef): { valid: boolean; reason?: string } {
+  try {
+    if (!tool || tool.type !== "function") return { valid: false, reason: "missing type:function" };
+    const fn = tool.function;
+    if (!fn || typeof fn.name !== "string" || fn.name.length === 0) return { valid: false, reason: "missing function.name" };
+    if (typeof fn.description !== "string") return { valid: false, reason: "missing description" };
+    const params = fn.parameters as Record<string, unknown> | undefined;
+    if (!params || typeof params !== "object") return { valid: false, reason: "missing parameters object" };
+    if (params.type !== "object") return { valid: false, reason: "parameters.type must be 'object'" };
+    const r = validateJsonSchema(params, `${fn.name}.parameters`);
+    if (!r.valid) return r;
+    JSON.stringify(tool);
+    return { valid: true };
+  } catch (err) {
+    return { valid: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 let _validatedTools: ToolDef[] | null = null;
 let _droppedTools: string[] = [];
 function getValidatedTools(): ToolDef[] {
@@ -6243,19 +6291,48 @@ function getValidatedTools(): ToolDef[] {
   const valid: ToolDef[] = [];
   const dropped: string[] = [];
   for (const t of ACTION_TOOLS) {
-    if (isValidToolSchema(t)) {
-      valid.push(t);
-    } else {
-      dropped.push(t?.function?.name ?? '<unnamed>');
+    const r = isValidToolSchema(t);
+    if (r.valid) valid.push(t);
+    else {
+      dropped.push(t?.function?.name ?? "<unnamed>");
+      console.warn(`[tool-guard] DROPPED legacy '${t?.function?.name}': ${r.reason}`);
     }
   }
   _validatedTools = valid;
   _droppedTools = dropped;
-  if (dropped.length > 0) {
-    console.warn(`[tool-guard] DROPPED ${dropped.length} malformed tool(s):`, dropped);
-  }
-  console.log(`[tool-guard] ${valid.length}/${ACTION_TOOLS.length} tools validated and ready.`);
+  console.log(`[tool-guard] legacy: ${valid.length}/${ACTION_TOOLS.length} validated`);
   return valid;
+}
+
+/**
+ * Final assembled-list quarantine. Run immediately before tools go to OpenAI.
+ * Every tool — legacy, manifest, multi_action — passes through here. One bad
+ * apple is dropped; the rest ship.
+ */
+let _quarantineSummary: { live: number; quarantined: { name: string; reason: string }[] } = { live: 0, quarantined: [] };
+function quarantineFinalToolList(tools: ToolDef[]): ToolDef[] {
+  const live: ToolDef[] = [];
+  const quarantined: { name: string; reason: string }[] = [];
+  for (const t of tools) {
+    const r = isValidToolSchema(t);
+    if (r.valid) live.push(t);
+    else {
+      const name = t?.function?.name ?? "<unnamed>";
+      quarantined.push({ name, reason: r.reason ?? "unknown" });
+      console.warn(`[tool-guard] QUARANTINED '${name}': ${r.reason}`);
+    }
+  }
+  _quarantineSummary = { live: live.length, quarantined };
+  console.log(`[tool-guard] final: live=${live.length} quarantined=${quarantined.length}`);
+  return live;
+}
+
+export function getRegistryHealth() {
+  return {
+    legacyDropped: _droppedTools,
+    live: _quarantineSummary.live,
+    quarantined: _quarantineSummary.quarantined,
+  };
 }
 
 // ============================================================================
