@@ -17,6 +17,8 @@ import { ChannelChips, type ChipFilter } from "@/components/communications/Chann
 import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 function greetingFor(name?: string | null) {
@@ -74,6 +76,77 @@ export default function Communications() {
   };
   const handleDeleted = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+  };
+  const handleRowDelete = async (m: CommMessage) => {
+    setHidden((s) => new Set(s).add(m.id));
+    try {
+      if (m.source === "gmail") {
+        const id = m.id.replace(/^gmail:/, "");
+        await supabase.functions.invoke("google-gmail", {
+          body: { action: "trash_message", params: { id } },
+        });
+        toast({
+          title: "Moved to trash",
+          action: (
+            <button
+              onClick={async () => {
+                await supabase.functions.invoke("google-gmail", {
+                  body: { action: "untrash_message", params: { id } },
+                });
+                setHidden((s) => {
+                  const n = new Set(s);
+                  n.delete(m.id);
+                  return n;
+                });
+                toast({ title: "Restored" });
+              }}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              Undo
+            </button>
+          ),
+        });
+      } else if (m.source === "slack") {
+        const parts = m.id.split(":");
+        const channel = parts[1];
+        const ts = parts.slice(2).join(":");
+        const { data, error } = await supabase.functions.invoke("slack", {
+          body: { action: "delete_message", params: { channel, ts } },
+        });
+        const ok = !error && (data as { success?: boolean })?.success !== false;
+        if (!ok) {
+          setHidden((s) => {
+            const n = new Set(s);
+            n.delete(m.id);
+            return n;
+          });
+          toast({
+            title: "Can't delete",
+            description: "Slack only allows deleting messages you posted.",
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: "Deleted from Slack" });
+        }
+      } else if (m.source === "ghl") {
+        const conversationId = m.threadId || m.id.replace(/^ghl:/, "");
+        await supabase.functions.invoke("gohighlevel", {
+          body: { action: "update_conversation", params: { conversationId, read: true } },
+        });
+        toast({ title: "Marked as read" });
+      }
+    } catch (e) {
+      setHidden((s) => {
+        const n = new Set(s);
+        n.delete(m.id);
+        return n;
+      });
+      toast({
+        title: "Action failed",
+        description: e instanceof Error ? e.message : "Try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const closeReply = () => {
