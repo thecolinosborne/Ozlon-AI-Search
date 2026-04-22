@@ -7617,6 +7617,17 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Tool-registry health probe — used by Developer page + log inspection.
+  // GET /chat?health=registry returns live/quarantined tool counts.
+  const url = new URL(req.url);
+  if (req.method === 'GET' && url.searchParams.get('health') === 'registry') {
+    // Force lazy init of legacy validated tools (so getRegistryHealth is meaningful).
+    try { getValidatedTools(); } catch { /* ignore */ }
+    return new Response(JSON.stringify({ ok: true, registry: getRegistryHealth() }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const requestStart = Date.now();
     const body = await req.json();
