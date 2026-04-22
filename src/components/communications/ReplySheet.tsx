@@ -75,8 +75,10 @@ export function ReplySheet({ message, onClose }: ReplySheetProps) {
           {message.subject && (
             <h3 className="text-base font-semibold text-foreground mb-2">{message.subject}</h3>
           )}
-          <div className="rounded-2xl bg-background/40 border border-border/20 p-4">
-            <p className="text-[14px] text-foreground/90 leading-relaxed">{message.preview}</p>
+          <div className="rounded-2xl bg-background/40 border border-border/20 p-4 max-h-[40vh] overflow-y-auto">
+            <p className="text-[14px] text-foreground/90 leading-relaxed whitespace-pre-wrap break-words">
+              {message.preview}
+            </p>
           </div>
 
           <div className="mt-5 flex items-center gap-2 text-[11px] uppercase tracking-wider text-primary/80">
