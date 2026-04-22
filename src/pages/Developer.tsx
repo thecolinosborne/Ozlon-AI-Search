@@ -1,17 +1,44 @@
-import { useState } from "react";
-import { Code, Plug, TestTube, Key, Settings, ToggleLeft, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Code, Plug, TestTube, Key, Settings, ToggleLeft, ChevronRight, Shield, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { getAllAgents, getAllHooks, getAllCards, getRegistrySummary } from "@/core/registry";
 import { InfinityRouterDebug } from "@/components/InfinityRouterDebug";
 
+interface RegistryHealth {
+  legacyDropped: string[];
+  live: number;
+  quarantined: { name: string; reason: string }[];
+}
+
 const Developer = () => {
   const [testResults, setTestResults] = useState<string[]>([]);
+  const [health, setHealth] = useState<RegistryHealth | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const summary = getRegistrySummary();
   const agents = getAllAgents();
   const hooks = getAllHooks();
   const cards = getAllCards();
+
+  const loadHealth = async () => {
+    setHealthLoading(true);
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(`https://${projectId}.functions.supabase.co/chat?health=registry`, {
+        method: "GET",
+        headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+      });
+      const json = await res.json();
+      if (json?.registry) setHealth(json.registry);
+    } catch (e) {
+      console.warn("[developer] registry health failed", e);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  useEffect(() => { loadHealth(); }, []);
 
   const runHookTest = async (hookId: string) => {
     setTestResults((prev) => [...prev, `Testing hook: ${hookId}...`]);
