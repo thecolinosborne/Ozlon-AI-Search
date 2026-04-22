@@ -2627,7 +2627,7 @@ const ACTION_TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           task_id: { type: 'string', description: 'The work task ID to update' },
-          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed', 'cancelled'], description: 'New status — must follow valid transitions' },
+          status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed'], description: 'New status — must follow valid transitions' },
           draft_output: { type: 'string', description: 'Markdown deliverable content to save' },
           ai_status: { type: 'string', enum: ['idle', 'thinking', 'executing', 'waiting', 'error'], description: 'Current AI processing status' },
           next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'], description: 'Next action state' },
@@ -2665,7 +2665,7 @@ const ACTION_TOOLS: ToolDef[] = [
               type: 'object',
               properties: {
                 task_id: { type: 'string', description: 'The work task ID to update' },
-                status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed', 'cancelled'] },
+                status: { type: 'string', enum: ['todo', 'in_progress', 'up_for_review', 'completed'] },
                 draft_output: { type: 'string' },
                 ai_status: { type: 'string', enum: ['idle', 'thinking', 'executing', 'waiting', 'error'] },
                 next_action: { type: 'string', enum: ['waiting_on_ai', 'waiting_on_human', 'ready_to_send', 'needs_review', 'blocked', 'none'] },
