@@ -8,6 +8,12 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 type Channel = "email" | "slack" | "sms" | "voicemail";
 type Tone = "default" | "shorter" | "friendlier" | "firmer";
 
+interface ThreadCtxMsg {
+  from: string;
+  body: string;
+  direction: "in" | "out";
+}
+
 interface DraftRequest {
   channel: Channel;
   fromName: string;
@@ -15,6 +21,7 @@ interface DraftRequest {
   subject?: string;
   preview: string;
   tone?: Tone;
+  threadContext?: ThreadCtxMsg[];
 }
 
 function fallbackDraft(req: DraftRequest): string {
@@ -88,12 +95,28 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const ctx = (body.threadContext || []).slice(-3);
+    const threadBlock = ctx.length
+      ? [
+          "Prior thread (oldest → newest):",
+          ...ctx.map(
+            (m) => `[${m.direction === "out" ? "ME" : m.from}] ${m.body.slice(0, 600).replace(/\s+/g, " ")}`,
+          ),
+          "",
+        ].join("\n")
+      : "";
+
+    const threadNote = ctx.length
+      ? " You're continuing an ongoing thread. Match the conversational tone already established and reference specifics from the prior messages when natural."
+      : "";
+
     const userContent = [
       `From: ${body.fromName}`,
       body.subject ? `Subject: ${body.subject}` : null,
       body.channelLabel ? `Channel: ${body.channelLabel}` : null,
       "",
-      "Message:",
+      threadBlock,
+      "Latest message to reply to:",
       body.preview,
     ]
       .filter(Boolean)
@@ -108,7 +131,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: systemPromptFor(body.channel, tone) },
+          { role: "system", content: systemPromptFor(body.channel, tone) + threadNote },
           { role: "user", content: userContent },
         ],
       }),
