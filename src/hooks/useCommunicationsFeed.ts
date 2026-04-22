@@ -41,6 +41,7 @@ export interface CommunicationsFeed {
   digest: DailyDigest;
   stream: CommMessage[];
   isLoading: boolean;
+  isFetching: boolean;
   refetch: () => void;
 }
 
