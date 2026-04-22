@@ -34,7 +34,9 @@ const SCOPES = [
   "reactions:write",
   "users:read",
   "users:read.email",
-  "search:read",
+  "search:read.files",
+  "search:read.im",
+  "search:read.users",
 ].join(",");
 
 // Where to send the user after install completes. Adjust if you want a different post-install URL.
