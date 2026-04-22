@@ -15,7 +15,7 @@ import { googleAnalyticsIntegration } from "./google-analytics.ts";
 import { googleTagManagerIntegration } from "./google-tag-manager.ts";
 import { descriptIntegration } from "./descript.ts";
 import { searchAtlasIntegration } from "./search-atlas.ts";
-import { notionIntegration } from "./notion.ts";
+import { slackIntegration } from "./slack.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   googleDocsIntegration,
@@ -27,7 +27,7 @@ export const INTEGRATIONS: IntegrationManifest[] = [
   googleTagManagerIntegration,
   descriptIntegration,
   searchAtlasIntegration,
-  notionIntegration,
+  slackIntegration,
 ];
 
 /** Map: tool name → compiled route. Built once at module load. */
