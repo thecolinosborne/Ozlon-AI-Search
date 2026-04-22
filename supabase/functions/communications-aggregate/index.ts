@@ -197,8 +197,13 @@ async function fetchSlack(): Promise<CommMessage[]> {
     );
 
     const perChannel = await Promise.all(
-      channels.slice(0, 6).map(async (ch) => {
-        const hist = await slackGateway("conversations.history", { channel: ch.id, limit: 3 });
+      channels.slice(0, 8).map(async (ch) => {
+        let hist = await slackGateway("conversations.history", { channel: ch.id, limit: 3 });
+        // Auto-join public channels we're not in, then retry once.
+        if (!hist && !ch.is_im) {
+          const joined = await slackGateway("conversations.join", { channel: ch.id });
+          if (joined) hist = await slackGateway("conversations.history", { channel: ch.id, limit: 3 });
+        }
         if (!hist) return [] as CommMessage[];
         const msgs = (hist.messages as Array<{ ts: string; text?: string; user?: string; subtype?: string }>) || [];
         const channelLabel = ch.is_im

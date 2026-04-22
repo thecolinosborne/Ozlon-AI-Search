@@ -41,6 +41,7 @@ export interface CommunicationsFeed {
   digest: DailyDigest;
   stream: CommMessage[];
   isLoading: boolean;
+  isFetching: boolean;
   refetch: () => void;
 }
 
@@ -103,6 +104,7 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     digest,
     stream,
     isLoading: aggregateQ.isLoading || digestQ.isLoading,
+    isFetching: aggregateQ.isFetching || digestQ.isFetching,
     refetch: () => {
       aggregateQ.refetch();
       digestQ.refetch();
