@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Send, Sparkles } from "lucide-react";
+import { Mic, Send, Sparkles, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
+import { supabase } from "@/integrations/supabase/client";
 import type { CommMessage } from "@/hooks/useCommunicationsFeed";
 
 interface ReplySheetProps {
@@ -11,25 +12,55 @@ interface ReplySheetProps {
   onClose: () => void;
 }
 
-function draftFor(m: CommMessage): string {
+type Tone = "default" | "shorter" | "friendlier" | "firmer";
+
+function fallbackDraft(m: CommMessage): string {
+  const first = m.fromName.split(" ")[0] || "there";
   switch (m.channel) {
     case "email":
-      return `Hi ${m.fromName.split(" ")[0]},\n\nThanks for the note — I can do Friday at 2pm. I'll send a calendar invite shortly.\n\nBest,`;
+      return `Hi ${first},\n\nThanks for the note — got it and I'll get back to you shortly.\n\nBest,`;
     case "slack":
-      return `On it — taking a look now and will drop notes in thread.`;
+      return `thanks — taking a look and will follow up in thread.`;
     case "sms":
-      return `Hi! Yes still available — happy to share details. What's the best time to chat?`;
+      return `Got it — will get back to you shortly.`;
     case "voicemail":
-      return `Hey, got your voicemail — calling you back in a few minutes.`;
+      return `Hey ${first}, got your voicemail — calling you back shortly.`;
   }
 }
 
 export function ReplySheet({ message, onClose }: ReplySheetProps) {
   const [draft, setDraft] = useState("");
+  const [isDrafting, setIsDrafting] = useState(false);
+
+  async function generate(m: CommMessage, tone: Tone = "default") {
+    setIsDrafting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("communications-draft", {
+        body: {
+          channel: m.channel,
+          fromName: m.fromName,
+          channelLabel: m.channelLabel,
+          subject: m.subject,
+          preview: m.preview,
+          tone,
+        },
+      });
+      if (error) throw error;
+      const next = (data as { draft?: string })?.draft;
+      setDraft(next && next.trim().length > 0 ? next : fallbackDraft(m));
+    } catch {
+      setDraft(fallbackDraft(m));
+    } finally {
+      setIsDrafting(false);
+    }
+  }
 
   useEffect(() => {
-    if (message) setDraft(draftFor(message));
-  }, [message]);
+    if (!message) return;
+    setDraft("");
+    generate(message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message?.id]);
 
   if (!message) return null;
   const Icon = channelIcon(message.channel);
@@ -81,16 +112,52 @@ export function ReplySheet({ message, onClose }: ReplySheetProps) {
             </p>
           </div>
 
-          <div className="mt-5 flex items-center gap-2 text-[11px] uppercase tracking-wider text-primary/80">
-            <Sparkles className="w-3 h-3" />
-            <span>AI draft ready</span>
+          <div className="mt-5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-primary/80">
+              <Sparkles className={cn("w-3 h-3", isDrafting && "animate-pulse")} />
+              <span>{isDrafting ? "Drafting…" : "AI draft ready"}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => generate(message, "shorter")}
+                disabled={isDrafting}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-card/60 transition-colors disabled:opacity-50"
+              >
+                Shorter
+              </button>
+              <button
+                onClick={() => generate(message, "friendlier")}
+                disabled={isDrafting}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-card/60 transition-colors disabled:opacity-50"
+              >
+                Friendlier
+              </button>
+              <button
+                onClick={() => generate(message, "firmer")}
+                disabled={isDrafting}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-card/60 transition-colors disabled:opacity-50"
+              >
+                Firmer
+              </button>
+              <button
+                onClick={() => generate(message, "default")}
+                disabled={isDrafting}
+                className="ml-1 w-7 h-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card/60 transition-colors disabled:opacity-50"
+                aria-label="Regenerate"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5", isDrafting && "animate-spin")} />
+              </button>
+            </div>
           </div>
           <div className="mt-2 rounded-2xl bg-card/60 border border-border/30 backdrop-blur-xl p-1">
             <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="min-h-[140px] border-0 bg-transparent resize-none focus-visible:ring-0 text-[14px] leading-relaxed"
-              placeholder="Reply…"
+              className={cn(
+                "min-h-[140px] border-0 bg-transparent resize-none focus-visible:ring-0 text-[14px] leading-relaxed transition-opacity",
+                isDrafting && draft.length === 0 && "opacity-50",
+              )}
+              placeholder={isDrafting ? "Drafting your reply…" : "Reply…"}
             />
           </div>
         </div>
