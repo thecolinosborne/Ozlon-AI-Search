@@ -74,6 +74,55 @@ const Developer = () => {
           </div>
         </SettingsSection>
 
+        {/* Tool Registry Health — quarantine surface */}
+        <SettingsSection title="Tool Registry Health">
+          <div className="p-4 bg-card rounded-xl border border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">Orchestration tools</span>
+              </div>
+              <Button size="sm" variant="ghost" onClick={loadHealth} disabled={healthLoading}>
+                {healthLoading ? "Checking…" : "Refresh"}
+              </Button>
+            </div>
+            {health ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <div className="text-xl font-semibold text-primary">{health.live}</div>
+                    <div className="text-xs text-muted-foreground">Live</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <div className={`text-xl font-semibold ${health.quarantined.length ? 'text-destructive' : 'text-primary'}`}>
+                      {health.quarantined.length}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Quarantined</div>
+                  </div>
+                </div>
+                {health.quarantined.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs text-destructive">
+                      <AlertTriangle className="w-3 h-3" /> Dropped tools
+                    </div>
+                    {health.quarantined.map((q) => (
+                      <div key={q.name} className="text-xs p-2 rounded-md bg-destructive/5 border border-destructive/20">
+                        <div className="font-mono font-medium">{q.name}</div>
+                        <div className="text-muted-foreground mt-0.5">{q.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                {healthLoading ? "Loading…" : "No data — refresh to probe."}
+              </div>
+            )}
+          </div>
+        </SettingsSection>
+
+
         {/* Agents */}
         <SettingsSection title={`Agents (${agents.length})`}>
           <div className="space-y-2">
