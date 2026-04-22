@@ -2,16 +2,17 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PriorityCard } from "./PriorityCard";
 import { BriefMeButton } from "./BriefMeButton";
-import type { DailyDigest } from "@/hooks/useCommunicationsFeed";
+import type { DailyDigest, PriorityItem } from "@/hooks/useCommunicationsFeed";
 
 interface HeroDigestProps {
   digest: DailyDigest;
   collapsed: boolean;
   greeting: string;
   onBrief: () => void;
+  onPriorityTap?: (p: PriorityItem) => void;
 }
 
-export function HeroDigest({ digest, collapsed, greeting, onBrief }: HeroDigestProps) {
+export function HeroDigest({ digest, collapsed, greeting, onBrief, onPriorityTap }: HeroDigestProps) {
   return (
     <div className="px-4 lg:px-6 pt-4 lg:pt-6">
       <div
@@ -45,7 +46,11 @@ export function HeroDigest({ digest, collapsed, greeting, onBrief }: HeroDigestP
 
             <div className="mt-4 space-y-2">
               {digest.priorities.map((p) => (
-                <PriorityCard key={p.id} priority={p} />
+                <PriorityCard
+                  key={p.id}
+                  priority={p}
+                  onClick={onPriorityTap ? () => onPriorityTap(p) : undefined}
+                />
               ))}
             </div>
 

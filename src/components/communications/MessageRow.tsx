@@ -1,3 +1,4 @@
+import { Check, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
@@ -6,17 +7,27 @@ import type { CommMessage } from "@/hooks/useCommunicationsFeed";
 interface MessageRowProps {
   message: CommMessage;
   onTap: (m: CommMessage) => void;
+  onDone?: (m: CommMessage) => void;
+  onSnooze?: (m: CommMessage) => void;
 }
 
-export function MessageRow({ message, onTap }: MessageRowProps) {
+export function MessageRow({ message, onTap, onDone, onSnooze }: MessageRowProps) {
   const Icon = channelIcon(message.channel);
   const tint = channelTint(message.channel);
 
   return (
-    <button
+    <div
       onClick={() => onTap(message)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onTap(message);
+        }
+      }}
       className={cn(
-        "w-full text-left flex items-start gap-3 px-4 lg:px-6 py-3.5",
+        "group relative w-full text-left flex items-start gap-3 px-4 lg:px-6 py-3.5 cursor-pointer",
         "hover:bg-card/30 active:bg-card/50 transition-colors",
         "focus-visible:outline-none focus-visible:bg-card/30",
       )}
@@ -88,6 +99,38 @@ export function MessageRow({ message, onTap }: MessageRowProps) {
           aria-label="Unread"
         />
       )}
-    </button>
+
+      {/* Hover actions (desktop) */}
+      {(onDone || onSnooze) && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {onSnooze && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSnooze(message);
+              }}
+              className="h-7 px-2 rounded-full bg-background/80 backdrop-blur-xl border border-border/40 text-[11px] font-medium text-muted-foreground hover:text-foreground flex items-center gap-1"
+              aria-label="Snooze"
+            >
+              <Clock className="w-3 h-3" />
+              Later
+            </button>
+          )}
+          {onDone && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDone(message);
+              }}
+              className="h-7 px-2 rounded-full bg-background/80 backdrop-blur-xl border border-border/40 text-[11px] font-medium text-muted-foreground hover:text-foreground flex items-center gap-1"
+              aria-label="Mark done"
+            >
+              <Check className="w-3 h-3" />
+              Done
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

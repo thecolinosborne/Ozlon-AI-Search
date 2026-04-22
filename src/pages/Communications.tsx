@@ -1,13 +1,19 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Mic, RefreshCw } from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw, Target } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useCommunicationsFeed, type CommMessage } from "@/hooks/useCommunicationsFeed";
+import {
+  useCommunicationsFeed,
+  type CommMessage,
+  type CommChannel,
+  type PriorityItem,
+} from "@/hooks/useCommunicationsFeed";
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
 import { HeroDigest } from "@/components/communications/HeroDigest";
 import { UnifiedStream } from "@/components/communications/UnifiedStream";
 import { FilterDropdown, type FilterValue } from "@/components/communications/FilterDropdown";
+import { ChannelChips, type ChipFilter } from "@/components/communications/ChannelChips";
 import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
@@ -26,23 +32,59 @@ export default function Communications() {
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
 
-  const [filter, setFilter] = useState<FilterValue>("all");
+  const [chip, setChip] = useState<ChipFilter>("all");
+  const [stateFilter, setStateFilter] = useState<FilterValue>("all");
   const [active, setActive] = useState<CommMessage | null>(null);
+  const [triage, setTriage] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
 
-  const greeting = greetingFor((user?.user_metadata as { full_name?: string })?.full_name ?? user?.email);
+  const greeting = greetingFor(
+    (user?.user_metadata as { full_name?: string })?.full_name ?? user?.email,
+  );
 
+  // Counts per channel for chip badges (from full stream, ignoring filters)
+  const channelCounts = useMemo(() => {
+    const c: Record<CommChannel, number> = { email: 0, slack: 0, sms: 0, voicemail: 0 };
+    for (const m of stream) c[m.channel] += 1;
+    return c;
+  }, [stream]);
+
+  // Apply chip + state + triage + hidden, in order.
   const filtered = useMemo(() => {
-    switch (filter) {
-      case "all":
-        return stream;
-      case "unread":
-        return stream.filter((m) => m.isUnread);
-      case "needs-reply":
-        return stream.filter((m) => m.needsReply);
-      default:
-        return stream.filter((m) => m.channel === filter);
+    let out = stream.filter((m) => !hidden.has(m.id));
+    if (triage) out = out.filter((m) => m.needsReply);
+    if (chip !== "all") out = out.filter((m) => m.channel === chip);
+    if (stateFilter === "unread") out = out.filter((m) => m.isUnread);
+    if (stateFilter === "needs-reply") out = out.filter((m) => m.needsReply);
+    return out;
+  }, [stream, hidden, triage, chip, stateFilter]);
+
+  const openMessage = (m: CommMessage) => setActive(m);
+
+  const openPriority = (p: PriorityItem) => {
+    const match = stream.find((m) => m.id === p.id);
+    if (match) setActive(match);
+  };
+
+  const handleDone = (m: CommMessage) => {
+    setHidden((s) => new Set(s).add(m.id));
+  };
+  const handleSnooze = (m: CommMessage) => {
+    setHidden((s) => new Set(s).add(m.id));
+  };
+
+  const closeReply = () => {
+    if (triage && active) {
+      // Auto-advance to next needsReply, hide the one we just handled.
+      const remaining = stream.filter(
+        (m) => !hidden.has(m.id) && m.id !== active.id && m.needsReply,
+      );
+      setHidden((s) => new Set(s).add(active.id));
+      setActive(remaining[0] ?? null);
+    } else {
+      setActive(null);
     }
-  }, [stream, filter]);
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -84,6 +126,7 @@ export default function Communications() {
               collapsed={collapsed}
               greeting={greeting}
               onBrief={() => brief.play(digest.briefScript)}
+              onPriorityTap={openPriority}
             />
           </aside>
 
@@ -93,21 +136,50 @@ export default function Communications() {
             <div className="h-6 bg-gradient-to-b from-transparent to-background lg:hidden" />
 
             {/* Sticky sub-header */}
-            <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 flex items-center justify-between bg-background/70 backdrop-blur-2xl">
-              <h2 className="text-[13px] font-medium text-foreground">All Messages</h2>
-              <FilterDropdown value={filter} onChange={setFilter} />
+            <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[13px] font-medium text-foreground">All Messages</h2>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setTriage((v) => !v)}
+                    className={cn(
+                      "inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors",
+                      triage
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card/40 text-muted-foreground hover:text-foreground border-border/30",
+                    )}
+                    aria-pressed={triage}
+                    aria-label="Toggle triage mode"
+                  >
+                    <Target className="w-3 h-3" />
+                    Triage
+                  </button>
+                  <FilterDropdown value={stateFilter} onChange={setStateFilter} />
+                </div>
+              </div>
+              <ChannelChips
+                value={chip}
+                onChange={setChip}
+                counts={channelCounts}
+                total={stream.filter((m) => !hidden.has(m.id)).length}
+              />
             </div>
 
             {filtered.length === 0 ? (
               <EmptyCaughtUp />
             ) : (
-              <UnifiedStream messages={filtered} onTap={setActive} />
+              <UnifiedStream
+                messages={filtered}
+                onTap={openMessage}
+                onDone={handleDone}
+                onSnooze={handleSnooze}
+              />
             )}
           </section>
         </div>
       </div>
 
-      <ReplySheet message={active} onClose={() => setActive(null)} />
+      <ReplySheet message={active} onClose={closeReply} />
       <BriefMeOverlay
         open={brief.isOverlayOpen}
         isPlaying={brief.isPlaying}
