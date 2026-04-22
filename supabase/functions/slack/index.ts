@@ -141,6 +141,8 @@ async function dispatch(
       return await call("conversations.create", params);
     case "add_reaction":
       return await call("reactions.add", params);
+    case "delete_message":
+      return await call("chat.delete", params);
     default:
       throw new Error(`Unknown Slack action: ${action}`);
   }
