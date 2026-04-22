@@ -72,6 +72,9 @@ export default function Communications() {
   const handleSnooze = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
   };
+  const handleDeleted = (m: CommMessage) => {
+    setHidden((s) => new Set(s).add(m.id));
+  };
 
   const closeReply = () => {
     if (triage && active) {
@@ -173,13 +176,14 @@ export default function Communications() {
                 onTap={openMessage}
                 onDone={handleDone}
                 onSnooze={handleSnooze}
+                onDelete={handleDeleted}
               />
             )}
           </section>
         </div>
       </div>
 
-      <ReplySheet message={active} onClose={closeReply} />
+      <ReplySheet message={active} onClose={closeReply} onDeleted={handleDeleted} />
       <BriefMeOverlay
         open={brief.isOverlayOpen}
         isPlaying={brief.isPlaying}
