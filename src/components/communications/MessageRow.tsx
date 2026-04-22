@@ -1,4 +1,4 @@
-import { Check, Clock } from "lucide-react";
+import { Check, Clock, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
@@ -9,9 +9,10 @@ interface MessageRowProps {
   onTap: (m: CommMessage) => void;
   onDone?: (m: CommMessage) => void;
   onSnooze?: (m: CommMessage) => void;
+  onDelete?: (m: CommMessage) => void;
 }
 
-export function MessageRow({ message, onTap, onDone, onSnooze }: MessageRowProps) {
+export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: MessageRowProps) {
   const Icon = channelIcon(message.channel);
   const tint = channelTint(message.channel);
 
@@ -101,7 +102,7 @@ export function MessageRow({ message, onTap, onDone, onSnooze }: MessageRowProps
       )}
 
       {/* Hover actions (desktop) */}
-      {(onDone || onSnooze) && (
+      {(onDone || onSnooze || onDelete) && (
         <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {onSnooze && (
             <button
@@ -127,6 +128,19 @@ export function MessageRow({ message, onTap, onDone, onSnooze }: MessageRowProps
             >
               <Check className="w-3 h-3" />
               Done
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(message);
+              }}
+              className="h-7 w-7 rounded-full bg-background/80 backdrop-blur-xl border border-border/40 text-muted-foreground hover:text-destructive hover:border-destructive/40 flex items-center justify-center"
+              aria-label={message.source === "ghl" ? "Mark as read" : "Delete"}
+              title={message.source === "ghl" ? "Mark as read" : "Delete"}
+            >
+              <Trash2 className="w-3 h-3" />
             </button>
           )}
         </div>

@@ -8,9 +8,10 @@ interface UnifiedStreamProps {
   onTap: (m: CommMessage) => void;
   onDone?: (m: CommMessage) => void;
   onSnooze?: (m: CommMessage) => void;
+  onDelete?: (m: CommMessage) => void;
 }
 
-export function UnifiedStream({ messages, onTap, onDone, onSnooze }: UnifiedStreamProps) {
+export function UnifiedStream({ messages, onTap, onDone, onSnooze, onDelete }: UnifiedStreamProps) {
   const grouped = useMemo(() => {
     const groups: { bucket: string; items: CommMessage[] }[] = [];
     for (const m of messages) {
@@ -39,6 +40,7 @@ export function UnifiedStream({ messages, onTap, onDone, onSnooze }: UnifiedStre
                 onTap={onTap}
                 onDone={onDone}
                 onSnooze={onSnooze}
+                onDelete={onDelete}
               />
             ))}
           </div>

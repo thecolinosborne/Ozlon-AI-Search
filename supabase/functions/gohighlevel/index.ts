@@ -234,6 +234,14 @@ serve(async (req) => {
         fetchBody = JSON.stringify(reqBody);
         break;
       }
+      case 'update_conversation': {
+        if (!params?.conversationId) throw new Error('conversationId required');
+        endpoint = `${GHL_BASE_URL}/conversations/${params.conversationId}`;
+        method = 'PUT';
+        const { conversationId: _ignore, ...rest } = (params as Record<string, unknown>);
+        fetchBody = JSON.stringify(rest);
+        break;
+      }
 
       // ============ CAMPAIGNS ============
       case 'list_campaigns': {
