@@ -494,13 +494,26 @@ Deno.serve(async (req) => {
     voicemail: ghl.filter((m) => m.channel === "voicemail").length,
   };
 
+  const priorities = buildPriorities(stream);
+  const lastRefreshed = new Date().toISOString();
+
+  // Normalized envelope (orchestration contract): { ok, data, diagnostics }.
+  // Legacy top-level fields kept for back-compat with any older caller.
   return new Response(
     JSON.stringify({
+      ok: true,
+      data: { stream, priorities, sourceCounts, lastRefreshed },
+      diagnostics: {
+        partial: slack.partial,
+        slackReason: slack.reason ?? null,
+        sources: sourceCounts,
+      },
+      // legacy mirrors — safe to remove after one release cycle
       stream,
-      priorities: buildPriorities(stream),
+      priorities,
       sourceCounts,
       partial: { slack: slack.partial, slackReason: slack.reason ?? null },
-      lastRefreshed: new Date().toISOString(),
+      lastRefreshed,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
