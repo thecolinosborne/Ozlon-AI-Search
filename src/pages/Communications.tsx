@@ -19,6 +19,7 @@ import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useCommReadState } from "@/hooks/useCommReadState";
 import { cn } from "@/lib/utils";
 
 function greetingFor(name?: string | null) {
