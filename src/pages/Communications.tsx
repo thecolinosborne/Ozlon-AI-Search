@@ -11,6 +11,8 @@ import {
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
 import { HeroDigest } from "@/components/communications/HeroDigest";
+import { CompactBriefStrip } from "@/components/communications/CompactBriefStrip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { UnifiedStream } from "@/components/communications/UnifiedStream";
 import { FilterDropdown, type FilterValue } from "@/components/communications/FilterDropdown";
 import { ChannelChips, type ChipFilter } from "@/components/communications/ChannelChips";
@@ -32,6 +34,7 @@ function greetingFor(name?: string | null) {
 export default function Communications() {
   const { user } = useAuth();
   const { digest, stream, isFetching, refetch } = useCommunicationsFeed();
+  const isMobile = useIsMobile();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
   const readState = useCommReadState();
@@ -202,16 +205,25 @@ export default function Communications() {
       {/* Scrollable surface */}
       <div ref={ref} className="flex-1 overflow-y-auto">
         <div className="lg:grid lg:grid-cols-[38%_62%] lg:gap-0">
-          {/* Left / hero */}
-          <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
-            <HeroDigest
+          {/* Left / hero — desktop full card; mobile compact strip (no sticky, no blur) */}
+          {isMobile ? (
+            <CompactBriefStrip
               digest={digest}
-              collapsed={collapsed}
               greeting={greeting}
               onBrief={() => brief.play(digest.briefScript)}
               onPriorityTap={openPriority}
             />
-          </aside>
+          ) : (
+            <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
+              <HeroDigest
+                digest={digest}
+                collapsed={collapsed}
+                greeting={greeting}
+                onBrief={() => brief.play(digest.briefScript)}
+                onPriorityTap={openPriority}
+              />
+            </aside>
+          )}
 
           {/* Right / unified stream */}
           <section>
