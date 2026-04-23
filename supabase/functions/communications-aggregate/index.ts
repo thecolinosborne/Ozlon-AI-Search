@@ -379,10 +379,16 @@ async function fetchSlackInner(): Promise<SlackResult> {
         (ch.is_im ? dmPartnerName || "Slack DM" : `#${ch.name || "channel"}`);
 
       // Resolve <@Uxxx> mentions inline for readability.
-      const resolvedText = text.replace(/<@([UW][A-Z0-9]+)>/g, (_, uid) => {
+      let resolvedText = text.replace(/<@([UW][A-Z0-9]+)>/g, (_, uid) => {
         const n = fmtUser(userMap.get(uid));
         return n ? `@${n}` : "@user";
       });
+      // Strip Slack <url|label> syntax → keep label (or url) as plain text;
+      // the frontend Linkify will re-detect URLs.
+      resolvedText = resolvedText.replace(
+        /<(https?:\/\/[^|>\s]+)(?:\|([^>]+))?>/g,
+        (_full, url, label) => label || url,
+      );
 
       out.push({
         id: `slack:${ch.id}:${m.ts}`,
@@ -399,7 +405,15 @@ async function fetchSlackInner(): Promise<SlackResult> {
       });
     }
   }
-  return { messages: out, partial: false };
+  // If we encountered partial errors (e.g. missing_scope on IMs) but still got
+  // some messages, surface that so the UI can hint without hiding everything.
+  const partial = out.length === 0 ? !!slackErrorReason : !!slackErrorReason;
+  return {
+    messages: out,
+    partial,
+    reason: slackErrorReason ?? undefined,
+    scope: slackErrorScope ?? undefined,
+  };
 }
 
 async function fetchSlack(): Promise<SlackResult> {
