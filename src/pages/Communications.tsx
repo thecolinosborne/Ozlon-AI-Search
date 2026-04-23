@@ -85,6 +85,7 @@ export default function Communications() {
   };
   const handleRowDelete = async (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.softDelete(m.id);
     try {
       if (m.source === "gmail") {
         const id = m.id.replace(/^gmail:/, "");
