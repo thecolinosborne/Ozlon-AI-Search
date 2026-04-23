@@ -405,6 +405,54 @@ export type Database = {
         }
         Relationships: []
       }
+      communications_outbox: {
+        Row: {
+          attempt_count: number
+          channel: string
+          created_at: string
+          id: string
+          in_reply_to_external_id: string | null
+          last_error: string | null
+          payload: Json
+          sent_at: string | null
+          source: string
+          status: string
+          thread_external_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          channel: string
+          created_at?: string
+          id?: string
+          in_reply_to_external_id?: string | null
+          last_error?: string | null
+          payload: Json
+          sent_at?: string | null
+          source: string
+          status?: string
+          thread_external_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempt_count?: number
+          channel?: string
+          created_at?: string
+          id?: string
+          in_reply_to_external_id?: string | null
+          last_error?: string | null
+          payload?: Json
+          sent_at?: string | null
+          source?: string
+          status?: string
+          thread_external_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       communications_read_state: {
         Row: {
           archived_at: string | null
@@ -1235,6 +1283,7 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           elevenlabs_voice_id: string | null
+          email_signature: string | null
           first_name: string | null
           full_name: string | null
           id: string
@@ -1256,6 +1305,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           elevenlabs_voice_id?: string | null
+          email_signature?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
@@ -1277,6 +1327,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           elevenlabs_voice_id?: string | null
+          email_signature?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string
