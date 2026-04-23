@@ -34,6 +34,7 @@ export default function Communications() {
   const { digest, stream, isFetching, refetch } = useCommunicationsFeed();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
+  const readState = useCommReadState();
 
   const [chip, setChip] = useState<ChipFilter>("all");
   const [stateFilter, setStateFilter] = useState<FilterValue>("all");
@@ -71,12 +72,16 @@ export default function Communications() {
 
   const handleDone = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.markDone(m.id);
   };
   const handleSnooze = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    // Default snooze: 1 hour
+    readState.snooze(m.id, Date.now() + 60 * 60 * 1000);
   };
   const handleDeleted = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.softDelete(m.id);
   };
   const handleRowDelete = async (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
