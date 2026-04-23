@@ -8,6 +8,7 @@ import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { RichEmailEditor } from "./RichEmailEditor";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { Linkify } from "@/lib/linkify";
 import type { CommMessage } from "@/hooks/useCommunicationsFeed";
 
 interface ThreadMessage {
