@@ -4,6 +4,7 @@
 // sources so the frontend renders one feed.
 
 import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.0";
 
 interface PriorityItem {
   id: string;
