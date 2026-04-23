@@ -58,6 +58,7 @@ export interface DailyDigest {
 export interface FeedDiagnostics {
   partial: boolean;
   slackReason: string | null;
+  slackScope: string | null;
   sources: { email: number; slack: number; sms: number; voicemail: number };
 }
 
