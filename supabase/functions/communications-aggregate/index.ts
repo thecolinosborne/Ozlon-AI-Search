@@ -167,6 +167,10 @@ interface SlackUser {
   profile?: { display_name?: string; real_name?: string };
 }
 
+// Tracks the most informative Slack failure across calls in a single request.
+let slackErrorReason: string | null = null;
+let slackErrorScope: string | null = null;
+
 async function slackGateway(
   endpoint: string,
   qs: Record<string, string | number> = {},
@@ -187,11 +191,23 @@ async function slackGateway(
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data as { ok?: boolean }).ok === false) {
+      const errStr = String((data as { error?: string }).error || "");
+      const needed = String((data as { needed?: string }).needed || "");
+      if (errStr === "missing_scope" || errStr.includes("missing_scope")) {
+        // Prefer the first missing-scope reason we see; record needed scope.
+        if (!slackErrorReason || slackErrorReason !== "missing_scope") {
+          slackErrorReason = "missing_scope";
+          slackErrorScope = needed || slackErrorScope;
+        }
+      } else if (!slackErrorReason) {
+        slackErrorReason = errStr || "error";
+      }
       console.warn(`[slack] ${endpoint} failed:`, JSON.stringify(data).slice(0, 200));
       return null;
     }
     return data as Record<string, unknown>;
   } catch (e) {
+    if (!slackErrorReason) slackErrorReason = "error";
     console.warn(`[slack] ${endpoint} threw:`, e instanceof Error ? e.message : e);
     return null;
   }
@@ -248,9 +264,13 @@ interface SlackResult {
   messages: CommMessage[];
   partial: boolean;
   reason?: string;
+  scope?: string;
 }
 
 async function fetchSlackInner(): Promise<SlackResult> {
+  // Reset per-request error tracking so previous calls don't bleed in.
+  slackErrorReason = null;
+  slackErrorScope = null;
   // Auth probe — we need bot/user id to compute needsReply correctly.
   const auth = await slackGateway("auth.test");
   const myUserId =
