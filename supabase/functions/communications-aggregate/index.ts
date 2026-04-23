@@ -605,13 +605,18 @@ Deno.serve(async (req) => {
       diagnostics: {
         partial: slack.partial,
         slackReason: slack.reason ?? null,
+        slackScope: slack.scope ?? null,
         sources: sourceCounts,
       },
       // legacy mirrors — safe to remove after one release cycle
       stream,
       priorities,
       sourceCounts,
-      partial: { slack: slack.partial, slackReason: slack.reason ?? null },
+      partial: {
+        slack: slack.partial,
+        slackReason: slack.reason ?? null,
+        slackScope: slack.scope ?? null,
+      },
       lastRefreshed,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
