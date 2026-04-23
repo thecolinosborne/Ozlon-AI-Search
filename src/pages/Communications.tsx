@@ -19,6 +19,7 @@ import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useCommReadState } from "@/hooks/useCommReadState";
 import { cn } from "@/lib/utils";
 
 function greetingFor(name?: string | null) {
@@ -33,6 +34,7 @@ export default function Communications() {
   const { digest, stream, isFetching, refetch } = useCommunicationsFeed();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
+  const readState = useCommReadState();
 
   const [chip, setChip] = useState<ChipFilter>("all");
   const [stateFilter, setStateFilter] = useState<FilterValue>("all");
@@ -70,15 +72,20 @@ export default function Communications() {
 
   const handleDone = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.markDone(m.id);
   };
   const handleSnooze = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    // Default snooze: 1 hour
+    readState.snooze(m.id, Date.now() + 60 * 60 * 1000);
   };
   const handleDeleted = (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.softDelete(m.id);
   };
   const handleRowDelete = async (m: CommMessage) => {
     setHidden((s) => new Set(s).add(m.id));
+    readState.softDelete(m.id);
     try {
       if (m.source === "gmail") {
         const id = m.id.replace(/^gmail:/, "");

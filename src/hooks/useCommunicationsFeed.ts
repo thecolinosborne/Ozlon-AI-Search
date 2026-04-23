@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 export type CommChannel = "email" | "slack" | "sms" | "voicemail";
 
@@ -76,7 +78,6 @@ interface AggregateEnvelope {
   ok?: boolean;
   data?: AggregateData;
   diagnostics?: { partial?: boolean; slackReason?: string | null; sources?: FeedDiagnostics["sources"] };
-  // legacy mirrors
   stream?: AggregateData["stream"];
   priorities?: PriorityItem[];
   sourceCounts?: FeedDiagnostics["sources"];
@@ -86,7 +87,6 @@ interface AggregateEnvelope {
 interface DigestEnvelope {
   ok?: boolean;
   data?: DailyDigest & { generatedAt?: string };
-  // legacy mirrors
   heroLine?: string;
   subLine?: string;
   priorities?: PriorityItem[];
@@ -138,7 +138,57 @@ function unwrapDigest(raw: DigestEnvelope): DailyDigest | null {
   };
 }
 
+interface CachedRow {
+  source: string;
+  channel: string;
+  external_id: string;
+  thread_external_id: string | null;
+  from_name: string | null;
+  from_handle: string | null;
+  channel_label: string | null;
+  subject: string | null;
+  preview: string | null;
+  received_at: string;
+  is_unread: boolean;
+  needs_reply: boolean;
+  audio_url: string | null;
+  duration_sec: number | null;
+}
+
+interface ReadStateRow {
+  message_key: string;
+  read_at: string | null;
+  snoozed_until: string | null;
+  archived_at: string | null;
+  deleted_at: string | null;
+}
+
+function rowToMessage(r: CachedRow, hidden: boolean): CommMessage | null {
+  if (hidden) return null;
+  return {
+    id: `${r.source}:${r.external_id}`,
+    channel: r.channel as CommChannel,
+    source: r.source as CommMessage["source"],
+    fromName: r.from_name ?? "Unknown",
+    fromHandle: r.from_handle ?? undefined,
+    channelLabel: r.channel_label ?? r.channel,
+    subject: r.subject ?? undefined,
+    preview: r.preview ?? "",
+    receivedAt: new Date(r.received_at),
+    isUnread: r.is_unread,
+    needsReply: r.needs_reply,
+    threadId: r.thread_external_id ?? undefined,
+    audioUrl: r.audio_url ?? undefined,
+    durationSec: r.duration_sec ?? undefined,
+  };
+}
+
 export function useCommunicationsFeed(): CommunicationsFeed {
+  const { user } = useAuth();
+  const userId = user?.id;
+  const queryClient = useQueryClient();
+
+  // Aggregate query — drives fresh fetches + writes to cache server-side.
   const aggregateQ = useQuery({
     queryKey: ["communications", "aggregate"],
     queryFn: async () => {
@@ -150,6 +200,86 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     },
     staleTime: 60_000,
   });
+
+  // Cached stream — instant render from DB; updated via realtime.
+  const cachedQ = useQuery({
+    queryKey: ["communications", "cached", userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      const [msgsRes, stateRes] = await Promise.all([
+        supabase
+          .from("communications_messages")
+          .select(
+            "source,channel,external_id,thread_external_id,from_name,from_handle,channel_label,subject,preview,received_at,is_unread,needs_reply,audio_url,duration_sec",
+          )
+          .order("received_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("communications_read_state")
+          .select("message_key,read_at,snoozed_until,archived_at,deleted_at"),
+      ]);
+      const rows = (msgsRes.data ?? []) as CachedRow[];
+      const states = (stateRes.data ?? []) as ReadStateRow[];
+      const stateMap = new Map<string, ReadStateRow>();
+      for (const s of states) stateMap.set(s.message_key, s);
+      const now = Date.now();
+      const out: CommMessage[] = [];
+      for (const r of rows) {
+        const key = `${r.source}:${r.external_id}`;
+        const state = stateMap.get(key);
+        const hidden =
+          !!state &&
+          ((state.deleted_at !== null) ||
+            (state.archived_at !== null) ||
+            (state.snoozed_until !== null && new Date(state.snoozed_until).getTime() > now));
+        const msg = rowToMessage(r, hidden);
+        if (!msg) continue;
+        // Apply read overlay
+        if (state?.read_at) {
+          msg.isUnread = false;
+          msg.needsReply = false;
+        }
+        out.push(msg);
+      }
+      return out;
+    },
+    staleTime: 30_000,
+  });
+
+  // Realtime subscription — invalidate cached stream on any change.
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`comm-msgs-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "communications_messages",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["communications", "cached", userId] });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "communications_read_state",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["communications", "cached", userId] });
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, queryClient]);
 
   const digestQ = useQuery({
     queryKey: ["communications", "digest"],
@@ -163,9 +293,12 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     staleTime: 5 * 60_000,
   });
 
-  const stream: CommMessage[] = (aggregateQ.data?.data.stream ?? [])
+  // Prefer cached stream when available; fall back to live aggregate response.
+  const liveStream: CommMessage[] = (aggregateQ.data?.data.stream ?? [])
     .map((m) => ({ ...m, receivedAt: new Date(m.receivedAt) }))
     .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
+
+  const stream = (cachedQ.data && cachedQ.data.length > 0) ? cachedQ.data : liveStream;
 
   const digest: DailyDigest =
     digestQ.data ?? {
@@ -179,11 +312,12 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     digest,
     stream,
     diagnostics,
-    isLoading: aggregateQ.isLoading || digestQ.isLoading,
-    isFetching: aggregateQ.isFetching || digestQ.isFetching,
+    isLoading: (aggregateQ.isLoading && !cachedQ.data) || digestQ.isLoading,
+    isFetching: aggregateQ.isFetching || digestQ.isFetching || cachedQ.isFetching,
     refetch: () => {
       aggregateQ.refetch();
       digestQ.refetch();
+      cachedQ.refetch();
     },
   };
 }
