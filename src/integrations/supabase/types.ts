@@ -333,6 +333,114 @@ export type Database = {
         }
         Relationships: []
       }
+      communications_messages: {
+        Row: {
+          audio_url: string | null
+          body_text: string | null
+          channel: string
+          channel_label: string | null
+          created_at: string
+          duration_sec: number | null
+          external_id: string
+          fetched_at: string
+          from_handle: string | null
+          from_name: string | null
+          id: string
+          is_unread: boolean
+          needs_reply: boolean
+          preview: string | null
+          raw: Json
+          received_at: string
+          source: string
+          subject: string | null
+          thread_external_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          audio_url?: string | null
+          body_text?: string | null
+          channel: string
+          channel_label?: string | null
+          created_at?: string
+          duration_sec?: number | null
+          external_id: string
+          fetched_at?: string
+          from_handle?: string | null
+          from_name?: string | null
+          id?: string
+          is_unread?: boolean
+          needs_reply?: boolean
+          preview?: string | null
+          raw?: Json
+          received_at: string
+          source: string
+          subject?: string | null
+          thread_external_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          audio_url?: string | null
+          body_text?: string | null
+          channel?: string
+          channel_label?: string | null
+          created_at?: string
+          duration_sec?: number | null
+          external_id?: string
+          fetched_at?: string
+          from_handle?: string | null
+          from_name?: string | null
+          id?: string
+          is_unread?: boolean
+          needs_reply?: boolean
+          preview?: string | null
+          raw?: Json
+          received_at?: string
+          source?: string
+          subject?: string | null
+          thread_external_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      communications_read_state: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          deleted_at: string | null
+          id: string
+          message_key: string
+          read_at: string | null
+          snoozed_until: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          message_key: string
+          read_at?: string | null
+          snoozed_until?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          message_key?: string
+          read_at?: string | null
+          snoozed_until?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       creative_reference_assets: {
         Row: {
           analysis: Json | null
