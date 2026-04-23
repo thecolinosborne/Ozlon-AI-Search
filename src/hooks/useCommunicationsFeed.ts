@@ -23,12 +23,28 @@ export interface CommMessage {
   groupCount?: number;
 }
 
+export type TriageUrgency = "high" | "medium" | "low";
+export type TriageAction = "reply" | "schedule" | "snooze" | "done" | "ignore";
+
+export interface TriageItem {
+  messageId: string;
+  urgency: TriageUrgency;
+  reason: string;
+  actionHint: TriageAction;
+  suggestedReply?: string;
+}
+
 export interface PriorityItem {
   id: string;
   channel: CommChannel;
   who: string;
   what: string;
   channelLabel: string;
+  // Enriched by triage (optional — present when AI triage succeeds and matched).
+  urgency?: TriageUrgency;
+  reason?: string;
+  actionHint?: TriageAction;
+  suggestedReply?: string;
 }
 
 export interface DailyDigest {
@@ -293,6 +309,22 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     staleTime: 5 * 60_000,
   });
 
+  // Triage — AI-enriched per-message judgments (urgency, action hint, suggested reply).
+  const triageQ = useQuery({
+    queryKey: ["communications", "triage"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("communications-triage", {
+        body: {},
+      });
+      if (error) throw error;
+      const items = ((data as { data?: { items?: TriageItem[] } })?.data?.items ?? []) as TriageItem[];
+      const map = new Map<string, TriageItem>();
+      for (const it of items) map.set(it.messageId, it);
+      return map;
+    },
+    staleTime: 2 * 60_000,
+  });
+
   // Prefer cached stream when available; fall back to live aggregate response.
   const liveStream: CommMessage[] = (aggregateQ.data?.data.stream ?? [])
     .map((m) => ({ ...m, receivedAt: new Date(m.receivedAt) }))
@@ -300,11 +332,48 @@ export function useCommunicationsFeed(): CommunicationsFeed {
 
   const stream = (cachedQ.data && cachedQ.data.length > 0) ? cachedQ.data : liveStream;
 
+  const basePriorities: PriorityItem[] =
+    digestQ.data?.priorities ?? aggregateQ.data?.data.priorities ?? [];
+
+  // Enrich priorities with triage hints when available.
+  // Priority `id` from aggregator is `p1`, `p2`, etc — we re-match by index against
+  // the top-N stream candidates that also match the priority's `who` field, and we
+  // also try direct id lookup in case the digest includes message ids.
+  const triageMap = triageQ.data;
+  const priorities: PriorityItem[] = basePriorities.map((p) => {
+    if (!triageMap || triageMap.size === 0) return p;
+    // Direct id hit (forward-compatible if digest starts emitting messageId).
+    const direct = triageMap.get(p.id);
+    if (direct) {
+      return { ...p, urgency: direct.urgency, reason: direct.reason, actionHint: direct.actionHint, suggestedReply: direct.suggestedReply };
+    }
+    // Heuristic: find a stream message whose fromName starts with `who`.
+    const candidate = stream.find(
+      (m) => m.fromName.toLowerCase().startsWith(p.who.toLowerCase().slice(0, 8)),
+    );
+    if (candidate) {
+      const t = triageMap.get(candidate.id);
+      if (t) {
+        return {
+          ...p,
+          id: candidate.id, // promote to real message id so action chips can act on it
+          urgency: t.urgency,
+          reason: t.reason,
+          actionHint: t.actionHint,
+          suggestedReply: t.suggestedReply,
+        };
+      }
+    }
+    return p;
+  });
+
   const digest: DailyDigest =
-    digestQ.data ?? {
-      ...FALLBACK_DIGEST,
-      priorities: aggregateQ.data?.data.priorities ?? [],
-    };
+    digestQ.data
+      ? { ...digestQ.data, priorities }
+      : {
+          ...FALLBACK_DIGEST,
+          priorities,
+        };
 
   const diagnostics: FeedDiagnostics = aggregateQ.data?.diagnostics ?? FALLBACK_DIAGNOSTICS;
 
@@ -313,11 +382,12 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     stream,
     diagnostics,
     isLoading: (aggregateQ.isLoading && !cachedQ.data) || digestQ.isLoading,
-    isFetching: aggregateQ.isFetching || digestQ.isFetching || cachedQ.isFetching,
+    isFetching: aggregateQ.isFetching || digestQ.isFetching || cachedQ.isFetching || triageQ.isFetching,
     refetch: () => {
       aggregateQ.refetch();
       digestQ.refetch();
       cachedQ.refetch();
+      triageQ.refetch();
     },
   };
 }

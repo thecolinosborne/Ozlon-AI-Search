@@ -9,6 +9,9 @@ interface CompactBriefStripProps {
   greeting: string;
   onBrief: () => void;
   onPriorityTap?: (p: PriorityItem) => void;
+  onReply?: (p: PriorityItem) => void;
+  onSnooze?: (p: PriorityItem) => void;
+  onDone?: (p: PriorityItem) => void;
 }
 
 /**
@@ -21,6 +24,9 @@ export function CompactBriefStrip({
   greeting,
   onBrief,
   onPriorityTap,
+  onReply,
+  onSnooze,
+  onDone,
 }: CompactBriefStripProps) {
   const [open, setOpen] = useState(false);
   const count = digest.priorities.length;
@@ -74,6 +80,9 @@ export function CompactBriefStrip({
                 key={p.id}
                 priority={p}
                 onClick={onPriorityTap ? () => onPriorityTap(p) : undefined}
+                onReply={onReply}
+                onSnooze={onSnooze}
+                onDone={onDone}
               />
             ))}
           </div>

@@ -10,9 +10,21 @@ interface HeroDigestProps {
   greeting: string;
   onBrief: () => void;
   onPriorityTap?: (p: PriorityItem) => void;
+  onReply?: (p: PriorityItem) => void;
+  onSnooze?: (p: PriorityItem) => void;
+  onDone?: (p: PriorityItem) => void;
 }
 
-export function HeroDigest({ digest, collapsed, greeting, onBrief, onPriorityTap }: HeroDigestProps) {
+export function HeroDigest({
+  digest,
+  collapsed,
+  greeting,
+  onBrief,
+  onPriorityTap,
+  onReply,
+  onSnooze,
+  onDone,
+}: HeroDigestProps) {
   return (
     <div className="px-4 lg:px-6 pt-4 lg:pt-6">
       <div
@@ -50,6 +62,9 @@ export function HeroDigest({ digest, collapsed, greeting, onBrief, onPriorityTap
                   key={p.id}
                   priority={p}
                   onClick={onPriorityTap ? () => onPriorityTap(p) : undefined}
+                  onReply={onReply}
+                  onSnooze={onSnooze}
+                  onDone={onDone}
                 />
               ))}
             </div>
