@@ -337,7 +337,7 @@ export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplyS
             ) : showFallback ? (
               <div className="rounded-2xl bg-background/40 border border-border/20 p-4">
                 <p className="text-[14px] text-foreground/90 leading-relaxed whitespace-pre-wrap break-words">
-                  {message.preview}
+                  <Linkify text={message.preview} />
                 </p>
               </div>
             ) : (
@@ -357,7 +357,7 @@ export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplyS
                         : "bg-background/60 text-foreground/90 border border-border/20",
                     )}
                   >
-                    {t.body}
+                    <Linkify text={t.body} />
                   </div>
                   <span className="text-[10px] text-muted-foreground/60 px-1">
                     {t.direction === "out" ? "You" : t.fromName.split(/[<·@]/)[0].trim()} ·{" "}

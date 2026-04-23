@@ -2,6 +2,7 @@ import { Check, Clock, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
+import { Linkify } from "@/lib/linkify";
 import type { CommMessage } from "@/hooks/useCommunicationsFeed";
 
 interface MessageRowProps {
@@ -72,12 +73,12 @@ export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: Messa
           <div className="mt-1.5">
             <VoicemailInline durationSec={message.durationSec ?? 0} />
             <p className="mt-1.5 text-[13px] text-muted-foreground line-clamp-2 leading-snug">
-              {message.preview}
+              <Linkify text={message.preview} />
             </p>
           </div>
         ) : (
           <p className="text-[13.5px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
-            {message.preview}
+            <Linkify text={message.preview} />
           </p>
         )}
 
