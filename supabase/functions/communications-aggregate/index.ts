@@ -482,13 +482,14 @@ Deno.serve(async (req) => {
     fetchGHL(authHeader),
   ]);
 
-  const stream = [...gmail, ...slack, ...ghl].sort(
+  const slackMessages = slack.messages;
+  const stream = [...gmail, ...slackMessages, ...ghl].sort(
     (a, b) => +new Date(b.receivedAt) - +new Date(a.receivedAt),
   );
 
   const sourceCounts = {
     email: gmail.length,
-    slack: slack.length,
+    slack: slackMessages.length,
     sms: ghl.filter((m) => m.channel === "sms").length,
     voicemail: ghl.filter((m) => m.channel === "voicemail").length,
   };
@@ -498,6 +499,7 @@ Deno.serve(async (req) => {
       stream,
       priorities: buildPriorities(stream),
       sourceCounts,
+      partial: { slack: slack.partial, slackReason: slack.reason ?? null },
       lastRefreshed: new Date().toISOString(),
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
