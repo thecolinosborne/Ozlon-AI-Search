@@ -23,12 +23,28 @@ export interface CommMessage {
   groupCount?: number;
 }
 
+export type TriageUrgency = "high" | "medium" | "low";
+export type TriageAction = "reply" | "schedule" | "snooze" | "done" | "ignore";
+
+export interface TriageItem {
+  messageId: string;
+  urgency: TriageUrgency;
+  reason: string;
+  actionHint: TriageAction;
+  suggestedReply?: string;
+}
+
 export interface PriorityItem {
   id: string;
   channel: CommChannel;
   who: string;
   what: string;
   channelLabel: string;
+  // Enriched by triage (optional — present when AI triage succeeds and matched).
+  urgency?: TriageUrgency;
+  reason?: string;
+  actionHint?: TriageAction;
+  suggestedReply?: string;
 }
 
 export interface DailyDigest {
