@@ -19,6 +19,7 @@ import { ChannelChips, type ChipFilter } from "@/components/communications/Chann
 import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
+import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
@@ -33,7 +34,7 @@ function greetingFor(name?: string | null) {
 
 export default function Communications() {
   const { user } = useAuth();
-  const { digest, stream, isFetching, refetch } = useCommunicationsFeed();
+  const { digest, stream, diagnostics, isFetching, refetch } = useCommunicationsFeed();
   const isMobile = useIsMobile();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
@@ -293,6 +294,13 @@ export default function Communications() {
                 total={stream.filter((m) => !hidden.has(m.id)).length}
               />
             </div>
+
+            {diagnostics.partial && diagnostics.sources.slack === 0 ? (
+              <SlackStatusBanner
+                reason={diagnostics.slackReason}
+                scope={diagnostics.slackScope ?? null}
+              />
+            ) : null}
 
             {filtered.length === 0 ? (
               <EmptyCaughtUp />
