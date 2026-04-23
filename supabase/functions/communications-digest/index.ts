@@ -165,14 +165,16 @@ Deno.serve(async (req) => {
   const wordCount = briefScript.split(/\s+/).length;
   const briefDurationSec = Math.max(15, Math.min(90, Math.round(wordCount / 2.5)));
 
+  const generatedAt = new Date().toISOString();
+  const payload = { heroLine, subLine, priorities, briefScript, briefDurationSec, generatedAt };
+
   return new Response(
     JSON.stringify({
-      heroLine,
-      subLine,
-      priorities,
-      briefScript,
-      briefDurationSec,
-      generatedAt: new Date().toISOString(),
+      ok: true,
+      data: payload,
+      diagnostics: { aiUsed: !!ai, priorityCount: priorities.length },
+      // legacy mirrors
+      ...payload,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
