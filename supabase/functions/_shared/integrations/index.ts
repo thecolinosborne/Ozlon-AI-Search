@@ -19,6 +19,7 @@ import { slackIntegration } from "./slack.ts";
 import { gmailIntegration } from "./gmail.ts";
 import { clickupIntegration } from "./clickup.ts";
 import { goHighLevelIntegration } from "./gohighlevel.ts";
+import { communicationsIntegration, communicationsDigestIntegration } from "./communications.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   googleDocsIntegration,
@@ -34,6 +35,8 @@ export const INTEGRATIONS: IntegrationManifest[] = [
   gmailIntegration,
   clickupIntegration,
   goHighLevelIntegration,
+  communicationsIntegration,
+  communicationsDigestIntegration,
 ];
 
 /** Map: tool name → compiled route. Built once at module load. */
