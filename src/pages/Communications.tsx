@@ -42,6 +42,7 @@ export default function Communications() {
   const [chip, setChip] = useState<ChipFilter>("all");
   const [stateFilter, setStateFilter] = useState<FilterValue>("all");
   const [active, setActive] = useState<CommMessage | null>(null);
+  const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
@@ -66,11 +67,38 @@ export default function Communications() {
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
 
-  const openMessage = (m: CommMessage) => setActive(m);
+  const openMessage = (m: CommMessage) => {
+    setActiveDraft(undefined);
+    setActive(m);
+  };
 
   const openPriority = (p: PriorityItem) => {
     const match = stream.find((m) => m.id === p.id);
-    if (match) setActive(match);
+    if (match) {
+      setActiveDraft(undefined);
+      setActive(match);
+    }
+  };
+
+  // Action chip handlers from priority cards (AI triage hints).
+  const handlePriorityReply = (p: PriorityItem) => {
+    const match = stream.find((m) => m.id === p.id);
+    if (!match) {
+      toast({ title: "Message not in current view", description: "Try Scan to refresh." });
+      return;
+    }
+    setActiveDraft(p.suggestedReply);
+    setActive(match);
+  };
+  const handlePrioritySnooze = (p: PriorityItem) => {
+    setHidden((s) => new Set(s).add(p.id));
+    readState.snooze(p.id, Date.now() + 60 * 60 * 1000);
+    toast({ title: "Snoozed for 1 hour" });
+  };
+  const handlePriorityDone = (p: PriorityItem) => {
+    setHidden((s) => new Set(s).add(p.id));
+    readState.markDone(p.id);
+    toast({ title: "Marked done" });
   };
 
   const handleDone = (m: CommMessage) => {
@@ -212,6 +240,9 @@ export default function Communications() {
               greeting={greeting}
               onBrief={() => brief.play(digest.briefScript)}
               onPriorityTap={openPriority}
+              onReply={handlePriorityReply}
+              onSnooze={handlePrioritySnooze}
+              onDone={handlePriorityDone}
             />
           ) : (
             <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
@@ -221,6 +252,9 @@ export default function Communications() {
                 greeting={greeting}
                 onBrief={() => brief.play(digest.briefScript)}
                 onPriorityTap={openPriority}
+                onReply={handlePriorityReply}
+                onSnooze={handlePrioritySnooze}
+                onDone={handlePriorityDone}
               />
             </aside>
           )}
