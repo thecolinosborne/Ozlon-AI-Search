@@ -167,6 +167,10 @@ interface SlackUser {
   profile?: { display_name?: string; real_name?: string };
 }
 
+// Tracks the most informative Slack failure across calls in a single request.
+let slackErrorReason: string | null = null;
+let slackErrorScope: string | null = null;
+
 async function slackGateway(
   endpoint: string,
   qs: Record<string, string | number> = {},
@@ -187,11 +191,23 @@ async function slackGateway(
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || (data as { ok?: boolean }).ok === false) {
+      const errStr = String((data as { error?: string }).error || "");
+      const needed = String((data as { needed?: string }).needed || "");
+      if (errStr === "missing_scope" || errStr.includes("missing_scope")) {
+        // Prefer the first missing-scope reason we see; record needed scope.
+        if (!slackErrorReason || slackErrorReason !== "missing_scope") {
+          slackErrorReason = "missing_scope";
+          slackErrorScope = needed || slackErrorScope;
+        }
+      } else if (!slackErrorReason) {
+        slackErrorReason = errStr || "error";
+      }
       console.warn(`[slack] ${endpoint} failed:`, JSON.stringify(data).slice(0, 200));
       return null;
     }
     return data as Record<string, unknown>;
   } catch (e) {
+    if (!slackErrorReason) slackErrorReason = "error";
     console.warn(`[slack] ${endpoint} threw:`, e instanceof Error ? e.message : e);
     return null;
   }
@@ -248,9 +264,13 @@ interface SlackResult {
   messages: CommMessage[];
   partial: boolean;
   reason?: string;
+  scope?: string;
 }
 
 async function fetchSlackInner(): Promise<SlackResult> {
+  // Reset per-request error tracking so previous calls don't bleed in.
+  slackErrorReason = null;
+  slackErrorScope = null;
   // Auth probe — we need bot/user id to compute needsReply correctly.
   const auth = await slackGateway("auth.test");
   const myUserId =
@@ -359,10 +379,16 @@ async function fetchSlackInner(): Promise<SlackResult> {
         (ch.is_im ? dmPartnerName || "Slack DM" : `#${ch.name || "channel"}`);
 
       // Resolve <@Uxxx> mentions inline for readability.
-      const resolvedText = text.replace(/<@([UW][A-Z0-9]+)>/g, (_, uid) => {
+      let resolvedText = text.replace(/<@([UW][A-Z0-9]+)>/g, (_, uid) => {
         const n = fmtUser(userMap.get(uid));
         return n ? `@${n}` : "@user";
       });
+      // Strip Slack <url|label> syntax → keep label (or url) as plain text;
+      // the frontend Linkify will re-detect URLs.
+      resolvedText = resolvedText.replace(
+        /<(https?:\/\/[^|>\s]+)(?:\|([^>]+))?>/g,
+        (_full, url, label) => label || url,
+      );
 
       out.push({
         id: `slack:${ch.id}:${m.ts}`,
@@ -379,7 +405,15 @@ async function fetchSlackInner(): Promise<SlackResult> {
       });
     }
   }
-  return { messages: out, partial: false };
+  // If we encountered partial errors (e.g. missing_scope on IMs) but still got
+  // some messages, surface that so the UI can hint without hiding everything.
+  const partial = out.length === 0 ? !!slackErrorReason : !!slackErrorReason;
+  return {
+    messages: out,
+    partial,
+    reason: slackErrorReason ?? undefined,
+    scope: slackErrorScope ?? undefined,
+  };
 }
 
 async function fetchSlack(): Promise<SlackResult> {
@@ -571,13 +605,18 @@ Deno.serve(async (req) => {
       diagnostics: {
         partial: slack.partial,
         slackReason: slack.reason ?? null,
+        slackScope: slack.scope ?? null,
         sources: sourceCounts,
       },
       // legacy mirrors — safe to remove after one release cycle
       stream,
       priorities,
       sourceCounts,
-      partial: { slack: slack.partial, slackReason: slack.reason ?? null },
+      partial: {
+        slack: slack.partial,
+        slackReason: slack.reason ?? null,
+        slackScope: slack.scope ?? null,
+      },
       lastRefreshed,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },

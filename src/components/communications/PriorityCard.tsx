@@ -1,6 +1,7 @@
 import { Reply, Clock, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelTint } from "./channelStyle";
+import { Linkify } from "@/lib/linkify";
 import type { PriorityItem, TriageUrgency } from "@/hooks/useCommunicationsFeed";
 
 interface PriorityCardProps {
@@ -59,7 +60,7 @@ export function PriorityCard({ priority, onClick, onReply, onSnooze, onDone }: P
         )}
         <div className="min-w-0 flex-1">
           <span className="text-sm text-foreground font-medium">{priority.who}</span>
-          <span className="text-sm text-muted-foreground"> · {priority.what}</span>
+          <span className="text-sm text-muted-foreground"> · <Linkify text={priority.what} /></span>
         </div>
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
           {priority.channelLabel}

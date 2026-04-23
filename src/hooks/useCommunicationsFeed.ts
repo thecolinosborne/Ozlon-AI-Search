@@ -58,6 +58,7 @@ export interface DailyDigest {
 export interface FeedDiagnostics {
   partial: boolean;
   slackReason: string | null;
+  slackScope: string | null;
   sources: { email: number; slack: number; sms: number; voicemail: number };
 }
 
@@ -81,6 +82,7 @@ const FALLBACK_DIGEST: DailyDigest = {
 const FALLBACK_DIAGNOSTICS: FeedDiagnostics = {
   partial: false,
   slackReason: null,
+  slackScope: null,
   sources: { email: 0, slack: 0, sms: 0, voicemail: 0 },
 };
 
@@ -93,11 +95,16 @@ interface AggregateData {
 interface AggregateEnvelope {
   ok?: boolean;
   data?: AggregateData;
-  diagnostics?: { partial?: boolean; slackReason?: string | null; sources?: FeedDiagnostics["sources"] };
+  diagnostics?: {
+    partial?: boolean;
+    slackReason?: string | null;
+    slackScope?: string | null;
+    sources?: FeedDiagnostics["sources"];
+  };
   stream?: AggregateData["stream"];
   priorities?: PriorityItem[];
   sourceCounts?: FeedDiagnostics["sources"];
-  partial?: { slack?: boolean; slackReason?: string | null };
+  partial?: { slack?: boolean; slackReason?: string | null; slackScope?: string | null };
 }
 
 interface DigestEnvelope {
@@ -122,6 +129,7 @@ function unwrapAggregate(raw: AggregateEnvelope): {
   const diag = raw.diagnostics ?? {
     partial: raw.partial?.slack ?? false,
     slackReason: raw.partial?.slackReason ?? null,
+    slackScope: raw.partial?.slackScope ?? null,
     sources: raw.sourceCounts,
   };
   return {
@@ -129,11 +137,11 @@ function unwrapAggregate(raw: AggregateEnvelope): {
     diagnostics: {
       partial: diag.partial ?? false,
       slackReason: diag.slackReason ?? null,
+      slackScope: diag.slackScope ?? null,
       sources: diag.sources ?? data.sourceCounts ?? FALLBACK_DIAGNOSTICS.sources,
     },
   };
 }
-
 function unwrapDigest(raw: DigestEnvelope): DailyDigest | null {
   const d = raw.data ?? (raw.heroLine
     ? {
