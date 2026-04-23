@@ -31,9 +31,30 @@ async function gFetch(token: string, path: string, init: RequestInit = {}) {
   return data;
 }
 
-function buildRawEmail(headers: Record<string, string>, body: string): string {
+function buildRawEmail(
+  headers: Record<string, string>,
+  body: string,
+  opts: { html?: string; inReplyTo?: string; references?: string } = {},
+): string {
   const lines = Object.entries(headers).map(([k, v]) => `${k}: ${v}`);
-  lines.push("Content-Type: text/plain; charset=UTF-8", "", body);
+  if (opts.inReplyTo) {
+    lines.push(`In-Reply-To: ${opts.inReplyTo}`);
+    lines.push(`References: ${opts.references || opts.inReplyTo}`);
+  }
+  if (opts.html) {
+    const boundary = `=_alt_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    lines.push("MIME-Version: 1.0");
+    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    lines.push("", `--${boundary}`);
+    lines.push("Content-Type: text/plain; charset=UTF-8");
+    lines.push("Content-Transfer-Encoding: 7bit", "", body);
+    lines.push(`--${boundary}`);
+    lines.push("Content-Type: text/html; charset=UTF-8");
+    lines.push("Content-Transfer-Encoding: 7bit", "", opts.html);
+    lines.push(`--${boundary}--`);
+  } else {
+    lines.push("Content-Type: text/plain; charset=UTF-8", "", body);
+  }
   const raw = lines.join("\r\n");
   return btoa(unescape(encodeURIComponent(raw)))
     .replace(/\+/g, "-")
@@ -117,18 +138,24 @@ serve(async (req) => {
         const to = String((params as AnyJson).to || "");
         const subject = String((params as AnyJson).subject || "");
         const body = String((params as AnyJson).body || "");
+        const html = (params as AnyJson).body_html as string | undefined;
         const cc = String((params as AnyJson).cc || "");
         const bcc = String((params as AnyJson).bcc || "");
+        const inReplyTo = (params as AnyJson).inReplyTo as string | undefined;
+        const references = (params as AnyJson).references as string | undefined;
+        const threadId = (params as AnyJson).threadId as string | undefined;
         if (!to || !subject) return jsonErr("to and subject are required");
 
         const hdrs: Record<string, string> = { To: to, Subject: subject };
         if (cc) hdrs["Cc"] = cc;
         if (bcc) hdrs["Bcc"] = bcc;
 
-        const raw = buildRawEmail(hdrs, body);
+        const raw = buildRawEmail(hdrs, body, { html, inReplyTo, references });
+        const sendBody: AnyJson = { raw };
+        if (threadId) sendBody.threadId = threadId;
         const data = await gFetch(token, "/messages/send", {
           method: "POST",
-          body: JSON.stringify({ raw }),
+          body: JSON.stringify(sendBody),
         });
         return jsonOk({ success: true, message: data });
       }
