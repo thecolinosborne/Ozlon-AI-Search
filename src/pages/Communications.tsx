@@ -309,7 +309,15 @@ export default function Communications() {
         </div>
       </div>
 
-      <ReplySheet message={active} onClose={closeReply} onDeleted={handleDeleted} />
+      <ReplySheet
+        message={active}
+        initialDraft={activeDraft}
+        onClose={() => {
+          setActiveDraft(undefined);
+          closeReply();
+        }}
+        onDeleted={handleDeleted}
+      />
       <BriefMeOverlay
         open={brief.isOverlayOpen}
         isPlaying={brief.isPlaying}
