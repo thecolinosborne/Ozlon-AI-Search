@@ -470,6 +470,64 @@ function buildPriorities(stream: CommMessage[]): PriorityItem[] {
   }));
 }
 
+// ---------- Cache write ----------
+
+async function getUserId(authHeader: string | null): Promise<string | null> {
+  if (!authHeader) return null;
+  const SUPABASE_ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
+  try {
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data } = await sb.auth.getUser();
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistMessages(userId: string, stream: CommMessage[]) {
+  if (!userId || stream.length === 0) return;
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!SERVICE_KEY) return;
+  const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+  const rows = stream.map((m) => {
+    const externalId = m.id.replace(/^[a-z]+:/, "");
+    return {
+      user_id: userId,
+      source: m.source,
+      channel: m.channel,
+      external_id: externalId,
+      thread_external_id: m.threadId ?? null,
+      from_name: m.fromName,
+      from_handle: m.fromHandle ?? null,
+      channel_label: m.channelLabel,
+      subject: m.subject ?? null,
+      preview: m.preview,
+      body_text: m.preview, // B2 will replace with full body
+      audio_url: m.audioUrl ?? null,
+      duration_sec: m.durationSec ?? null,
+      received_at: m.receivedAt,
+      is_unread: m.isUnread,
+      needs_reply: m.needsReply,
+      raw: {} as Record<string, unknown>,
+      fetched_at: new Date().toISOString(),
+    };
+  });
+  // Chunk to keep payloads sane.
+  const CHUNK = 200;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    const { error } = await admin
+      .from("communications_messages")
+      .upsert(slice, { onConflict: "user_id,source,external_id" });
+    if (error) {
+      console.warn("[cache] upsert failed:", error.message);
+      break;
+    }
+  }
+}
+
 // ---------- handler ----------
 
 Deno.serve(async (req) => {
@@ -477,10 +535,11 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get("Authorization");
 
-  const [gmail, slack, ghl] = await Promise.all([
+  const [gmail, slack, ghl, userId] = await Promise.all([
     fetchGmail(authHeader),
     fetchSlack(),
     fetchGHL(authHeader),
+    getUserId(authHeader),
   ]);
 
   const slackMessages = slack.messages;
@@ -498,8 +557,13 @@ Deno.serve(async (req) => {
   const priorities = buildPriorities(stream);
   const lastRefreshed = new Date().toISOString();
 
-  // Normalized envelope (orchestration contract): { ok, data, diagnostics }.
-  // Legacy top-level fields kept for back-compat with any older caller.
+  // Fire-and-forget cache write (does not block response).
+  if (userId) {
+    persistMessages(userId, stream).catch((e) =>
+      console.warn("[cache] persist threw:", e instanceof Error ? e.message : e),
+    );
+  }
+
   return new Response(
     JSON.stringify({
       ok: true,
