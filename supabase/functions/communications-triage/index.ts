@@ -9,7 +9,10 @@
 //               actionHint: 'reply'|'schedule'|'snooze'|'done'|'ignore',
 //               suggestedReply?: string }
 
-import { corsHeaders } from "https://esm.sh/@supabase/supabase-js@2.95.0/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
