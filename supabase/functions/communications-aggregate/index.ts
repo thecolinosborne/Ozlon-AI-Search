@@ -138,6 +138,34 @@ async function fetchGmail(authHeader: string | null): Promise<CommMessage[]> {
 
 // ---------- Slack ----------
 
+interface SlackChannel {
+  id: string;
+  name?: string;
+  is_im?: boolean;
+  is_mpim?: boolean;
+  is_private?: boolean;
+  is_member?: boolean;
+  is_archived?: boolean;
+  user?: string;
+}
+
+interface SlackMessage {
+  ts: string;
+  text?: string;
+  user?: string;
+  subtype?: string;
+  thread_ts?: string;
+  reply_count?: number;
+  latest_reply?: string;
+}
+
+interface SlackUser {
+  id?: string;
+  real_name?: string;
+  name?: string;
+  profile?: { display_name?: string; real_name?: string };
+}
+
 async function slackGateway(
   endpoint: string,
   qs: Record<string, string | number> = {},
@@ -148,88 +176,225 @@ async function slackGateway(
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(qs)) params.set(k, String(v));
   const url = `${SLACK_GATEWAY}/${endpoint}${params.toString() ? `?${params}` : ""}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "X-Connection-Api-Key": SLACK_API_KEY,
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data as { ok?: boolean }).ok === false) {
-    console.warn(`[slack] ${endpoint} failed:`, JSON.stringify(data).slice(0, 200));
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": SLACK_API_KEY,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data as { ok?: boolean }).ok === false) {
+      console.warn(`[slack] ${endpoint} failed:`, JSON.stringify(data).slice(0, 200));
+      return null;
+    }
+    return data as Record<string, unknown>;
+  } catch (e) {
+    console.warn(`[slack] ${endpoint} threw:`, e instanceof Error ? e.message : e);
     return null;
   }
-  return data as Record<string, unknown>;
 }
 
-async function fetchSlack(): Promise<CommMessage[]> {
-  try {
-    // Try each channel type independently so a single missing scope (e.g.
-    // `groups:read` for private channels) doesn't blank the whole Slack feed.
-    const types = ["public_channel", "private_channel", "im", "mpim"];
-    const lists = await Promise.all(
-      types.map((t) =>
-        slackGateway("conversations.list", {
-          types: t,
-          limit: 8,
-          exclude_archived: "true",
-        }),
-      ),
-    );
-    const channels = lists.flatMap(
-      (l) => ((l?.channels as Array<{ id: string; name?: string; is_im?: boolean; user?: string }>) || []),
-    );
-    if (channels.length === 0) return [];
+// Paginate conversations.list for a single type up to a budget.
+async function listChannelsForType(type: string, budget: number): Promise<SlackChannel[]> {
+  const out: SlackChannel[] = [];
+  let cursor = "";
+  // Hard ceiling on pagination loops to avoid runaway.
+  for (let i = 0; i < 6 && out.length < budget; i++) {
+    const qs: Record<string, string | number> = {
+      types: type,
+      limit: Math.min(200, budget * 2),
+      exclude_archived: "true",
+    };
+    if (cursor) qs.cursor = cursor;
+    const data = await slackGateway("conversations.list", qs);
+    if (!data) break;
+    const channels = (data.channels as SlackChannel[]) || [];
+    for (const c of channels) {
+      if (c.is_archived) continue;
+      out.push(c);
+      if (out.length >= budget) break;
+    }
+    cursor =
+      ((data.response_metadata as { next_cursor?: string } | undefined)?.next_cursor) || "";
+    if (!cursor) break;
+  }
+  return out;
+}
 
-    // Build a quick user lookup for IMs (best-effort).
-    const userIds = Array.from(new Set(channels.filter((c) => c.is_im && c.user).map((c) => c.user!)));
-    const userNames = new Map<string, string>();
-    await Promise.all(
-      userIds.slice(0, 10).map(async (uid) => {
-        const u = await slackGateway("users.info", { user: uid });
-        const name =
-          (u?.user as { real_name?: string; profile?: { display_name?: string }; name?: string })?.real_name ||
-          (u?.user as { profile?: { display_name?: string } })?.profile?.display_name ||
-          (u?.user as { name?: string })?.name;
-        if (name) userNames.set(uid, name);
-      }),
-    );
+const SLACK_TIMEOUT_MS = 8000;
+const PER_TYPE_BUDGETS: Record<string, number> = {
+  im: 25,
+  mpim: 10,
+  private_channel: 15,
+  public_channel: 10,
+};
+const HISTORY_LIMIT = 15;
 
-    const perChannel = await Promise.all(
-      channels.slice(0, 8).map(async (ch) => {
-        let hist = await slackGateway("conversations.history", { channel: ch.id, limit: 3 });
-        // Auto-join public channels we're not in, then retry once.
-        if (!hist && !ch.is_im) {
-          const joined = await slackGateway("conversations.join", { channel: ch.id });
-          if (joined) hist = await slackGateway("conversations.history", { channel: ch.id, limit: 3 });
+function fmtUser(u: SlackUser | undefined): string | undefined {
+  if (!u) return undefined;
+  return (
+    u.profile?.display_name ||
+    u.real_name ||
+    u.profile?.real_name ||
+    u.name ||
+    undefined
+  );
+}
+
+interface SlackResult {
+  messages: CommMessage[];
+  partial: boolean;
+  reason?: string;
+}
+
+async function fetchSlackInner(): Promise<SlackResult> {
+  // Auth probe — we need bot/user id to compute needsReply correctly.
+  const auth = await slackGateway("auth.test");
+  const myUserId =
+    (auth?.user_id as string | undefined) || (auth?.bot_id as string | undefined) || "";
+
+  // Fetch channels per-type with independent budgets and pagination (Fix 1 + Fix 2).
+  const typeEntries = Object.entries(PER_TYPE_BUDGETS);
+  const channelLists = await Promise.all(
+    typeEntries.map(([t, b]) => listChannelsForType(t, b)),
+  );
+  let channels: SlackChannel[] = channelLists.flat();
+  if (channels.length === 0) return { messages: [], partial: false };
+
+  // Public channels: only ones the bot is already a member of (no auto-join spam).
+  channels = channels.filter((c) => {
+    if (c.is_im || c.is_mpim || c.is_private) return true;
+    return c.is_member === true;
+  });
+
+  // Per-channel pull (history + last_read for real unread).
+  const perChannel = await Promise.all(
+    channels.map(async (ch) => {
+      const [info, hist] = await Promise.all([
+        slackGateway("conversations.info", { channel: ch.id }),
+        slackGateway("conversations.history", { channel: ch.id, limit: HISTORY_LIMIT }),
+      ]);
+      if (!hist) return { ch, msgs: [] as SlackMessage[], lastRead: 0 };
+      const lastReadStr =
+        ((info?.channel as { last_read?: string } | undefined)?.last_read) || "0";
+      const lastRead = Number(lastReadStr) || 0;
+      const msgs = (hist.messages as SlackMessage[]) || [];
+      return { ch, msgs, lastRead };
+    }),
+  );
+
+  // Fetch unread thread replies (Fix 5).
+  await Promise.all(
+    perChannel.map(async (entry) => {
+      const extras: SlackMessage[] = [];
+      for (const m of entry.msgs) {
+        if (
+          (m.reply_count || 0) > 0 &&
+          m.latest_reply &&
+          Number(m.latest_reply) > entry.lastRead
+        ) {
+          const replies = await slackGateway("conversations.replies", {
+            channel: entry.ch.id,
+            ts: m.ts,
+            limit: 10,
+          });
+          if (replies) {
+            const rs = (replies.messages as SlackMessage[]) || [];
+            for (const r of rs) {
+              if (r.ts === m.ts) continue; // skip parent
+              if (Number(r.ts) > entry.lastRead) extras.push(r);
+            }
+          }
         }
-        if (!hist) return [] as CommMessage[];
-        const msgs = (hist.messages as Array<{ ts: string; text?: string; user?: string; subtype?: string }>) || [];
-        const channelLabel = ch.is_im
-          ? `${userNames.get(ch.user || "") || "DM"} · Slack DM`
-          : `#${ch.name || "channel"} · Slack`;
-        return msgs
-          .filter((m) => !m.subtype || m.subtype === "thread_broadcast")
-          .map<CommMessage>((m) => ({
-            id: `slack:${ch.id}:${m.ts}`,
-            channel: "slack",
-            source: "slack",
-            fromName: ch.is_im ? userNames.get(ch.user || "") || "Slack DM" : `#${ch.name || "channel"}`,
-            channelLabel,
-            preview: (m.text || "").replace(/\s+/g, " ").slice(0, 240).trim() || "(no text)",
-            receivedAt: new Date(Number(m.ts.split(".")[0]) * 1000).toISOString(),
-            isUnread: false,
-            needsReply: (m.text || "").includes("<@"),
-            threadId: ch.id,
-          }));
-      }),
-    );
+      }
+      entry.msgs = entry.msgs.concat(extras);
+    }),
+  );
 
-    return perChannel.flat();
+  // Batch-resolve every user id we encountered (Fix 6).
+  const allUserIds = new Set<string>();
+  for (const entry of perChannel) {
+    if (entry.ch.user) allUserIds.add(entry.ch.user);
+    for (const m of entry.msgs) {
+      if (m.user) allUserIds.add(m.user);
+    }
+  }
+  const userMap = new Map<string, SlackUser>();
+  // Cap to avoid runaway on giant workspaces.
+  const userIdList = Array.from(allUserIds).slice(0, 200);
+  await Promise.all(
+    userIdList.map(async (uid) => {
+      const u = await slackGateway("users.info", { user: uid });
+      const userObj = u?.user as SlackUser | undefined;
+      if (userObj) userMap.set(uid, userObj);
+    }),
+  );
+
+  // Materialize CommMessage rows.
+  const out: CommMessage[] = [];
+  for (const entry of perChannel) {
+    const ch = entry.ch;
+    const dmPartnerName =
+      ch.is_im && ch.user ? fmtUser(userMap.get(ch.user)) : undefined;
+    const channelLabel = ch.is_im
+      ? `${dmPartnerName || "DM"} · Slack DM`
+      : ch.is_mpim
+        ? "Group DM · Slack"
+        : `#${ch.name || "channel"} · Slack`;
+
+    for (const m of entry.msgs) {
+      // Skip system/joins/etc. Keep regular + thread_broadcast.
+      if (m.subtype && m.subtype !== "thread_broadcast") continue;
+      const text = m.text || "";
+      const isUnread = Number(m.ts) > entry.lastRead;
+      const isMention = !!myUserId && text.includes(`<@${myUserId}>`);
+      const isDmFromOther = !!ch.is_im && !!m.user && m.user !== myUserId;
+      const needsReply = isUnread && (isMention || isDmFromOther);
+
+      const senderName =
+        (m.user && fmtUser(userMap.get(m.user))) ||
+        (ch.is_im ? dmPartnerName || "Slack DM" : `#${ch.name || "channel"}`);
+
+      // Resolve <@Uxxx> mentions inline for readability.
+      const resolvedText = text.replace(/<@([UW][A-Z0-9]+)>/g, (_, uid) => {
+        const n = fmtUser(userMap.get(uid));
+        return n ? `@${n}` : "@user";
+      });
+
+      out.push({
+        id: `slack:${ch.id}:${m.ts}`,
+        channel: "slack",
+        source: "slack",
+        fromName: senderName,
+        channelLabel,
+        preview:
+          resolvedText.replace(/\s+/g, " ").slice(0, 240).trim() || "(no text)",
+        receivedAt: new Date(Number(m.ts.split(".")[0]) * 1000).toISOString(),
+        isUnread,
+        needsReply,
+        threadId: m.thread_ts || ch.id,
+      });
+    }
+  }
+  return { messages: out, partial: false };
+}
+
+async function fetchSlack(): Promise<SlackResult> {
+  try {
+    return await Promise.race<SlackResult>([
+      fetchSlackInner(),
+      new Promise<SlackResult>((resolve) =>
+        setTimeout(
+          () => resolve({ messages: [], partial: true, reason: "timeout" }),
+          SLACK_TIMEOUT_MS,
+        ),
+      ),
+    ]);
   } catch (e) {
     console.warn("[slack] aggregate failed:", e instanceof Error ? e.message : e);
-    return [];
+    return { messages: [], partial: true, reason: "error" };
   }
 }
 
@@ -317,13 +482,14 @@ Deno.serve(async (req) => {
     fetchGHL(authHeader),
   ]);
 
-  const stream = [...gmail, ...slack, ...ghl].sort(
+  const slackMessages = slack.messages;
+  const stream = [...gmail, ...slackMessages, ...ghl].sort(
     (a, b) => +new Date(b.receivedAt) - +new Date(a.receivedAt),
   );
 
   const sourceCounts = {
     email: gmail.length,
-    slack: slack.length,
+    slack: slackMessages.length,
     sms: ghl.filter((m) => m.channel === "sms").length,
     voicemail: ghl.filter((m) => m.channel === "voicemail").length,
   };
@@ -333,6 +499,7 @@ Deno.serve(async (req) => {
       stream,
       priorities: buildPriorities(stream),
       sourceCounts,
+      partial: { slack: slack.partial, slackReason: slack.reason ?? null },
       lastRefreshed: new Date().toISOString(),
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
