@@ -1,104 +1,70 @@
 
 
-## Communications Hub — Mobile Polish + AI-Native Composer
+## Two fixes — clickable links + Slack restored
 
-Three things to fix, in order. Each is independently shippable.
+### What's actually broken
 
----
+**1. Long URLs aren't clickable.** Every place we render message bodies (thread bubbles in `ReplySheet`, message previews in `MessageRow`, fallback content) uses `whitespace-pre-wrap` on plain text. URLs render as inert characters. Same for email addresses and `@mentions`.
 
-### 1. Kill the sticky summary on mobile
-
-**Problem:** On mobile the `HeroDigest` (greeting + priorities + Brief Me button) is wrapped in an `<aside>` that becomes sticky on `lg:` breakpoints, but the *touch interaction* on mobile is triggering an iOS Safari quirk where the backdrop-blur card "sticks" to the finger because the parent scroll container has `overflow-y-auto` and the card has `backdrop-blur-xl`.
-
-**Fix:** Replace the heavy hero card on mobile with a **compact AI Brief strip** — a single horizontal row with greeting + a small "Brief me" pill + a "Top 3" expandable accordion. Full hero stays on desktop only.
-
-- Mobile (<lg): one-line strip, ~56px tall, no backdrop-blur on the touch surface, no sticky behavior at all. Tap "Top 3" to expand priorities inline.
-- Desktop (≥lg): keep current `HeroDigest` as the left column.
-- Remove `useScrollCollapse` on mobile entirely — the strip is already compact, no collapse needed.
-
-**Files:** `src/components/communications/HeroDigest.tsx` (split into `HeroDigestDesktop` + new `CompactBriefStrip` for mobile), `src/pages/Communications.tsx` (conditional render via `useIsMobile`).
+**2. Slack is silently empty.** The DB confirms zero Slack rows. Edge logs show **70+ `missing_scope` errors** — the Slack connector is missing `im:history` (and likely `mpim:history`/`groups:history` for some channel types). The aggregator's `slackReason` diagnostic flag exists but is **never rendered anywhere in the UI** — confirmed by grep. So Slack appears broken with no explanation.
 
 ---
 
-### 2. Make the AI the centerpiece — not the summary
+### Fix 1 — Linkify everything that renders message text
 
-Right now the digest is a passive 3-priority list. Replace the *philosophy* of the hero with an **AI Comms Console**:
+Add a tiny `Linkify` component that takes a string and returns React nodes with:
+- `https?://…` and bare `www.…` → `<a target="_blank" rel="noopener noreferrer">` with truncated display (max 48 chars, ellipsis in the middle: `https://example.com/…/path?q=1`)
+- Email addresses → `mailto:` links
+- Slack-style `<https://x|label>` → use the label as the visible text
+- Preserves existing line breaks (replaces `whitespace-pre-wrap` rendering)
 
-**a. Smarter daily brief.** Replace `buildPriorities` heuristic with the AI triage pass we already scoped in Track B4 (Gemini Flash, structured output: `{messageId, urgency, reason, actionHint, suggestedReply?}`). The brief script becomes a real synthesized paragraph, not a template ("You have 4 things that need you today: Sarah is waiting on the contract, Stripe flagged a failed payment...").
+Apply in:
+- `ReplySheet.tsx` — thread bubbles (line ~360) and fallback preview (line ~340)
+- `MessageRow.tsx` — preview line (lines ~75 and ~80)
+- `PriorityCard.tsx` — `what` field
 
-**b. Inline AI actions on every priority card.** Each priority shows 2 action chips based on `actionHint`:
-- `Reply` → opens quick-reply with AI draft pre-filled
-- `Schedule` → opens calendar slot picker
-- `Snooze 1h` / `Mark done` → instant
-No more "tap card → open sheet → read → decide". The decision is surfaced upfront.
+Also strip Slack's `<https://url|label>` syntax in the aggregator's preview transform so the raw `<…|…>` doesn't show in the row.
 
-**c. Voice triage button (wire the dead mic).** The mic icon in the top bar currently does nothing. Wire it to the existing realtime voice stack with intents: `next`, `reply with…`, `snooze`, `delete`, `what's urgent`.
-
-**Files:** new `supabase/functions/communications-triage/index.ts` (Gemini Flash, structured output), `useCommunicationsFeed.ts` (call triage, merge into priorities), `PriorityCard.tsx` (action chips), `Communications.tsx` (wire mic to `useRealtimeVoice`).
-
----
-
-### 3. Reply & send directly from the hub — with proper email formatting
-
-Today `ReplySheet` exists but composes plaintext only. Three upgrades:
-
-**a. Rich email composer for Gmail replies.**
-- Add a minimal rich-text editor (use `@tiptap/react` + `@tiptap/starter-kit`, ~30KB gzipped) with: bold, italic, lists, links, blockquote.
-- Output sanitized HTML → send via existing `google-gmail` tool with `body_html` parameter (the manifest already supports `format: "html"`).
-- Auto-include a quoted reply block of the original message (collapsed `<blockquote>` like Gmail does).
-- Auto-append signature from `profiles.email_signature` (new column, optional, set in Settings).
-
-**b. Channel-aware composer UI.**
-- Email → full rich editor + subject + cc/bcc collapsed by default
-- Slack/SMS/voicemail → single-line textarea, no formatting toolbar (matches channel norm)
-- Composer header shows the channel pill so you always know what you're sending into
-
-**c. New message / cold compose.**
-- Add a floating "Compose" FAB (bottom-right on mobile, top-right on desktop) → opens the same composer with empty `to` field
-- Channel selector at top: Email / Slack DM / SMS via GHL
-- Recipient autocomplete pulls from recent senders in `communications_messages` + Gmail contacts
-
-**d. Send confirmation + persistence.**
-- On send: optimistic insert into `communications_messages` with `direction: 'out'` and `is_unread: false` so it appears immediately in the thread
-- Toast with Undo (5s window) — calls Gmail `trash_message` or Slack `delete_message` if user undoes
-- Failed sends queue to `communications_outbox` table for retry (new table, owner-only RLS)
-
-**Files:**
-- `src/components/communications/ReplySheet.tsx` — split into `ReplyComposerEmail.tsx` (rich) + `ReplyComposerChat.tsx` (plain)
-- new `src/components/communications/RichEmailEditor.tsx` (Tiptap wrapper)
-- new `src/components/communications/ComposeFab.tsx` + `NewMessageSheet.tsx`
-- new `supabase/functions/communications-send/index.ts` — unified send endpoint that routes to the right provider tool, handles HTML formatting, signature injection, optimistic cache write
-- new migration: `communications_outbox` table + `profiles.email_signature` column
-- `src/pages/Settings.tsx` — add email signature editor
+**Email rendering bonus:** for Gmail thread bubbles where the original message was HTML, the current `stripHtml()` in `communications-thread` flattens it to plaintext. Keep that behavior (sanitization safety) but rely on Linkify to make the resulting URLs clickable. No raw HTML rendering — too risky without DOMPurify.
 
 ---
 
-### Out of scope (intentionally)
+### Fix 2 — Bring Slack back + tell the user what's going on
 
-- Attachments in compose (separate track — needs storage upload + MIME handling)
-- Template library
-- Send-later / scheduled send (Gmail supports it, but UI is its own thing)
+**a. Surface the diagnostic.** Add a one-line `SlackStatusBanner` directly under the channel chips when `diagnostics.partial && diagnostics.sources.slack === 0`:
+
+> "Slack messages can't load — missing `im:history` scope. **Fix scopes →**" (links to `/integrations/slack`)
+
+Quiet, not alarming — same translucent card aesthetic. Dismissible per-session.
+
+**b. Map error reasons to friendly text** in the aggregator: instead of just `"timeout"` or `"error"`, capture `missing_scope` from Slack responses and bubble up `{ reason: "missing_scope", scope: "im:history" }` so the banner can say exactly what to fix.
+
+**c. Don't let one channel type kill the rest.** Currently when `conversations.history` fails for IMs, the IM channel returns no messages, but public/private channel history still works. Verify the per-channel `Promise.all` in `fetchSlackInner` actually catches per-call failures (it does via `slackGateway` returning `null`) — so public/group messages should still appear. The 70+ errors all being IMs explains the empty result: this user has only DMs in their workspace.
+
+**d. Add a manual "request scope" hint on the Slack integration page.** The user can already manage scopes in Connectors, but the Communications page should deep-link them straight there. Add a copy of the exact scopes list needed: `im:history, mpim:history, groups:history` (channels:history is already granted).
 
 ---
 
-### Order of execution
+### Files touched
 
-1. **Mobile fix (15 min):** kill sticky behavior, ship the compact strip. Immediate visible win on the device the user is on right now.
-2. **Rich email composer (B3a) + send pipeline (B3d):** the core "respond from the hub" capability.
-3. **AI triage (Section 2a + 2b):** priorities become useful, action chips replace dead taps.
-4. **Compose FAB + new message (B3c):** outbound from zero.
-5. **Voice triage (Section 2c):** the mic finally does something.
-6. **Settings: email signature.**
+- `src/lib/linkify.tsx` — new utility component
+- `src/components/communications/MessageRow.tsx` — wrap preview in Linkify
+- `src/components/communications/ReplySheet.tsx` — wrap thread bubbles + fallback in Linkify
+- `src/components/communications/PriorityCard.tsx` — wrap `what` text
+- `src/components/communications/SlackStatusBanner.tsx` — new diagnostic banner
+- `src/pages/Communications.tsx` — render banner, pass diagnostics
+- `supabase/functions/communications-aggregate/index.ts` — capture `missing_scope` reason + scope name into `diagnostics.slackReason`
+
+No schema changes. No new dependencies.
 
 ---
 
 ### Verification
 
-- iPhone preview at 320px wide → tap and drag on the hero area: nothing sticks to the finger, page scrolls normally.
-- Mobile shows compact strip; rotating to landscape ≥1024px shows full desktop hero.
-- Tap a priority card → action chip "Reply" opens composer with AI-drafted body already in the editor.
-- Compose new email → bold a word, add a bullet list, send → recipient receives properly formatted HTML email with signature, not raw markdown.
-- Send a Slack DM from the hub → appears in the stream within 2s as an outbound message; Undo within 5s removes it from Slack.
-- Tap the mic, say "what's urgent" → AI reads the top 3 priorities aloud.
-- Network offline → send queues to outbox; reconnect → auto-retries and surfaces a "Sent (1 queued)" toast.
+- Open any Gmail thread with a long marketing URL → the URL appears truncated with ellipsis and is clickable, opens in a new tab.
+- Open a Slack thread containing `<https://docs.example.com/long-path|the docs>` → renders as the word "the docs" as a hyperlink.
+- A message with `mailto:foo@bar.com` in the body → clickable email link.
+- On the Communications page right now (Slack scope missing), a quiet banner appears under the channel chips: "Slack can't load — missing scope `im:history`. Fix scopes →" linking to the connector settings.
+- After granting `im:history` in Connectors and tapping Scan → Slack DMs populate and the banner disappears.
+- No double-render: links are not re-escaped or clipped by line-clamp at the wrong place.
 
