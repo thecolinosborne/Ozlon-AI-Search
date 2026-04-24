@@ -18,10 +18,10 @@ export const GOOGLE_SERVICE_SCOPES: Record<string, GoogleServiceScopeConfig> = {
     scopeSummary: "Upload videos, read channel data and analytics",
   },
   gmail: {
-    requiredScopes: ["gmail.readonly", "gmail.send", "gmail.modify"],
+    requiredScopes: ["gmail.readonly", "gmail.send", "gmail.modify", "gmail.compose", "gmail.labels", "gmail.settings.basic"],
     apiName: "Gmail API",
     cloudConsoleUrl: "https://console.cloud.google.com/apis/library/gmail.googleapis.com",
-    scopeSummary: "Read, send, and modify email messages",
+    scopeSummary: "Read, send, modify, compose, manage labels, filters, signature, and vacation responder",
   },
   "google-drive": {
     requiredScopes: ["drive.readonly", "drive.file", "auth/drive"],

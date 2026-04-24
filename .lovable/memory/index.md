@@ -5,7 +5,7 @@
 - **Design Language:** Apple Vision Pro-inspired minimalist. Calm, translucent, generous spacing. No emojis ever. Jarvis/Batman tone.
 - **Strict Constraints:** Additive development only. No UI rewrites or redesigns. Fixes must be surgical.
 - **UI Architecture:** Voice-first. Unified ChatGPT-like page. No hardcoded chat action buttons.
-- **Google Services:** Native Google edge functions only (Gmail, Drive, Calendar, Sheets, Docs, Slides, GSC, GA, Tag Manager, YouTube). Maton is REMOVED — do not reference, do not re-add. Gmail: never HTTP DELETE (use POST `/trash`). Return structured errors to AI, don't swallow them.
+- **Google Services:** Native Google edge functions only (Gmail, Drive, Calendar, Sheets, Docs, Slides, GSC, GA, Tag Manager, YouTube). Maton is REMOVED. Gmail scopes: readonly+send+modify+compose+labels+settings.basic. NEVER request `mail.google.com/` or `gmail.settings.sharing`. Never HTTP DELETE (use POST `/trash`). Return structured errors to AI.
 - **State Management:** Strict data isolation (reset app store on user change). Complete reset on signout.
 - **Forbidden Features:** Do not re-add Facebook Ads, Tasks, Video Studio, or Maton.
 - **Both-Sides Rule:** When fixing/verifying anything that spans backend + frontend, always check BOTH sides before claiming done.
@@ -97,6 +97,8 @@
 - [Email management](mem://features/email-management-system) — Native Gmail edge function, multi-account, newest-first default
 - [Email reference ledger](mem://integrations/email-reference-ledger) — Validates message ID against session before destructive actions
 - [Gmail deletion policy](mem://integrations/gmail-deletion-policy) — HTTP DELETE forbidden, use POST /trash
+- [Gmail scope bundle](mem://features/gmail-scope-bundle) — Full Gmail scopes (read/send/modify/compose/labels/settings.basic) + orchestration flow
+- [Gmail restricted scopes](mem://constraints/gmail-restricted-scopes) — Never request mail.google.com or gmail.settings.sharing
 
 ### Wisdom Engine (Memory)
 - [Living memory architecture](mem://architecture/wisdom-engine-living-memory) — pgvector tables: knowledge_entries, wisdom_memories, reflection_notes

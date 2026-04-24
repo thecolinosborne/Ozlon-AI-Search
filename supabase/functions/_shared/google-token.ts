@@ -86,6 +86,59 @@ export async function getGoogleAccessToken(userId: string): Promise<string> {
   return newAccessToken;
 }
 
+/**
+ * Force a refresh-token exchange regardless of cached expires_at.
+ * Use this to recover from 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT or stale-token errors
+ * after the user reauthorizes with new scopes.
+ */
+export async function forceRefreshGoogleToken(userId: string): Promise<string> {
+  const admin = getAdminClient();
+  const { data: conn } = await admin
+    .from("integration_connections")
+    .select("id, metadata")
+    .eq("user_id", userId)
+    .eq("provider", "youtube")
+    .eq("auth_type", "oauth2")
+    .eq("status", "connected")
+    .maybeSingle();
+
+  if (!conn) throw new Error("No Google OAuth connection");
+
+  const meta = (conn.metadata || {}) as AnyJson;
+  const refreshToken = String(meta.refresh_token || "");
+  if (!refreshToken) throw new Error("No refresh token — re-authorize Google");
+
+  const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+  const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+  if (!clientId || !clientSecret) throw new Error("Google OAuth credentials not configured");
+
+  const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const refreshData = await refreshRes.json();
+  if (!refreshRes.ok) throw new Error(`Forced token refresh failed: ${JSON.stringify(refreshData)}`);
+
+  const newAccessToken = refreshData.access_token as string;
+  const newExpiresAt = new Date(Date.now() + (refreshData.expires_in || 3600) * 1000).toISOString();
+
+  await admin
+    .from("integration_connections")
+    .update({
+      metadata: { ...meta, access_token: newAccessToken, expires_at: newExpiresAt },
+      last_validated_at: new Date().toISOString(),
+    })
+    .eq("id", conn.id);
+
+  return newAccessToken;
+}
+
 export function jsonOk(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
