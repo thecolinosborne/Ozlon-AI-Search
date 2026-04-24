@@ -142,8 +142,6 @@ serve(async (req) => {
     const { action, params = {} } = (await req.json()) as { action: string; params?: AnyJson };
     if (!action) return jsonErr("Missing action");
 
-    const token = await getGoogleAccessToken(userId);
-
     switch (action) {
       // ── Existing ──
       case "list_messages": {
