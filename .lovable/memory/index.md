@@ -5,7 +5,7 @@
 - **Design Language:** Apple Vision Pro-inspired minimalist. Calm, translucent, generous spacing. No emojis ever. Jarvis/Batman tone.
 - **Strict Constraints:** Additive development only. No UI rewrites or redesigns. Fixes must be surgical.
 - **UI Architecture:** Voice-first. Unified ChatGPT-like page. No hardcoded chat action buttons.
-- **Google Services:** Native Google edge functions only (Gmail, Drive, Calendar, Sheets, Docs, Slides, GSC, GA, Tag Manager, YouTube). Maton is REMOVED — do not reference, do not re-add. Gmail: never HTTP DELETE (use POST `/trash`). Return structured errors to AI, don't swallow them.
+- **Google Services:** Native Google edge functions only (Gmail, Drive, Calendar, Sheets, Docs, Slides, GSC, GA, Tag Manager, YouTube). Maton is REMOVED. Gmail scopes: readonly+send+modify+compose+labels+settings.basic. NEVER request `mail.google.com/` or `gmail.settings.sharing`. Never HTTP DELETE (use POST `/trash`). Return structured errors to AI.
 - **State Management:** Strict data isolation (reset app store on user change). Complete reset on signout.
 - **Forbidden Features:** Do not re-add Facebook Ads, Tasks, Video Studio, or Maton.
 - **Both-Sides Rule:** When fixing/verifying anything that spans backend + frontend, always check BOTH sides before claiming done.
