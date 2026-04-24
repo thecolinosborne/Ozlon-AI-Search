@@ -97,6 +97,8 @@
 - [Email management](mem://features/email-management-system) — Native Gmail edge function, multi-account, newest-first default
 - [Email reference ledger](mem://integrations/email-reference-ledger) — Validates message ID against session before destructive actions
 - [Gmail deletion policy](mem://integrations/gmail-deletion-policy) — HTTP DELETE forbidden, use POST /trash
+- [Gmail scope bundle](mem://features/gmail-scope-bundle) — Full Gmail scopes (read/send/modify/compose/labels/settings.basic) + orchestration flow
+- [Gmail restricted scopes](mem://constraints/gmail-restricted-scopes) — Never request mail.google.com or gmail.settings.sharing
 
 ### Wisdom Engine (Memory)
 - [Living memory architecture](mem://architecture/wisdom-engine-living-memory) — pgvector tables: knowledge_entries, wisdom_memories, reflection_notes
