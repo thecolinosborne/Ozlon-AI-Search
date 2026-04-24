@@ -43,8 +43,9 @@ type ClickUpAuthContext = {
   connectionId: string | null;
 };
 
+// deno-lint-ignore no-explicit-any
 async function tryVaultRead(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
 ): Promise<string | null> {
@@ -78,8 +79,7 @@ async function tryVaultRead(
           action: "vault_read",
           detail: "api_key",
         })
-        .then(() => {})
-        .catch(() => {});
+        .then(() => {}, () => {});
       return plain;
     }
     return null;
@@ -89,8 +89,9 @@ async function tryVaultRead(
   }
 }
 
+// deno-lint-ignore no-explicit-any
 async function resolveStoredClickUpToken(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
   metadata?: Record<string, unknown> | null,

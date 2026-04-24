@@ -9,8 +9,9 @@ const corsHeaders = {
 
 const BASE_URL = "https://platform.higgsfield.ai";
 
+// deno-lint-ignore no-explicit-any
 async function tryVaultRead(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
   secretName: string,

@@ -8,8 +8,9 @@ const corsHeaders = {
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
+// deno-lint-ignore no-explicit-any
 async function tryVaultRead(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
   secretName: string,

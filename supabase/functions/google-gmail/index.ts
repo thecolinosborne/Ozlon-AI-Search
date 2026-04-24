@@ -20,7 +20,7 @@ async function gFetch(
   path: string,
   init: RequestInit = {},
   _retried = false,
-): Promise<unknown> {
+): Promise<AnyJson> {
   const token = await getGoogleAccessToken(userId);
   const res = await fetch(`${GMAIL_BASE}${path}`, {
     ...init,
@@ -62,7 +62,7 @@ async function gFetch(
     }
     throw new Error(`Gmail API ${res.status}: ${JSON.stringify(data)}`);
   }
-  return data;
+  return (data ?? {}) as AnyJson;
 }
 
 function buildRawEmail(
@@ -417,7 +417,7 @@ serve(async (req) => {
         const signature = String((params as AnyJson).signature || "");
         if (!sendAsEmail) return jsonErr("sendAsEmail is required");
         const data = await gFetch(
-          token,
+          userId,
           `/settings/sendAs/${encodeURIComponent(sendAsEmail)}`,
           {
             method: "PATCH",
@@ -453,7 +453,7 @@ serve(async (req) => {
         const attachmentId = String((params as AnyJson).attachmentId || "");
         if (!messageId || !attachmentId) return jsonErr("messageId and attachmentId are required");
         const data = await gFetch(
-          token,
+          userId,
           `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
         );
         return jsonOk({ success: true, attachment: data });

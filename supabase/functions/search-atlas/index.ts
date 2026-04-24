@@ -43,8 +43,9 @@ function sanitizeDetail(raw: string): string {
 // AUTH RESOLUTION (vault → metadata → env fallback)
 // ============================================================================
 
+// deno-lint-ignore no-explicit-any
 async function tryVaultRead(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
 ): Promise<string | null> {
