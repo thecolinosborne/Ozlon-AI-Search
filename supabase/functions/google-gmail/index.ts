@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
   corsHeaders,
+  forceRefreshGoogleToken,
   getAuthedUserId,
   getGoogleAccessToken,
   jsonErr,
@@ -11,7 +12,16 @@ const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 type AnyJson = Record<string, unknown>;
 
-async function gFetch(token: string, path: string, init: RequestInit = {}) {
+// Auto-recovery: on 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT (or 401 invalid_token),
+// force-refresh the OAuth token once and retry. This makes newly granted
+// Gmail scopes take effect on the very next call after the user reauthorizes.
+async function gFetch(
+  userId: string,
+  path: string,
+  init: RequestInit = {},
+  _retried = false,
+): Promise<unknown> {
+  const token = await getGoogleAccessToken(userId);
   const res = await fetch(`${GMAIL_BASE}${path}`, {
     ...init,
     headers: {
@@ -27,7 +37,31 @@ async function gFetch(token: string, path: string, init: RequestInit = {}) {
   } catch {
     data = { raw: text };
   }
-  if (!res.ok) throw new Error(`Gmail API ${res.status}: ${JSON.stringify(data)}`);
+  if (!res.ok) {
+    const blob = JSON.stringify(data).toLowerCase();
+    const isScopeIssue =
+      res.status === 403 &&
+      (blob.includes("access_token_scope_insufficient") ||
+        blob.includes("insufficient authentication scopes") ||
+        blob.includes("insufficient permission"));
+    const isAuthExpired =
+      res.status === 401 &&
+      (blob.includes("invalid_token") || blob.includes("invalid credentials"));
+
+    if ((isScopeIssue || isAuthExpired) && !_retried) {
+      console.log(`[google-gmail] auth recovery: status=${res.status} forcing token refresh and retrying once`);
+      try {
+        await forceRefreshGoogleToken(userId);
+      } catch (refreshErr) {
+        const m = refreshErr instanceof Error ? refreshErr.message : String(refreshErr);
+        throw new Error(
+          `Gmail API ${res.status}: ${JSON.stringify(data)} — token refresh failed: ${m}. Please reconnect Google in Integrations.`,
+        );
+      }
+      return gFetch(userId, path, init, true);
+    }
+    throw new Error(`Gmail API ${res.status}: ${JSON.stringify(data)}`);
+  }
   return data;
 }
 
