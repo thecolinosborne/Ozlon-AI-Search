@@ -269,14 +269,14 @@ serve(async (req) => {
 
         if (replaceAll) {
           // Wipe existing body (everything between index 1 and end - 1)
-          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`);
+          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`) as AnyJson;
           const end = getBodyEndIndex(doc);
           if (end > 2) {
             requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: end - 1 } } });
           }
           insertAt = 1;
         } else {
-          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`);
+          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`) as AnyJson;
           const end = getBodyEndIndex(doc);
           insertAt = Math.max(1, end - 1);
         }
@@ -343,7 +343,7 @@ serve(async (req) => {
         const documentId = String((params as AnyJson).documentId || "");
         if (!documentId) return jsonErr("documentId is required");
 
-        const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`);
+        const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`) as AnyJson;
         const end = getBodyEndIndex(doc);
         if (end <= 2) return jsonOk({ success: true, message: "Document is empty — nothing to format" });
 
@@ -424,7 +424,7 @@ serve(async (req) => {
         let startIndex = typeof p.startIndex === "number" ? p.startIndex : 1;
         let endIndex = typeof p.endIndex === "number" ? p.endIndex : 0;
         if (!endIndex) {
-          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`);
+          const doc = await gFetch(token, `${DOCS_BASE}/${encodeURIComponent(documentId)}`) as AnyJson;
           endIndex = Math.max(2, getBodyEndIndex(doc) - 1);
         }
         if (endIndex <= startIndex) return jsonOk({ success: true, message: "Empty range — nothing to clear" });

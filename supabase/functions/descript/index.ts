@@ -69,8 +69,9 @@ async function descriptFetch(path: string, apiKey: string, options: RequestInit 
   return data;
 }
 
+// deno-lint-ignore no-explicit-any
 async function tryVaultRead(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   connectionId: string,
   userId: string,
 ): Promise<string | null> {
@@ -104,8 +105,7 @@ async function tryVaultRead(
           action: "vault_read",
           detail: "api_key",
         })
-        .then(() => {})
-        .catch(() => {});
+        .then(() => {}, () => {});
       return plain;
     }
     return null;
