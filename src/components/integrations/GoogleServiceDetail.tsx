@@ -36,6 +36,9 @@ export function GoogleServiceDetail({ config }: { config: GoogleServiceConfig })
   const [testResult, setTestResult] = useState<{ status: "ok" | "error"; message: string } | null>(null);
 
   const loadedRef = useRef(false);
+  const oauthHandledRef = useRef(false);
+
+  const redirectUri = `${window.location.origin}/integrations/${config.serviceId}`;
 
   const serviceGranted = isServiceGranted(config.serviceId, grantedScopes);
   const accountAuthorized =
