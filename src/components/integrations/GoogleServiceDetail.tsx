@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
 import { LucideIcon, Shield, Loader2, CheckCircle2, XCircle, ExternalLink, Settings2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
@@ -37,6 +36,9 @@ export function GoogleServiceDetail({ config }: { config: GoogleServiceConfig })
   const [testResult, setTestResult] = useState<{ status: "ok" | "error"; message: string } | null>(null);
 
   const loadedRef = useRef(false);
+  const oauthHandledRef = useRef(false);
+
+  const redirectUri = `${window.location.origin}/integrations/${config.serviceId}`;
 
   const serviceGranted = isServiceGranted(config.serviceId, grantedScopes);
   const accountAuthorized =
@@ -87,17 +89,57 @@ export function GoogleServiceDetail({ config }: { config: GoogleServiceConfig })
   }, [callYouTube, config.serviceId, setStatus]);
 
   useEffect(() => {
-    if (authLoading || !session || loadedRef.current) return;
+    if (authLoading || !session) return;
+
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    const oauthError = url.searchParams.get("error");
+    const oauthErrorDescription = url.searchParams.get("error_description");
+
+    if (oauthError) {
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_description");
+      url.searchParams.delete("state");
+      url.searchParams.delete("scope");
+      window.history.replaceState({}, "", url.toString());
+      toast.error(`OAuth failed: ${oauthErrorDescription || oauthError}`);
+      if (!loadedRef.current) {
+        loadedRef.current = true;
+        loadOAuthStatus();
+      }
+      return;
+    }
+
+    if (code && !oauthHandledRef.current) {
+      oauthHandledRef.current = true;
+      loadedRef.current = true;
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      url.searchParams.delete("scope");
+      window.history.replaceState({}, "", url.toString());
+      (async () => {
+        setLoading(true);
+        try {
+          await callYouTube("oauth_callback", { code, redirectUri });
+          toast.success(`Google account connected — ${config.name} authorized`);
+        } catch (e) {
+          toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+        } finally {
+          await loadOAuthStatus();
+        }
+      })();
+      return;
+    }
+
+    if (loadedRef.current) return;
     loadedRef.current = true;
     loadOAuthStatus();
-  }, [authLoading, session, loadOAuthStatus]);
+  }, [authLoading, session, loadOAuthStatus, callYouTube, redirectUri, config.name]);
 
   const handleAuthorize = async () => {
     setAuthorizing(true);
     try {
-      const result = await callYouTube("oauth_authorize", {
-        redirectUri: `${window.location.origin}/integrations/youtube`,
-      });
+      const result = await callYouTube("oauth_authorize", { redirectUri });
       window.location.href = (result as { authUrl: string }).authUrl;
     } catch (e) {
       toast.error(`OAuth failed: ${e instanceof Error ? e.message : "Unknown error"}`);
@@ -250,15 +292,6 @@ export function GoogleServiceDetail({ config }: { config: GoogleServiceConfig })
           </div>
         )}
       </section>
-
-      {/* Footer link */}
-      <Link
-        to="/integrations/youtube"
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Manage Google Workspace OAuth
-        <ExternalLink className="w-3 h-3" />
-      </Link>
     </IntegrationDetailLayout>
   );
 }
