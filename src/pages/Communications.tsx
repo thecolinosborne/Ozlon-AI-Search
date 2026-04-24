@@ -11,7 +11,9 @@ import {
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
 import { HeroDigest } from "@/components/communications/HeroDigest";
-import { CompactBriefStrip } from "@/components/communications/CompactBriefStrip";
+import { FocusStack } from "@/components/communications/FocusStack";
+import { SummaryChip } from "@/components/communications/SummaryChip";
+import { OutboxBadge } from "@/components/communications/OutboxBadge";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { UnifiedStream } from "@/components/communications/UnifiedStream";
 import { FilterDropdown, type FilterValue } from "@/components/communications/FilterDropdown";
@@ -233,38 +235,21 @@ export default function Communications() {
 
       {/* Scrollable surface */}
       <div ref={ref} className="flex-1 overflow-y-auto">
-        <div className="lg:grid lg:grid-cols-[38%_62%] lg:gap-0">
-          {/* Left / hero — desktop full card; mobile compact strip (no sticky, no blur) */}
-          {isMobile ? (
-            <CompactBriefStrip
-              digest={digest}
-              greeting={greeting}
-              onBrief={() => brief.play(digest.briefScript)}
-              onPriorityTap={openPriority}
-              onReply={handlePriorityReply}
-              onSnooze={handlePrioritySnooze}
-              onDone={handlePriorityDone}
-            />
-          ) : (
+        <div className="lg:grid lg:grid-cols-[32%_68%] lg:gap-0">
+          {/* Left / hero — desktop only thin "Today" rail; mobile gets nothing here */}
+          {!isMobile && (
             <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
               <HeroDigest
                 digest={digest}
                 collapsed={collapsed}
                 greeting={greeting}
                 onBrief={() => brief.play(digest.briefScript)}
-                onPriorityTap={openPriority}
-                onReply={handlePriorityReply}
-                onSnooze={handlePrioritySnooze}
-                onDone={handlePriorityDone}
               />
             </aside>
           )}
 
           {/* Right / unified stream */}
           <section>
-            {/* Soft gradient divider */}
-            <div className="h-6 bg-gradient-to-b from-transparent to-background lg:hidden" />
-
             {/* Sticky sub-header */}
             <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -302,16 +287,46 @@ export default function Communications() {
               />
             ) : null}
 
+            {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
+            <FocusStack
+              priorities={digest.priorities}
+              onTap={openPriority}
+              onReply={handlePriorityReply}
+              onSnooze={handlePrioritySnooze}
+              onDone={handlePriorityDone}
+            />
+
+            {/* Smart summary chip — toggles "needs reply" filter */}
+            <SummaryChip
+              unread={summaryCounts.unread}
+              needsReply={summaryCounts.needsReply}
+              total={summaryCounts.total}
+              active={stateFilter === "needs-reply"}
+              onToggle={() =>
+                setStateFilter((v) => (v === "needs-reply" ? "all" : "needs-reply"))
+              }
+            />
+
             {filtered.length === 0 ? (
               <EmptyCaughtUp />
             ) : (
-              <UnifiedStream
-                messages={filtered}
-                onTap={openMessage}
-                onDone={handleDone}
-                onSnooze={handleSnooze}
-                onDelete={handleRowDelete}
-              />
+              <>
+                {digest.priorities.length > 0 && (
+                  <div className="px-4 lg:px-6 pt-3 pb-1">
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/50">
+                      Everything else
+                    </span>
+                  </div>
+                )}
+                <UnifiedStream
+                  messages={filtered}
+                  onTap={openMessage}
+                  onDone={handleDone}
+                  onSnooze={handleSnooze}
+                  onDelete={handleRowDelete}
+                />
+                <OutboxBadge onRetry={() => refetch()} />
+              </>
             )}
           </section>
         </div>
