@@ -22,4 +22,6 @@ type: feature
 4. Helper auto-refreshes via `YOUTUBE_CLIENT_ID/SECRET` if `expires_at` near
 5. After scope changes / 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT, use `forceRefreshGoogleToken(userId)` to bypass cache
 
+**Auto-recovery (live):** `supabase/functions/google-gmail/index.ts` `gFetch` wrapper detects 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` (and 401 `invalid_token`), calls `forceRefreshGoogleToken(userId)`, and retries the request exactly once. Newly granted Gmail scopes take effect on the very next call after reauthorize — no manual reconnect dance. If the retry still fails, the error tells the user to reconnect Google in Integrations. Replicate this pattern in other Google service functions if/when needed.
+
 **Always keep this in mind:** Any new Gmail capability must (a) check scope is in this bundle, (b) if not, add scope to `youtube/index.ts` AND `googleScopes.ts`, (c) never request `https://mail.google.com/` (see `mem://constraints/gmail-restricted-scopes`).
