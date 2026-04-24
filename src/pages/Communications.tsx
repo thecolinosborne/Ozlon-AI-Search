@@ -48,6 +48,18 @@ export default function Communications() {
   const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const prevSlackMissing = useRef(false);
+
+  // Toast once when Slack flips from missing-scope → loading messages.
+  useEffect(() => {
+    const slackCount = diagnostics.sources.slack ?? 0;
+    const wasMissing = prevSlackMissing.current;
+    const isMissingNow = diagnostics.slackReason === "missing_scope" && slackCount === 0;
+    if (wasMissing && !isMissingNow && slackCount > 0) {
+      toast({ title: "Slack connected", description: "Scanning DMs…" });
+    }
+    prevSlackMissing.current = isMissingNow;
+  }, [diagnostics.sources.slack, diagnostics.slackReason]);
 
   const greeting = greetingFor(
     (user?.user_metadata as { full_name?: string })?.full_name ?? user?.email,
