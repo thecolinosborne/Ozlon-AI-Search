@@ -12,7 +12,7 @@ export default function GmailDetail() {
         fnName: "google-gmail",
         testAction: "get_profile",
         testLabel: "Gmail Profile",
-        scopeNote: "Requires gmail.modify scope (granted via shared Workspace OAuth).",
+        scopeNote: "Full Gmail management: read, send, modify, compose drafts, manage labels, filters, signature, and vacation responder. Deletion uses trash (Gmail auto-purges after 30 days)."
       }}
     />
   );
