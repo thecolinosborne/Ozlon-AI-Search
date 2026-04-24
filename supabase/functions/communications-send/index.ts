@@ -54,6 +54,11 @@ function withQuotedReply(html: string, quoted?: { from?: string; date?: string; 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  console.info("[communications-send] entry", {
+    method: req.method,
+    hasAuth: !!req.headers.get("Authorization"),
+  });
+
   try {
     const auth = req.headers.get("Authorization");
     if (!auth) {

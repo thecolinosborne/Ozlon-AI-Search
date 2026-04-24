@@ -73,9 +73,17 @@ function b64urlDecode(s: string): string {
 }
 
 function stripHtml(html: string): string {
-  return html
+  let out = html
+    // Drop entire blocks that produce noise
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, "")
+    .replace(/<img[^>]*>/gi, "") // drop tracking pixels + inline images
+    // Fold gmail/outlook quoted blocks into a single marker
+    .replace(/<blockquote[^>]*class="gmail_quote"[\s\S]*?<\/blockquote>/gi, "\n\n--- earlier ---\n")
+    .replace(/<div[^>]*class="gmail_quote"[\s\S]*?<\/div>/gi, "\n\n--- earlier ---\n")
+    // Standard text shaping
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<[^>]+>/g, "")
@@ -85,8 +93,19 @@ function stripHtml(html: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Strip zero-width / soft-hyphen / BOM
+    .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "")
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  // Fold "On <date> <name> wrote:" tails into the same marker (only first occurrence).
+  out = out.replace(
+    /\n*On\s.+?\swrote:[\s\S]*$/m,
+    "\n\n--- earlier ---",
+  );
+
+  return out;
 }
 
 interface GmailPart {
