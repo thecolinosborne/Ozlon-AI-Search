@@ -5,7 +5,7 @@ import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
-const MODEL_REGISTRY = MODEL_REGISTRY_BASE as unknown as Record<string, ModelEntry>;
+// (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
 // Lovable AI Gateway key (used by web_search_google and a few helpers).
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
 // Local type for per-account alias entries used by tool routing.
