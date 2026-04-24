@@ -1,8 +1,15 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
+import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY as MODEL_REGISTRY_BASE, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
 import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
+
+// Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
+// (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
+// Lovable AI Gateway key (used by web_search_google and a few helpers).
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
+// Local type for per-account alias entries used by tool routing.
+type AliasEntry = { alias: string; connectionId: string; provider?: string; email?: string };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6194,7 +6201,7 @@ You are the intelligence, memory, and action layer of ${osName}.`;
 //   3. Cap how many tools ship per request (prevents 128-tool overload).
 // ============================================================================
 
-type ToolDomain =
+type ToolDomainLegacy =
   | 'google-mail' | 'google-calendar' | 'google-drive' | 'google-docs'
   | 'google-sheets' | 'google-slides' | 'google-search-console'
   | 'google-analytics' | 'youtube' | 'clickup' | 'ghl'
@@ -6607,7 +6614,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'ghl_list_prices': 'ghl',
     'ghl_create_price': 'ghl',
     'ghl_update_price': 'ghl',
-    'ghl_upload_media_file': 'ghl',
+    // (duplicate 'ghl_upload_media_file' removed — defined above at line 6558)
     'ghl_delete_media_file': 'ghl',
     'ghl_list_sub_accounts': 'ghl',
     'ghl_set_active_sub_account': 'ghl',
@@ -6884,7 +6891,7 @@ async function runPlannerPass(
   prefs: UserPrefs = DEFAULT_PREFS,
   supabaseClient?: any,
   userId?: string,
-  registry: Record<string, ModelEntry> = MODEL_REGISTRY,
+  registry: Record<string, ModelEntry> = MODEL_REGISTRY_BASE,
 ): Promise<AgenticPlan | null> {
   const knownIntegrations = Object.keys(PLAN_INTEGRATION_TO_INTENT)
     .filter((k, i, arr) => arr.indexOf(k) === i)
@@ -7218,7 +7225,7 @@ async function runToolLoop(
       // GUARD: if user just approved an action and assistant only called task-tracking tools,
       // inject a system reminder to actually execute the action on next iteration.
       const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
-      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n) => n === 'create_work_task' || n === 'update_work_task' || n === 'bulk_update_work_tasks');
+      const onlyTaskTools = toolNames.length > 0 && toolNames.every((n: string) => n === 'create_work_task' || n === 'update_work_task' || n === 'bulk_update_work_tasks');
       // Find last user message (skip tool/assistant) BEFORE this assistant turn
       const lastUser = [...openAIMessages].reverse().find((m) => m.role === 'user');
       const lastUserText = typeof lastUser?.content === 'string' ? lastUser.content : '';
@@ -7839,7 +7846,7 @@ CONNECTED SERVICES (you can read data and take actions on these)
           messages,
           connMap,
           credUserId,
-          'auto',
+          // (4th positional arg removed — injectNativeData(messages, connMap, userId))
         );
         if (nativeInjection) systemPrompt += nativeInjection;
       } catch (e) {
@@ -8324,7 +8331,7 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
               // Infinity Gauntlet: load user routing prefs + admin client for telemetry.
               let gauntletPrefs = DEFAULT_PREFS;
               let gauntletAdmin: any = null;
-              let gauntletRegistry: Record<string, ModelEntry> = MODEL_REGISTRY;
+              let gauntletRegistry: Record<string, ModelEntry> = MODEL_REGISTRY_BASE;
               try {
                 const { createClient: ccGaunt } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
                 gauntletAdmin = ccGaunt(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
