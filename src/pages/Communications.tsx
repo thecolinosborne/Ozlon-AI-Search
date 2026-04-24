@@ -70,6 +70,16 @@ export default function Communications() {
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
 
+  // Smart summary counts — derived from already-loaded data, no extra fetch.
+  const summaryCounts = useMemo(() => {
+    const visible = stream.filter((m) => !hidden.has(m.id));
+    return {
+      total: visible.length,
+      unread: visible.filter((m) => m.isUnread).length,
+      needsReply: visible.filter((m) => m.needsReply).length,
+    };
+  }, [stream, hidden]);
+
   const openMessage = (m: CommMessage) => {
     setActiveDraft(undefined);
     setActive(m);
