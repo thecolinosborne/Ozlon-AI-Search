@@ -51,8 +51,8 @@ async function ytFetch(path: string, apiKey: string): Promise<AnyJson> {
   const data = await res.json();
   if (!res.ok) {
     // Surface Google's specific error reason instead of dumping the raw payload.
-    const err = (data as AnyJson)?.error;
-    const reason = err?.errors?.[0]?.reason || err?.status;
+    const err = ((data as AnyJson)?.error || {}) as AnyJson;
+    const reason = (err?.errors as AnyJson[] | undefined)?.[0]?.reason || err?.status;
     const message = err?.message || "Unknown error";
     let hint = "";
     if (reason === "API_KEY_INVALID" || res.status === 400) {
@@ -950,9 +950,9 @@ serve(async (req) => {
 
     // ── Helper: download a remote file (Drive-aware) ──
     const downloadFile = async (url: string, accessToken: string): Promise<Response> => {
-      const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
-      const driveOpenMatch = !driveFileMatch && url.match(/drive\.google\.com\/open\?id=([^&]+)/);
-      const driveUcMatch = !driveFileMatch && !driveOpenMatch && url.match(/drive\.google\.com\/uc\?.*id=([^&]+)/);
+      const driveFileMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/) || null;
+      const driveOpenMatch = !driveFileMatch ? (url.match(/drive\.google\.com\/open\?id=([^&]+)/) || null) : null;
+      const driveUcMatch = !driveFileMatch && !driveOpenMatch ? (url.match(/drive\.google\.com\/uc\?.*id=([^&]+)/) || null) : null;
       const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1] || driveUcMatch?.[1];
       if (driveId) {
         const r = await fetch(`https://www.googleapis.com/drive/v3/files/${driveId}?alt=media`, {
