@@ -355,28 +355,7 @@ export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplyS
               </div>
             ) : (
               threadMsgs.map((t) => (
-                <div
-                  key={t.id}
-                  className={cn(
-                    "flex flex-col gap-0.5",
-                    t.direction === "out" ? "items-end" : "items-start",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words",
-                      t.direction === "out"
-                        ? "bg-primary/15 text-foreground border border-primary/20"
-                        : "bg-background/60 text-foreground/90 border border-border/20",
-                    )}
-                  >
-                    <Linkify text={t.body} />
-                  </div>
-                  <span className="text-[10px] text-muted-foreground/60 px-1">
-                    {t.direction === "out" ? "You" : t.fromName.split(/[<·@]/)[0].trim()} ·{" "}
-                    {formatTime(new Date(t.sentAt))}
-                  </span>
-                </div>
+                <ThreadBubble key={t.id} t={t} />
               ))
             )}
             <div ref={threadEndRef} />
