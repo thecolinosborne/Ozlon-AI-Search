@@ -36,8 +36,8 @@ export function OutboxBadge({ onRetry }: OutboxBadgeProps) {
 
   if (count === 0) return null;
   return (
-    <div className="mx-4 lg:mx-6 my-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
-      <Send className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+    <div className="mx-4 lg:mx-6 my-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-card/60 border border-border/40 backdrop-blur-xl">
+      <Send className="w-3.5 h-3.5 text-primary shrink-0" />
       <p className="text-[12px] text-foreground/80 flex-1">
         {count} message{count === 1 ? "" : "s"} queued — will retry on next scan
       </p>
