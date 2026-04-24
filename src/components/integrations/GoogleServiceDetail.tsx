@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
 import { LucideIcon, Shield, Loader2, CheckCircle2, XCircle, ExternalLink, Settings2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
