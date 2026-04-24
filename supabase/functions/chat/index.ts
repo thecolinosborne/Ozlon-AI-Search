@@ -1,8 +1,15 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
+import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY as MODEL_REGISTRY_BASE, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
 import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
+
+// Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
+const MODEL_REGISTRY = MODEL_REGISTRY_BASE as unknown as Record<string, ModelEntry>;
+// Lovable AI Gateway key (used by web_search_google and a few helpers).
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
+// Local type for per-account alias entries used by tool routing.
+type AliasEntry = { alias: string; connectionId: string; provider?: string; email?: string };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
