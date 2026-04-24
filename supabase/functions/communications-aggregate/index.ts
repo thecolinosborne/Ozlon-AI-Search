@@ -76,10 +76,10 @@ async function fetchGmail(authHeader: string | null): Promise<CommMessage[]> {
   try {
     const list = (await invokeFn(
       "google-gmail",
-      { action: "list_messages", params: { maxResults: 15, labelIds: ["INBOX"] } },
+      { action: "list_messages", params: { maxResults: 100, labelIds: ["INBOX"] } },
       authHeader,
     )) as { messages?: Array<{ id: string; threadId: string }> };
-    const ids = (list.messages || []).slice(0, 15).map((m) => m.id);
+    const ids = (list.messages || []).slice(0, 100).map((m) => m.id);
     if (ids.length === 0) return [];
 
     const details = await Promise.all(
