@@ -1,79 +1,44 @@
-import { ChevronRight } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PriorityCard } from "./PriorityCard";
-import { BriefMeButton } from "./BriefMeButton";
-import type { DailyDigest, PriorityItem } from "@/hooks/useCommunicationsFeed";
+import type { DailyDigest } from "@/hooks/useCommunicationsFeed";
 
 interface HeroDigestProps {
   digest: DailyDigest;
   collapsed: boolean;
   greeting: string;
   onBrief: () => void;
-  onPriorityTap?: (p: PriorityItem) => void;
-  onReply?: (p: PriorityItem) => void;
-  onSnooze?: (p: PriorityItem) => void;
-  onDone?: (p: PriorityItem) => void;
 }
 
-export function HeroDigest({
-  digest,
-  collapsed,
-  greeting,
-  onBrief,
-  onPriorityTap,
-  onReply,
-  onSnooze,
-  onDone,
-}: HeroDigestProps) {
+/**
+ * Slimmed "Today rail" — desktop only. Just greeting + Brief button.
+ * Priorities now live inside the stream as the FocusStack.
+ */
+export function HeroDigest({ digest, collapsed, greeting, onBrief }: HeroDigestProps) {
   return (
     <div className="px-4 lg:px-6 pt-4 lg:pt-6">
       <div
         className={cn(
           "rounded-3xl bg-card/40 backdrop-blur-xl border border-border/30 shadow-card overflow-hidden transition-all duration-500 ease-out",
-          collapsed ? "p-3" : "p-5 lg:p-7",
+          collapsed ? "p-3" : "p-5",
         )}
       >
-        {collapsed ? (
-          <button
-            onClick={onBrief}
-            className="w-full flex items-center justify-between gap-3 text-left"
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-medium text-foreground truncate">{greeting}</span>
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground/70 shrink-0">
-                · {digest.priorities.length} priorities
-              </span>
-            </div>
-            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-          </button>
-        ) : (
-          <>
-            <h1 className="text-2xl lg:text-3xl font-semibold text-foreground leading-tight">
-              {greeting}
-            </h1>
-            <p className="mt-1 text-base lg:text-lg text-muted-foreground">{digest.heroLine}</p>
-            <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground/60">
-              {digest.subLine}
-            </p>
+        <h1 className="text-xl lg:text-2xl font-semibold text-foreground leading-tight">
+          {greeting}
+        </h1>
+        {digest.heroLine && digest.heroLine !== "Loading your day…" ? (
+          <p className="mt-1 text-[13px] text-muted-foreground leading-snug">
+            {digest.heroLine}
+          </p>
+        ) : null}
 
-            <div className="mt-4 space-y-2">
-              {digest.priorities.map((p) => (
-                <PriorityCard
-                  key={p.id}
-                  priority={p}
-                  onClick={onPriorityTap ? () => onPriorityTap(p) : undefined}
-                  onReply={onReply}
-                  onSnooze={onSnooze}
-                  onDone={onDone}
-                />
-              ))}
-            </div>
-
-            <div className="mt-5">
-              <BriefMeButton durationSec={45} onClick={onBrief} />
-            </div>
-          </>
-        )}
+        <button
+          onClick={onBrief}
+          className="mt-4 w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-full bg-primary/10 text-primary text-[12px] font-medium hover:bg-primary/20 active:scale-[0.99] transition-all"
+          aria-label="Play daily brief"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Brief me ({digest.briefDurationSec || 45}s)
+        </button>
       </div>
     </div>
   );
