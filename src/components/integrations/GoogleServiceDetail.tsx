@@ -292,15 +292,6 @@ export function GoogleServiceDetail({ config }: { config: GoogleServiceConfig })
           </div>
         )}
       </section>
-
-      {/* Footer link */}
-      <Link
-        to="/integrations/youtube"
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Manage Google Workspace OAuth
-        <ExternalLink className="w-3 h-3" />
-      </Link>
     </IntegrationDetailLayout>
   );
 }
