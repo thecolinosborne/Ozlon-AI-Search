@@ -615,7 +615,7 @@ Deno.serve(async (req) => {
 
   const [gmail, slack, ghl, userId] = await Promise.all([
     fetchGmail(authHeader),
-    fetchSlack(),
+    fetchSlack(authHeader),
     fetchGHL(authHeader),
     getUserId(authHeader),
   ]);
