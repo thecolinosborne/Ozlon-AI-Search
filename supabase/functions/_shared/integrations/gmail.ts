@@ -18,15 +18,68 @@ export const gmailIntegration: IntegrationManifest = {
     },
     {
       name: "gmail_create_filter",
-      description: "Create a Gmail filter. Confirm with user before creating destructive filters (auto-trash, auto-spam). criteria fields: from, to, subject, query, hasAttachment. action fields: addLabelIds (array), removeLabelIds (array), forward (email).",
+      description: "Create a Gmail filter. Provide BOTH `criteria` (what mail to match) AND `action` (what to do) as nested objects. To auto-trash: set action.addLabelIds=['TRASH']. To label+archive: set action.addLabelIds=['<labelId>'] and action.removeLabelIds=['INBOX']. Always confirm destructive filters (TRASH, SPAM) with user first.",
       action: "create_filter",
+      sideEffect: "write",
+      cost: "cheap",
+      requiresConfirmation: true,
       schema: {
         type: "object",
         properties: {
-          criteria: { type: "object", description: 'e.g. { "from": "noreply@stripe.com" } or { "subject": "Invoice" }' },
-          action: { type: "object", description: 'e.g. { "addLabelIds": ["Label_123"], "removeLabelIds": ["INBOX"] }' },
+          criteria: {
+            type: "object",
+            description: "Match rules. At least one field required.",
+            properties: {
+              from: { type: "string", description: "Sender email or domain" },
+              to: { type: "string", description: "Recipient email" },
+              subject: { type: "string", description: "Subject substring" },
+              query: { type: "string", description: "Raw Gmail search query (e.g. 'has:attachment older_than:1y')" },
+              hasAttachment: { type: "boolean" },
+              excludeChats: { type: "boolean" },
+              size: { type: "number" },
+            },
+          },
+          action: {
+            type: "object",
+            description: "What to do with matching mail.",
+            properties: {
+              addLabelIds: { type: "array", items: { type: "string" }, description: "Label IDs to add. Use 'TRASH' to auto-delete, 'SPAM' to mark spam, or a custom label ID." },
+              removeLabelIds: { type: "array", items: { type: "string" }, description: "Label IDs to remove. Use 'INBOX' to auto-archive, 'UNREAD' to auto-mark-read." },
+              forward: { type: "string", description: "Forward to this email address (must be a verified forwarding address)." },
+            },
+          },
         },
         required: ["criteria", "action"],
+      },
+      mapArgs: (args) => {
+        // If model already nested correctly, pass through.
+        const hasNestedCriteria = args.criteria && typeof args.criteria === "object";
+        const hasNestedAction = args.action && typeof args.action === "object";
+        if (hasNestedCriteria && hasNestedAction) return args;
+
+        // Defensive: re-nest flat args the model may have produced.
+        const a = args as Record<string, unknown>;
+        const criteria: Record<string, unknown> = (hasNestedCriteria ? a.criteria : {}) as Record<string, unknown>;
+        const action: Record<string, unknown> = (hasNestedAction ? a.action : {}) as Record<string, unknown>;
+
+        for (const k of ["from", "to", "subject", "query", "hasAttachment", "excludeChats", "size"]) {
+          if (a[k] !== undefined && criteria[k] === undefined) criteria[k] = a[k];
+        }
+        for (const k of ["addLabelIds", "removeLabelIds", "forward"]) {
+          if (a[k] !== undefined && action[k] === undefined) action[k] = a[k];
+        }
+        // Common shorthand: { trash: true } → addLabelIds: ['TRASH']
+        if (a.trash === true && !action.addLabelIds) action.addLabelIds = ["TRASH"];
+        if (a.archive === true) {
+          const remove = (action.removeLabelIds as string[] | undefined) ?? [];
+          if (!remove.includes("INBOX")) action.removeLabelIds = [...remove, "INBOX"];
+        }
+        if (a.markRead === true) {
+          const remove = (action.removeLabelIds as string[] | undefined) ?? [];
+          if (!remove.includes("UNREAD")) action.removeLabelIds = [...remove, "UNREAD"];
+        }
+
+        return { criteria, action };
       },
     },
     {
