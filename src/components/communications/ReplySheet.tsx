@@ -67,6 +67,72 @@ function slackChannelFor(m: CommMessage): { channel: string; ts?: string } {
   return { channel: parts[1] || "", ts: parts.slice(2).join(":") || undefined };
 }
 
+const TRUNCATE_AT = 800;
+const TRUNCATE_TO = 400;
+
+function splitQuoted(body: string): { main: string; quoted: string | null } {
+  const idx = body.indexOf("--- earlier ---");
+  if (idx === -1) return { main: body, quoted: null };
+  const main = body.slice(0, idx).trimEnd();
+  const quoted = body.slice(idx + "--- earlier ---".length).trim();
+  return { main, quoted: quoted.length > 0 ? quoted : null };
+}
+
+function ThreadBubble({ t }: { t: ThreadMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showQuoted, setShowQuoted] = useState(false);
+  const { main, quoted } = splitQuoted(t.body);
+  const isLong = main.length > TRUNCATE_AT;
+  const visible = isLong && !expanded ? `${main.slice(0, TRUNCATE_TO).trimEnd()}…` : main;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-0.5",
+        t.direction === "out" ? "items-end" : "items-start",
+      )}
+    >
+      <div
+        className={cn(
+          "max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words",
+          t.direction === "out"
+            ? "bg-primary/15 text-foreground border border-primary/20"
+            : "bg-background/60 text-foreground/90 border border-border/20",
+        )}
+      >
+        <Linkify text={visible} />
+        {isLong && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-1 text-[11px] font-medium text-primary hover:underline"
+          >
+            {expanded ? "Show less" : "Show full message"}
+          </button>
+        )}
+        {quoted && (
+          <div className="mt-2">
+            <button
+              onClick={() => setShowQuoted((v) => !v)}
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {showQuoted ? "Hide quoted history" : "Show quoted history"}
+            </button>
+            {showQuoted && (
+              <div className="mt-1.5 pl-2 border-l-2 border-border/40 text-[12.5px] text-muted-foreground/80 whitespace-pre-wrap">
+                <Linkify text={quoted} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <span className="text-[10px] text-muted-foreground/60 px-1">
+        {t.direction === "out" ? "You" : t.fromName.split(/[<·@]/)[0].trim()} ·{" "}
+        {formatTime(new Date(t.sentAt))}
+      </span>
+    </div>
+  );
+}
+
 export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplySheetProps) {
   const [draftText, setDraftText] = useState("");
   const [draftHtml, setDraftHtml] = useState("");
