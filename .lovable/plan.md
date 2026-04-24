@@ -1,29 +1,34 @@
+# Capability Gap Recovery — Universal Policy
+
 ## Goal
-Make the `google-gmail` edge function self-heal after Google scope changes, eliminating the manual reconnect dance after future scope expansions.
+Make Ozlon convert every non-transient tool failure into a buildable engineering spec, for ALL integrations (current + future). Prompt-only, zero infra changes.
 
-## Changes
+## Why scalable for everyone
+- Lives inside `buildSystemPrompt` in `supabase/functions/chat/index.ts` — applied to every user, every conversation, every tool call.
+- Triggers on the dispatcher's universal error envelope (`Tool X failed: ...`) which already wraps every integration uniformly via `_dispatcher.ts`.
+- No per-integration code: Gmail, Slack, ClickUp, GHL, Drive, Calendar, Sheets, Docs, GA, Plaid, Descript, and any future manifest dropped into `_shared/integrations/` automatically inherits the behavior.
 
-### 1. `supabase/functions/google-gmail/index.ts` — refactor `gFetch`
-- Change signature: `gFetch(token, path, init)` → `gFetch(userId, path, init, _retried = false)`
-- Inside `gFetch`:
-  - Call `getGoogleAccessToken(userId)` to obtain a fresh-enough token (helper already auto-refreshes near expiry).
-  - On `403` with body containing `ACCESS_TOKEN_SCOPE_INSUFFICIENT` / `insufficient authentication scopes` / `insufficient permission`, OR on `401 invalid_token`: call `forceRefreshGoogleToken(userId)` and retry **exactly once** (`_retried` flag prevents loops).
-  - If the second attempt still fails, throw a clear error instructing the user to reconnect Google in Integrations.
-- Import `forceRefreshGoogleToken` from `../_shared/google-token.ts`.
-- Remove the now-redundant `const token = await getGoogleAccessToken(userId);` line at the top of the `serve` handler (each `gFetch` call now owns token retrieval).
-- Mechanically replace all `gFetch(token,` call sites (~35) with `gFetch(userId,`.
+## Single change
+Insert a new `CAPABILITY GAP RECOVERY` section in `supabase/functions/chat/index.ts` between the `CORE ROLE` and `RESPONSE FORMATTING` sections (around line 5864).
 
-### 2. `.lovable/memory/features/gmail-scope-bundle.md` — append recovery flow
-Add a short "Auto-recovery" section noting that `google-gmail`'s `gFetch` wrapper detects scope-403 and calls `forceRefreshGoogleToken` automatically, so newly granted Gmail scopes take effect on the very next call.
+The section instructs Ozlon to:
+1. **Capture** the verbatim error.
+2. **Classify** into one of: `transient_api_failure`, `auth_gap`, `service_not_connected`, `schema_gap`, `tooling_gap`, `policy_block`.
+3. **Respond in two parts:**
+   - User-facing plain explanation + smallest next step.
+   - Markdown `### Capability Gap Report` with: `user_goal`, `attempted_tool`, `actual_error`, `gap_type`, `root_cause`, `minimum_fix`, `implementation_spec`, `fallback_options`, `retry_condition`.
+4. **Always offer a fallback** so the user keeps momentum.
+5. **Never** swallow errors, never repeat the same failed call unchanged, never emit the report for transient retries that succeeded.
 
-### 3. Deploy
-Deploy the `google-gmail` edge function so the change is live.
+## Verification
+1. Deploy `chat` edge function.
+2. Force a failure (e.g. call a tool with deliberately bad args via the chat UI) and confirm:
+   - User-facing explanation appears.
+   - `### Capability Gap Report` block is emitted with all fields.
+   - A fallback is suggested.
+3. Confirm a normal successful tool call does NOT emit the report.
 
-## Out of scope
-- No orchestrator, router, or chat function changes.
-- No new scopes (those landed in the prior change).
-- No changes to other Google services (gmail-only for now; pattern can be replicated later if needed).
-- No changes to the deletion policy — still trash-only.
+## Files touched
+- `supabase/functions/chat/index.ts` — single insertion (~50 lines) inside `buildSystemPrompt`.
 
-## Risk
-Low. `gFetch` is the single chokepoint; signature change is mechanical. Retry is bounded to one attempt by `_retried` flag. On terminal failure, the error message is clearer than today's.
+No DB migrations, no new edge functions, no schema changes.
