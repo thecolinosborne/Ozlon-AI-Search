@@ -1,70 +1,97 @@
 
 
-## Two fixes — clickable links + Slack restored
+## Communications Hub — Next-Gen Pass
 
-### What's actually broken
-
-**1. Long URLs aren't clickable.** Every place we render message bodies (thread bubbles in `ReplySheet`, message previews in `MessageRow`, fallback content) uses `whitespace-pre-wrap` on plain text. URLs render as inert characters. Same for email addresses and `@mentions`.
-
-**2. Slack is silently empty.** The DB confirms zero Slack rows. Edge logs show **70+ `missing_scope` errors** — the Slack connector is missing `im:history` (and likely `mpim:history`/`groups:history` for some channel types). The aggregator's `slackReason` diagnostic flag exists but is **never rendered anywhere in the UI** — confirmed by grep. So Slack appears broken with no explanation.
+Three surgical upgrades. No redesign of the rest of the app. Everything additive, all behind the existing `/communications` route.
 
 ---
 
-### Fix 1 — Linkify everything that renders message text
+### 1. Kill the summary, give the page a real spine
 
-Add a tiny `Linkify` component that takes a string and returns React nodes with:
-- `https?://…` and bare `www.…` → `<a target="_blank" rel="noopener noreferrer">` with truncated display (max 48 chars, ellipsis in the middle: `https://example.com/…/path?q=1`)
-- Email addresses → `mailto:` links
-- Slack-style `<https://x|label>` → use the label as the visible text
-- Preserves existing line breaks (replaces `whitespace-pre-wrap` rendering)
+**Remove on mobile:** `CompactBriefStrip` is gone. The hero section is the message stream itself.
 
-Apply in:
-- `ReplySheet.tsx` — thread bubbles (line ~360) and fallback preview (line ~340)
-- `MessageRow.tsx` — preview line (lines ~75 and ~80)
-- `PriorityCard.tsx` — `what` field
+**Demote on desktop:** `HeroDigest` becomes a thin **"Today" rail** docked into the left column — just the greeting + a single inline `Brief me (45s)` button. No priorities list, no big card. The Brief overlay still exists if the user taps it. Priorities live inside the stream now (see #2).
 
-Also strip Slack's `<https://url|label>` syntax in the aggregator's preview transform so the raw `<…|…>` doesn't show in the row.
+**New top of stream:** a one-line **smart summary chip** above the message list:
+> "12 unread · 3 need reply · Slack quiet today" — generated from already-loaded data, no extra fetch. Tap → filters to "needs reply".
 
-**Email rendering bonus:** for Gmail thread bubbles where the original message was HTML, the current `stripHtml()` in `communications-thread` flattens it to plaintext. Keep that behavior (sanitization safety) but rely on Linkify to make the resulting URLs clickable. No raw HTML rendering — too risky without DOMPurify.
+This reclaims ~40% of the viewport for the actual inbox, which is what the user comes here for.
 
 ---
 
-### Fix 2 — Bring Slack back + tell the user what's going on
+### 2. The "wow" interaction: AI-ranked **Focus Stack**
 
-**a. Surface the diagnostic.** Add a one-line `SlackStatusBanner` directly under the channel chips when `diagnostics.partial && diagnostics.sources.slack === 0`:
+Replace the current flat stream's top section with a **Focus Stack** — the top 3 messages the AI thinks matter most, rendered as full-width tactile cards with three actions baked in:
 
-> "Slack messages can't load — missing `im:history` scope. **Fix scopes →**" (links to `/integrations/slack`)
+```text
+┌──────────────────────────────────────────────┐
+│  ●  Sarah Chen — Acme Q3 contract             │
+│     "Need your sign-off before Friday EOD"    │
+│     · email · 2h ago · high                   │
+│                                                │
+│   [ ✨ Reply with AI ]  [ Snooze 1h ]  [ ✓ ]  │
+└──────────────────────────────────────────────┘
+```
 
-Quiet, not alarming — same translucent card aesthetic. Dismissible per-session.
+- **One-tap "Reply with AI"** opens `ReplySheet` *with the suggested draft already in the editor*. Already wired in `useCommunicationsFeed` — we just promote it from a dim PriorityCard into a hero row.
+- **Snooze / Done** chips work without opening the sheet. Already wired.
+- Cards use the channel tint as a left edge accent (1.5px), urgency dot top-left.
 
-**b. Map error reasons to friendly text** in the aggregator: instead of just `"timeout"` or `"error"`, capture `missing_scope` from Slack responses and bubble up `{ reason: "missing_scope", scope: "im:history" }` so the banner can say exactly what to fix.
+Below the Focus Stack, a clean divider ("Everything else") and the existing `UnifiedStream`. Same component, no rewrite.
 
-**c. Don't let one channel type kill the rest.** Currently when `conversations.history` fails for IMs, the IM channel returns no messages, but public/private channel history still works. Verify the per-channel `Promise.all` in `fetchSlackInner` actually catches per-call failures (it does via `slackGateway` returning `null`) — so public/group messages should still appear. The 70+ errors all being IMs explains the empty result: this user has only DMs in their workspace.
+---
 
-**d. Add a manual "request scope" hint on the Slack integration page.** The user can already manage scopes in Connectors, but the Communications page should deep-link them straight there. Add a copy of the exact scopes list needed: `im:history, mpim:history, groups:history` (channels:history is already granted).
+### 3. Make replies actually work + readable threads
+
+**Fix A — the Reply button doesn't fire.** Edge logs show **zero invocations** of `communications-send`. The button calls `supabase.functions.invoke("communications-send", { body })` but the function requires an `Authorization` header and **the supabase-js client doesn't auto-attach the session JWT for `functions.invoke` in some browser cases** when there's no `apikey`. We'll explicitly grab the session and forward the access token in the invoke headers, plus add a visible toast on the catch path so failures stop being silent. Also add a one-line console.error tag so future debugging is instant.
+
+**Fix B — HTML soup in email threads.** Today `stripHtml()` in `communications-thread` flattens HTML into plain text but leaves orphaned CSS classes, tracking-pixel alt text, and table layout artifacts. We'll do three things:
+
+1. **Server side (`communications-thread`):** before stripping, drop `<head>`, `<style>`, `<svg>`, `<img>` (keep alt only if meaningful), and collapse repeated whitespace/zero-width chars. Strip Outlook/Gmail quote blocks (`<blockquote class="gmail_quote">`, `On ___ wrote:`) into a single collapsible `--- earlier ---` marker.
+2. **Client side (`ReplySheet` thread bubbles):** if the cleaned body is >800 chars, show first 400 with a **"Show full message"** chevron. Marketing emails stop dominating the sheet.
+3. **Quoted history collapse:** any text matching `On ___ wrote:` or `> ` line patterns gets folded into a "Show quoted history" toggle. Standard mail-client UX.
+
+**Fix C — composer UX.** Two small things:
+- The "AI draft ready" sparkle pulses while drafting; after first draft, pulse **once** then go solid. Currently it pulses forever when `isDrafting` flickers.
+- Send button gets a loading spinner inline + disabled state. Today it's a flat send icon with no feedback.
+
+---
+
+### 4. Scalability hooks (no UI cost)
+
+While we're in here, three small architectural moves so this scales as channels grow:
+
+- **Channel registry** in `src/components/communications/channels.ts` — `{ source, channel, label, tint, icon, send: (body) => Promise }`. Today the send pipeline switches on `source` in three places (ReplySheet, communications-send, MessageRow). One registry; new channels (Discord, Teams, WhatsApp later) drop in with one entry.
+- **Triage cache key tied to stream hash** — currently `["communications", "triage"]` refetches every 2 min regardless. Key on the top-20 message IDs so it only re-runs when there's actually new mail. Cuts AI cost ~80%.
+- **Outbox surfaced inline** — when `communications-send` fails it already writes to `communications_outbox` (table exists). Add a tiny "1 message queued · retry" pill at the bottom of the stream when the outbox is non-empty. Auto-retry on next `Scan`.
 
 ---
 
 ### Files touched
 
-- `src/lib/linkify.tsx` — new utility component
-- `src/components/communications/MessageRow.tsx` — wrap preview in Linkify
-- `src/components/communications/ReplySheet.tsx` — wrap thread bubbles + fallback in Linkify
-- `src/components/communications/PriorityCard.tsx` — wrap `what` text
-- `src/components/communications/SlackStatusBanner.tsx` — new diagnostic banner
-- `src/pages/Communications.tsx` — render banner, pass diagnostics
-- `supabase/functions/communications-aggregate/index.ts` — capture `missing_scope` reason + scope name into `diagnostics.slackReason`
+- `src/pages/Communications.tsx` — drop `CompactBriefStrip`, render Focus Stack + summary chip
+- `src/components/communications/CompactBriefStrip.tsx` — delete
+- `src/components/communications/HeroDigest.tsx` — slim to "Today rail" (greeting + Brief button only)
+- `src/components/communications/FocusStack.tsx` — new (3 hero cards, urgency-ranked)
+- `src/components/communications/SummaryChip.tsx` — new (one-line counts above stream)
+- `src/components/communications/OutboxBadge.tsx` — new (queued retry pill)
+- `src/components/communications/ReplySheet.tsx` — fix invoke auth, send-button spinner, quoted-history collapse
+- `src/components/communications/channels.ts` — new (channel registry)
+- `src/hooks/useCommunicationsFeed.ts` — triage cache key tied to stream hash
+- `supabase/functions/communications-thread/index.ts` — better HTML cleaner, drop `<head>/<style>/<svg>/<img>`, fold quoted history
+- `supabase/functions/communications-send/index.ts` — log invocation entrypoint for debugging
 
-No schema changes. No new dependencies.
+No DB migrations. No new dependencies. All existing routes/keyboard shortcuts/voice mic preserved.
 
 ---
 
 ### Verification
 
-- Open any Gmail thread with a long marketing URL → the URL appears truncated with ellipsis and is clickable, opens in a new tab.
-- Open a Slack thread containing `<https://docs.example.com/long-path|the docs>` → renders as the word "the docs" as a hyperlink.
-- A message with `mailto:foo@bar.com` in the body → clickable email link.
-- On the Communications page right now (Slack scope missing), a quiet banner appears under the channel chips: "Slack can't load — missing scope `im:history`. Fix scopes →" linking to the connector settings.
-- After granting `im:history` in Connectors and tapping Scan → Slack DMs populate and the banner disappears.
-- No double-render: links are not re-escaped or clipped by line-clamp at the wrong place.
+- Open `/communications` on mobile — no summary card visible. Stream starts ~14px below the header. Top 3 priority cards have inline `Reply / Snooze / Done`.
+- Tap "Reply with AI" on a priority card → `ReplySheet` opens with the AI draft already in the editor (not blank).
+- Type a reply, hit send → spinner shows, message lands in `communications_messages` (visible in DB) within ~2s and a toast confirms `Sent via Gmail`. If it fails, an error toast shows the actual reason (no more silent failure).
+- Open a marketing email thread → no raw CSS class names, no inline `<style>` text, no `[image:0]` markers. Long emails truncate to first 400 chars with "Show full message".
+- Replies to threaded Gmail conversations fold the prior history into a "Show quoted history" toggle.
+- Tap the summary chip "3 need reply" → stream filters; tap again → unfilters.
+- Disconnect network, send a message → "1 message queued" pill appears; reconnect + Scan → it sends and pill disappears.
 
