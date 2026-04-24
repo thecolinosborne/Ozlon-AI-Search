@@ -76,10 +76,10 @@ async function fetchGmail(authHeader: string | null): Promise<CommMessage[]> {
   try {
     const list = (await invokeFn(
       "google-gmail",
-      { action: "list_messages", params: { maxResults: 15, labelIds: ["INBOX"] } },
+      { action: "list_messages", params: { maxResults: 100, labelIds: ["INBOX"] } },
       authHeader,
     )) as { messages?: Array<{ id: string; threadId: string }> };
-    const ids = (list.messages || []).slice(0, 15).map((m) => m.id);
+    const ids = (list.messages || []).slice(0, 100).map((m) => m.id);
     if (ids.length === 0) return [];
 
     const details = await Promise.all(
@@ -286,14 +286,14 @@ async function listChannelsForType(
   return out;
 }
 
-const SLACK_TIMEOUT_MS = 8000;
+const SLACK_TIMEOUT_MS = 20000;
 const PER_TYPE_BUDGETS: Record<string, number> = {
-  im: 25,
-  mpim: 10,
-  private_channel: 15,
-  public_channel: 10,
+  im: 200,
+  mpim: 100,
+  private_channel: 100,
+  public_channel: 100,
 };
-const HISTORY_LIMIT = 15;
+const HISTORY_LIMIT = 50;
 
 function fmtUser(u: SlackUser | undefined): string | undefined {
   if (!u) return undefined;
