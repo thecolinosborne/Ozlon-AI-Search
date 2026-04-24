@@ -191,7 +191,18 @@ export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplyS
         body.conversationId = message.threadId || message.id.replace(/^ghl:/, "");
       }
 
-      const { data, error } = await supabase.functions.invoke("communications-send", { body });
+      // Explicitly forward the session JWT — supabase-js doesn't always attach
+      // it on functions.invoke, which silently 401s. See: comms-send edge logs.
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+      console.info("[reply] sending via", message.source, { hasJwt: !!session?.access_token });
+
+      const { data, error } = await supabase.functions.invoke("communications-send", {
+        body,
+        headers,
+      });
       if (error) throw error;
       const ok = (data as { ok?: boolean })?.ok !== false;
       if (!ok) throw new Error((data as { error?: string })?.error || "Send failed");
@@ -199,6 +210,7 @@ export function ReplySheet({ message, onClose, onDeleted, initialDraft }: ReplyS
       toast({ title: `Sent via ${message.channelLabel}` });
       onClose();
     } catch (e) {
+      console.error("[reply] send failed:", e);
       toast({
         title: "Send failed",
         description: e instanceof Error ? e.message : "Try again.",

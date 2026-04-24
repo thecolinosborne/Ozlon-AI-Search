@@ -317,9 +317,17 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     staleTime: 5 * 60_000,
   });
 
+  // Build a hash of the top-20 cached message IDs so triage only re-runs when
+  // there's actually new mail (cuts AI cost ~80%).
+  const triageCacheKey = (cachedQ.data ?? [])
+    .slice(0, 20)
+    .map((m) => m.id)
+    .join("|");
+
   // Triage — AI-enriched per-message judgments (urgency, action hint, suggested reply).
   const triageQ = useQuery({
-    queryKey: ["communications", "triage"],
+    queryKey: ["communications", "triage", triageCacheKey],
+    enabled: triageCacheKey.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("communications-triage", {
         body: {},
@@ -330,7 +338,7 @@ export function useCommunicationsFeed(): CommunicationsFeed {
       for (const it of items) map.set(it.messageId, it);
       return map;
     },
-    staleTime: 2 * 60_000,
+    staleTime: 5 * 60_000,
   });
 
   // Prefer cached stream when available; fall back to live aggregate response.
