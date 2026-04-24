@@ -156,7 +156,7 @@ serve(async (req) => {
         if (q) qs.set("q", q);
         if (labelIds && labelIds.length) qs.set("labelIds", labelIds.join(","));
         if (pageToken) qs.set("pageToken", pageToken);
-        const data = await gFetch(token, `/messages?${qs.toString()}`);
+        const data = await gFetch(userId, `/messages?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
@@ -164,7 +164,7 @@ serve(async (req) => {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
         const format = String((params as AnyJson).format || "full");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}?format=${format}`);
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}?format=${format}`);
         return jsonOk({ success: true, message: data });
       }
 
@@ -187,7 +187,7 @@ serve(async (req) => {
         const raw = buildRawEmail(hdrs, body, { html, inReplyTo, references });
         const sendBody: AnyJson = { raw };
         if (threadId) sendBody.threadId = threadId;
-        const data = await gFetch(token, "/messages/send", {
+        const data = await gFetch(userId, "/messages/send", {
           method: "POST",
           body: JSON.stringify(sendBody),
         });
@@ -197,12 +197,12 @@ serve(async (req) => {
       case "trash_message": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/trash`, { method: "POST" });
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/trash`, { method: "POST" });
         return jsonOk({ success: true, message: data });
       }
 
       case "list_labels": {
-        const data = await gFetch(token, "/labels");
+        const data = await gFetch(userId, "/labels");
         return jsonOk({ success: true, ...data });
       }
 
@@ -210,7 +210,7 @@ serve(async (req) => {
       case "untrash_message": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/untrash`, { method: "POST" });
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/untrash`, { method: "POST" });
         return jsonOk({ success: true, message: data });
       }
 
@@ -219,7 +219,7 @@ serve(async (req) => {
         if (!id) return jsonErr("id is required");
         const addLabelIds = (params as AnyJson).addLabelIds as string[] | undefined;
         const removeLabelIds = (params as AnyJson).removeLabelIds as string[] | undefined;
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }),
         });
@@ -234,7 +234,7 @@ serve(async (req) => {
         qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
         if (q) qs.set("q", q);
         if (pageToken) qs.set("pageToken", pageToken);
-        const data = await gFetch(token, `/threads?${qs.toString()}`);
+        const data = await gFetch(userId, `/threads?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
@@ -242,7 +242,7 @@ serve(async (req) => {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
         const format = String((params as AnyJson).format || "full");
-        const data = await gFetch(token, `/threads/${encodeURIComponent(id)}?format=${format}`);
+        const data = await gFetch(userId, `/threads/${encodeURIComponent(id)}?format=${format}`);
         return jsonOk({ success: true, thread: data });
       }
 
@@ -255,7 +255,7 @@ serve(async (req) => {
         const raw = buildRawEmail(hdrs, body);
         const draftBody: AnyJson = { message: { raw } };
         if (threadId) (draftBody.message as AnyJson).threadId = threadId;
-        const data = await gFetch(token, "/drafts", { method: "POST", body: JSON.stringify(draftBody) });
+        const data = await gFetch(userId, "/drafts", { method: "POST", body: JSON.stringify(draftBody) });
         return jsonOk({ success: true, draft: data });
       }
 
@@ -265,14 +265,14 @@ serve(async (req) => {
         const qs = new URLSearchParams();
         qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
         if (pageToken) qs.set("pageToken", pageToken);
-        const data = await gFetch(token, `/drafts?${qs.toString()}`);
+        const data = await gFetch(userId, `/drafts?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
       case "send_draft": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, "/drafts/send", {
+        const data = await gFetch(userId, "/drafts/send", {
           method: "POST",
           body: JSON.stringify({ id }),
         });
@@ -282,7 +282,7 @@ serve(async (req) => {
       case "delete_draft": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        await gFetch(token, `/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await gFetch(userId, `/drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
         return jsonOk({ success: true });
       }
 
@@ -302,7 +302,7 @@ serve(async (req) => {
         const raw = buildRawEmail(hdrs, body);
         const msgBody: AnyJson = { raw };
         if (threadId) msgBody.threadId = threadId;
-        const data = await gFetch(token, "/messages/send", { method: "POST", body: JSON.stringify(msgBody) });
+        const data = await gFetch(userId, "/messages/send", { method: "POST", body: JSON.stringify(msgBody) });
         return jsonOk({ success: true, message: data });
       }
 
@@ -315,12 +315,12 @@ serve(async (req) => {
         qs.set("q", q);
         qs.set("maxResults", String(Math.min(100, Math.max(1, maxResults))));
         if (pageToken) qs.set("pageToken", pageToken);
-        const data = await gFetch(token, `/messages?${qs.toString()}`);
+        const data = await gFetch(userId, `/messages?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
       case "get_profile": {
-        const data = await gFetch(token, "/profile");
+        const data = await gFetch(userId, "/profile");
         return jsonOk({ success: true, profile: data });
       }
 
@@ -329,7 +329,7 @@ serve(async (req) => {
         if (!ids || !ids.length) return jsonErr("ids array is required");
         const addLabelIds = (params as AnyJson).addLabelIds as string[] | undefined;
         const removeLabelIds = (params as AnyJson).removeLabelIds as string[] | undefined;
-        const data = await gFetch(token, "/messages/batchModify", {
+        const data = await gFetch(userId, "/messages/batchModify", {
           method: "POST",
           body: JSON.stringify({ ids, addLabelIds: addLabelIds || [], removeLabelIds: removeLabelIds || [] }),
         });
@@ -343,13 +343,13 @@ serve(async (req) => {
         const qs = new URLSearchParams();
         qs.set("startHistoryId", startHistoryId);
         qs.set("maxResults", String(Math.min(500, Math.max(1, maxResults))));
-        const data = await gFetch(token, `/history?${qs.toString()}`);
+        const data = await gFetch(userId, `/history?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
       // ── Tier 1: Filters ──
       case "list_filters": {
-        const data = await gFetch(token, "/settings/filters");
+        const data = await gFetch(userId, "/settings/filters");
         return jsonOk({ success: true, ...(data as AnyJson) });
       }
 
@@ -357,7 +357,7 @@ serve(async (req) => {
         const criteria = (params as AnyJson).criteria as AnyJson | undefined;
         const action = (params as AnyJson).action as AnyJson | undefined;
         if (!criteria || !action) return jsonErr("criteria and action are required");
-        const data = await gFetch(token, "/settings/filters", {
+        const data = await gFetch(userId, "/settings/filters", {
           method: "POST",
           body: JSON.stringify({ criteria, action }),
         });
@@ -367,20 +367,20 @@ serve(async (req) => {
       case "delete_filter": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        await gFetch(token, `/settings/filters/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await gFetch(userId, `/settings/filters/${encodeURIComponent(id)}`, { method: "DELETE" });
         return jsonOk({ success: true });
       }
 
       case "get_filter": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/settings/filters/${encodeURIComponent(id)}`);
+        const data = await gFetch(userId, `/settings/filters/${encodeURIComponent(id)}`);
         return jsonOk({ success: true, filter: data });
       }
 
       // ── Tier 1: Vacation / Vacation Responder ──
       case "get_vacation": {
-        const data = await gFetch(token, "/settings/vacation");
+        const data = await gFetch(userId, "/settings/vacation");
         return jsonOk({ success: true, vacation: data });
       }
 
@@ -401,7 +401,7 @@ serve(async (req) => {
         };
         if (startTime) body.startTime = startTime;
         if (endTime) body.endTime = endTime;
-        const data = await gFetch(token, "/settings/vacation", {
+        const data = await gFetch(userId, "/settings/vacation", {
           method: "PUT",
           body: JSON.stringify(body),
         });
@@ -410,7 +410,7 @@ serve(async (req) => {
 
       // ── Tier 1: SendAs / Signatures ──
       case "list_send_as": {
-        const data = await gFetch(token, "/settings/sendAs");
+        const data = await gFetch(userId, "/settings/sendAs");
         return jsonOk({ success: true, ...(data as AnyJson) });
       }
 
@@ -442,7 +442,7 @@ serve(async (req) => {
         };
         if (originalMessageId) hdrs["References"] = originalMessageId;
         const raw = buildRawEmail(hdrs, body);
-        const data = await gFetch(token, "/messages/send", {
+        const data = await gFetch(userId, "/messages/send", {
           method: "POST",
           body: JSON.stringify({ raw }),
         });
@@ -478,7 +478,7 @@ serve(async (req) => {
         if (cc) hdrs["Cc"] = cc;
         if (bcc) hdrs["Bcc"] = bcc;
         const raw = buildRawEmailWithAttachments(hdrs, body, attachments);
-        const data = await gFetch(token, "/messages/send", {
+        const data = await gFetch(userId, "/messages/send", {
           method: "POST",
           body: JSON.stringify({ raw }),
         });
@@ -489,7 +489,7 @@ serve(async (req) => {
       case "star_message": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: ["STARRED"], removeLabelIds: [] }),
         });
@@ -499,7 +499,7 @@ serve(async (req) => {
       case "unstar_message": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["STARRED"] }),
         });
@@ -509,7 +509,7 @@ serve(async (req) => {
       case "mark_read": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["UNREAD"] }),
         });
@@ -519,7 +519,7 @@ serve(async (req) => {
       case "mark_unread": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: ["UNREAD"], removeLabelIds: [] }),
         });
@@ -529,7 +529,7 @@ serve(async (req) => {
       case "mark_important": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: ["IMPORTANT"], removeLabelIds: [] }),
         });
@@ -540,7 +540,7 @@ serve(async (req) => {
         // archive = remove INBOX label (gmail-deletion-policy compliant: never hard-delete)
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        const data = await gFetch(token, `/messages/${encodeURIComponent(id)}/modify`, {
+        const data = await gFetch(userId, `/messages/${encodeURIComponent(id)}/modify`, {
           method: "POST",
           body: JSON.stringify({ addLabelIds: [], removeLabelIds: ["INBOX"] }),
         });
@@ -551,7 +551,7 @@ serve(async (req) => {
       case "create_label": {
         const name = String((params as AnyJson).name || "");
         if (!name) return jsonErr("name is required");
-        const data = await gFetch(token, "/labels", {
+        const data = await gFetch(userId, "/labels", {
           method: "POST",
           body: JSON.stringify({
             name,
@@ -565,7 +565,7 @@ serve(async (req) => {
       case "delete_label": {
         const id = String((params as AnyJson).id || "");
         if (!id) return jsonErr("id is required");
-        await gFetch(token, `/labels/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await gFetch(userId, `/labels/${encodeURIComponent(id)}`, { method: "DELETE" });
         return jsonOk({ success: true });
       }
 
