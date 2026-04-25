@@ -5207,18 +5207,54 @@ async function executeToolCall(
           }
 
           if (!tavilyRes || !tavilyRes.ok) {
-            const errText = tavilyRes ? await tavilyRes.text().catch(() => '') : 'All attempts failed';
-            console.error('[deep_research] Tavily error after retries:', errText);
+            const errText = tavilyRes ? await tavilyRes.text().catch(() => '') : 'All attempts failed (network)';
+            const status = tavilyRes?.status ?? 'network';
+            console.error('[deep_research] Tavily error after retries:', status, errText);
             if (adminClient && taskRowId) {
               await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
             }
-            return { success: false, result: `Research search failed: ${tavilyRes?.status ?? 'network error'}` };
+            return { success: false, result: `Tool deep_research failed: Tavily returned ${status}. Body: ${String(errText).slice(0, 400)}` };
           }
 
           const tavilyData = await tavilyRes.json();
-          const results = tavilyData.results || [];
-          const tavilyAnswer = tavilyData.answer || '';
-          console.log(`[deep_research] Found ${results.length} sources`);
+          let results = tavilyData.results || [];
+          let tavilyAnswer = tavilyData.answer || '';
+          console.log(`[deep_research] Tavily found ${results.length} sources`);
+
+          // Firecrawl fallback: if Tavily returned no results, try Firecrawl /search.
+          const FIRECRAWL_KEY = Deno.env.get('FIRECRAWL_API_KEY');
+          if (results.length === 0 && FIRECRAWL_KEY) {
+            console.log('[deep_research] Tavily returned 0 results; falling back to Firecrawl search');
+            try {
+              const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, limit: maxResults }),
+              });
+              if (fcRes.ok) {
+                const fcData = await fcRes.json();
+                const fcResults = fcData?.data || fcData?.web?.results || [];
+                results = fcResults.map((r: { url: string; title?: string; description?: string; markdown?: string }) => ({
+                  url: r.url,
+                  title: r.title || r.url,
+                  content: r.markdown || r.description || '',
+                }));
+                console.log(`[deep_research] Firecrawl fallback returned ${results.length} sources`);
+              } else {
+                const fcErr = await fcRes.text().catch(() => '');
+                console.warn(`[deep_research] Firecrawl fallback ${fcRes.status}: ${fcErr.slice(0, 300)}`);
+              }
+            } catch (e) {
+              console.warn('[deep_research] Firecrawl fallback threw:', e);
+            }
+          }
+
+          if (results.length === 0) {
+            if (adminClient && taskRowId) {
+              await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
+            }
+            return { success: false, result: `Tool deep_research returned no results for "${query}". Both Tavily and Firecrawl came back empty. Try a more specific query, different keywords, or a narrower geography/time window.` };
+          }
 
           // Build source context for GPT synthesis
           const sourcesForPrompt = results.map((r: { title: string; url: string; content: string }, i: number) =>
