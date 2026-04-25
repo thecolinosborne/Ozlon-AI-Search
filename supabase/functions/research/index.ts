@@ -243,9 +243,9 @@ async function cacheGet(userId: string, key: string): Promise<unknown | null> {
   }
 }
 
-async function cacheSet(userId: string, key: string, action: string, payload: unknown): Promise<void> {
+async function cacheSet(userId: string, key: string, action: string, payload: unknown, ttlMsOverride?: number): Promise<void> {
   try {
-    const ttl = CACHE_TTL_MS[action];
+    const ttl = ttlMsOverride ?? CACHE_TTL_MS[action];
     if (!ttl) return;
     const admin = createClient(supabaseUrl, serviceKey);
     await admin.from("research_cache").upsert({
