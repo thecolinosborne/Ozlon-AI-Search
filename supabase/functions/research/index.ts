@@ -1001,6 +1001,12 @@ Deno.serve(async (req) => {
       succeeded = attempted;
       resultCount = (r.citations as unknown[]).length;
       result = r;
+    } else if (action === "web_recall") {
+      attempted = ["embedding", "supabase"];
+      const r = await handleWebRecall(params, userId);
+      succeeded = attempted;
+      resultCount = (r.matches as unknown[]).length;
+      result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
     }
