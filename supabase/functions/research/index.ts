@@ -584,7 +584,7 @@ async function handleWebAnswer(params: Record<string, unknown>, userId: string) 
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing for synthesis");
 
   // Stage 1: search
-  const search = await handleWebSearch({ query, maxResults: 8, contextHint: params.contextHint });
+  const search = await handleWebSearch({ query, maxResults: 8, contextHint: params.contextHint }, userId);
   const topUrls = search.results.slice(0, 3).map((r) => r.url);
 
   // Stage 2: enrich top 3
