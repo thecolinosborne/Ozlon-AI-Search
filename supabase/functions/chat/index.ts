@@ -7222,11 +7222,12 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string; toolsUsed: string[] }> {
+): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }> }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
   const toolsUsed: string[] = [];
+  const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
 
   while (iteration < maxIterations) {
     iteration++;
@@ -7445,7 +7446,7 @@ async function runToolLoop(
 
           // Auto-upgrade web_investigate → streaming variant for live progress.
           // Falls back to blocking dispatch on any error.
-          let result: { success: boolean; result: string } | null = null;
+          let result: { success: boolean; result: string; structured?: Record<string, unknown> } | null = null;
           if (tc.function.name === 'web_investigate' && onTaskUpdate) {
             const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
             if (authHeader) {
@@ -7462,6 +7463,14 @@ async function runToolLoop(
             result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
           }
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
+
+          // Capture structured investigation payload for artifact persistence.
+          if (tc.function.name === 'web_investigate' && result.success && result.structured) {
+            investigations.push({
+              question: (args.query as string) || '',
+              payload: result.structured,
+            });
+          }
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
