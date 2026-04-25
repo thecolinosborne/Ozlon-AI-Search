@@ -6864,6 +6864,158 @@ interface TaskUpdateEvent {
   summary?: string;
 }
 
+// ============================================================================
+// STREAMING WEB INVESTIGATE — auto-upgrade web_investigate tool calls to the
+// SSE variant (web_investigate_stream) and forward each event as a task_update
+// to the chat client. Falls back to null on any error so caller can use the
+// blocking dispatcher path.
+// ============================================================================
+async function streamWebInvestigate(
+  args: Record<string, unknown>,
+  authHeader: string,
+  taskId: string,
+  emit: (e: TaskUpdateEvent) => void | Promise<void>,
+): Promise<{ success: boolean; result: string } | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!supabaseUrl || !anonKey) return null;
+
+  let res: Response;
+  try {
+    res = await fetch(`${supabaseUrl}/functions/v1/research`, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'apikey': anonKey,
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify({
+        action: 'web_investigate_stream',
+        query: args.query,
+        contextHint: args.contextHint,
+      }),
+    });
+  } catch (e) {
+    console.warn('[streamWebInvestigate] fetch failed:', e);
+    return null;
+  }
+
+  if (!res.ok || !res.body) {
+    console.warn(`[streamWebInvestigate] bad response: ${res.status}`);
+    return null;
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('text/event-stream')) {
+    // Stream variant not supported — let blocking path handle it.
+    return null;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let currentEvent = 'message';
+  let finalPayload: Record<string, unknown> | null = null;
+  let errorMsg: string | null = null;
+  const subQueryCount: { n: number } = { n: 0 };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith(':')) continue;
+        if (t.startsWith('event: ')) {
+          currentEvent = t.slice(7).trim();
+          continue;
+        }
+        if (!t.startsWith('data: ')) continue;
+        const dataStr = t.slice(6);
+        let data: Record<string, unknown> = {};
+        try { data = JSON.parse(dataStr); } catch { continue; }
+
+        // Map SSE events → task_update steps
+        try {
+          switch (currentEvent) {
+            case 'started':
+              await emit({ taskId, title: '', step: 'Planning investigation', status: 'in_progress' });
+              break;
+            case 'recall_hit':
+              await emit({ taskId, title: '', step: 'Found recent matching investigation', status: 'done' });
+              break;
+            case 'plan_ready': {
+              const subs = Array.isArray(data.sub_queries) ? data.sub_queries.length : 0;
+              await emit({ taskId, title: '', step: `Planned ${subs} sub-quer${subs === 1 ? 'y' : 'ies'}`, status: 'done' });
+              break;
+            }
+            case 'subquery_done': {
+              subQueryCount.n += 1;
+              const q = (data.query as string) || `sub-query ${subQueryCount.n}`;
+              const short = q.length > 60 ? q.slice(0, 57) + '…' : q;
+              await emit({ taskId, title: '', step: `Searched: ${short}`, status: 'done' });
+              break;
+            }
+            case 'enrich_start':
+              await emit({ taskId, title: '', step: 'Reading top sources', status: 'in_progress' });
+              break;
+            case 'enrich_done': {
+              const n = (data.document_count as number) ?? 0;
+              await emit({ taskId, title: '', step: `Read ${n} document${n === 1 ? '' : 's'}`, status: 'done' });
+              break;
+            }
+            case 'synthesis_start':
+              await emit({ taskId, title: '', step: 'Synthesizing answer', status: 'in_progress' });
+              break;
+            case 'critique_done':
+              await emit({ taskId, title: '', step: 'Self-critique complete', status: 'done' });
+              break;
+            case 'done':
+              finalPayload = data;
+              break;
+            case 'error':
+              errorMsg = (data.error as string) || 'Investigation stream error';
+              break;
+          }
+        } catch (e) {
+          console.warn('[streamWebInvestigate] emit failed:', e);
+        }
+        currentEvent = 'message';
+      }
+    }
+  } catch (e) {
+    console.warn('[streamWebInvestigate] read loop error:', e);
+    return null;
+  }
+
+  if (errorMsg && !finalPayload) {
+    return { success: false, result: `Investigation failed: ${errorMsg}` };
+  }
+  if (!finalPayload) {
+    return null; // incomplete — let caller fall back
+  }
+
+  // Format final payload using the same shape web_investigate returns.
+  const d = finalPayload as {
+    answer?: string;
+    citations?: Array<{ index: number; url: string; title: string }>;
+    sub_queries?: Array<{ query: string; intent: string }>;
+    confidence?: number;
+    gaps?: string[];
+  };
+  if (!d.answer) return { success: false, result: 'No investigation completed.' };
+  const subs = (d.sub_queries ?? []).map((s, i) => `  ${i + 1}. [${s.intent}] ${s.query}`).join('\n');
+  const cites = (d.citations ?? []).map((c) => `[${c.index}] ${c.title} — ${c.url}`).join('\n');
+  const gaps = d.gaps && d.gaps.length > 0 ? `\n\nKnown gaps:\n${d.gaps.map((g) => `• ${g}`).join('\n')}` : '';
+  const conf = typeof d.confidence === 'number' ? ` (confidence: ${(d.confidence * 100).toFixed(0)}%)` : '';
+  const body = `${d.answer}${conf}\n\nSub-queries run:\n${subs}${cites ? `\n\nSources:\n${cites}` : ''}${gaps}`;
+  return { success: true, result: body };
+}
+
 // Human-readable tool names for display
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'list_emails': 'Fetching emails',
