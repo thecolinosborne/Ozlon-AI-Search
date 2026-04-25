@@ -228,6 +228,8 @@ export function useChatStream({
           systemName,
           userSettings,
           enableTools: true,
+          sessionId: sessionId ?? undefined,
+          assistantMessageId: assistantId,
           signal,
           onToolCall: (toolName, toolArgs) => {
             if (!isCurrentRequest()) return;
