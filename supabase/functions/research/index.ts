@@ -56,6 +56,8 @@ async function logRun(row: {
   }
 }
 
+const STOPWORDS = new Set(["the","a","an","of","to","and","or","is","in","on","for","with","my","me","i","that","this","it","what","whats","find","get","show"]);
+
 // --- Cache (fail-open) ---
 const CACHE_TTL_MS: Record<string, number> = {
   web_search: 15 * 60 * 1000,
