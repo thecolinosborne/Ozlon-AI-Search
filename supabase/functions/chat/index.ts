@@ -2557,7 +2557,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'deep_research',
-      description: 'Perform real-time web research on any topic using Tavily search. Searches the internet, reads multiple sources, and synthesizes a structured research report with citations. Use when the user asks to research, investigate, deep dive, look into, or find information about any topic.',
+      description: 'Live web research and general web search. Use this for ANY request that needs information from the open internet — news, facts, prices, reviews, "what is", "find me", "search for", "look up", "google", current events, competitor info, local listings, opinions, definitions, or anything beyond your training data. Searches the web (Tavily), reads multiple sources, and returns a cited synthesis. THIS IS YOUR PRIMARY WEB SEARCH TOOL — do NOT invent generic names like "websearch" or "search_web"; always call this one.',
       parameters: {
         type: 'object',
         properties: {
@@ -2574,7 +2574,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'scrape_events',
-      description: 'Search the web for events (networking, conferences, meetups, etc.) and extract structured event data including dates, locations, and URLs. Stores discovered events for the user. Use when asked to find events, conferences, meetups, networking opportunities, or upcoming dates.',
+      description: 'Find real upcoming events (networking, conferences, meetups, workshops, webinars, local gatherings) and extract structured event data — title, date, location, URL — then save them for the user. Use whenever the user asks about events, conferences, meetups, networking opportunities, "what\'s happening near me", or upcoming local/industry dates. Combines Tavily web search with Firecrawl page scraping for richer detail.',
       parameters: {
         type: 'object',
         properties: {
@@ -5207,18 +5207,54 @@ async function executeToolCall(
           }
 
           if (!tavilyRes || !tavilyRes.ok) {
-            const errText = tavilyRes ? await tavilyRes.text().catch(() => '') : 'All attempts failed';
-            console.error('[deep_research] Tavily error after retries:', errText);
+            const errText = tavilyRes ? await tavilyRes.text().catch(() => '') : 'All attempts failed (network)';
+            const status = tavilyRes?.status ?? 'network';
+            console.error('[deep_research] Tavily error after retries:', status, errText);
             if (adminClient && taskRowId) {
               await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
             }
-            return { success: false, result: `Research search failed: ${tavilyRes?.status ?? 'network error'}` };
+            return { success: false, result: `Tool deep_research failed: Tavily returned ${status}. Body: ${String(errText).slice(0, 400)}` };
           }
 
           const tavilyData = await tavilyRes.json();
-          const results = tavilyData.results || [];
-          const tavilyAnswer = tavilyData.answer || '';
-          console.log(`[deep_research] Found ${results.length} sources`);
+          let results = tavilyData.results || [];
+          let tavilyAnswer = tavilyData.answer || '';
+          console.log(`[deep_research] Tavily found ${results.length} sources`);
+
+          // Firecrawl fallback: if Tavily returned no results, try Firecrawl /search.
+          const FIRECRAWL_KEY = Deno.env.get('FIRECRAWL_API_KEY');
+          if (results.length === 0 && FIRECRAWL_KEY) {
+            console.log('[deep_research] Tavily returned 0 results; falling back to Firecrawl search');
+            try {
+              const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, limit: maxResults }),
+              });
+              if (fcRes.ok) {
+                const fcData = await fcRes.json();
+                const fcResults = fcData?.data || fcData?.web?.results || [];
+                results = fcResults.map((r: { url: string; title?: string; description?: string; markdown?: string }) => ({
+                  url: r.url,
+                  title: r.title || r.url,
+                  content: r.markdown || r.description || '',
+                }));
+                console.log(`[deep_research] Firecrawl fallback returned ${results.length} sources`);
+              } else {
+                const fcErr = await fcRes.text().catch(() => '');
+                console.warn(`[deep_research] Firecrawl fallback ${fcRes.status}: ${fcErr.slice(0, 300)}`);
+              }
+            } catch (e) {
+              console.warn('[deep_research] Firecrawl fallback threw:', e);
+            }
+          }
+
+          if (results.length === 0) {
+            if (adminClient && taskRowId) {
+              await adminClient.from('research_tasks').update({ status: 'failed' }).eq('id', taskRowId);
+            }
+            return { success: false, result: `Tool deep_research returned no results for "${query}". Both Tavily and Firecrawl came back empty. Try a more specific query, different keywords, or a narrower geography/time window.` };
+          }
 
           // Build source context for GPT synthesis
           const sourcesForPrompt = results.map((r: { title: string; url: string; content: string }, i: number) =>
@@ -5902,6 +5938,13 @@ NEVER:
 - Say "I can't do that" without classifying why and proposing the fix.
 - Repeat the same failed call without changing arguments.
 - Emit the Capability Gap Report for transient retries that succeeded on retry.
+- INVENT tool names. If you want to search the web, the tool is **deep_research** (not "websearch", "search_web", "google", "browse"). For events use **scrape_events**. For Google SERP cross-checks use **web_search_google**. Calling a non-existent tool counts as a tooling_gap and you must emit the report.
+
+RESEARCH FAILURE SUB-PROTOCOL:
+When deep_research or scrape_events returns 0 results or fails:
+1. Try ONCE with a reformulated query (broader keywords, drop date qualifiers, drop geography).
+2. If still empty, tell the user exactly what was searched, what came back, and offer alternatives: a narrower/wider query, a specific source URL to scrape, or a manual link they can share.
+3. Do not pretend the search succeeded. Do not fabricate results.
 
 ===========================================================
 RESPONSE FORMATTING (ALWAYS — NON-NEGOTIABLE)
