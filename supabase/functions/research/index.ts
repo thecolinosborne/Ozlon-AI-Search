@@ -63,6 +63,151 @@ const CACHE_TTL_MS: Record<string, number> = {
   web_map:    24 * 60 * 60 * 1000,
   web_answer: 30 * 60 * 1000,
 };
+const TTL_MIN_MS = 5 * 60 * 1000;
+const TTL_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+// --- Phase 4: Adaptive learning helpers (all fail-open) ---
+function extractDomain(url: string): string | null {
+  try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); }
+  catch { return null; }
+}
+
+function classifyFailure(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("timeout") || m.includes("timed out")) return "provider_timeout";
+  if (m.includes("rate") && m.includes("limit")) return "rate_limit";
+  if (m.includes("401") || m.includes("403") || m.includes("unauthor") || m.includes("forbidden") || m.includes("api_key") || m.includes("missing")) return "auth";
+  if (m.includes("no search providers") || m.includes("zero results") || m.includes("no results")) return "zero_results";
+  if (m.includes("query required") || m.includes("url required")) return "bad_query";
+  return "other";
+}
+
+async function logFailure(userId: string, action: string, intent: string | null, failureClass: string, query: string | null, errorMessage: string, provider?: string): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    await admin.from("research_failures").insert({
+      user_id: userId, action, intent, failure_class: failureClass,
+      provider: provider ?? null, query, error_message: errorMessage.slice(0, 500),
+    });
+  } catch (e) { console.warn("[research] logFailure failed:", e instanceof Error ? e.message : e); }
+}
+
+async function getCacheTtlMs(userId: string, action: string, intent: string): Promise<number> {
+  const fallback = CACHE_TTL_MS[action];
+  if (!fallback) return 0;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("cache_policy").select("ttl_seconds").eq("user_id", userId).eq("action", action).eq("intent", intent).maybeSingle();
+    if (data?.ttl_seconds) return Math.min(Math.max(data.ttl_seconds * 1000, TTL_MIN_MS), TTL_MAX_MS);
+  } catch (e) { console.warn("[research] getCacheTtlMs fail-open:", e instanceof Error ? e.message : e); }
+  return fallback;
+}
+
+async function recordCacheStat(userId: string, action: string, intent: string, hit: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: existing } = await admin.from("cache_policy").select("id, hit_count, miss_count, ttl_seconds").eq("user_id", userId).eq("action", action).eq("intent", intent).maybeSingle();
+    if (!existing) {
+      await admin.from("cache_policy").insert({
+        user_id: userId, action, intent,
+        ttl_seconds: Math.floor((CACHE_TTL_MS[action] ?? 900_000) / 1000),
+        hit_count: hit ? 1 : 0, miss_count: hit ? 0 : 1,
+      });
+      return;
+    }
+    const hits = existing.hit_count + (hit ? 1 : 0);
+    const misses = existing.miss_count + (hit ? 0 : 1);
+    const total = hits + misses;
+    let ttl = existing.ttl_seconds;
+    if (total >= 20 && total % 10 === 0) {
+      const ratio = hits / total;
+      if (ratio > 0.6) ttl = Math.min(Math.floor(ttl * 1.25), 604_800);
+      else if (ratio < 0.2) ttl = Math.max(Math.floor(ttl * 0.75), 300);
+    }
+    await admin.from("cache_policy").update({ hit_count: hits, miss_count: misses, ttl_seconds: ttl, last_tuned_at: new Date().toISOString() }).eq("id", existing.id);
+  } catch (e) { console.warn("[research] recordCacheStat fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function getTrustScores(userId: string, domains: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (domains.length === 0) return map;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("source_reputation").select("domain, trust_score").eq("user_id", userId).in("domain", domains);
+    for (const row of data ?? []) map.set(row.domain, Number(row.trust_score));
+  } catch (e) { console.warn("[research] getTrustScores fail-open:", e instanceof Error ? e.message : e); }
+  return map;
+}
+
+async function bumpReturned(userId: string, domains: string[]): Promise<void> {
+  if (domains.length === 0) return;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const existing = await admin.from("source_reputation").select("domain, total_returned, total_enriched, total_failed, trust_score").eq("user_id", userId).in("domain", domains);
+    const have = new Map((existing.data ?? []).map((r) => [r.domain, r]));
+    const upserts = domains.map((d) => {
+      const row = have.get(d);
+      if (!row) return { user_id: userId, domain: d, total_returned: 1, trust_score: 0.5, last_seen_at: new Date().toISOString() };
+      const returned = row.total_returned + 1;
+      const enriched = row.total_enriched;
+      const failed = row.total_failed;
+      const trust = Math.max(0, Math.min(1, 0.5 + (enriched * 0.05) - (failed * 0.1) + Math.log10(returned + 1) * 0.02));
+      return { user_id: userId, domain: d, total_returned: returned, trust_score: trust, last_seen_at: new Date().toISOString() };
+    });
+    await admin.from("source_reputation").upsert(upserts, { onConflict: "user_id,domain" });
+  } catch (e) { console.warn("[research] bumpReturned fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function bumpEnriched(userId: string, domain: string, ok: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: row } = await admin.from("source_reputation").select("id, total_returned, total_enriched, total_failed").eq("user_id", userId).eq("domain", domain).maybeSingle();
+    if (!row) return;
+    const enriched = row.total_enriched + (ok ? 1 : 0);
+    const failed = row.total_failed + (ok ? 0 : 1);
+    const trust = Math.max(0, Math.min(1, 0.5 + (enriched * 0.05) - (failed * 0.1) + Math.log10((row.total_returned || 1) + 1) * 0.02));
+    await admin.from("source_reputation").update({ total_enriched: enriched, total_failed: failed, trust_score: trust }).eq("id", row.id);
+  } catch (e) { console.warn("[research] bumpEnriched fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function lookupQueryPattern(userId: string, intent: string, patternHash: string): Promise<string | null> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("query_patterns").select("rewritten, success_count, use_count").eq("user_id", userId).eq("intent", intent).eq("pattern_hash", patternHash).maybeSingle();
+    if (data && data.success_count >= 5) {
+      void admin.from("query_patterns").update({ use_count: data.use_count + 1, last_used_at: new Date().toISOString() }).eq("user_id", userId).eq("pattern_hash", patternHash);
+      return data.rewritten;
+    }
+  } catch (e) { console.warn("[research] lookupQueryPattern fail-open:", e instanceof Error ? e.message : e); }
+  return null;
+}
+
+async function recordPatternResult(userId: string, intent: string, patternHash: string, original: string, rewritten: string, resultCount: number, success: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: row } = await admin.from("query_patterns").select("id, success_count, use_count, avg_result_count").eq("user_id", userId).eq("pattern_hash", patternHash).maybeSingle();
+    if (!row) {
+      await admin.from("query_patterns").insert({
+        user_id: userId, intent, pattern_hash: patternHash,
+        original_sample: original.slice(0, 300), rewritten: rewritten.slice(0, 300),
+        success_count: success ? 1 : 0, use_count: 1, avg_result_count: resultCount,
+      });
+      return;
+    }
+    const useCount = row.use_count + 1;
+    const successCount = row.success_count + (success ? 1 : 0);
+    const avg = ((Number(row.avg_result_count ?? 0) * row.use_count) + resultCount) / useCount;
+    await admin.from("query_patterns").update({
+      use_count: useCount, success_count: successCount,
+      avg_result_count: avg, last_used_at: new Date().toISOString(),
+    }).eq("id", row.id);
+  } catch (e) { console.warn("[research] recordPatternResult fail-open:", e instanceof Error ? e.message : e); }
+}
+
+function patternHashFor(intent: string, query: string): Promise<string> {
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => !STOPWORDS.has(t.replace(/[^\w]/g, ""))).sort().join(" ");
+  return sha256Hex(`${intent}::${tokens}`);
+}
 
 async function sha256Hex(input: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
