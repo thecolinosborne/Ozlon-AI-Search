@@ -655,6 +655,9 @@ Deno.serve(async (req) => {
         cacheHit = true;
         const latency = Date.now() - t0;
         const payload = cached as Record<string, unknown>;
+        const cachedIntel = (payload.intelligence as Record<string, unknown> | undefined);
+        const cachedIntent = typeof cachedIntel?.intent === "string" ? cachedIntel.intent as string : "default";
+        void recordCacheStat(userId, action, cachedIntent, true);
         const count =
           Array.isArray(payload.results) ? payload.results.length :
           Array.isArray(payload.links) ? payload.links.length :
@@ -672,7 +675,7 @@ Deno.serve(async (req) => {
 
     let result: Record<string, unknown>;
     if (action === "web_search") {
-      const r = await handleWebSearch(params);
+      const r = await handleWebSearch(params, userId);
       attempted = r.attempted;
       succeeded = r.succeeded;
       resultCount = r.results.length;
@@ -707,8 +710,11 @@ Deno.serve(async (req) => {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
     }
 
+    const intentForCache = (intelligence?.intent as string) ?? "default";
     if (cacheKey && CACHE_TTL_MS[action]) {
-      void cacheSet(userId, cacheKey, action, result);
+      const dynTtl = await getCacheTtlMs(userId, action, intentForCache);
+      void cacheSet(userId, cacheKey, action, result, dynTtl);
+      void recordCacheStat(userId, action, intentForCache, false);
     }
 
     success = true;
@@ -725,6 +731,9 @@ Deno.serve(async (req) => {
     errorClass = msg.split(":")[0].slice(0, 80);
     console.error(`[research] ${action} failed:`, msg);
     const latency = Date.now() - t0;
+    const failClass = classifyFailure(msg);
+    const intentForFail = typeof intelligence?.intent === "string" ? intelligence.intent as string : null;
+    void logFailure(userId, action, intentForFail, failClass, query, msg);
     void logRun({
       user_id: userId, query, action,
       providers_attempted: attempted, providers_succeeded: succeeded,
