@@ -610,6 +610,211 @@ async function handleWebAnswer(params: Record<string, unknown>, userId: string) 
   return { answer, citations, query: search.query, intelligence: search.intelligence };
 }
 
+// --- Phase 5: Multi-hop investigate ---
+const INVESTIGATE_LIMITS = {
+  maxSubQueries: 5,
+  maxEnrichesTotal: 8,
+  wallClockMs: 30_000,
+  dailyPlansPerUser: 50,
+};
+
+interface SubQueryPlan {
+  query: string;
+  intent: Intent;
+  rationale?: string;
+}
+
+async function planInvestigation(question: string, contextHint?: string): Promise<SubQueryPlan[]> {
+  const sys = `You decompose research questions into 2-5 focused sub-queries. Output JSON only: {"sub_queries":[{"query":"...","intent":"news|factual_lookup|deep_research|local|domain_specific|default","rationale":"short"}]}. Each sub-query must be independently searchable. Keep them tight.`;
+  const userMsg = contextHint
+    ? `Context: ${contextHint}\n\nQuestion: ${question}`
+    : `Question: ${question}`;
+  const raw = await callGateway(
+    [{ role: "system", content: sys }, { role: "user", content: userMsg }],
+    { jsonMode: true, maxTokens: 500 },
+  );
+  if (!raw) return [{ query: question, intent: "default" }];
+  try {
+    const parsed = JSON.parse(raw);
+    const arr = Array.isArray(parsed?.sub_queries) ? parsed.sub_queries : [];
+    const cleaned: SubQueryPlan[] = arr
+      .filter((s: unknown) => s && typeof s === "object" && typeof (s as { query?: unknown }).query === "string")
+      .slice(0, INVESTIGATE_LIMITS.maxSubQueries)
+      .map((s: { query: string; intent?: string; rationale?: string }) => ({
+        query: s.query,
+        intent: (["news","factual_lookup","deep_research","local","domain_specific","default"] as const).includes(s.intent as Intent) ? s.intent as Intent : "default",
+        rationale: s.rationale,
+      }));
+    return cleaned.length > 0 ? cleaned : [{ query: question, intent: "default" }];
+  } catch {
+    return [{ query: question, intent: "default" }];
+  }
+}
+
+async function critiqueAnswer(question: string, answer: string): Promise<{ gaps: string[]; followUp: string | null }> {
+  const sys = `You audit a draft answer for completeness against the original question. Output JSON only: {"gaps":["..."],"follow_up":"single targeted query or null"}. Be strict but concise.`;
+  const userMsg = `Question: ${question}\n\nDraft answer: ${answer}`;
+  const raw = await callGateway(
+    [{ role: "system", content: sys }, { role: "user", content: userMsg }],
+    { jsonMode: true, maxTokens: 300 },
+  );
+  if (!raw) return { gaps: [], followUp: null };
+  try {
+    const parsed = JSON.parse(raw);
+    const gaps = Array.isArray(parsed?.gaps) ? parsed.gaps.filter((g: unknown) => typeof g === "string").slice(0, 5) : [];
+    const followUp = typeof parsed?.follow_up === "string" && parsed.follow_up.trim().length > 0 ? parsed.follow_up : null;
+    return { gaps, followUp };
+  } catch {
+    return { gaps: [], followUp: null };
+  }
+}
+
+async function checkPlanBudget(userId: string): Promise<boolean> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await admin
+      .from("research_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", since);
+    return (count ?? 0) < INVESTIGATE_LIMITS.dailyPlansPerUser;
+  } catch { return true; }
+}
+
+async function recordPlan(row: Record<string, unknown>): Promise<string | null> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("research_plans").insert(row).select("id").single();
+    return data?.id ?? null;
+  } catch (e) {
+    console.warn("[research] recordPlan failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function handleWebInvestigate(params: Record<string, unknown>, userId: string): Promise<Record<string, unknown>> {
+  const t0 = Date.now();
+  const question = String(params.query ?? "").trim();
+  if (!question) throw new Error("query required");
+  const contextHint = typeof params.contextHint === "string" ? params.contextHint : undefined;
+
+  const within = await checkPlanBudget(userId);
+  if (!within) {
+    // Fail-open to single web_answer
+    const fallback = await handleWebAnswer({ query: question, contextHint }, userId);
+    return { ...fallback, plan: { fallback: "daily_budget_exceeded" } };
+  }
+
+  const subQueries = await planInvestigation(question, contextHint);
+  const intents = subQueries.map((s) => s.intent);
+
+  // Execute sub-queries in parallel (capped)
+  const remainingBudget = () => Math.max(0, INVESTIGATE_LIMITS.wallClockMs - (Date.now() - t0));
+  const searchResults = await Promise.all(subQueries.map(async (sq) => {
+    try {
+      return await handleWebSearch({ query: sq.query, maxResults: 5, contextHint }, userId);
+    } catch (e) {
+      console.warn("[investigate] sub-search failed:", e instanceof Error ? e.message : e);
+      return { results: [], attempted: [], succeeded: [], intelligence: { intent: sq.intent } };
+    }
+  }));
+
+  // Collect top URLs (dedup), respect enrich budget
+  const seen = new Set<string>();
+  const topUrls: string[] = [];
+  for (const sr of searchResults) {
+    for (const r of sr.results.slice(0, 2)) {
+      if (topUrls.length >= INVESTIGATE_LIMITS.maxEnrichesTotal) break;
+      if (!seen.has(r.url)) { seen.add(r.url); topUrls.push(r.url); }
+    }
+    if (topUrls.length >= INVESTIGATE_LIMITS.maxEnrichesTotal) break;
+  }
+
+  let docs: Array<{ url: string; title?: string; markdown?: string; error?: string }> = [];
+  if (topUrls.length > 0 && remainingBudget() > 5_000) {
+    try {
+      const enriched = await handleWebEnrich({ urls: topUrls }, userId);
+      docs = (enriched.documents as typeof docs) ?? [];
+    } catch (e) {
+      console.warn("[investigate] enrich failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  // Synthesize
+  const sourceBlocks = docs
+    .filter((d) => !d.error && d.markdown)
+    .map((d, i) => `[${i + 1}] ${d.title || d.url}\n${d.url}\n${(d.markdown ?? "").slice(0, 4000)}`)
+    .join("\n\n---\n\n");
+  const subSummary = subQueries.map((s, i) => `${i + 1}. (${s.intent}) ${s.query}`).join("\n");
+  const synthSys = "You synthesize a comprehensive answer to the user's original question using the provided sources and the sub-queries that were run. Cite sources inline as [1], [2], etc. Structure the answer with key findings. Be precise; flag uncertainty.";
+  const synthUser = `Original question: ${question}\n\nSub-queries run:\n${subSummary}\n\nSources:\n${sourceBlocks || "(no enriched sources)"}`;
+  let answer = (await callGateway([{ role: "system", content: synthSys }, { role: "user", content: synthUser }], { maxTokens: 900 })) ?? "Unable to synthesize answer.";
+
+  // Self-critique (fail-open)
+  let gaps: string[] = [];
+  let followUpRan: { query: string; resultCount: number } | null = null;
+  if (remainingBudget() > 8_000) {
+    const critique = await critiqueAnswer(question, answer);
+    gaps = critique.gaps;
+    if (critique.followUp && remainingBudget() > 5_000 && topUrls.length < INVESTIGATE_LIMITS.maxEnrichesTotal) {
+      try {
+        const fu = await handleWebSearch({ query: critique.followUp, maxResults: 3, contextHint }, userId);
+        followUpRan = { query: critique.followUp, resultCount: fu.results.length };
+        const newUrls = fu.results.map((r) => r.url).filter((u) => !seen.has(u)).slice(0, INVESTIGATE_LIMITS.maxEnrichesTotal - topUrls.length);
+        if (newUrls.length > 0) {
+          const moreEnriched = await handleWebEnrich({ urls: newUrls }, userId);
+          const moreDocs = (moreEnriched.documents as typeof docs) ?? [];
+          docs = [...docs, ...moreDocs];
+          // Re-synthesize with new context
+          const allBlocks = docs
+            .filter((d) => !d.error && d.markdown)
+            .map((d, i) => `[${i + 1}] ${d.title || d.url}\n${d.url}\n${(d.markdown ?? "").slice(0, 4000)}`)
+            .join("\n\n---\n\n");
+          answer = (await callGateway(
+            [{ role: "system", content: synthSys }, { role: "user", content: `Original question: ${question}\n\nSub-queries (incl. follow-up): ${subSummary}\n${critique.followUp}\n\nSources:\n${allBlocks}` }],
+            { maxTokens: 900 },
+          )) ?? answer;
+        }
+      } catch (e) {
+        console.warn("[investigate] follow-up failed:", e instanceof Error ? e.message : e);
+      }
+    }
+  }
+
+  const citations = docs
+    .filter((d) => !d.error)
+    .map((d, i) => ({ index: i + 1, url: d.url, title: d.title || d.url }));
+
+  const totalLatency = Date.now() - t0;
+  const confidence = Math.max(0, Math.min(1, 0.5 + 0.1 * citations.length - 0.15 * gaps.length));
+
+  // Fire-and-forget plan record
+  void recordPlan({
+    user_id: userId,
+    original_question: question,
+    sub_queries: subQueries,
+    intents,
+    total_cost_estimate: subQueries.length * 0.002 + docs.length * 0.001,
+    total_latency_ms: totalLatency,
+    final_answer: answer,
+    confidence,
+    gaps_detected: gaps,
+    status: "completed",
+    metadata: { followUpRan, enrichedCount: docs.length, contextHint: contextHint ?? null },
+  });
+
+  return {
+    answer,
+    citations,
+    sub_queries: subQueries,
+    confidence,
+    gaps,
+    follow_up: followUpRan,
+    latency_ms: totalLatency,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -705,6 +910,12 @@ Deno.serve(async (req) => {
       succeeded = attempted;
       resultCount = (r.citations as unknown[]).length;
       intelligence = r.intelligence as Record<string, unknown>;
+      result = r;
+    } else if (action === "web_investigate") {
+      attempted = ["planner", "tavily", "firecrawl", "gateway"];
+      const r = await handleWebInvestigate(params, userId);
+      succeeded = attempted;
+      resultCount = (r.citations as unknown[]).length;
       result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);

@@ -1538,6 +1538,60 @@ export type Database = {
         }
         Relationships: []
       }
+      research_plans: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          final_answer: string | null
+          final_answer_hash: string | null
+          gaps_detected: string[] | null
+          id: string
+          intents: string[]
+          metadata: Json
+          original_question: string
+          status: string
+          sub_queries: Json
+          total_cost_estimate: number | null
+          total_latency_ms: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          final_answer?: string | null
+          final_answer_hash?: string | null
+          gaps_detected?: string[] | null
+          id?: string
+          intents?: string[]
+          metadata?: Json
+          original_question: string
+          status?: string
+          sub_queries?: Json
+          total_cost_estimate?: number | null
+          total_latency_ms?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          final_answer?: string | null
+          final_answer_hash?: string | null
+          gaps_detected?: string[] | null
+          id?: string
+          intents?: string[]
+          metadata?: Json
+          original_question?: string
+          status?: string
+          sub_queries?: Json
+          total_cost_estimate?: number | null
+          total_latency_ms?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       research_runs: {
         Row: {
           action: string
@@ -1546,6 +1600,7 @@ export type Database = {
           id: string
           latency_ms: number | null
           metadata: Json
+          plan_id: string | null
           providers_attempted: string[]
           providers_succeeded: string[]
           query: string | null
@@ -1560,6 +1615,7 @@ export type Database = {
           id?: string
           latency_ms?: number | null
           metadata?: Json
+          plan_id?: string | null
           providers_attempted?: string[]
           providers_succeeded?: string[]
           query?: string | null
@@ -1574,6 +1630,7 @@ export type Database = {
           id?: string
           latency_ms?: number | null
           metadata?: Json
+          plan_id?: string | null
           providers_attempted?: string[]
           providers_succeeded?: string[]
           query?: string | null
@@ -1581,7 +1638,15 @@ export type Database = {
           success?: boolean
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "research_runs_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "research_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       research_tasks: {
         Row: {
