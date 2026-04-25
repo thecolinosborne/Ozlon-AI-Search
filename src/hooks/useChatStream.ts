@@ -15,6 +15,7 @@ export type ChatMessage = {
   toolsUsed?: ToolUsedInfo[];
   orchestration?: OrchestrationTraceEvent;
   liveSteps?: LiveStep[];
+  artifactId?: string;
 };
 
 /**
@@ -48,8 +49,9 @@ interface UseChatStreamOptions {
   systemName: string;
   userSettings: UserSettings;
   autoPlayEnabled: boolean;
-  saveMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => Promise<void>;
-  finalizeMessage: (msg: { id: string; role: "user" | "assistant"; content: string }) => Promise<void> | void;
+  sessionId?: string | null;
+  saveMessage: (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => Promise<void>;
+  finalizeMessage: (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => Promise<void> | void;
   playMessage: (id: string, text: string) => void;
 }
 
@@ -65,6 +67,7 @@ export function useChatStream({
   systemName,
   userSettings,
   autoPlayEnabled,
+  sessionId,
   saveMessage,
   finalizeMessage,
   playMessage,
