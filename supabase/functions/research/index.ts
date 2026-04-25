@@ -563,7 +563,16 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
     }),
   );
   const docs = results
-    .map((r, i) => r.status === "fulfilled" ? r.value : { url: capped[i], error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) })
+    .map((r, i) => {
+      const url = capped[i];
+      const domain = extractDomain(url);
+      if (r.status === "fulfilled") {
+        if (domain) void bumpEnriched(userId, domain, true);
+        return r.value;
+      }
+      if (domain) void bumpEnriched(userId, domain, false);
+      return { url, error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) };
+    })
     .filter(Boolean);
   return { documents: docs };
 }
