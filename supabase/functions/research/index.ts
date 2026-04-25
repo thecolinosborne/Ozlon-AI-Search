@@ -276,7 +276,27 @@ async function handleWebMap(params: Record<string, unknown>) {
   return { url, links: normalized };
 }
 
-Deno.serve(async (req) => {
+// --- web_enrich: batched parallel scrape of N urls (stage 2 of two-stage flow) ---
+async function handleWebEnrich(params: Record<string, unknown>, userId: string) {
+  const urls = Array.isArray(params.urls) ? (params.urls as unknown[]).filter((u) => typeof u === "string") as string[] : [];
+  if (urls.length === 0) throw new Error("urls required");
+  const capped = urls.slice(0, 8);
+  const results = await Promise.allSettled(
+    capped.map(async (url) => {
+      // Reuse scrape cache per-url.
+      const key = await buildCacheKey("web_scrape", { url, onlymaincontent: true });
+      const cached = await cacheGet(userId, key);
+      if (cached) return cached;
+      const fresh = await handleWebScrape({ url, onlyMainContent: true });
+      void cacheSet(userId, key, "web_scrape", fresh);
+      return fresh;
+    }),
+  );
+  const docs = results
+    .map((r, i) => r.status === "fulfilled" ? r.value : { url: capped[i], error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) })
+    .filter(Boolean);
+  return { documents: docs };
+}
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const t0 = Date.now();
