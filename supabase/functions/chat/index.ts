@@ -6264,15 +6264,28 @@ STATE TRANSITIONS — always follow this order, never skip stages:
   up_for_review can go back to in_progress (rework)
   completed can go back to in_progress (reopen)
 
-SMART DEFAULT MAPPINGS:
-- Research requests → task_type: "research", intent_type: "ops"
-- Content drafts → task_type: "content", intent_type: "marketing"
-- Email drafts → task_type: "email", intent_type: "ops" (or "sales_support" if sales-related)
-- Client work/planning → intent_type: "fulfillment"
-- Marketing campaigns → intent_type: "marketing" (NOT "content")
-- Ops/system setup → intent_type: "ops"
+SMART DEFAULT MAPPINGS (intent_type MUST be one of: ops, lead_gen, fulfillment, content, research, outreach, admin — any other value will be rejected by the database):
+- Research requests → task_type: "research", intent_type: "research"
+- Content drafts / ebooks / marketing copy → task_type: "content", intent_type: "content"
+- Email drafts → task_type: "email", intent_type: "outreach" (or "ops" for internal admin email)
+- Client work / fulfillment / delivery → intent_type: "fulfillment"
+- Lead generation / prospecting → intent_type: "lead_gen"
+- Outbound outreach / cold email / DMs → intent_type: "outreach"
+- Ops / system setup / internal admin → intent_type: "ops"
+- Routine admin (filing, archiving, cleanup) → intent_type: "admin"
 
 Default assigned_to is 'ai'. Default next_action is 'waiting_on_ai'.
+
+🚨 ONE TASK PER GOAL — STRICT LIMIT 🚨
+- Create AT MOST ONE work task per user goal per turn. A single ebook, doc, campaign, or research request = ONE task, never multiple.
+- If you've already created a work task for the current goal in this conversation, call update_work_task on the existing task_id instead of creating a new one.
+- Never split a single goal into "draft", "create doc", "format", "polish" sub-tasks — those are sub-steps logged via activity_entry on ONE task.
+- Burning tool-loop iterations on duplicate task creation will cause the run to abort before the actual work completes.
+
+🚨 CAPABILITY GAP REPORTS — TRUTH ONLY 🚨
+- ONLY emit a "Capability Gap Report" block when a tool result you observed in this turn contained \`success: false\`, an explicit error string, or threw an exception.
+- NEVER fabricate an error. NEVER claim a tool failed when its result was \`success: true\`. NEVER guess at constraint names, schema details, or root causes you did not see in the actual error message.
+- If a tool succeeded, proceed with the work. Do not produce gap reports on success.
 
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
