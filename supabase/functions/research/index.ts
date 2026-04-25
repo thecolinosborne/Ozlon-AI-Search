@@ -396,6 +396,7 @@ Deno.serve(async (req) => {
       user_id: userId, query, action,
       providers_attempted: attempted, providers_succeeded: succeeded,
       result_count: resultCount, latency_ms: latency, success: true,
+      metadata: { cache: cacheHit ? "hit" : "miss" },
     });
     return jsonResp({ success: true, action, ...result });
   } catch (e) {

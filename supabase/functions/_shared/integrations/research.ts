@@ -85,5 +85,33 @@ export const researchIntegration: IntegrationManifest = {
       formatter: (data) =>
         formatList(data, "links", { title: "url" }, { label: "URLs", max: 30 }),
     },
+    {
+      name: "web_enrich",
+      description:
+        "Stage-2 enrichment: take URLs from a prior web_search and fetch full markdown for the ones you actually want to read. Batched parallel scrape (max 8 URLs). Use after web_search when you need the body of specific results, NOT before.",
+      action: "web_enrich",
+      sideEffect: "external_call",
+      cost: "moderate",
+      schema: {
+        type: "object",
+        properties: {
+          urls: {
+            type: "array",
+            items: { type: "string" },
+            description: "URLs to fetch full content for (max 8).",
+          },
+        },
+        required: ["urls"],
+      },
+      mapArgs: (a) => ({ urls: a.urls }),
+      formatter: (data) => {
+        const docs = (data as { documents?: Array<{ url: string; title?: string; markdown?: string; error?: string }> })?.documents ?? [];
+        if (docs.length === 0) return "No documents enriched.";
+        return docs.map((d) => d.error
+          ? `❌ ${d.url}: ${d.error}`
+          : `📄 ${d.title || d.url}\n${d.url}\n${(d.markdown ?? "").slice(0, 1500)}`
+        ).join("\n\n---\n\n");
+      },
+    },
   ],
 };
