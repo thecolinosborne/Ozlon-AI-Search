@@ -357,7 +357,7 @@ async function handleWebRecall(params: Record<string, unknown>, userId: string):
   };
 }
 
-
+async function reformulateQuery(query: string, contextHint?: string): Promise<string> {
   if (!isWeakQuery(query)) return query;
   const sys = "Rewrite the user's vague search query into a concise, specific web search string (max 10 words). Use concrete nouns. Output ONLY the rewritten query, no quotes, no explanation.";
   const userMsg = contextHint ? `Context: ${contextHint}\nQuery: ${query}` : `Query: ${query}`;
