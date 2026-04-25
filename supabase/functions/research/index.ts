@@ -994,6 +994,18 @@ Deno.serve(async (req) => {
     const params = (body?.params ?? {}) as Record<string, unknown>;
     query = typeof params.query === "string" ? params.query : (typeof params.url === "string" ? params.url : null);
 
+    // --- Streaming action: bypass cache + telemetry wrapper, return SSE directly ---
+    if (action === "web_investigate_stream") {
+      void logRun({
+        user_id: userId, query, action,
+        providers_attempted: ["planner", "tavily", "firecrawl", "gateway"],
+        providers_succeeded: [],
+        result_count: 0, latency_ms: 0, success: true,
+        metadata: { streamed: true },
+      });
+      return streamInvestigation(params, userId);
+    }
+
     // --- Cache lookup ---
     let cacheKey: string | null = null;
     if (CACHE_TTL_MS[action]) {
