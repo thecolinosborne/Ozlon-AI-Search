@@ -1549,6 +1549,7 @@ export type Database = {
           intents: string[]
           metadata: Json
           original_question: string
+          original_question_embedding: string | null
           status: string
           sub_queries: Json
           total_cost_estimate: number | null
@@ -1566,6 +1567,7 @@ export type Database = {
           intents?: string[]
           metadata?: Json
           original_question: string
+          original_question_embedding?: string | null
           status?: string
           sub_queries?: Json
           total_cost_estimate?: number | null
@@ -1583,6 +1585,7 @@ export type Database = {
           intents?: string[]
           metadata?: Json
           original_question?: string
+          original_question_embedding?: string | null
           status?: string
           sub_queries?: Json
           total_cost_estimate?: number | null
@@ -1639,6 +1642,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "research_runs_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "recent_research"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "research_runs_plan_id_fkey"
             columns: ["plan_id"]
@@ -2567,6 +2577,42 @@ export type Database = {
       }
     }
     Views: {
+      recent_research: {
+        Row: {
+          age_hours: number | null
+          confidence: number | null
+          created_at: string | null
+          gap_count: number | null
+          id: string | null
+          original_question: string | null
+          subquery_count: number | null
+          total_latency_ms: number | null
+          user_id: string | null
+        }
+        Insert: {
+          age_hours?: never
+          confidence?: number | null
+          created_at?: string | null
+          gap_count?: never
+          id?: string | null
+          original_question?: string | null
+          subquery_count?: never
+          total_latency_ms?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          age_hours?: never
+          confidence?: number | null
+          created_at?: string | null
+          gap_count?: never
+          id?: string | null
+          original_question?: string | null
+          subquery_count?: never
+          total_latency_ms?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       research_intelligence: {
         Row: {
           detail: Json | null
@@ -2642,6 +2688,25 @@ export type Database = {
           note_type: string
           similarity: number
           source_ids: Json
+        }[]
+      }
+      match_research_plans: {
+        Args: {
+          filter_user_id?: string
+          match_count?: number
+          match_threshold?: number
+          max_age_hours?: number
+          query_embedding: string
+        }
+        Returns: {
+          confidence: number
+          created_at: string
+          final_answer: string
+          gaps_detected: string[]
+          id: string
+          original_question: string
+          similarity: number
+          sub_queries: Json
         }[]
       }
       match_wisdom_memories: {
