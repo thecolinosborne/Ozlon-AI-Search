@@ -6875,7 +6875,7 @@ async function streamWebInvestigate(
   authHeader: string,
   taskId: string,
   emit: (e: TaskUpdateEvent) => void | Promise<void>,
-): Promise<{ success: boolean; result: string } | null> {
+): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> } | null> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
   if (!supabaseUrl || !anonKey) return null;
@@ -7013,7 +7013,7 @@ async function streamWebInvestigate(
   const gaps = d.gaps && d.gaps.length > 0 ? `\n\nKnown gaps:\n${d.gaps.map((g) => `• ${g}`).join('\n')}` : '';
   const conf = typeof d.confidence === 'number' ? ` (confidence: ${(d.confidence * 100).toFixed(0)}%)` : '';
   const body = `${d.answer}${conf}\n\nSub-queries run:\n${subs}${cites ? `\n\nSources:\n${cites}` : ''}${gaps}`;
-  return { success: true, result: body };
+  return { success: true, result: body, structured: { ...d, question: (args.query as string) || '', delivered_via: 'stream' } };
 }
 
 // Human-readable tool names for display
@@ -7222,11 +7222,12 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string; toolsUsed: string[] }> {
+): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }> }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
   const toolsUsed: string[] = [];
+  const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
 
   while (iteration < maxIterations) {
     iteration++;
@@ -7445,7 +7446,7 @@ async function runToolLoop(
 
           // Auto-upgrade web_investigate → streaming variant for live progress.
           // Falls back to blocking dispatch on any error.
-          let result: { success: boolean; result: string } | null = null;
+          let result: { success: boolean; result: string; structured?: Record<string, unknown> } | null = null;
           if (tc.function.name === 'web_investigate' && onTaskUpdate) {
             const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
             if (authHeader) {
@@ -7462,6 +7463,14 @@ async function runToolLoop(
             result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
           }
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
+
+          // Capture structured investigation payload for artifact persistence.
+          if (tc.function.name === 'web_investigate' && result.success && result.structured) {
+            investigations.push({
+              question: (args.query as string) || '',
+              payload: result.structured,
+            });
+          }
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
@@ -7501,10 +7510,10 @@ async function runToolLoop(
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '', toolsUsed };
+    return { role: 'assistant', content: msg.content || '', toolsUsed, investigations };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed };
+  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations };
 }
 
 // ============================================================================
@@ -8701,6 +8710,46 @@ Execute these in order. Be decisive — the user has already been shown this pla
                 platform: inferPlatformFromModel(usedModel),
               })}\n\n`));
             } catch { /* best-effort */ }
+
+            // Persist investigation payloads as artifacts (one per web_investigate call).
+            // Emit `investigation_artifact` SSE so the client can render an InvestigationCard
+            // under the assistant message and survive page reloads via chat_messages.metadata.
+            try {
+              const sessionIdForArtifact = (body.sessionId as string) || null;
+              const assistantMessageId = (body.assistantMessageId as string) || null;
+              if (wisdomUserId && sessionIdForArtifact && result.investigations.length > 0) {
+                const { createClient: ccArt } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminArt = ccArt(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                for (const inv of result.investigations) {
+                  const inserted = await adminArt
+                    .from('artifacts')
+                    .insert({
+                      user_id: wisdomUserId,
+                      conversation_id: sessionIdForArtifact,
+                      message_id: assistantMessageId,
+                      type: 'investigation_report',
+                      title: inv.question.slice(0, 80) || 'Investigation',
+                      content: inv.payload,
+                      created_by: 'ai',
+                      status: 'published',
+                    })
+                    .select('id')
+                    .maybeSingle();
+                  const artifactId = inserted.data?.id;
+                  if (artifactId) {
+                    await writer.write(encoder.encode(`event: investigation_artifact\ndata: ${JSON.stringify({
+                      artifact_id: artifactId,
+                      message_id: assistantMessageId,
+                      question: inv.question,
+                    })}\n\n`));
+                  } else if (inserted.error) {
+                    console.warn('[investigation_artifact] insert failed:', inserted.error.message);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('[investigation_artifact] persistence error:', e);
+            }
 
             // Emit orchestration trace before DONE so the client can attach it to the message
             await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));

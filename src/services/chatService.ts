@@ -149,6 +149,12 @@ export interface OrchestrationTraceEvent {
   router_path: string | null;
 }
 
+export interface InvestigationArtifactEvent {
+  artifact_id: string;
+  message_id: string | null;
+  question: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -158,6 +164,8 @@ export interface StreamChatOptions {
   agentMetadata?: AgentMetadata;
   enableTools?: boolean;
   userSettings?: UserSettings;
+  sessionId?: string;
+  assistantMessageId?: string;
   signal?: AbortSignal;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
@@ -166,6 +174,7 @@ export interface StreamChatOptions {
   onProviderUsed?: (data: ProviderUsedEvent) => void;
   onToolsUsed?: (data: ToolsUsedEvent) => void;
   onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
+  onInvestigationArtifact?: (data: InvestigationArtifactEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -183,6 +192,8 @@ export async function streamChat({
   agentMetadata,
   enableTools = false,
   userSettings,
+  sessionId,
+  assistantMessageId,
   signal,
   onDelta,
   onToolCall,
@@ -191,6 +202,7 @@ export async function streamChat({
   onProviderUsed,
   onToolsUsed,
   onOrchestrationTrace,
+  onInvestigationArtifact,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -252,6 +264,8 @@ export async function streamChat({
         agentMetadata,
         enableTools,
         userSettings,
+        sessionId,
+        assistantMessageId,
         routing_mode: routingMode,
       }),
     });
@@ -334,6 +348,12 @@ export async function streamChat({
           // Handle orchestration_trace events (wisdom signal + routing decisions)
           if (currentEventType === 'orchestration_trace' && onOrchestrationTrace) {
             onOrchestrationTrace(parsed as OrchestrationTraceEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle investigation_artifact events (persisted research artifact id)
+          if (currentEventType === 'investigation_artifact' && onInvestigationArtifact) {
+            onInvestigationArtifact(parsed as InvestigationArtifactEvent);
             currentEventType = 'message';
             continue;
           }
