@@ -297,6 +297,8 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
     .filter(Boolean);
   return { documents: docs };
 }
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const t0 = Date.now();
@@ -308,9 +310,9 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
   let resultCount = 0;
   let success = false;
   let errorClass: string | null = null;
+  let cacheHit = false;
 
   try {
-    // Auth
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return jsonResp({ success: false, error: "Unauthorized" }, 401);
@@ -331,6 +333,29 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
     const params = (body?.params ?? {}) as Record<string, unknown>;
     query = typeof params.query === "string" ? params.query : (typeof params.url === "string" ? params.url : null);
 
+    // --- Cache lookup (cacheable single-call actions only) ---
+    let cacheKey: string | null = null;
+    if (CACHE_TTL_MS[action]) {
+      cacheKey = await buildCacheKey(action, params);
+      const cached = await cacheGet(userId, cacheKey);
+      if (cached && typeof cached === "object") {
+        cacheHit = true;
+        const latency = Date.now() - t0;
+        const payload = cached as Record<string, unknown>;
+        const count =
+          Array.isArray(payload.results) ? payload.results.length :
+          Array.isArray(payload.links) ? payload.links.length :
+          payload.markdown ? 1 : 0;
+        void logRun({
+          user_id: userId, query, action,
+          providers_attempted: ["cache"], providers_succeeded: ["cache"],
+          result_count: count, latency_ms: latency, success: true,
+          metadata: { cache: "hit" },
+        });
+        return jsonResp({ success: true, action, cache: "hit", ...payload });
+      }
+    }
+
     let result: Record<string, unknown>;
     if (action === "web_search") {
       const r = await handleWebSearch(params);
@@ -350,8 +375,19 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
       succeeded = ["firecrawl"];
       resultCount = (r.links as unknown[]).length;
       result = r;
+    } else if (action === "web_enrich") {
+      attempted = ["firecrawl"];
+      const r = await handleWebEnrich(params, userId);
+      succeeded = ["firecrawl"];
+      resultCount = (r.documents as unknown[]).length;
+      result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
+    }
+
+    // Cache write (best-effort)
+    if (cacheKey && CACHE_TTL_MS[action]) {
+      void cacheSet(userId, cacheKey, action, result);
     }
 
     success = true;
