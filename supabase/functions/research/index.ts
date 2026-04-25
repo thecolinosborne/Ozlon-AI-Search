@@ -296,7 +296,68 @@ async function callGateway(messages: Array<{ role: string; content: string }>, o
   }
 }
 
-async function reformulateQuery(query: string, contextHint?: string): Promise<string> {
+// --- Phase 6: Embeddings + recall helpers (all fail-open) ---
+async function embedText(text: string): Promise<number[] | null> {
+  if (!LOVABLE_API_KEY) return null;
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "openai/text-embedding-3-small", input: text.slice(0, 4000) }),
+    });
+    if (!res.ok) { console.warn(`[research] embed ${res.status}`); return null; }
+    const data = await res.json();
+    const vec = data?.data?.[0]?.embedding;
+    return Array.isArray(vec) ? vec : null;
+  } catch (e) {
+    console.warn("[research] embed failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function findSimilarPlans(userId: string, question: string, threshold = 0.82, maxAgeHours = 168): Promise<Array<{ id: string; original_question: string; final_answer: string; confidence: number; gaps_detected: string[]; sub_queries: unknown; created_at: string; similarity: number }>> {
+  try {
+    const emb = await embedText(question);
+    if (!emb) return [];
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data, error } = await admin.rpc("match_research_plans", {
+      query_embedding: emb as unknown as string,
+      match_threshold: threshold,
+      match_count: 5,
+      filter_user_id: userId,
+      max_age_hours: maxAgeHours,
+    });
+    if (error) { console.warn("[research] match_research_plans:", error.message); return []; }
+    return (data ?? []) as Array<{ id: string; original_question: string; final_answer: string; confidence: number; gaps_detected: string[]; sub_queries: unknown; created_at: string; similarity: number }>;
+  } catch (e) {
+    console.warn("[research] findSimilarPlans failed:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+async function handleWebRecall(params: Record<string, unknown>, userId: string): Promise<Record<string, unknown>> {
+  const question = String(params.query ?? "").trim();
+  if (!question) throw new Error("query required");
+  const maxAgeHours = typeof params.maxAgeHours === "number" ? Math.min(720, Math.max(1, params.maxAgeHours)) : 168;
+  const threshold = typeof params.threshold === "number" ? Math.min(0.99, Math.max(0.5, params.threshold)) : 0.82;
+
+  const matches = await findSimilarPlans(userId, question, threshold, maxAgeHours);
+  return {
+    query: question,
+    matches: matches.map((m) => ({
+      plan_id: m.id,
+      original_question: m.original_question,
+      answer: m.final_answer,
+      confidence: m.confidence,
+      gaps: m.gaps_detected ?? [],
+      similarity: m.similarity,
+      age_hours: Math.round((Date.now() - new Date(m.created_at).getTime()) / 3_600_000),
+      sub_queries: m.sub_queries,
+    })),
+  };
+}
+
+
   if (!isWeakQuery(query)) return query;
   const sys = "Rewrite the user's vague search query into a concise, specific web search string (max 10 words). Use concrete nouns. Output ONLY the rewritten query, no quotes, no explanation.";
   const userMsg = contextHint ? `Context: ${contextHint}\nQuery: ${query}` : `Query: ${query}`;
