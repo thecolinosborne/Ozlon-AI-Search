@@ -264,6 +264,8 @@ export async function streamChat({
         agentMetadata,
         enableTools,
         userSettings,
+        sessionId,
+        assistantMessageId,
         routing_mode: routingMode,
       }),
     });
@@ -346,6 +348,12 @@ export async function streamChat({
           // Handle orchestration_trace events (wisdom signal + routing decisions)
           if (currentEventType === 'orchestration_trace' && onOrchestrationTrace) {
             onOrchestrationTrace(parsed as OrchestrationTraceEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle investigation_artifact events (persisted research artifact id)
+          if (currentEventType === 'investigation_artifact' && onInvestigationArtifact) {
+            onInvestigationArtifact(parsed as InvestigationArtifactEvent);
             currentEventType = 'message';
             continue;
           }
