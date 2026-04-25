@@ -56,6 +56,8 @@ async function logRun(row: {
   }
 }
 
+const STOPWORDS = new Set(["the","a","an","of","to","and","or","is","in","on","for","with","my","me","i","that","this","it","what","whats","find","get","show"]);
+
 // --- Cache (fail-open) ---
 const CACHE_TTL_MS: Record<string, number> = {
   web_search: 15 * 60 * 1000,
@@ -63,6 +65,151 @@ const CACHE_TTL_MS: Record<string, number> = {
   web_map:    24 * 60 * 60 * 1000,
   web_answer: 30 * 60 * 1000,
 };
+const TTL_MIN_MS = 5 * 60 * 1000;
+const TTL_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+// --- Phase 4: Adaptive learning helpers (all fail-open) ---
+function extractDomain(url: string): string | null {
+  try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); }
+  catch { return null; }
+}
+
+function classifyFailure(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("timeout") || m.includes("timed out")) return "provider_timeout";
+  if (m.includes("rate") && m.includes("limit")) return "rate_limit";
+  if (m.includes("401") || m.includes("403") || m.includes("unauthor") || m.includes("forbidden") || m.includes("api_key") || m.includes("missing")) return "auth";
+  if (m.includes("no search providers") || m.includes("zero results") || m.includes("no results")) return "zero_results";
+  if (m.includes("query required") || m.includes("url required")) return "bad_query";
+  return "other";
+}
+
+async function logFailure(userId: string, action: string, intent: string | null, failureClass: string, query: string | null, errorMessage: string, provider?: string): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    await admin.from("research_failures").insert({
+      user_id: userId, action, intent, failure_class: failureClass,
+      provider: provider ?? null, query, error_message: errorMessage.slice(0, 500),
+    });
+  } catch (e) { console.warn("[research] logFailure failed:", e instanceof Error ? e.message : e); }
+}
+
+async function getCacheTtlMs(userId: string, action: string, intent: string): Promise<number> {
+  const fallback = CACHE_TTL_MS[action];
+  if (!fallback) return 0;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("cache_policy").select("ttl_seconds").eq("user_id", userId).eq("action", action).eq("intent", intent).maybeSingle();
+    if (data?.ttl_seconds) return Math.min(Math.max(data.ttl_seconds * 1000, TTL_MIN_MS), TTL_MAX_MS);
+  } catch (e) { console.warn("[research] getCacheTtlMs fail-open:", e instanceof Error ? e.message : e); }
+  return fallback;
+}
+
+async function recordCacheStat(userId: string, action: string, intent: string, hit: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: existing } = await admin.from("cache_policy").select("id, hit_count, miss_count, ttl_seconds").eq("user_id", userId).eq("action", action).eq("intent", intent).maybeSingle();
+    if (!existing) {
+      await admin.from("cache_policy").insert({
+        user_id: userId, action, intent,
+        ttl_seconds: Math.floor((CACHE_TTL_MS[action] ?? 900_000) / 1000),
+        hit_count: hit ? 1 : 0, miss_count: hit ? 0 : 1,
+      });
+      return;
+    }
+    const hits = existing.hit_count + (hit ? 1 : 0);
+    const misses = existing.miss_count + (hit ? 0 : 1);
+    const total = hits + misses;
+    let ttl = existing.ttl_seconds;
+    if (total >= 20 && total % 10 === 0) {
+      const ratio = hits / total;
+      if (ratio > 0.6) ttl = Math.min(Math.floor(ttl * 1.25), 604_800);
+      else if (ratio < 0.2) ttl = Math.max(Math.floor(ttl * 0.75), 300);
+    }
+    await admin.from("cache_policy").update({ hit_count: hits, miss_count: misses, ttl_seconds: ttl, last_tuned_at: new Date().toISOString() }).eq("id", existing.id);
+  } catch (e) { console.warn("[research] recordCacheStat fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function getTrustScores(userId: string, domains: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (domains.length === 0) return map;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("source_reputation").select("domain, trust_score").eq("user_id", userId).in("domain", domains);
+    for (const row of data ?? []) map.set(row.domain, Number(row.trust_score));
+  } catch (e) { console.warn("[research] getTrustScores fail-open:", e instanceof Error ? e.message : e); }
+  return map;
+}
+
+async function bumpReturned(userId: string, domains: string[]): Promise<void> {
+  if (domains.length === 0) return;
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const existing = await admin.from("source_reputation").select("domain, total_returned, total_enriched, total_failed, trust_score").eq("user_id", userId).in("domain", domains);
+    const have = new Map((existing.data ?? []).map((r) => [r.domain, r]));
+    const upserts = domains.map((d) => {
+      const row = have.get(d);
+      if (!row) return { user_id: userId, domain: d, total_returned: 1, trust_score: 0.5, last_seen_at: new Date().toISOString() };
+      const returned = row.total_returned + 1;
+      const enriched = row.total_enriched;
+      const failed = row.total_failed;
+      const trust = Math.max(0, Math.min(1, 0.5 + (enriched * 0.05) - (failed * 0.1) + Math.log10(returned + 1) * 0.02));
+      return { user_id: userId, domain: d, total_returned: returned, trust_score: trust, last_seen_at: new Date().toISOString() };
+    });
+    await admin.from("source_reputation").upsert(upserts, { onConflict: "user_id,domain" });
+  } catch (e) { console.warn("[research] bumpReturned fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function bumpEnriched(userId: string, domain: string, ok: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: row } = await admin.from("source_reputation").select("id, total_returned, total_enriched, total_failed").eq("user_id", userId).eq("domain", domain).maybeSingle();
+    if (!row) return;
+    const enriched = row.total_enriched + (ok ? 1 : 0);
+    const failed = row.total_failed + (ok ? 0 : 1);
+    const trust = Math.max(0, Math.min(1, 0.5 + (enriched * 0.05) - (failed * 0.1) + Math.log10((row.total_returned || 1) + 1) * 0.02));
+    await admin.from("source_reputation").update({ total_enriched: enriched, total_failed: failed, trust_score: trust }).eq("id", row.id);
+  } catch (e) { console.warn("[research] bumpEnriched fail-open:", e instanceof Error ? e.message : e); }
+}
+
+async function lookupQueryPattern(userId: string, intent: string, patternHash: string): Promise<string | null> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin.from("query_patterns").select("rewritten, success_count, use_count").eq("user_id", userId).eq("intent", intent).eq("pattern_hash", patternHash).maybeSingle();
+    if (data && data.success_count >= 5) {
+      void admin.from("query_patterns").update({ use_count: data.use_count + 1, last_used_at: new Date().toISOString() }).eq("user_id", userId).eq("pattern_hash", patternHash);
+      return data.rewritten;
+    }
+  } catch (e) { console.warn("[research] lookupQueryPattern fail-open:", e instanceof Error ? e.message : e); }
+  return null;
+}
+
+async function recordPatternResult(userId: string, intent: string, patternHash: string, original: string, rewritten: string, resultCount: number, success: boolean): Promise<void> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data: row } = await admin.from("query_patterns").select("id, success_count, use_count, avg_result_count").eq("user_id", userId).eq("pattern_hash", patternHash).maybeSingle();
+    if (!row) {
+      await admin.from("query_patterns").insert({
+        user_id: userId, intent, pattern_hash: patternHash,
+        original_sample: original.slice(0, 300), rewritten: rewritten.slice(0, 300),
+        success_count: success ? 1 : 0, use_count: 1, avg_result_count: resultCount,
+      });
+      return;
+    }
+    const useCount = row.use_count + 1;
+    const successCount = row.success_count + (success ? 1 : 0);
+    const avg = ((Number(row.avg_result_count ?? 0) * row.use_count) + resultCount) / useCount;
+    await admin.from("query_patterns").update({
+      use_count: useCount, success_count: successCount,
+      avg_result_count: avg, last_used_at: new Date().toISOString(),
+    }).eq("id", row.id);
+  } catch (e) { console.warn("[research] recordPatternResult fail-open:", e instanceof Error ? e.message : e); }
+}
+
+function patternHashFor(intent: string, query: string): Promise<string> {
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => !STOPWORDS.has(t.replace(/[^\w]/g, ""))).sort().join(" ");
+  return sha256Hex(`${intent}::${tokens}`);
+}
 
 async function sha256Hex(input: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
@@ -96,9 +243,9 @@ async function cacheGet(userId: string, key: string): Promise<unknown | null> {
   }
 }
 
-async function cacheSet(userId: string, key: string, action: string, payload: unknown): Promise<void> {
+async function cacheSet(userId: string, key: string, action: string, payload: unknown, ttlMsOverride?: number): Promise<void> {
   try {
-    const ttl = CACHE_TTL_MS[action];
+    const ttl = ttlMsOverride ?? CACHE_TTL_MS[action];
     if (!ttl) return;
     const admin = createClient(supabaseUrl, serviceKey);
     await admin.from("research_cache").upsert({
@@ -114,7 +261,6 @@ async function cacheSet(userId: string, key: string, action: string, payload: un
 }
 
 // --- Query intelligence (Lovable AI Gateway, fail-open) ---
-const STOPWORDS = new Set(["the","a","an","of","to","and","or","is","in","on","for","with","my","me","i","that","this","it","what","whats","find","get","show"]);
 const OPERATOR_REGEX = /(\bsite:|"|-\w|\bOR\b|\bAND\b|filetype:)/i;
 
 function isWeakQuery(q: string): boolean {
@@ -269,7 +415,7 @@ function mergeResults(lists: NormalizedResult[][], maxResults: number, recencyDa
 }
 
 // --- Action handlers ---
-async function handleWebSearch(params: Record<string, unknown>) {
+async function handleWebSearch(params: Record<string, unknown>, userId?: string) {
   const rawQuery = String(params.query ?? "").trim();
   if (!rawQuery) throw new Error("query required");
   const maxResults = Math.min(Number(params.maxResults ?? 10) || 10, 25);
@@ -277,13 +423,25 @@ async function handleWebSearch(params: Record<string, unknown>) {
   const skipIntelligence = params.skipIntelligence === true;
 
   // Stage 0: query intelligence (fail-open, runs in parallel)
-  const [rewrittenQuery, intent] = skipIntelligence
-    ? [rawQuery, "default" as Intent]
-    : await Promise.all([reformulateQuery(rawQuery, contextHint), classifyIntent(rawQuery)]);
+  let intent: Intent = "default";
+  let rewrittenQuery = rawQuery;
+  let patternHash: string | null = null;
+  let patternFromCache = false;
+  if (!skipIntelligence) {
+    intent = await classifyIntent(rawQuery);
+    if (userId) {
+      patternHash = await patternHashFor(intent, rawQuery);
+      const cached = await lookupQueryPattern(userId, intent, patternHash);
+      if (cached) { rewrittenQuery = cached; patternFromCache = true; }
+    }
+    if (!patternFromCache) {
+      rewrittenQuery = await reformulateQuery(rawQuery, contextHint);
+    }
+  }
 
   // Resolve strategy from intent (caller params override).
   let recencyDays = params.recencyDays ? Number(params.recencyDays) : undefined;
-  let includeDomains = Array.isArray(params.includeDomains) ? params.includeDomains as string[] : undefined;
+  const includeDomains = Array.isArray(params.includeDomains) ? params.includeDomains as string[] : undefined;
   const excludeDomains = Array.isArray(params.excludeDomains) ? params.excludeDomains as string[] : undefined;
   let depth: "basic" | "advanced" = "advanced";
   let useFirecrawl = !!FIRECRAWL_KEY;
@@ -292,13 +450,8 @@ async function handleWebSearch(params: Record<string, unknown>) {
     if (intent === "news") recencyDays = 7;
     else if (intent === "deep_research") recencyDays = undefined;
   }
-  if (intent === "news") {
-    useFirecrawl = false; // Tavily is better for fresh news
-  } else if (intent === "deep_research") {
-    depth = "advanced";
-  } else if (intent === "factual_lookup") {
-    depth = "basic";
-  }
+  if (intent === "news") useFirecrawl = false;
+  else if (intent === "factual_lookup") depth = "basic";
 
   const attempted: string[] = [];
   if (TAVILY_KEY) attempted.push("tavily");
@@ -317,13 +470,32 @@ async function handleWebSearch(params: Record<string, unknown>) {
   if (settled[1].status === "fulfilled") { succeeded.push("firecrawl"); lists.push(settled[1].value); }
   else if (useFirecrawl) console.warn("[research] firecrawl failed:", (settled[1].reason as Error)?.message);
 
-  const merged = mergeResults(lists, maxResults, recencyDays);
+  // Trust-aware ranking
+  let merged = mergeResults(lists, maxResults * 2, recencyDays);
+  if (userId && merged.length > 0) {
+    const domains = Array.from(new Set(merged.map((r) => extractDomain(r.url)).filter((d): d is string => !!d)));
+    const trustMap = await getTrustScores(userId, domains);
+    merged = merged.map((r) => {
+      const d = extractDomain(r.url);
+      const trust = d ? (trustMap.get(d) ?? 0.5) : 0.5;
+      return { ...r, score: r.score + (trust - 0.5) * 0.4 };
+    }).sort((a, b) => b.score - a.score).slice(0, maxResults);
+    void bumpReturned(userId, domains.slice(0, maxResults));
+  } else {
+    merged = merged.slice(0, maxResults);
+  }
+
+  // Record pattern outcome (only when we actually rewrote the query)
+  if (userId && patternHash && !patternFromCache && rewrittenQuery !== rawQuery) {
+    void recordPatternResult(userId, intent, patternHash, rawQuery, rewrittenQuery, merged.length, merged.length > 0);
+  }
+
   return {
     results: merged,
     attempted,
     succeeded,
     query: rewrittenQuery,
-    intelligence: { original: rawQuery, rewritten: rewrittenQuery, intent, depth, recencyDays },
+    intelligence: { original: rawQuery, rewritten: rewrittenQuery, intent, depth, recencyDays, patternFromCache },
   };
 }
 
@@ -391,7 +563,16 @@ async function handleWebEnrich(params: Record<string, unknown>, userId: string) 
     }),
   );
   const docs = results
-    .map((r, i) => r.status === "fulfilled" ? r.value : { url: capped[i], error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) })
+    .map((r, i) => {
+      const url = capped[i];
+      const domain = extractDomain(url);
+      if (r.status === "fulfilled") {
+        if (domain) void bumpEnriched(userId, domain, true);
+        return r.value;
+      }
+      if (domain) void bumpEnriched(userId, domain, false);
+      return { url, error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) };
+    })
     .filter(Boolean);
   return { documents: docs };
 }
@@ -403,7 +584,7 @@ async function handleWebAnswer(params: Record<string, unknown>, userId: string) 
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing for synthesis");
 
   // Stage 1: search
-  const search = await handleWebSearch({ query, maxResults: 8, contextHint: params.contextHint });
+  const search = await handleWebSearch({ query, maxResults: 8, contextHint: params.contextHint }, userId);
   const topUrls = search.results.slice(0, 3).map((r) => r.url);
 
   // Stage 2: enrich top 3
@@ -474,6 +655,9 @@ Deno.serve(async (req) => {
         cacheHit = true;
         const latency = Date.now() - t0;
         const payload = cached as Record<string, unknown>;
+        const cachedIntel = (payload.intelligence as Record<string, unknown> | undefined);
+        const cachedIntent = typeof cachedIntel?.intent === "string" ? cachedIntel.intent as string : "default";
+        void recordCacheStat(userId, action, cachedIntent, true);
         const count =
           Array.isArray(payload.results) ? payload.results.length :
           Array.isArray(payload.links) ? payload.links.length :
@@ -491,7 +675,7 @@ Deno.serve(async (req) => {
 
     let result: Record<string, unknown>;
     if (action === "web_search") {
-      const r = await handleWebSearch(params);
+      const r = await handleWebSearch(params, userId);
       attempted = r.attempted;
       succeeded = r.succeeded;
       resultCount = r.results.length;
@@ -526,8 +710,11 @@ Deno.serve(async (req) => {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
     }
 
+    const intentForCache = (intelligence?.intent as string) ?? "default";
     if (cacheKey && CACHE_TTL_MS[action]) {
-      void cacheSet(userId, cacheKey, action, result);
+      const dynTtl = await getCacheTtlMs(userId, action, intentForCache);
+      void cacheSet(userId, cacheKey, action, result, dynTtl);
+      void recordCacheStat(userId, action, intentForCache, false);
     }
 
     success = true;
@@ -544,6 +731,9 @@ Deno.serve(async (req) => {
     errorClass = msg.split(":")[0].slice(0, 80);
     console.error(`[research] ${action} failed:`, msg);
     const latency = Date.now() - t0;
+    const failClass = classifyFailure(msg);
+    const intentForFail = typeof intelligence?.intent === "string" ? intelligence.intent as string : null;
+    void logFailure(userId, action, intentForFail, failClass, query, msg);
     void logRun({
       user_id: userId, query, action,
       providers_attempted: attempted, providers_succeeded: succeeded,
