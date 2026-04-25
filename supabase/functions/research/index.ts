@@ -763,6 +763,25 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
   const question = String(params.query ?? "").trim();
   if (!question) throw new Error("query required");
   const contextHint = typeof params.contextHint === "string" ? params.contextHint : undefined;
+  const skipRecall = params.skipRecall === true;
+
+  // Recall: if a near-identical question was investigated recently, return it
+  if (!skipRecall) {
+    const recall = await findSimilarPlans(userId, question, 0.88, 24);
+    if (recall.length > 0) {
+      const top = recall[0];
+      const ageHours = Math.round((Date.now() - new Date(top.created_at).getTime()) / 3_600_000);
+      return {
+        answer: top.final_answer,
+        citations: [],
+        sub_queries: top.sub_queries,
+        confidence: Number(top.confidence ?? 0),
+        gaps: top.gaps_detected ?? [],
+        recall: { plan_id: top.id, similarity: top.similarity, age_hours: ageHours, original_question: top.original_question },
+        latency_ms: Date.now() - t0,
+      };
+    }
+  }
 
   const within = await checkPlanBudget(userId);
   if (!within) {
