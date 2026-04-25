@@ -54,6 +54,64 @@ async function logRun(row: {
   }
 }
 
+// --- Cache (fail-open) ---
+const CACHE_TTL_MS: Record<string, number> = {
+  web_search: 15 * 60 * 1000,        // 15 min
+  web_scrape: 24 * 60 * 60 * 1000,   // 24 h
+  web_map:    24 * 60 * 60 * 1000,   // 24 h
+  // web_enrich is just a batch of web_scrape — uses scrape cache per URL.
+};
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function buildCacheKey(action: string, params: Record<string, unknown>): Promise<string> {
+  // Stable serialization: sort keys, lowercase, drop undefined.
+  const norm: Record<string, unknown> = {};
+  Object.keys(params).sort().forEach((k) => {
+    const v = params[k];
+    if (v === undefined || v === null || v === "") return;
+    norm[k] = typeof v === "string" ? v.trim().toLowerCase() : v;
+  });
+  return sha256Hex(`${action}::${JSON.stringify(norm)}`);
+}
+
+async function cacheGet(userId: string, key: string): Promise<unknown | null> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data } = await admin
+      .from("research_cache")
+      .select("payload, expires_at")
+      .eq("user_id", userId)
+      .eq("cache_key", key)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    return data?.payload ?? null;
+  } catch (e) {
+    console.warn("[research] cacheGet failed (fail-open):", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function cacheSet(userId: string, key: string, action: string, payload: unknown): Promise<void> {
+  try {
+    const ttl = CACHE_TTL_MS[action];
+    if (!ttl) return;
+    const admin = createClient(supabaseUrl, serviceKey);
+    await admin.from("research_cache").upsert({
+      user_id: userId,
+      cache_key: key,
+      action,
+      payload: payload as Record<string, unknown>,
+      expires_at: new Date(Date.now() + ttl).toISOString(),
+    }, { onConflict: "user_id,cache_key" });
+  } catch (e) {
+    console.warn("[research] cacheSet failed (fail-open):", e instanceof Error ? e.message : e);
+  }
+}
+
 // --- Provider: Tavily search ---
 async function tavilySearch(query: string, maxResults: number, recencyDays?: number, includeDomains?: string[], excludeDomains?: string[]): Promise<NormalizedResult[]> {
   if (!TAVILY_KEY) throw new Error("TAVILY_API_KEY missing");
@@ -218,6 +276,28 @@ async function handleWebMap(params: Record<string, unknown>) {
   return { url, links: normalized };
 }
 
+// --- web_enrich: batched parallel scrape of N urls (stage 2 of two-stage flow) ---
+async function handleWebEnrich(params: Record<string, unknown>, userId: string) {
+  const urls = Array.isArray(params.urls) ? (params.urls as unknown[]).filter((u) => typeof u === "string") as string[] : [];
+  if (urls.length === 0) throw new Error("urls required");
+  const capped = urls.slice(0, 8);
+  const results = await Promise.allSettled(
+    capped.map(async (url) => {
+      // Reuse scrape cache per-url.
+      const key = await buildCacheKey("web_scrape", { url, onlymaincontent: true });
+      const cached = await cacheGet(userId, key);
+      if (cached) return cached;
+      const fresh = await handleWebScrape({ url, onlyMainContent: true });
+      void cacheSet(userId, key, "web_scrape", fresh);
+      return fresh;
+    }),
+  );
+  const docs = results
+    .map((r, i) => r.status === "fulfilled" ? r.value : { url: capped[i], error: (r.reason instanceof Error ? r.reason.message : String(r.reason)) })
+    .filter(Boolean);
+  return { documents: docs };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -230,9 +310,9 @@ Deno.serve(async (req) => {
   let resultCount = 0;
   let success = false;
   let errorClass: string | null = null;
+  let cacheHit = false;
 
   try {
-    // Auth
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return jsonResp({ success: false, error: "Unauthorized" }, 401);
@@ -253,6 +333,29 @@ Deno.serve(async (req) => {
     const params = (body?.params ?? {}) as Record<string, unknown>;
     query = typeof params.query === "string" ? params.query : (typeof params.url === "string" ? params.url : null);
 
+    // --- Cache lookup (cacheable single-call actions only) ---
+    let cacheKey: string | null = null;
+    if (CACHE_TTL_MS[action]) {
+      cacheKey = await buildCacheKey(action, params);
+      const cached = await cacheGet(userId, cacheKey);
+      if (cached && typeof cached === "object") {
+        cacheHit = true;
+        const latency = Date.now() - t0;
+        const payload = cached as Record<string, unknown>;
+        const count =
+          Array.isArray(payload.results) ? payload.results.length :
+          Array.isArray(payload.links) ? payload.links.length :
+          payload.markdown ? 1 : 0;
+        void logRun({
+          user_id: userId, query, action,
+          providers_attempted: ["cache"], providers_succeeded: ["cache"],
+          result_count: count, latency_ms: latency, success: true,
+          metadata: { cache: "hit" },
+        });
+        return jsonResp({ success: true, action, cache: "hit", ...payload });
+      }
+    }
+
     let result: Record<string, unknown>;
     if (action === "web_search") {
       const r = await handleWebSearch(params);
@@ -272,8 +375,19 @@ Deno.serve(async (req) => {
       succeeded = ["firecrawl"];
       resultCount = (r.links as unknown[]).length;
       result = r;
+    } else if (action === "web_enrich") {
+      attempted = ["firecrawl"];
+      const r = await handleWebEnrich(params, userId);
+      succeeded = ["firecrawl"];
+      resultCount = (r.documents as unknown[]).length;
+      result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
+    }
+
+    // Cache write (best-effort)
+    if (cacheKey && CACHE_TTL_MS[action]) {
+      void cacheSet(userId, cacheKey, action, result);
     }
 
     success = true;
@@ -282,6 +396,7 @@ Deno.serve(async (req) => {
       user_id: userId, query, action,
       providers_attempted: attempted, providers_succeeded: succeeded,
       result_count: resultCount, latency_ms: latency, success: true,
+      metadata: { cache: cacheHit ? "hit" : "miss" },
     });
     return jsonResp({ success: true, action, ...result });
   } catch (e) {

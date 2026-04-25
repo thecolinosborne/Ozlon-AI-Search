@@ -1382,6 +1382,36 @@ export type Database = {
         }
         Relationships: []
       }
+      research_cache: {
+        Row: {
+          action: string
+          cache_key: string
+          created_at: string
+          expires_at: string
+          id: string
+          payload: Json
+          user_id: string
+        }
+        Insert: {
+          action: string
+          cache_key: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          payload: Json
+          user_id: string
+        }
+        Update: {
+          action?: string
+          cache_key?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          payload?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       research_runs: {
         Row: {
           action: string
@@ -2304,7 +2334,20 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      research_runs_summary: {
+        Row: {
+          action: string | null
+          avg_latency_ms: number | null
+          avg_result_count: number | null
+          day: string | null
+          p95_latency_ms: number | null
+          success_rate_pct: number | null
+          successful_calls: number | null
+          total_calls: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_user_secret: {
