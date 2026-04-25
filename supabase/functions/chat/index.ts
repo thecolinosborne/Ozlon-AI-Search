@@ -8711,6 +8711,46 @@ Execute these in order. Be decisive — the user has already been shown this pla
               })}\n\n`));
             } catch { /* best-effort */ }
 
+            // Persist investigation payloads as artifacts (one per web_investigate call).
+            // Emit `investigation_artifact` SSE so the client can render an InvestigationCard
+            // under the assistant message and survive page reloads via chat_messages.metadata.
+            try {
+              const sessionIdForArtifact = (body.sessionId as string) || null;
+              const assistantMessageId = (body.assistantMessageId as string) || null;
+              if (wisdomUserId && sessionIdForArtifact && result.investigations.length > 0) {
+                const { createClient: ccArt } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+                const adminArt = ccArt(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+                for (const inv of result.investigations) {
+                  const inserted = await adminArt
+                    .from('artifacts')
+                    .insert({
+                      user_id: wisdomUserId,
+                      conversation_id: sessionIdForArtifact,
+                      message_id: assistantMessageId,
+                      type: 'investigation_report',
+                      title: inv.question.slice(0, 80) || 'Investigation',
+                      content: inv.payload,
+                      created_by: 'ai',
+                      status: 'published',
+                    })
+                    .select('id')
+                    .maybeSingle();
+                  const artifactId = inserted.data?.id;
+                  if (artifactId) {
+                    await writer.write(encoder.encode(`event: investigation_artifact\ndata: ${JSON.stringify({
+                      artifact_id: artifactId,
+                      message_id: assistantMessageId,
+                      question: inv.question,
+                    })}\n\n`));
+                  } else if (inserted.error) {
+                    console.warn('[investigation_artifact] insert failed:', inserted.error.message);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('[investigation_artifact] persistence error:', e);
+            }
+
             // Emit orchestration trace before DONE so the client can attach it to the message
             await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
