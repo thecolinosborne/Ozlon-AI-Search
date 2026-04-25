@@ -6875,7 +6875,7 @@ async function streamWebInvestigate(
   authHeader: string,
   taskId: string,
   emit: (e: TaskUpdateEvent) => void | Promise<void>,
-): Promise<{ success: boolean; result: string } | null> {
+): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> } | null> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
   if (!supabaseUrl || !anonKey) return null;
@@ -7013,7 +7013,7 @@ async function streamWebInvestigate(
   const gaps = d.gaps && d.gaps.length > 0 ? `\n\nKnown gaps:\n${d.gaps.map((g) => `• ${g}`).join('\n')}` : '';
   const conf = typeof d.confidence === 'number' ? ` (confidence: ${(d.confidence * 100).toFixed(0)}%)` : '';
   const body = `${d.answer}${conf}\n\nSub-queries run:\n${subs}${cites ? `\n\nSources:\n${cites}` : ''}${gaps}`;
-  return { success: true, result: body };
+  return { success: true, result: body, structured: { ...d, question: (args.query as string) || '', delivered_via: 'stream' } };
 }
 
 // Human-readable tool names for display
