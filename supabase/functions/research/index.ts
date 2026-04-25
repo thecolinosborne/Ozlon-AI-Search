@@ -259,7 +259,6 @@ async function cacheSet(userId: string, key: string, action: string, payload: un
 }
 
 // --- Query intelligence (Lovable AI Gateway, fail-open) ---
-const STOPWORDS = new Set(["the","a","an","of","to","and","or","is","in","on","for","with","my","me","i","that","this","it","what","whats","find","get","show"]);
 const OPERATOR_REGEX = /(\bsite:|"|-\w|\bOR\b|\bAND\b|filetype:)/i;
 
 function isWeakQuery(q: string): boolean {
