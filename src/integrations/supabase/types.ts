@@ -1382,6 +1382,51 @@ export type Database = {
         }
         Relationships: []
       }
+      research_runs: {
+        Row: {
+          action: string
+          created_at: string
+          error_class: string | null
+          id: string
+          latency_ms: number | null
+          metadata: Json
+          providers_attempted: string[]
+          providers_succeeded: string[]
+          query: string | null
+          result_count: number
+          success: boolean
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error_class?: string | null
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json
+          providers_attempted?: string[]
+          providers_succeeded?: string[]
+          query?: string | null
+          result_count?: number
+          success?: boolean
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error_class?: string | null
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json
+          providers_attempted?: string[]
+          providers_succeeded?: string[]
+          query?: string | null
+          result_count?: number
+          success?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
       research_tasks: {
         Row: {
           completed_at: string | null
