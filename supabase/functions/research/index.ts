@@ -746,7 +746,11 @@ async function checkPlanBudget(userId: string): Promise<boolean> {
 async function recordPlan(row: Record<string, unknown>): Promise<string | null> {
   try {
     const admin = createClient(supabaseUrl, serviceKey);
-    const { data } = await admin.from("research_plans").insert(row).select("id").single();
+    // Embed the original question for future recall (fail-open)
+    const question = typeof row.original_question === "string" ? row.original_question : null;
+    const embedding = question ? await embedText(question) : null;
+    const insertRow = embedding ? { ...row, original_question_embedding: embedding } : row;
+    const { data } = await admin.from("research_plans").insert(insertRow).select("id").single();
     return data?.id ?? null;
   } catch (e) {
     console.warn("[research] recordPlan failed:", e instanceof Error ? e.message : e);
