@@ -113,5 +113,28 @@ export const researchIntegration: IntegrationManifest = {
         ).join("\n\n---\n\n");
       },
     },
+    {
+      name: "web_answer",
+      description:
+        "One-shot answer with citations. Searches the web, fetches the top 3 sources, and synthesizes a concise answer with inline [1][2] citations. Use for direct user questions like 'what is the current X' or 'who won Y' when you want a finished answer instead of raw results. Slower than web_search but saves round-trips.",
+      action: "web_answer",
+      sideEffect: "external_call",
+      cost: "expensive",
+      schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The user's question." },
+          contextHint: { type: "string", description: "Optional context from the conversation to disambiguate the query." },
+        },
+        required: ["query"],
+      },
+      mapArgs: (a) => ({ query: a.query, contextHint: a.contextHint }),
+      formatter: (data) => {
+        const d = data as { answer?: string; citations?: Array<{ index: number; url: string; title: string }> };
+        if (!d?.answer) return "No answer synthesized.";
+        const cites = (d.citations ?? []).map((c) => `[${c.index}] ${c.title} — ${c.url}`).join("\n");
+        return cites ? `${d.answer}\n\nSources:\n${cites}` : d.answer;
+      },
+    },
   ],
 };
