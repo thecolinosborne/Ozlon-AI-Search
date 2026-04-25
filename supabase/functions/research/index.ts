@@ -108,14 +108,18 @@ async function firecrawlSearch(query: string, maxResults: number): Promise<Norma
   // v2 may return { data: { web: [...] } } or { data: [...] }
   const raw = (data?.data?.web ?? data?.data ?? data?.web ?? []) as Array<Record<string, unknown>>;
   const arr = Array.isArray(raw) ? raw : [];
-  return arr.map((r): NormalizedResult => ({
-    url: String(r.url ?? ""),
-    title: String(r.title ?? r.metadata && (r.metadata as Record<string, unknown>)?.title || ""),
-    snippet: String(r.description ?? r.snippet ?? ""),
-    publishedAt: undefined,
-    score: 0.5,
-    source: "firecrawl",
-  })).filter((r) => r.url);
+  return arr.map((r): NormalizedResult => {
+    const meta = (r.metadata && typeof r.metadata === "object") ? r.metadata as Record<string, unknown> : {};
+    const title = (typeof r.title === "string" && r.title) || (typeof meta.title === "string" ? meta.title : "");
+    return {
+      url: String(r.url ?? ""),
+      title: String(title),
+      snippet: String(r.description ?? r.snippet ?? ""),
+      publishedAt: undefined,
+      score: 0.5,
+      source: "firecrawl",
+    };
+  }).filter((r) => r.url);
 }
 
 // --- Merge + dedupe + rank ---
@@ -237,7 +241,8 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
     const token = authHeader.replace("Bearer ", "");
-    const { data: claims } = await supabase.auth.getClaims(token);
+    // deno-lint-ignore no-explicit-any
+    const { data: claims } = await (supabase.auth as any).getClaims(token);
     if (!claims?.claims?.sub) {
       return jsonResp({ success: false, error: "Unauthorized" }, 401);
     }
