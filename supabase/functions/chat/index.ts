@@ -7228,7 +7228,7 @@ async function runToolLoop(
   openAIMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
   tools: ToolDef[],
   connMap: MultiConnMap,
-  maxIterations = 10,
+  maxIterations = 20,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
   userMessage?: string,
   aliasMap?: AliasEntry[],
