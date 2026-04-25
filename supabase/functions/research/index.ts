@@ -758,7 +758,10 @@ async function recordPlan(row: Record<string, unknown>): Promise<string | null> 
   }
 }
 
-async function handleWebInvestigate(params: Record<string, unknown>, userId: string): Promise<Record<string, unknown>> {
+type EmitFn = (event: string, payload: Record<string, unknown>) => void;
+const NOOP_EMIT: EmitFn = () => {};
+
+async function runInvestigation(params: Record<string, unknown>, userId: string, emit: EmitFn = NOOP_EMIT): Promise<Record<string, unknown>> {
   const t0 = Date.now();
   const question = String(params.query ?? "").trim();
   if (!question) throw new Error("query required");
@@ -771,13 +774,15 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
     if (recall.length > 0) {
       const top = recall[0];
       const ageHours = Math.round((Date.now() - new Date(top.created_at).getTime()) / 3_600_000);
+      const recallPayload = { plan_id: top.id, similarity: top.similarity, age_hours: ageHours, original_question: top.original_question };
+      emit("recall_hit", recallPayload);
       return {
         answer: top.final_answer,
         citations: [],
         sub_queries: top.sub_queries,
         confidence: Number(top.confidence ?? 0),
         gaps: top.gaps_detected ?? [],
-        recall: { plan_id: top.id, similarity: top.similarity, age_hours: ageHours, original_question: top.original_question },
+        recall: recallPayload,
         latency_ms: Date.now() - t0,
       };
     }
@@ -785,21 +790,27 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
 
   const within = await checkPlanBudget(userId);
   if (!within) {
-    // Fail-open to single web_answer
+    emit("budget_exceeded", { fallback: "web_answer" });
     const fallback = await handleWebAnswer({ query: question, contextHint }, userId);
     return { ...fallback, plan: { fallback: "daily_budget_exceeded" } };
   }
 
   const subQueries = await planInvestigation(question, contextHint);
   const intents = subQueries.map((s) => s.intent);
+  emit("plan_ready", { sub_queries: subQueries });
 
-  // Execute sub-queries in parallel (capped)
   const remainingBudget = () => Math.max(0, INVESTIGATE_LIMITS.wallClockMs - (Date.now() - t0));
-  const searchResults = await Promise.all(subQueries.map(async (sq) => {
+
+  // Execute sub-queries in parallel; emit per-completion
+  const searchResults = await Promise.all(subQueries.map(async (sq, index) => {
     try {
-      return await handleWebSearch({ query: sq.query, maxResults: 5, contextHint }, userId);
+      const r = await handleWebSearch({ query: sq.query, maxResults: 5, contextHint }, userId);
+      emit("subquery_done", { index, query: sq.query, intent: sq.intent, result_count: r.results.length });
+      return r;
     } catch (e) {
-      console.warn("[investigate] sub-search failed:", e instanceof Error ? e.message : e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[investigate] sub-search failed:", msg);
+      emit("subquery_done", { index, query: sq.query, intent: sq.intent, result_count: 0, error: msg });
       return { results: [], attempted: [], succeeded: [], intelligence: { intent: sq.intent } };
     }
   }));
@@ -817,15 +828,19 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
 
   let docs: Array<{ url: string; title?: string; markdown?: string; error?: string }> = [];
   if (topUrls.length > 0 && remainingBudget() > 5_000) {
+    emit("enrich_start", { urls: topUrls });
     try {
       const enriched = await handleWebEnrich({ urls: topUrls }, userId);
       docs = (enriched.documents as typeof docs) ?? [];
+      emit("enrich_done", { document_count: docs.filter((d) => !d.error).length });
     } catch (e) {
       console.warn("[investigate] enrich failed:", e instanceof Error ? e.message : e);
+      emit("enrich_done", { document_count: 0, error: e instanceof Error ? e.message : String(e) });
     }
   }
 
   // Synthesize
+  emit("synthesis_start", {});
   const sourceBlocks = docs
     .filter((d) => !d.error && d.markdown)
     .map((d, i) => `[${i + 1}] ${d.title || d.url}\n${d.url}\n${(d.markdown ?? "").slice(0, 4000)}`)
@@ -841,16 +856,17 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
   if (remainingBudget() > 8_000) {
     const critique = await critiqueAnswer(question, answer);
     gaps = critique.gaps;
+    emit("critique_done", { gaps, follow_up: critique.followUp });
     if (critique.followUp && remainingBudget() > 5_000 && topUrls.length < INVESTIGATE_LIMITS.maxEnrichesTotal) {
       try {
         const fu = await handleWebSearch({ query: critique.followUp, maxResults: 3, contextHint }, userId);
         followUpRan = { query: critique.followUp, resultCount: fu.results.length };
         const newUrls = fu.results.map((r) => r.url).filter((u) => !seen.has(u)).slice(0, INVESTIGATE_LIMITS.maxEnrichesTotal - topUrls.length);
         if (newUrls.length > 0) {
+          emit("follow_up_enriching", { urls: newUrls });
           const moreEnriched = await handleWebEnrich({ urls: newUrls }, userId);
           const moreDocs = (moreEnriched.documents as typeof docs) ?? [];
           docs = [...docs, ...moreDocs];
-          // Re-synthesize with new context
           const allBlocks = docs
             .filter((d) => !d.error && d.markdown)
             .map((d, i) => `[${i + 1}] ${d.title || d.url}\n${d.url}\n${(d.markdown ?? "").slice(0, 4000)}`)
@@ -873,7 +889,6 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
   const totalLatency = Date.now() - t0;
   const confidence = Math.max(0, Math.min(1, 0.5 + 0.1 * citations.length - 0.15 * gaps.length));
 
-  // Fire-and-forget plan record
   void recordPlan({
     user_id: userId,
     original_question: question,
@@ -897,6 +912,50 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
     follow_up: followUpRan,
     latency_ms: totalLatency,
   };
+}
+
+async function handleWebInvestigate(params: Record<string, unknown>, userId: string): Promise<Record<string, unknown>> {
+  return await runInvestigation(params, userId, NOOP_EMIT);
+}
+
+function streamInvestigation(params: Record<string, unknown>, userId: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let eventCount = 0;
+      const send = (event: string, payload: Record<string, unknown>) => {
+        try {
+          eventCount++;
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+        } catch (e) {
+          console.warn("[investigate-stream] enqueue failed:", e instanceof Error ? e.message : e);
+        }
+      };
+      // Heartbeat every 10s to keep proxies alive
+      const heartbeat = setInterval(() => {
+        try { controller.enqueue(encoder.encode(`: ping\n\n`)); } catch { /* ignore */ }
+      }, 10_000);
+      try {
+        send("started", { query: String(params.query ?? "") });
+        const result = await runInvestigation(params, userId, send);
+        send("done", { ...result, stream_events: eventCount });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        send("error", { error: msg, failure_class: classifyFailure(msg) });
+      } finally {
+        clearInterval(heartbeat);
+        try { controller.close(); } catch { /* ignore */ }
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 Deno.serve(async (req) => {
