@@ -136,5 +136,37 @@ export const researchIntegration: IntegrationManifest = {
         return cites ? `${d.answer}\n\nSources:\n${cites}` : d.answer;
       },
     },
+    {
+      name: "web_investigate",
+      description:
+        "Multi-hop autonomous research. Decomposes a complex question into 2-5 focused sub-queries (planned by Gemini), runs them in parallel via web_search, auto-enriches the top hits, synthesizes a structured answer with citations, and self-critiques for gaps (firing one targeted follow-up if needed). Use for COMPARATIVE, MULTI-FACETED, or CROSS-SOURCE questions like 'compare X vs Y', 'give me a full briefing on Z', 'what's happening with A across pricing/reviews/news'. One call replaces 4-8 manual rounds. Hard budget: 5 sub-queries, 8 enriches, 30s wall-clock. Falls back to web_answer if budgets exceeded.",
+      action: "web_investigate",
+      sideEffect: "external_call",
+      cost: "expensive",
+      schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The user's complex question." },
+          contextHint: { type: "string", description: "Optional context from the conversation." },
+        },
+        required: ["query"],
+      },
+      mapArgs: (a) => ({ query: a.query, contextHint: a.contextHint }),
+      formatter: (data) => {
+        const d = data as {
+          answer?: string;
+          citations?: Array<{ index: number; url: string; title: string }>;
+          sub_queries?: Array<{ query: string; intent: string }>;
+          confidence?: number;
+          gaps?: string[];
+        };
+        if (!d?.answer) return "No investigation completed.";
+        const subs = (d.sub_queries ?? []).map((s, i) => `  ${i + 1}. [${s.intent}] ${s.query}`).join("\n");
+        const cites = (d.citations ?? []).map((c) => `[${c.index}] ${c.title} — ${c.url}`).join("\n");
+        const gaps = d.gaps && d.gaps.length > 0 ? `\n\nKnown gaps:\n${d.gaps.map((g) => `• ${g}`).join("\n")}` : "";
+        const conf = typeof d.confidence === "number" ? ` (confidence: ${(d.confidence * 100).toFixed(0)}%)` : "";
+        return `${d.answer}${conf}\n\nSub-queries run:\n${subs}${cites ? `\n\nSources:\n${cites}` : ""}${gaps}`;
+      },
+    },
   ],
 };
