@@ -5938,12 +5938,12 @@ NEVER:
 - Say "I can't do that" without classifying why and proposing the fix.
 - Repeat the same failed call without changing arguments.
 - Emit the Capability Gap Report for transient retries that succeeded on retry.
-- INVENT tool names. If you want to search the web, the tool is **deep_research** (not "websearch", "search_web", "google", "browse"). For events use **scrape_events**. For Google SERP cross-checks use **web_search_google**. Calling a non-existent tool counts as a tooling_gap and you must emit the report.
+- INVENT tool names. For general web search PREFER **web_search** (universal, parallel Tavily+Firecrawl, normalized results). Legacy fallbacks: deep_research, scrape_events. For Google SERP cross-checks use web_search_google. To read a specific page use **web_scrape**. To list URLs on a domain use **web_map**. Calling a non-existent tool counts as a tooling_gap and you must emit the report.
 
 RESEARCH FAILURE SUB-PROTOCOL:
-When deep_research or scrape_events returns 0 results or fails:
+When web_search / deep_research / scrape_events returns 0 results or fails:
 1. Try ONCE with a reformulated query (broader keywords, drop date qualifiers, drop geography).
-2. If still empty, tell the user exactly what was searched, what came back, and offer alternatives: a narrower/wider query, a specific source URL to scrape, or a manual link they can share.
+2. If still empty, tell the user exactly what was searched, what came back, and offer alternatives: a narrower/wider query, a specific source URL to scrape (web_scrape), or a manual link they can share.
 3. Do not pretend the search succeeded. Do not fabricate results.
 
 ===========================================================

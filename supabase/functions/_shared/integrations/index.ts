@@ -20,8 +20,10 @@ import { gmailIntegration } from "./gmail.ts";
 import { clickupIntegration } from "./clickup.ts";
 import { goHighLevelIntegration } from "./gohighlevel.ts";
 import { communicationsIntegration, communicationsDigestIntegration } from "./communications.ts";
+import { researchIntegration } from "./research.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
+  researchIntegration,
   googleDocsIntegration,
   googleSheetsIntegration,
   googleCalendarIntegration,
