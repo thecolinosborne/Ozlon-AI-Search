@@ -415,7 +415,7 @@ function mergeResults(lists: NormalizedResult[][], maxResults: number, recencyDa
 }
 
 // --- Action handlers ---
-async function handleWebSearch(params: Record<string, unknown>) {
+async function handleWebSearch(params: Record<string, unknown>, userId?: string) {
   const rawQuery = String(params.query ?? "").trim();
   if (!rawQuery) throw new Error("query required");
   const maxResults = Math.min(Number(params.maxResults ?? 10) || 10, 25);
@@ -423,13 +423,25 @@ async function handleWebSearch(params: Record<string, unknown>) {
   const skipIntelligence = params.skipIntelligence === true;
 
   // Stage 0: query intelligence (fail-open, runs in parallel)
-  const [rewrittenQuery, intent] = skipIntelligence
-    ? [rawQuery, "default" as Intent]
-    : await Promise.all([reformulateQuery(rawQuery, contextHint), classifyIntent(rawQuery)]);
+  let intent: Intent = "default";
+  let rewrittenQuery = rawQuery;
+  let patternHash: string | null = null;
+  let patternFromCache = false;
+  if (!skipIntelligence) {
+    intent = await classifyIntent(rawQuery);
+    if (userId) {
+      patternHash = await patternHashFor(intent, rawQuery);
+      const cached = await lookupQueryPattern(userId, intent, patternHash);
+      if (cached) { rewrittenQuery = cached; patternFromCache = true; }
+    }
+    if (!patternFromCache) {
+      rewrittenQuery = await reformulateQuery(rawQuery, contextHint);
+    }
+  }
 
   // Resolve strategy from intent (caller params override).
   let recencyDays = params.recencyDays ? Number(params.recencyDays) : undefined;
-  let includeDomains = Array.isArray(params.includeDomains) ? params.includeDomains as string[] : undefined;
+  const includeDomains = Array.isArray(params.includeDomains) ? params.includeDomains as string[] : undefined;
   const excludeDomains = Array.isArray(params.excludeDomains) ? params.excludeDomains as string[] : undefined;
   let depth: "basic" | "advanced" = "advanced";
   let useFirecrawl = !!FIRECRAWL_KEY;
@@ -438,13 +450,8 @@ async function handleWebSearch(params: Record<string, unknown>) {
     if (intent === "news") recencyDays = 7;
     else if (intent === "deep_research") recencyDays = undefined;
   }
-  if (intent === "news") {
-    useFirecrawl = false; // Tavily is better for fresh news
-  } else if (intent === "deep_research") {
-    depth = "advanced";
-  } else if (intent === "factual_lookup") {
-    depth = "basic";
-  }
+  if (intent === "news") useFirecrawl = false;
+  else if (intent === "factual_lookup") depth = "basic";
 
   const attempted: string[] = [];
   if (TAVILY_KEY) attempted.push("tavily");
@@ -463,13 +470,32 @@ async function handleWebSearch(params: Record<string, unknown>) {
   if (settled[1].status === "fulfilled") { succeeded.push("firecrawl"); lists.push(settled[1].value); }
   else if (useFirecrawl) console.warn("[research] firecrawl failed:", (settled[1].reason as Error)?.message);
 
-  const merged = mergeResults(lists, maxResults, recencyDays);
+  // Trust-aware ranking
+  let merged = mergeResults(lists, maxResults * 2, recencyDays);
+  if (userId && merged.length > 0) {
+    const domains = Array.from(new Set(merged.map((r) => extractDomain(r.url)).filter((d): d is string => !!d)));
+    const trustMap = await getTrustScores(userId, domains);
+    merged = merged.map((r) => {
+      const d = extractDomain(r.url);
+      const trust = d ? (trustMap.get(d) ?? 0.5) : 0.5;
+      return { ...r, score: r.score + (trust - 0.5) * 0.4 };
+    }).sort((a, b) => b.score - a.score).slice(0, maxResults);
+    void bumpReturned(userId, domains.slice(0, maxResults));
+  } else {
+    merged = merged.slice(0, maxResults);
+  }
+
+  // Record pattern outcome (only when we actually rewrote the query)
+  if (userId && patternHash && !patternFromCache && rewrittenQuery !== rawQuery) {
+    void recordPatternResult(userId, intent, patternHash, rawQuery, rewrittenQuery, merged.length, merged.length > 0);
+  }
+
   return {
     results: merged,
     attempted,
     succeeded,
     query: rewrittenQuery,
-    intelligence: { original: rawQuery, rewritten: rewrittenQuery, intent, depth, recencyDays },
+    intelligence: { original: rawQuery, rewritten: rewrittenQuery, intent, depth, recencyDays, patternFromCache },
   };
 }
 
