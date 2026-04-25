@@ -119,6 +119,45 @@ export type Database = {
           },
         ]
       }
+      cache_policy: {
+        Row: {
+          action: string
+          created_at: string
+          hit_count: number
+          id: string
+          intent: string
+          last_tuned_at: string
+          miss_count: number
+          ttl_seconds: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          hit_count?: number
+          id?: string
+          intent?: string
+          last_tuned_at?: string
+          miss_count?: number
+          ttl_seconds?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          hit_count?: number
+          id?: string
+          intent?: string
+          last_tuned_at?: string
+          miss_count?: number
+          ttl_seconds?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       chat_messages: {
         Row: {
           content: string
@@ -1346,6 +1385,51 @@ export type Database = {
         }
         Relationships: []
       }
+      query_patterns: {
+        Row: {
+          avg_result_count: number | null
+          created_at: string
+          id: string
+          intent: string
+          last_used_at: string
+          original_sample: string
+          pattern_hash: string
+          rewritten: string
+          success_count: number
+          updated_at: string
+          use_count: number
+          user_id: string
+        }
+        Insert: {
+          avg_result_count?: number | null
+          created_at?: string
+          id?: string
+          intent: string
+          last_used_at?: string
+          original_sample: string
+          pattern_hash: string
+          rewritten: string
+          success_count?: number
+          updated_at?: string
+          use_count?: number
+          user_id: string
+        }
+        Update: {
+          avg_result_count?: number | null
+          created_at?: string
+          id?: string
+          intent?: string
+          last_used_at?: string
+          original_sample?: string
+          pattern_hash?: string
+          rewritten?: string
+          success_count?: number
+          updated_at?: string
+          use_count?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       reflection_notes: {
         Row: {
           content: string
@@ -1408,6 +1492,48 @@ export type Database = {
           expires_at?: string
           id?: string
           payload?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
+      research_failures: {
+        Row: {
+          action: string
+          created_at: string
+          error_message: string | null
+          failure_class: string
+          id: string
+          intent: string | null
+          metadata: Json
+          provider: string | null
+          query: string | null
+          run_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error_message?: string | null
+          failure_class: string
+          id?: string
+          intent?: string | null
+          metadata?: Json
+          provider?: string | null
+          query?: string | null
+          run_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error_message?: string | null
+          failure_class?: string
+          id?: string
+          intent?: string | null
+          metadata?: Json
+          provider?: string | null
+          query?: string | null
+          run_id?: string | null
           user_id?: string
         }
         Relationships: []
@@ -1708,6 +1834,48 @@ export type Database = {
           status?: string
           thread_ts?: string | null
           user_id_slack?: string | null
+        }
+        Relationships: []
+      }
+      source_reputation: {
+        Row: {
+          avg_freshness_days: number | null
+          created_at: string
+          domain: string
+          id: string
+          last_seen_at: string
+          total_enriched: number
+          total_failed: number
+          total_returned: number
+          trust_score: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avg_freshness_days?: number | null
+          created_at?: string
+          domain: string
+          id?: string
+          last_seen_at?: string
+          total_enriched?: number
+          total_failed?: number
+          total_returned?: number
+          trust_score?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avg_freshness_days?: number | null
+          created_at?: string
+          domain?: string
+          id?: string
+          last_seen_at?: string
+          total_enriched?: number
+          total_failed?: number
+          total_returned?: number
+          trust_score?: number
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -2334,6 +2502,18 @@ export type Database = {
       }
     }
     Views: {
+      research_intelligence: {
+        Row: {
+          detail: Json | null
+          kind: string | null
+          label: string | null
+          last_at: string | null
+          score: number | null
+          user_id: string | null
+          volume: number | null
+        }
+        Relationships: []
+      }
       research_runs_summary: {
         Row: {
           action: string | null
