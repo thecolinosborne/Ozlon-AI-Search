@@ -168,5 +168,31 @@ export const researchIntegration: IntegrationManifest = {
         return `${d.answer}${conf}\n\nSub-queries run:\n${subs}${cites ? `\n\nSources:\n${cites}` : ""}${gaps}`;
       },
     },
+    {
+      name: "web_recall",
+      description:
+        "Recall the user's PRIOR investigations on similar questions. Cheap semantic search over the user's research history (last 7 days by default). Use BEFORE web_investigate when the user asks something they may have asked before, or when they say 'what did we find about X' / 'remind me about Y'. Returns prior answers with confidence + age so you can offer to reuse or refresh.",
+      action: "web_recall",
+      sideEffect: "read",
+      cost: "cheap",
+      schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The question to look up." },
+          maxAgeHours: { type: "number", description: "Search window in hours (default 168 = 7 days, max 720)." },
+          threshold: { type: "number", description: "Similarity threshold 0.5–0.99 (default 0.82)." },
+        },
+        required: ["query"],
+      },
+      mapArgs: (a) => ({ query: a.query, maxAgeHours: a.maxAgeHours, threshold: a.threshold }),
+      formatter: (data) => {
+        const d = data as { matches?: Array<{ plan_id: string; original_question: string; answer: string; confidence: number; similarity: number; age_hours: number; gaps: string[] }> };
+        const matches = d?.matches ?? [];
+        if (matches.length === 0) return "No prior investigation found for this question.";
+        return matches.map((m, i) =>
+          `${i + 1}. "${m.original_question}" (${(m.similarity * 100).toFixed(0)}% match, ${m.age_hours}h ago, confidence ${(m.confidence * 100).toFixed(0)}%)\n${m.answer.slice(0, 600)}${m.answer.length > 600 ? "…" : ""}`
+        ).join("\n\n---\n\n");
+      },
+    },
   ],
 };
