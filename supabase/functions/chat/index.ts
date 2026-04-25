@@ -2557,7 +2557,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'deep_research',
-      description: 'Perform real-time web research on any topic using Tavily search. Searches the internet, reads multiple sources, and synthesizes a structured research report with citations. Use when the user asks to research, investigate, deep dive, look into, or find information about any topic.',
+      description: 'Live web research and general web search. Use this for ANY request that needs information from the open internet — news, facts, prices, reviews, "what is", "find me", "search for", "look up", "google", current events, competitor info, local listings, opinions, definitions, or anything beyond your training data. Searches the web (Tavily), reads multiple sources, and returns a cited synthesis. THIS IS YOUR PRIMARY WEB SEARCH TOOL — do NOT invent generic names like "websearch" or "search_web"; always call this one.',
       parameters: {
         type: 'object',
         properties: {
@@ -2574,7 +2574,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'scrape_events',
-      description: 'Search the web for events (networking, conferences, meetups, etc.) and extract structured event data including dates, locations, and URLs. Stores discovered events for the user. Use when asked to find events, conferences, meetups, networking opportunities, or upcoming dates.',
+      description: 'Find real upcoming events (networking, conferences, meetups, workshops, webinars, local gatherings) and extract structured event data — title, date, location, URL — then save them for the user. Use whenever the user asks about events, conferences, meetups, networking opportunities, "what\'s happening near me", or upcoming local/industry dates. Combines Tavily web search with Firecrawl page scraping for richer detail.',
       parameters: {
         type: 'object',
         properties: {
