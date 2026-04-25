@@ -7442,7 +7442,25 @@ async function runToolLoop(
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: 'in_progress' });
 
           console.log(`Executing tool: ${tc.function.name}`, args);
-          const result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+
+          // Auto-upgrade web_investigate → streaming variant for live progress.
+          // Falls back to blocking dispatch on any error.
+          let result: { success: boolean; result: string } | null = null;
+          if (tc.function.name === 'web_investigate' && onTaskUpdate) {
+            const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+            if (authHeader) {
+              try {
+                result = await streamWebInvestigate(args, authHeader, taskId, onTaskUpdate);
+                if (result) console.log('[web_investigate] delivered_via=stream');
+              } catch (e) {
+                console.warn('[web_investigate] stream upgrade failed, falling back:', e);
+                result = null;
+              }
+            }
+          }
+          if (!result) {
+            result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+          }
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
