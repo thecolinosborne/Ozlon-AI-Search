@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Phone, PhoneOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRealtimeVoice } from '@/hooks/useRealtimeVoice';
+import { SignalSurface } from '@/components/signals/SignalSurface';
 import { toast } from 'sonner';
 
 interface RealtimeVoiceChatProps {
