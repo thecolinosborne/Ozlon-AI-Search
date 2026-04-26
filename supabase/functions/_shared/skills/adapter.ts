@@ -143,6 +143,39 @@ export function mergeCompanion(
   return { ...manifest, ui: { ...(manifest.ui ?? {}), ...ui } };
 }
 
+/**
+ * Heal common authoring mistakes in native JSON manifests:
+ *  - keyword triggers using `value: "..."` (Claude/OpenAI style) → `match: ["..."]`
+ *  - keyword triggers using `match: "..."` (string) → `match: ["..."]`
+ *  - top-level `presentation` block → `ui` (merged, doesn't overwrite existing ui)
+ * Leaves everything else untouched so validation still surfaces real errors.
+ */
+// deno-lint-ignore no-explicit-any
+function healNativeManifest(m: any): any {
+  if (!m || typeof m !== "object") return m;
+  // Triggers
+  if (Array.isArray(m.triggers)) {
+    m.triggers = m.triggers.map((t: any) => {
+      if (!t || typeof t !== "object") return t;
+      if (t.type === "keyword") {
+        if (!t.match && typeof t.value === "string") {
+          return { type: "keyword", match: [t.value] };
+        }
+        if (typeof t.match === "string") {
+          return { type: "keyword", match: [t.match] };
+        }
+      }
+      return t;
+    });
+  }
+  // presentation → ui
+  if (m.presentation && typeof m.presentation === "object" && !m.ui) {
+    m.ui = { ...m.presentation };
+    delete m.presentation;
+  }
+  return m;
+}
+
 /** Main entrypoint: take raw source text + optional companion text, return normalized manifest. */
 export function adaptSkill(source: string, companionSource?: string): AdapterResult {
   const fmt = detectFormat(source);
