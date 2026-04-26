@@ -941,14 +941,14 @@ Deno.serve(async (req) => {
     const mode = url.searchParams.get("mode") ?? "now";
 
     // Cron path: scheduled-routines invokes with ?mode=lookahead_tick
-    if (mode === "lookahead_tick") {
+    if (mode === "lookahead_tick" || mode === "daily_digest_tick") {
       const provided = req.headers.get("x-cron-key") ?? url.searchParams.get("cron_key");
       if (provided !== CRON_KEY) {
         return new Response(JSON.stringify({ error: "forbidden" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const result = await lookaheadTick();
+      const result = mode === "lookahead_tick" ? await lookaheadTick() : await digestTick();
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -965,6 +965,14 @@ Deno.serve(async (req) => {
     // Per-user lookahead (callable from UI for "look ahead now")
     if (mode === "lookahead") {
       const result = await runLookaheadForUser(userId);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Per-user daily digest (callable from UI "Scan now")
+    if (mode === "daily_digest") {
+      const result = await runDigestForUser(userId, authHeader!);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
