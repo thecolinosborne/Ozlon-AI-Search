@@ -45,9 +45,26 @@ async function embed(text: string): Promise<number[] | null> {
   } catch { return null; }
 }
 
-type Outcome = "acted" | "ignored" | "dismissed";
+type Outcome =
+  | "acted" | "ignored" | "dismissed"
+  | "validate" | "start_task" | "start_message" | "complete" | "snooze";
 
-const VALID_OUTCOMES: Outcome[] = ["acted", "ignored", "dismissed"];
+const VALID_OUTCOMES: Outcome[] = [
+  "acted", "ignored", "dismissed",
+  "validate", "start_task", "start_message", "complete", "snooze",
+];
+
+// Map extended outcomes onto the canonical lifecycle status the table accepts.
+function lifecycleStatus(o: Outcome): string {
+  switch (o) {
+    case "validate":      return "live";       // user blessed it, keep visible
+    case "start_task":    return "acted";
+    case "start_message": return "acted";
+    case "complete":      return "acted";
+    case "snooze":        return "live";
+    default:              return o;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
