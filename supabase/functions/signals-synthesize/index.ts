@@ -358,7 +358,7 @@ async function insertWithDedup(
     if (emb) {
       const { data: matches } = await admin.rpc("match_signal_moments", {
         query_embedding: JSON.stringify(emb),
-        match_threshold: 0.88,
+        match_threshold: 0.82,
         match_count: 3,
         filter_user_id: userId,
         hours_back: 48,
