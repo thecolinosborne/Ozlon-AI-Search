@@ -28,6 +28,8 @@ import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
 import { SignalsBanner } from "@/components/communications/SignalsBanner";
 import { LearningPill } from "@/components/communications/LearningPill";
+import { ModeRibbon } from "@/components/communications/ModeRibbon";
+import { useCurrentMode } from "@/hooks/useCurrentMode";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
@@ -56,6 +58,8 @@ export default function Communications() {
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusedIdx, setFocusedIdx] = useState<number>(-1);
+  const [modeOverride, setModeOverride] = useState(false);
+  const { mode: currentMode, cognitiveLoad } = useCurrentMode();
   const prevSlackMissing = useRef(false);
   const filteredRef = useRef<CommMessage[]>([]);
   const focusedIdxRef = useRef<number>(-1);
@@ -119,15 +123,21 @@ export default function Communications() {
     return c;
   }, [stream]);
 
-  // Apply chip + state + triage + hidden, in order.
+  // Apply chip + state + triage + hidden, in order. In focus mode (and unless
+  // the user has overridden), gently trim to messages that need a reply so the
+  // surface matches the user's cognitive bandwidth.
   const filtered = useMemo(() => {
     let out = stream.filter((m) => !hidden.has(m.id));
     if (triage) out = out.filter((m) => m.needsReply);
     if (chip !== "all") out = out.filter((m) => m.channel === chip);
     if (stateFilter === "unread") out = out.filter((m) => m.isUnread);
     if (stateFilter === "needs-reply") out = out.filter((m) => m.needsReply);
+    if (currentMode === "focus" && !modeOverride && !triage) {
+      const focused = out.filter((m) => m.needsReply);
+      if (focused.length > 0) out = focused;
+    }
     return out;
-  }, [stream, hidden, triage, chip, stateFilter]);
+  }, [stream, hidden, triage, chip, stateFilter, currentMode, modeOverride]);
 
   // People-view groups derived from the same filtered stream.
   const peopleGroups = usePeopleView(filtered, triageMap);
@@ -478,6 +488,16 @@ export default function Communications() {
                   toast({ title: "Signal noted", description: suggestion ?? headline });
                 }
               }}
+            />
+
+            {/* Phase F — Mode awareness ribbon. Calmly tells the user how the
+                surface has adapted to their cognitive bandwidth. */}
+            <ModeRibbon
+              mode={currentMode}
+              cognitiveLoad={cognitiveLoad}
+              needsReply={summaryCounts.needsReply}
+              overridden={modeOverride}
+              onToggleOverride={() => setModeOverride((v) => !v)}
             />
 
             {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
