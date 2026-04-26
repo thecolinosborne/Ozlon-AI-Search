@@ -3156,11 +3156,13 @@ async function executeToolCall(
         triggerType: 'load_skill',
         triggerPayload: { slug },
       }).catch(() => {});
+      const memoryDomains = Array.isArray(m.memory_domains) ? m.memory_domains.filter((d): d is string => typeof d === 'string') : [];
       const block = [
         `## Skill activated: ${m.name} (v${m.version})`,
         `Description: ${m.description}`,
         m.requires_confirmation ? `⚠ Requires user confirmation before any write/destructive action.` : '',
         `Tools available for this skill: ${[...(m.tools_required || []), ...(m.tools_optional || [])].join(', ') || '(none)'}`,
+        memoryDomains.length ? `Memory scope for this skill: ${memoryDomains.join(', ')} — when calling search_wisdom_memories, pass memory_type from this list to stay focused.` : '',
         '',
         '### Instructions',
         m.instructions,
