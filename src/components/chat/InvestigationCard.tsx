@@ -69,7 +69,7 @@ export function InvestigationCard({ artifactId }: Props) {
   if (missing || !artifact) return null;
 
   const typeLabel = TYPE_LABEL[artifact.type] ?? artifact.type;
-  const href = `/threads/${artifact.conversation_id}`;
+  const href = `/?session=${artifact.conversation_id}`;
 
   return (
     <Link
