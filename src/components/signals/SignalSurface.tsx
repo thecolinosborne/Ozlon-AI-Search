@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useSignals, type SignalMoment } from "@/hooks/useSignals";
+import { useSkills } from "@/hooks/useSkills";
 
 interface Props {
   variant?: "page" | "indicator" | "inline" | "voice";
@@ -34,15 +35,41 @@ const InlinePrompt = ({ children, onClick }: { children: React.ReactNode; onClic
 
 export function SignalSurface({ variant = "page", maxMoments = 1, sendText, enabled = true }: Props) {
   const { moments, topMoment, loading, synthesizing, respond } = useSignals();
+  const { skills } = useSkills();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<{ why: boolean; what: boolean }>({ why: false, what: false });
   const [hoverPreview, setHoverPreview] = useState(false);
   const spokenIdsRef = useRef<Set<string>>(new Set());
 
+  // Map enabled skills to keyword triggers for matching against signal headlines.
+  const enabledSkillTriggers = useMemo(() => {
+    return skills
+      .filter((s) => s.installed && s.enabled)
+      .map((s) => {
+        const triggers = (s.manifest as { triggers?: Array<{ type: string; match: string[] | string }> })?.triggers ?? [];
+        const keywords = triggers
+          .filter((t) => t.type === "keyword" && Array.isArray(t.match))
+          .flatMap((t) => t.match as string[]);
+        return { slug: s.slug, name: s.name, keywords };
+      })
+      .filter((s) => s.keywords.length > 0);
+  }, [skills]);
+
+  const matchSkill = (m: SignalMoment) => {
+    const hay = `${m.headline} ${m.suggested_direction ?? ""}`.toLowerCase();
+    return enabledSkillTriggers.find((s) => s.keywords.some((k) => hay.includes(k.toLowerCase())));
+  };
+
   const handleAct = (m: SignalMoment) => {
     const intent = m.suggested_direction || m.headline;
     respond(m.id, "acted");
     navigate(`/?intent=${encodeURIComponent(intent)}&signal=${m.id}`);
+  };
+
+  const handleRunSkill = (m: SignalMoment, slug: string) => {
+    respond(m.id, "acted");
+    const intent = m.suggested_direction || m.headline;
+    navigate(`/?intent=${encodeURIComponent(intent)}&skill=${slug}&signal=${m.id}`);
   };
 
   // Voice variant: inject the top moment into the realtime session once.
@@ -148,6 +175,18 @@ export function SignalSurface({ variant = "page", maxMoments = 1, sendText, enab
                 )}
 
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2">
+                  {(() => {
+                    const skill = matchSkill(m);
+                    return skill ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRunSkill(m, skill.slug)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-foreground text-background text-xs font-medium hover:bg-foreground/90 transition-colors"
+                      >
+                        Run {skill.name}
+                      </button>
+                    ) : null;
+                  })()}
                   {m.reason && !expanded.why && (
                     <InlinePrompt onClick={() => setExpanded((e) => ({ ...e, why: true }))}>
                       Why?

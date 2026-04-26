@@ -8,6 +8,7 @@ import {
   formatSkillIndexForPrompt,
   getSkillBySlug,
   recordInvocation,
+  filterSkillsByMode,
 } from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 
@@ -3155,11 +3156,13 @@ async function executeToolCall(
         triggerType: 'load_skill',
         triggerPayload: { slug },
       }).catch(() => {});
+      const memoryDomains = Array.isArray(m.memory_domains) ? m.memory_domains.filter((d): d is string => typeof d === 'string') : [];
       const block = [
         `## Skill activated: ${m.name} (v${m.version})`,
         `Description: ${m.description}`,
         m.requires_confirmation ? `⚠ Requires user confirmation before any write/destructive action.` : '',
         `Tools available for this skill: ${[...(m.tools_required || []), ...(m.tools_optional || [])].join(', ') || '(none)'}`,
+        memoryDomains.length ? `Memory scope for this skill: ${memoryDomains.join(', ')} — when calling search_wisdom_memories, pass memory_type from this list to stay focused.` : '',
         '',
         '### Instructions',
         m.instructions,
@@ -8078,10 +8081,23 @@ serve(async (req) => {
     if (credUserId) {
       try {
         const installed = await getInstalledSkills(credUserId);
-        const indexBlock = formatSkillIndexForPrompt(buildSkillIndex(installed));
+        // Mode-aware gating: filter by user's current cognitive mode if known.
+        let currentMode: string | null = null;
+        try {
+          const { createClient: ccM } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminM = ccM(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          const { data: ctx } = await adminM
+            .from('user_context_state')
+            .select('current_mode')
+            .eq('user_id', credUserId)
+            .maybeSingle();
+          currentMode = (ctx?.current_mode as string | undefined) ?? null;
+        } catch (_) { /* mode optional */ }
+        const gated = filterSkillsByMode(installed, currentMode);
+        const indexBlock = formatSkillIndexForPrompt(buildSkillIndex(gated), currentMode);
         if (indexBlock) {
           systemPrompt += `\n\n${indexBlock}`;
-          console.log(`[Skills] Injected ${installed.length} installed skill(s) into prompt.`);
+          console.log(`[Skills] Injected ${gated.length}/${installed.length} skill(s) (mode=${currentMode ?? 'any'}).`);
         }
       } catch (e) {
         console.error('[Skills] Failed to load installed skills:', (e as Error).message);
