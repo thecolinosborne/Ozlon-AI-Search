@@ -127,6 +127,9 @@ export default function Communications() {
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
 
+  // People-view groups derived from the same filtered stream.
+  const peopleGroups = usePeopleView(filtered, triageMap);
+
   // Keep refs in sync for keyboard handlers (avoid stale closures).
   useEffect(() => {
     filteredRef.current = filtered;
