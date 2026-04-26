@@ -419,7 +419,12 @@ export default function Communications() {
             {/* Sticky sub-header */}
             <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-[13px] font-medium text-foreground">All Messages</h2>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-[13px] font-medium text-foreground truncate">
+                    {mode === "people" ? `People · ${peopleGroups.length}` : "All Messages"}
+                  </h2>
+                  <StreamModeToggle value={mode} onChange={setMode} />
+                </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => setTriage((v) => !v)}
