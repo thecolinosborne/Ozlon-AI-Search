@@ -10,7 +10,7 @@ import {
 } from "@/hooks/useCommunicationsFeed";
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
-import { HeroDigest } from "@/components/communications/HeroDigest";
+import { PulseRibbon } from "@/components/communications/PulseRibbon";
 import { FocusStack } from "@/components/communications/FocusStack";
 import { SummaryChip } from "@/components/communications/SummaryChip";
 import { OutboxBadge } from "@/components/communications/OutboxBadge";
