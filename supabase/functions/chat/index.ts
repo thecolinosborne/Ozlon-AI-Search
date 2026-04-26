@@ -6895,6 +6895,29 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     } as ToolDef);
   }
 
+  // ---- load_skill: progressive skill loader (Skills Platform) ----
+  if (!existingNames.has("load_skill")) {
+    filtered.push({
+      type: "function",
+      function: {
+        name: "load_skill",
+        description:
+          "Activate a user-installed Skill by its slug. Returns the skill's full instructions and the list of tools it expects to use. " +
+          "Call this AS SOON AS you recognize a request matches one of the installed skills listed in the system prompt — do not improvise the workflow when a skill exists for it.",
+        parameters: {
+          type: "object",
+          properties: {
+            slug: {
+              type: "string",
+              description: "The slug of the installed skill, e.g. 'email-triage'.",
+            },
+          },
+          required: ["slug"],
+        },
+      },
+    } as ToolDef);
+  }
+
   // FINAL QUARANTINE PASS — last line of defense before tools hit OpenAI.
   // Drops any individually malformed tool (legacy, manifest, or multi_action)
   // so one bad schema can never again poison the entire payload.
