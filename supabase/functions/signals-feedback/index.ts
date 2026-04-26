@@ -164,10 +164,10 @@ Deno.serve(async (req) => {
           user_id: userId,
           proposal_type: "signal_throttle",
           title: `Suppress '${signal.kind}' signals`,
-          rationale: `Last 14 days: ${sameKindOutcome.length} signals of kind '${signal.kind}' were ignored. Suggest adding a throttle so we surface these less often.`,
-          payload: { kind: signal.kind, suggested_throttle: "max 0/day" },
+          description: `Last 14 days: ${sameKindOutcome.length} signals of kind '${signal.kind}' were ignored. Suggest adding a throttle so we surface these less often.`,
           status: "pending",
-        }).select().maybeSingle();
+          metadata: { kind: signal.kind, suggested_throttle: "max 0/day" },
+        });
       }
     }
 
