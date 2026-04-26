@@ -110,31 +110,36 @@ export function pickStone(
 }
 
 // ─────────── Provider drivers (key passed in, never read env directly) ───────────
-async function callLovable(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
+async function callLovable(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
+    body: JSON.stringify({ model, messages, ...(tools && { tools }), ...(toolChoice && { tool_choice: toolChoice }) }),
   });
   if (!res.ok) throw new Error(`Lovable ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callOpenAI(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
+async function callOpenAI(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
+    body: JSON.stringify({ model, messages, ...(tools && { tools }), ...(toolChoice && { tool_choice: toolChoice }) }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callGemini(model: string, messages: any[], key: string): Promise<any> {
+async function callGemini(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages }),
+    body: JSON.stringify({
+      model,
+      messages,
+      ...(tools && { tools }),
+      ...(toolChoice && { tool_choice: toolChoice }),
+    }),
   });
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
   return await res.json();
@@ -231,11 +236,11 @@ async function resolveKey(admin: any, userId: string | null, provider: string): 
   return { key: null, source: "none" };
 }
 
-async function dispatch(provider: string, model: string, messages: any[], tools: any[] | undefined, needs: Needs | undefined, authHeader: string | undefined, key: string) {
+async function dispatch(provider: string, model: string, messages: any[], tools: any[] | undefined, needs: Needs | undefined, authHeader: string | undefined, key: string, toolChoice?: any) {
   switch (provider) {
-    case "lovable":   return callLovable(model, messages, key, tools);
-    case "openai":    return callOpenAI(model, messages, key, tools);
-    case "gemini":    return callGemini(model, messages, key);
+    case "lovable":   return callLovable(model, messages, key, tools, toolChoice);
+    case "openai":    return callOpenAI(model, messages, key, tools, toolChoice);
+    case "gemini":    return callGemini(model, messages, key, tools, toolChoice);
     case "anthropic": return callAnthropic(model, messages, key);
     case "higgsfield": return callHiggsfield(needs ?? {}, messages, authHeader);
     default: throw new Error(`Unknown provider: ${provider}`);
@@ -308,8 +313,54 @@ Deno.serve(async (req) => {
     if (action === "call") {
       const { needs, messages, tools, run_id, node_type } = payload;
       const active = await getActiveProviders(admin, userId);
-      const picked = pickStone(needs ?? {}, active);
+      let picked = pickStone(needs ?? {}, active);
       if (!picked) return json({ error: "no active stones" }, 400);
+
+      // ── Brain evolution: bias selection for signals-* node_types based on
+      //    this user's historical outcomes (written by signals-tune as
+      //    wisdom_memories.memory_type='brain_routing_pref').
+      let evolutionReason: string | null = null;
+      if (userId && typeof node_type === "string" && node_type.startsWith("signals-")) {
+        try {
+          const { data: prefRow } = await admin
+            .from("wisdom_memories")
+            .select("content")
+            .eq("user_id", userId)
+            .eq("memory_type", "brain_routing_pref")
+            .maybeSingle();
+          const prefMap = prefRow?.content ? JSON.parse(prefRow.content as string) : null;
+          const nodePref = prefMap?.[node_type];
+          if (nodePref && (nodePref.preferred_stones?.length || nodePref.avoid?.length)) {
+            const preferred: string[] = nodePref.preferred_stones ?? [];
+            const avoid: string[] = nodePref.avoid ?? [];
+            // Reorder: preferred first (in order), then current pick + fallbacks
+            // minus avoided ones. Avoided can still be used as last-resort fallback.
+            const chain = [picked.stone, ...picked.fallbacks];
+            const reordered: typeof chain = [];
+            for (const p of preferred) {
+              const found = chain.find((s) => s.provider === p);
+              if (found && !reordered.includes(found)) reordered.push(found);
+            }
+            for (const s of chain) {
+              if (avoid.includes(s.provider)) continue;
+              if (!reordered.includes(s)) reordered.push(s);
+            }
+            for (const s of chain) {
+              if (!reordered.includes(s)) reordered.push(s); // avoided as last resort
+            }
+            if (reordered.length > 0 && reordered[0] !== picked.stone) {
+              evolutionReason = `evolved: ${nodePref.reason}`;
+              picked = {
+                stone: reordered[0],
+                fallbacks: reordered.slice(1),
+                reason: `${evolutionReason} (was ${picked.stone.provider})`,
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("[gauntlet] brain_routing_pref skipped:", e instanceof Error ? e.message : e);
+        }
+      }
 
       const chain = [picked.stone, ...picked.fallbacks];
       let lastError: string | null = null;
@@ -322,7 +373,7 @@ Deno.serve(async (req) => {
           if (!resolved.key && stone.provider !== "higgsfield") {
             throw new Error(`no key for ${stone.provider}`);
           }
-          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "");
+          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "", payload.tool_choice);
           const latency = Date.now() - start;
           if (userId) {
             await admin.from("gauntlet_routing_log").insert({

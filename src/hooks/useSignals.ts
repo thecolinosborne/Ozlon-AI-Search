@@ -13,9 +13,12 @@ export interface SignalMoment {
   mode_context: string;
   status: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 }
 
-export type SignalOutcome = "acted" | "ignored" | "dismissed";
+export type SignalOutcome =
+  | "acted" | "ignored" | "dismissed"
+  | "validate" | "start_task" | "start_message" | "complete" | "snooze";
 
 export function useSignals() {
   const { user, session } = useAuth();
@@ -29,14 +32,23 @@ export function useSignals() {
     setLoading(true);
     const { data } = await supabase
       .from("signal_moments")
-      .select("id, kind, headline, reason, suggested_direction, salience, confidence, mode_context, status, created_at")
+      .select("id, kind, headline, reason, suggested_direction, salience, confidence, mode_context, status, created_at, metadata")
       .eq("user_id", user.id)
       .eq("status", "live")
       .order("salience", { ascending: false })
-      .limit(12);
-    setMoments((data ?? []) as SignalMoment[]);
+      .limit(20);
+    setMoments(((data ?? []) as unknown) as SignalMoment[]);
     setLoading(false);
   }, [user]);
+
+  const createSignal = useCallback(async (text: string) => {
+    if (!session || !text.trim()) return { ok: false as const };
+    const { data, error } = await supabase.functions.invoke("signals-create", {
+      body: { text },
+    });
+    if (!error) await load();
+    return { ok: !error, data, error };
+  }, [session, load]);
 
   const dismissAll = useCallback(async () => {
     if (!user || moments.length === 0) return;
@@ -120,5 +132,16 @@ export function useSignals() {
     return () => { supabase.removeChannel(ch); };
   }, [user, load]);
 
-  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, scanNow, respond, dismissAll, refresh: load };
+  return {
+    moments,
+    topMoment: moments[0] ?? null,
+    loading,
+    synthesizing,
+    synthesize,
+    scanNow,
+    respond,
+    dismissAll,
+    refresh: load,
+    createSignal,
+  };
 }

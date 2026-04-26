@@ -122,6 +122,86 @@ async function tuneUser(userId: string) {
     });
   }
 
+  // 2b. Brain routing evolution: per-node_type stone scorecards from
+  //     reflection_notes(note_type='signal_feedback') over the same window.
+  //     Writes ONE wisdom_memories(memory_type='brain_routing_pref') row per
+  //     user. The gauntlet-router reads this and biases stone selection for
+  //     any node_type starting with "signals-".
+  try {
+    const { data: feedback } = await admin
+      .from("reflection_notes")
+      .select("metadata")
+      .eq("user_id", userId)
+      .eq("note_type", "signal_feedback")
+      .gte("created_at", since)
+      .limit(500);
+
+    type Score = { acted: number; ignored: number; total: number };
+    const scoreboard = new Map<string, Map<string, Score>>(); // node_type → stone → score
+
+    for (const r of (feedback ?? []) as Array<{ metadata: Record<string, unknown> | null }>) {
+      const md = r.metadata ?? {};
+      const stone = md.brain_stone as string | undefined;
+      const node = md.node_type as string | undefined;
+      const out = md.outcome as string | undefined;
+      if (!stone || !node || !out) continue;
+      if (!scoreboard.has(node)) scoreboard.set(node, new Map());
+      const inner = scoreboard.get(node)!;
+      const cur = inner.get(stone) ?? { acted: 0, ignored: 0, total: 0 };
+      cur.total++;
+      if (out === "acted" || out === "complete" || out === "start_task" || out === "start_message" || out === "validate") cur.acted++;
+      else if (out === "ignored" || out === "dismissed") cur.ignored++;
+      inner.set(stone, cur);
+    }
+
+    const pref: Record<string, { preferred_stones: string[]; avoid: string[]; reason: string }> = {};
+    for (const [node, stones] of scoreboard) {
+      if (stones.size < 2) continue; // need ≥2 stones to compare
+      const ranked = Array.from(stones.entries())
+        .filter(([_, s]) => s.total >= 2)
+        .map(([stone, s]) => ({ stone, s, ratio: s.acted / Math.max(1, s.total) }))
+        .sort((a, b) => b.ratio - a.ratio);
+      if (ranked.length < 2) continue;
+      const top = ranked.filter((r) => r.ratio >= 0.5).slice(0, 2).map((r) => r.stone);
+      const bottom = ranked.filter((r) => r.ratio <= 0.25 && r.s.total >= 2).map((r) => r.stone);
+      if (top.length === 0 && bottom.length === 0) continue;
+      const lead = ranked[0];
+      pref[node] = {
+        preferred_stones: top,
+        avoid: bottom,
+        reason: `user acted ${lead.s.acted}/${lead.s.total} on ${lead.stone}`,
+      };
+    }
+
+    if (Object.keys(pref).length > 0) {
+      const prefContent = JSON.stringify(pref);
+      const { data: existingPref } = await admin
+        .from("wisdom_memories")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("memory_type", "brain_routing_pref")
+        .maybeSingle();
+      if (existingPref?.id) {
+        await admin.from("wisdom_memories").update({
+          content: prefContent,
+          summary: `Brain prefers stones based on ${(feedback ?? []).length} signal outcomes`,
+          updated_at: new Date().toISOString(),
+        }).eq("id", existingPref.id);
+      } else {
+        await admin.from("wisdom_memories").insert({
+          user_id: userId,
+          memory_type: "brain_routing_pref",
+          content: prefContent,
+          summary: `Brain prefers stones based on ${(feedback ?? []).length} signal outcomes`,
+          salience: 0.75,
+          confidence: 0.7,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[signals-tune] brain_routing_pref skipped:", e instanceof Error ? e.message : e);
+  }
+
   // 3. Decay pass: live signals older than 2h get salience * 0.7; expire if < 0.25.
   const decayCutoff = new Date(Date.now() - 2 * 3600_000).toISOString();
   const { data: stale } = await admin

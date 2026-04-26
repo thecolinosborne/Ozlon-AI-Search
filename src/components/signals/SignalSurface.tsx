@@ -142,8 +142,10 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
   }
 
   // Page variant: full minimalist surface
-  // Page hero/list excludes digest moments — those have their own "Today" section.
-  const pageMoments = variant === "page" ? moments.filter((m) => m.kind !== "digest") : moments;
+  // Page hero/list excludes digest + user_created moments — those have their own sections.
+  const pageMoments = variant === "page"
+    ? moments.filter((m) => m.kind !== "digest" && m.kind !== "user_created")
+    : moments;
   const visible = pageMoments.slice(0, maxMoments);
   const rest = showList ? pageMoments.slice(maxMoments) : [];
 

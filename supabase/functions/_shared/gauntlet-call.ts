@@ -9,6 +9,7 @@ export interface GauntletCallOptions {
   agent: AgentName;
   messages: ChatMessage[];
   tools?: any[];
+  tool_choice?: any;
   userId?: string | null;
   authHeader?: string | null;
   body?: Record<string, unknown>;
@@ -132,6 +133,7 @@ export async function gauntletCall(opts: GauntletCallOptions): Promise<CallResul
         needs,
         messages: opts.messages,
         tools: opts.tools,
+        tool_choice: opts.tool_choice,
         node_type: opts.agent,
       }),
     });
