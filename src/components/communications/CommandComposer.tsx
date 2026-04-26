@@ -201,9 +201,7 @@ export function CommandComposer({
             />
 
             <button
-              onClick={() =>
-                recorder.isRecording ? recorder.stopRecording() : recorder.startRecording()
-              }
+              onClick={() => recorder.handleMicClick()}
               disabled={disabled || recorder.isTranscribing}
               className={cn(
                 "shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
