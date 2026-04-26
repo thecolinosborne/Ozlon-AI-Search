@@ -1885,6 +1885,7 @@ export type Database = {
           id: string
           ignored_at: string | null
           kind: string
+          metadata: Json
           mode_context: string
           outcome_note: string | null
           reason: string | null
@@ -1906,6 +1907,7 @@ export type Database = {
           id?: string
           ignored_at?: string | null
           kind?: string
+          metadata?: Json
           mode_context?: string
           outcome_note?: string | null
           reason?: string | null
@@ -1927,6 +1929,7 @@ export type Database = {
           id?: string
           ignored_at?: string | null
           kind?: string
+          metadata?: Json
           mode_context?: string
           outcome_note?: string | null
           reason?: string | null
