@@ -26,6 +26,7 @@ import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
+import { SignalsBanner } from "@/components/communications/SignalsBanner";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
