@@ -1,94 +1,60 @@
-# Skills: Multi-format upload + Mode-gating tests
+## Goal
+Get the user's uploaded `marketing-studio-director.skill.json` (extracted from the zip) successfully validated, installed into the catalog, and verified end-to-end with the live mode-gating logic.
 
-Goal: make the skill you uploaded (`SKILL.md` + `openai.yaml`) installable in Ozlon, harden the activation path so a skill can never run in a disallowed mode, and prove mode-gating works with automated tests.
+## Findings from inspecting the upload
 
----
+The zip contains a single file: `marketing-studio-director.skill.json`. Three issues will block install as-is:
 
-## 1. Multi-format Skill Adapter
+1. **Trigger schema mismatch.** The author wrote `{ "type": "keyword", "value": "Marketing Studio" }`, but our validator (`skills-validate/index.ts` lines 66–71) requires `{ "type": "keyword", "match": ["..."] }`. Every one of the 16 triggers will fail.
+2. **`presentation` block uses the wrong key.** Our adapter merges UI metadata under `ui`, not `presentation`. Cosmetic only — won't block install, but the icon/brand color won't surface.
+3. **`instructions` is exactly 10,000 chars and ends mid-sentence** (`"...the avatar must match exac"`). It just barely passes the `> 10000` cap but is clearly truncated by the author. We'll keep it as-is and surface a warning.
 
-**New file:** `src/lib/skillAdapter.ts` (client) + mirrored logic in `supabase/functions/_shared/skills/adapter.ts` (server, used by `skills-validate`).
+The importer also doesn't accept `.zip` — the user already extracted via the upload, so we'll process the `.skill.json` directly.
 
-Accepts three input shapes and normalizes to the native `.skill.json` manifest:
+## Plan
 
-| Format | How it's recognized | Mapping |
-|---|---|---|
-| **`.skill.json`** | Starts with `{` / parses as JSON | Pass-through (current behavior) |
-| **Claude `SKILL.md`** | Starts with `---` YAML frontmatter | `name` + `description` from frontmatter; Markdown body → `instructions`; slug = kebab(name); version `1.0.0`; triggers auto-derived from description keywords; `tools_required: []` |
-| **OpenAI `*.yaml`** companion | Has top-level `interface:` key | Merged into the matching `SKILL.md` skill as cosmetic fields (`display_name`, `icon`, `brand_color` stored under `manifest.ui`) |
+### 1. Auto-heal common manifest mistakes in the adapter (additive, surgical)
+File: `supabase/functions/_shared/skills/adapter.ts`
 
-**Trigger inference:** when no `triggers` block exists, pull 2–4 short noun phrases from the description (e.g. "marketing studio", "ad prompt", "ugc") and emit a single `keyword` trigger. Always overridable in the importer UI before install.
+Add a `normalizeNativeManifest()` helper that runs when `detectFormat === "json"`:
+- Coerce `triggers[i].value` (string) → `triggers[i].match` (string[]) for keyword triggers. Coerce single-string `match` → `[match]`.
+- Coerce top-level `presentation` → `ui` (merged, doesn't overwrite an existing `ui`).
+- Leave everything else untouched.
 
-## 2. Importer UI upgrade
+This makes the importer tolerant of the two most common authoring mistakes (Claude/OpenAI-style YAML uses `value`; some templates use `presentation`) without weakening validation.
 
-**`src/pages/SkillImport.tsx`:**
-- Accept `.json`, `.md`, `.yaml`, `.yml` (and zip → unpack pairs).
-- Show **detected format** badge ("Claude SKILL.md", "Native JSON", "OpenAI YAML companion").
-- When a `.md` + `.yaml` pair is uploaded, auto-merge them into one preview.
-- Show the normalized manifest preview before install so the user can confirm inferred slug/triggers.
+### 2. Add a focused adapter test
+File: `supabase/functions/skills-validate/adapter_test.ts` (extend existing)
 
-## 3. Activation mode-guard (defense in depth)
+- Test: native JSON with `value`-style keyword triggers gets normalized to `match[]` and passes validation.
+- Test: `presentation` is moved under `ui`.
 
-`supabase/functions/chat/index.ts` already filters the **prompt index** by mode. Add a runtime guard inside the `load_skill(slug)` tool handler:
+### 3. Copy the extracted skill into the project as a fixture
+File: `public/sample-skills/marketing-studio-director.skill.json`
 
-```ts
-if (skill.manifest.modes_allowed?.length &&
-    !skill.manifest.modes_allowed.includes(currentMode)) {
-  return { error: `skill "${slug}" not allowed in ${currentMode} mode` };
-}
-```
+Place a clean copy so the user (and future tests) can re-import it from the importer's "Use sample" picker if we ever extend it.
 
-Ensures a skill can never execute in a disallowed mode even if the model hallucinates a `load_skill` call.
+### 4. Add `modes_allowed` to the manifest before install (recommendation only)
+The uploaded file omits `modes_allowed`, which means our gating treats it as "available in every mode" (per current registry behavior). For mode-gating tests to be meaningful, we'll suggest the user pick — but for this upload pass we will install it as-is (open to all modes) since omitting `modes_allowed` is valid per schema.
 
-## 4. `skills-validate` accepts raw strings
+### 5. Deploy + install the skill via the existing endpoint
+- `supabase--deploy_edge_functions` for `skills-validate`.
+- `supabase--curl_edge_functions` to POST the file content with `install: true`. Confirm a row appears in `skills` with `source: "imported"`.
 
-Edge function update:
-- Accept `{ source: string, format?: "auto" | "json" | "md" | "yaml" }` in addition to `{ manifest }`.
-- Run the adapter server-side, then run existing schema validation on the normalized output.
-- Keep the same `{ valid, issues, warnings, normalized, installed }` response shape — UI changes are minimal.
+### 6. End-to-end mode-gating verification (the actual test the user asked for)
+- `supabase--test_edge_functions` to run the existing `registry_test.ts` and `adapter_test.ts` (plus the new adapter normalization test) — confirm pass.
+- `supabase--read_query` to verify the new `skills` row exists and the manifest looks normalized (triggers are `match[]`, `ui` block present).
+- `supabase--curl_edge_functions` against `chat` with a probe message containing one of the trigger keywords ("create a UGC ad for Ozlon"). Confirm the system prompt route surfaces the skill and that, when we set `current_mode = focus` with a skill scoped to `planning` only (using the existing `morning-briefing` builtin as control), the gate blocks it. This proves both **block** and **allow** paths fire correctly.
+- Capture the responses and report what was allowed/blocked under each mode.
 
-## 5. Automated mode-gating tests
+### 7. Report back to the user
+Summarize:
+- Skill installed: yes/no, with id/slug.
+- Adapter auto-heals applied (so they know what we changed silently).
+- Mode-gating matrix actually exercised against the live `chat` function.
+- Note that the source `instructions` are author-truncated at 10k chars and offer to re-import a fuller version if they have one.
 
-**`supabase/functions/_shared/skills/registry_test.ts`** — pure unit tests, no DB:
-- `filterSkillsByMode` returns all skills when mode is `null`
-- Skills with empty/missing `modes_allowed` are always allowed
-- Skills with `modes_allowed: ["focus"]` are blocked in `idle`/`planning`/`reactive`
-- Multi-mode skills (`["focus","planning"]`) allowed in both, blocked in others
-- Matrix test across all 4 modes × 4 fixture skills
-
-**`supabase/functions/skills-validate/adapter_test.ts`:**
-- Native JSON pass-through preserves all fields
-- Claude `SKILL.md` fixture (your uploaded one) → valid normalized manifest with inferred slug `marketing-studio-director`, version `1.0.0`, ≥1 keyword trigger
-- OpenAI YAML companion merges `display_name` into `manifest.ui`
-- Malformed YAML returns a clear error, never throws
-
-Run via `supabase--test_edge_functions`.
-
-## 6. End-to-end smoke test
-
-After deploy:
-1. Call `skills-validate` via `supabase--curl_edge_functions` with your uploaded `SKILL.md` body → expect `valid: true`.
-2. Re-call with `install: true` → expect `installed.slug = "marketing-studio-director"`.
-3. Confirm row appears in `public.skills` via `supabase--read_query`.
-4. Verify it shows up in `/skills` UI with the icon/color from the YAML companion.
-
----
-
-## Files
-
-**New**
-- `src/lib/skillAdapter.ts`
-- `supabase/functions/_shared/skills/adapter.ts`
-- `supabase/functions/_shared/skills/registry_test.ts`
-- `supabase/functions/skills-validate/adapter_test.ts`
-
-**Modified**
-- `src/pages/SkillImport.tsx` (multi-format upload + preview)
-- `supabase/functions/skills-validate/index.ts` (raw-string + adapter)
-- `supabase/functions/chat/index.ts` (runtime mode-guard in `load_skill`)
-
-## Out of scope
-- Zip handling (will be follow-up if you actually need it; single-file upload covers your current case)
-- Re-introducing built-in skills (kept at zero per your preference)
-- Editing `.lovable/memory` index — no new persistent rules introduced
-
-Approve to switch to default mode and ship it.
+## Out of scope (not doing this pass)
+- Adding zip-upload support to the importer UI (separate UX feature).
+- Re-writing the truncated instructions — we don't know what was clipped.
+- Adding `modes_allowed` to the manifest on the user's behalf.
