@@ -319,6 +319,14 @@ export function useChatStream({
               )
             );
           },
+          onInvestigationArtifact: (info) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, artifactId: info.artifact_id } : m
+              )
+            );
+          },
           onDone: () => {
             if (!isCurrentRequest()) return;
             outcome = "success";
