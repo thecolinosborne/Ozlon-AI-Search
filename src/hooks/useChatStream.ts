@@ -407,14 +407,22 @@ export function useChatStream({
               provider: finalAssistantMessage.provider,
               toolsUsed: finalAssistantMessage.toolsUsed,
               orchestration: finalAssistantMessage.orchestration,
+              artifactId: finalAssistantMessage.artifactId,
             };
-            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration;
+            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId;
             if (hasAny) {
               metadataOverlayRef.current.set(assistantId, overlay);
               setMetadataOverlayVersion((v) => v + 1);
             }
 
-            persistAssistantMessage(finalAssistantMessage).catch((err) => {
+            // Pass artifactId through finalize/save metadata so it persists to DB
+            const messageWithMetadata = {
+              ...finalAssistantMessage,
+              metadata: finalAssistantMessage.artifactId
+                ? { artifact_id: finalAssistantMessage.artifactId }
+                : undefined,
+            };
+            persistAssistantMessage(messageWithMetadata).catch((err) => {
               console.error("[useChatStream] Failed to persist assistant message:", err);
             });
           }
