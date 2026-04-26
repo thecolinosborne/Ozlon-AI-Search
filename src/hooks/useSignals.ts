@@ -67,8 +67,8 @@ export function useSignals() {
   // Initial load + on-mount synthesize
   useEffect(() => {
     if (!user) return;
-    load();
-    synthesize();
+    load().catch((e) => console.warn("[useSignals] load failed:", e));
+    synthesize().catch((e) => console.warn("[useSignals] synthesize failed:", e));
   }, [user, load, synthesize]);
 
   // Realtime subscription
