@@ -258,21 +258,18 @@ export default function Communications() {
 
       {/* Scrollable surface */}
       <div ref={ref} className="flex-1 overflow-y-auto">
-        <div className="lg:grid lg:grid-cols-[32%_68%] lg:gap-0">
-          {/* Left / hero — desktop only thin "Today" rail; mobile gets nothing here */}
-          {!isMobile && (
-            <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
-              <HeroDigest
-                digest={digest}
-                collapsed={collapsed}
-                greeting={greeting}
-                onBrief={() => brief.play(digest.briefScript)}
-              />
-            </aside>
-          )}
-
-          {/* Right / unified stream */}
+        <div className="lg:max-w-3xl lg:mx-auto">
           <section>
+            {/* PulseRibbon — calm-at-rest, urgent-when-needed */}
+            <PulseRibbon
+              greeting={greeting}
+              unread={summaryCounts.unread}
+              needsReply={summaryCounts.needsReply}
+              total={summaryCounts.total}
+              briefDurationSec={digest.briefDurationSec}
+              onBrief={() => brief.play(digest.briefScript)}
+            />
+
             {/* Sticky sub-header */}
             <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
               <div className="flex items-center justify-between gap-2">
