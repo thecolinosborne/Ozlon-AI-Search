@@ -236,11 +236,11 @@ async function resolveKey(admin: any, userId: string | null, provider: string): 
   return { key: null, source: "none" };
 }
 
-async function dispatch(provider: string, model: string, messages: any[], tools: any[] | undefined, needs: Needs | undefined, authHeader: string | undefined, key: string) {
+async function dispatch(provider: string, model: string, messages: any[], tools: any[] | undefined, needs: Needs | undefined, authHeader: string | undefined, key: string, toolChoice?: any) {
   switch (provider) {
-    case "lovable":   return callLovable(model, messages, key, tools);
-    case "openai":    return callOpenAI(model, messages, key, tools);
-    case "gemini":    return callGemini(model, messages, key);
+    case "lovable":   return callLovable(model, messages, key, tools, toolChoice);
+    case "openai":    return callOpenAI(model, messages, key, tools, toolChoice);
+    case "gemini":    return callGemini(model, messages, key, tools, toolChoice);
     case "anthropic": return callAnthropic(model, messages, key);
     case "higgsfield": return callHiggsfield(needs ?? {}, messages, authHeader);
     default: throw new Error(`Unknown provider: ${provider}`);
