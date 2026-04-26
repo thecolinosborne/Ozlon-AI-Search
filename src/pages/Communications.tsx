@@ -340,6 +340,8 @@ export default function Communications() {
                 )}
                 <UnifiedStream
                   messages={filtered}
+                  triageMap={triageMap}
+                  focusedId={filtered[focusedIdx]?.id ?? null}
                   onTap={openMessage}
                   onDone={handleDone}
                   onSnooze={handleSnooze}
