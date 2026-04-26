@@ -285,7 +285,10 @@ const Index = () => {
               </button>
             </div>
           </div>
-          <UserMenu />
+          <div className="flex items-center gap-1">
+            {isAuthenticated && <SignalSurface variant="indicator" />}
+            <UserMenu />
+          </div>
         </div>
       </header>
 
