@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, Upload, FileJson, AlertTriangle, CheckCircle2, Download } from "lucide-react";
+import { ArrowLeft, Sparkles, Upload, FileJson, AlertTriangle, CheckCircle2, Download, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +15,7 @@ type ValidateResult = {
   warnings: Issue[];
   normalized: Record<string, unknown> | null;
   installed?: { id: string; slug: string } | null;
+  format?: string;
 };
 
 const SAMPLE = `{
@@ -30,44 +31,65 @@ const SAMPLE = `{
   "requires_confirmation": false
 }`;
 
+function detectFormat(s: string): "json" | "md" | "yaml" | "unknown" {
+  const t = s.trim();
+  if (!t) return "unknown";
+  if (t.startsWith("{") || t.startsWith("[")) return "json";
+  if (t.startsWith("---")) return "md";
+  if (/^[A-Za-z_][A-Za-z0-9_]*\s*:/m.test(t)) return "yaml";
+  return "unknown";
+}
+
+const FORMAT_LABEL: Record<string, string> = {
+  json: "Native JSON",
+  md: "Claude SKILL.md",
+  yaml: "YAML companion",
+  unknown: "Unknown",
+};
+
 export default function SkillImport() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const companionRef = useRef<HTMLInputElement>(null);
 
-  const [json, setJson] = useState("");
-  const [parseError, setParseError] = useState<string | null>(null);
+  const [source, setSource] = useState("");
+  const [companion, setCompanion] = useState("");
+  const [companionName, setCompanionName] = useState<string | null>(null);
   const [result, setResult] = useState<ValidateResult | null>(null);
   const [busy, setBusy] = useState<"validate" | "install" | null>(null);
 
-  const handleFile = async (file: File) => {
-    if (file.size > 100_000) {
-      toast({ title: "File too large", description: "Max 100 KB", variant: "destructive" });
+  const format = detectFormat(source);
+
+  const handleFile = async (file: File, target: "main" | "companion") => {
+    if (file.size > 200_000) {
+      toast({ title: "File too large", description: "Max 200 KB", variant: "destructive" });
       return;
     }
     const text = await file.text();
-    setJson(text);
-    setResult(null);
-    setParseError(null);
-  };
-
-  const parsed = (): unknown | null => {
-    try {
-      const obj = JSON.parse(json);
-      setParseError(null);
-      return obj;
-    } catch (e) {
-      setParseError(e instanceof Error ? e.message : "Invalid JSON");
-      return null;
+    if (target === "companion") {
+      setCompanion(text);
+      setCompanionName(file.name);
+    } else {
+      setSource(text);
+      setResult(null);
+      // Auto-detect: if user uploads SKILL.md, hint about companion
+      if (file.name.toLowerCase().endsWith(".md")) {
+        toast({ title: "SKILL.md detected", description: "Optionally upload an OpenAI YAML companion for icon/color." });
+      }
     }
   };
 
   const runValidate = async (install = false) => {
-    const manifest = parsed();
-    if (!manifest) return;
+    if (!source.trim()) return;
     setBusy(install ? "install" : "validate");
     try {
+      // Send raw source — backend adapter handles JSON/MD/YAML detection.
       const { data, error } = await supabase.functions.invoke("skills-validate", {
-        body: { manifest, install },
+        body: {
+          source,
+          companion: companion || undefined,
+          install,
+        },
       });
       if (error) throw error;
       setResult(data as ValidateResult);
@@ -108,12 +130,14 @@ export default function SkillImport() {
         <Card className="p-6 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="font-medium">Paste or upload a .skill.json file</h2>
+              <h2 className="font-medium">Paste or upload a skill file</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Manifests are validated against the Ozlon Skill schema and your tool whitelist before installing.
+                Accepts native <code className="text-xs">.skill.json</code>, Claude{" "}
+                <code className="text-xs">SKILL.md</code>, or OpenAI-style{" "}
+                <code className="text-xs">.yaml</code>. We'll normalize it to Ozlon's manifest before installing.
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setJson(SAMPLE)}>
+            <Button variant="ghost" size="sm" onClick={() => setSource(SAMPLE)}>
               <FileJson className="w-4 h-4 mr-2" />
               Use sample
             </Button>
@@ -122,44 +146,60 @@ export default function SkillImport() {
           <input
             ref={fileRef}
             type="file"
-            accept=".json,application/json"
+            accept=".json,.md,.yaml,.yml,application/json,text/markdown,text/yaml"
             className="hidden"
-            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0], "main")}
           />
-          <Button variant="secondary" onClick={() => fileRef.current?.click()} className="w-full">
-            <Upload className="w-4 h-4 mr-2" />
-            Upload .skill.json
-          </Button>
+          <input
+            ref={companionRef}
+            type="file"
+            accept=".yaml,.yml,text/yaml"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0], "companion")}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" onClick={() => fileRef.current?.click()}>
+              <Upload className="w-4 h-4 mr-2" />
+              Upload skill
+            </Button>
+            <Button variant="ghost" onClick={() => companionRef.current?.click()}>
+              <FileText className="w-4 h-4 mr-2" />
+              {companionName ? `Companion: ${companionName}` : "Add YAML companion (optional)"}
+            </Button>
+          </div>
 
           <Textarea
             rows={14}
-            placeholder="Paste manifest JSON here…"
-            value={json}
+            placeholder="Paste manifest JSON, SKILL.md, or YAML here…"
+            value={source}
             onChange={(e) => {
-              setJson(e.target.value);
+              setSource(e.target.value);
               setResult(null);
-              setParseError(null);
             }}
             className="font-mono text-xs"
           />
 
-          {parseError && (
-            <div className="text-xs text-destructive flex items-center gap-2">
-              <AlertTriangle className="w-3 h-3" />
-              {parseError}
+          {source.trim() && (
+            <div className="flex items-center justify-between text-xs">
+              <Badge variant="secondary">Format: {FORMAT_LABEL[format]}</Badge>
+              {companion && (
+                <Badge variant="outline" className="text-xs">
+                  + companion attached
+                </Badge>
+              )}
             </div>
           )}
 
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
-              disabled={!json.trim() || busy !== null}
+              disabled={!source.trim() || busy !== null}
               onClick={() => runValidate(false)}
             >
               {busy === "validate" ? "Validating…" : "Validate"}
             </Button>
             <Button
-              disabled={!json.trim() || busy !== null}
+              disabled={!source.trim() || busy !== null}
               onClick={() => runValidate(true)}
             >
               <Download className="w-4 h-4 mr-2" />
@@ -210,9 +250,9 @@ export default function SkillImport() {
             )}
 
             {result.valid && result.normalized && (
-              <details className="text-xs">
+              <details className="text-xs" open>
                 <summary className="cursor-pointer text-muted-foreground">View normalized manifest</summary>
-                <pre className="mt-2 p-3 bg-muted rounded-md overflow-auto">
+                <pre className="mt-2 p-3 bg-muted rounded-md overflow-auto max-h-96">
                   {JSON.stringify(result.normalized, null, 2)}
                 </pre>
               </details>

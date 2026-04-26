@@ -2,6 +2,7 @@
 // Returns { valid, issues, warnings, normalized } so the UI can show a report.
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { adaptSkill } from "../_shared/skills/adapter.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,6 +158,7 @@ function normalize(m: any) {
     instructions: String(m.instructions).trim(),
     side_effect: m.side_effect ?? "read",
     requires_confirmation: !!m.requires_confirmation,
+    ...(m.ui && typeof m.ui === "object" ? { ui: m.ui } : {}),
   };
 }
 
@@ -185,11 +187,32 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => null);
-    const manifest = body?.manifest;
+    let manifest = body?.manifest;
+    const source: string | undefined = typeof body?.source === "string" ? body.source : undefined;
+    const companionSource: string | undefined = typeof body?.companion === "string" ? body.companion : undefined;
     const install = !!body?.install;
+    let detectedFormat: string | undefined;
+
+    if (!manifest && source) {
+      const adapted = adaptSkill(source, companionSource);
+      detectedFormat = adapted.format;
+      if (!adapted.manifest) {
+        return new Response(
+          JSON.stringify({
+            valid: false,
+            issues: [{ level: "error", field: "source", message: adapted.error || "could not parse skill source" }],
+            warnings: [],
+            normalized: null,
+            format: detectedFormat,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      manifest = adapted.manifest;
+    }
 
     if (!manifest) {
-      return new Response(JSON.stringify({ error: "manifest required" }), {
+      return new Response(JSON.stringify({ error: "manifest or source required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -251,7 +274,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ valid: finalValid, issues, warnings, normalized, installed }),
+      JSON.stringify({ valid: finalValid, issues, warnings, normalized, installed, format: detectedFormat }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
