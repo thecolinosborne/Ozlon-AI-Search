@@ -158,6 +158,7 @@ function normalize(m: any) {
     instructions: String(m.instructions).trim(),
     side_effect: m.side_effect ?? "read",
     requires_confirmation: !!m.requires_confirmation,
+    ...(m.ui && typeof m.ui === "object" ? { ui: m.ui } : {}),
   };
 }
 
@@ -273,7 +274,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ valid: finalValid, issues, warnings, normalized, installed }),
+      JSON.stringify({ valid: finalValid, issues, warnings, normalized, installed, format: detectedFormat }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
