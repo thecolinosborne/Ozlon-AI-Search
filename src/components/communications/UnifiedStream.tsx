@@ -1,17 +1,27 @@
 import { Fragment, useMemo } from "react";
 import { MessageRow } from "./MessageRow";
 import { dateBucket } from "./channelStyle";
-import type { CommMessage } from "@/hooks/useCommunicationsFeed";
+import type { CommMessage, TriageItem } from "@/hooks/useCommunicationsFeed";
 
 interface UnifiedStreamProps {
   messages: CommMessage[];
+  triageMap?: Map<string, TriageItem>;
+  focusedId?: string | null;
   onTap: (m: CommMessage) => void;
   onDone?: (m: CommMessage) => void;
   onSnooze?: (m: CommMessage) => void;
   onDelete?: (m: CommMessage) => void;
 }
 
-export function UnifiedStream({ messages, onTap, onDone, onSnooze, onDelete }: UnifiedStreamProps) {
+export function UnifiedStream({
+  messages,
+  triageMap,
+  focusedId,
+  onTap,
+  onDone,
+  onSnooze,
+  onDelete,
+}: UnifiedStreamProps) {
   const grouped = useMemo(() => {
     const groups: { bucket: string; items: CommMessage[] }[] = [];
     for (const m of messages) {
@@ -37,6 +47,8 @@ export function UnifiedStream({ messages, onTap, onDone, onSnooze, onDelete }: U
               <MessageRow
                 key={m.id}
                 message={m}
+                triage={triageMap?.get(m.id)}
+                isFocused={focusedId === m.id}
                 onTap={onTap}
                 onDone={onDone}
                 onSnooze={onSnooze}

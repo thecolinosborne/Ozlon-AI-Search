@@ -1,21 +1,61 @@
-import { Check, Clock, Trash2 } from "lucide-react";
+import { Check, Clock, Trash2, Reply, CalendarPlus, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
 import { Linkify } from "@/lib/linkify";
-import type { CommMessage } from "@/hooks/useCommunicationsFeed";
+import type { CommMessage, TriageItem } from "@/hooks/useCommunicationsFeed";
 
 interface MessageRowProps {
   message: CommMessage;
+  triage?: TriageItem;
   onTap: (m: CommMessage) => void;
   onDone?: (m: CommMessage) => void;
   onSnooze?: (m: CommMessage) => void;
   onDelete?: (m: CommMessage) => void;
+  isFocused?: boolean;
 }
 
-export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: MessageRowProps) {
+function urgencyBarTone(urgency?: TriageItem["urgency"]): string {
+  switch (urgency) {
+    case "high":
+      return "bg-amber-500";
+    case "medium":
+      return "bg-primary/70";
+    case "low":
+      return "bg-muted-foreground/30";
+    default:
+      return "bg-transparent";
+  }
+}
+
+function actionLabel(hint?: TriageItem["actionHint"]): { label: string; Icon: typeof Reply } | null {
+  switch (hint) {
+    case "reply":
+      return { label: "Reply", Icon: Reply };
+    case "schedule":
+      return { label: "Schedule", Icon: CalendarPlus };
+    case "snooze":
+      return { label: "Later", Icon: Clock };
+    case "done":
+      return { label: "Done", Icon: Check };
+    default:
+      return null;
+  }
+}
+
+export function MessageRow({
+  message,
+  triage,
+  onTap,
+  onDone,
+  onSnooze,
+  onDelete,
+  isFocused,
+}: MessageRowProps) {
   const Icon = channelIcon(message.channel);
   const tint = channelTint(message.channel);
+  const urgencyTone = urgencyBarTone(triage?.urgency);
+  const primaryAction = actionLabel(triage?.actionHint);
 
   return (
     <div
@@ -28,12 +68,24 @@ export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: Messa
           onTap(message);
         }
       }}
+      data-message-id={message.id}
       className={cn(
         "group relative w-full text-left flex items-start gap-3 px-4 lg:px-6 py-3.5 cursor-pointer",
         "hover:bg-card/30 active:bg-card/50 transition-colors",
         "focus-visible:outline-none focus-visible:bg-card/30",
+        isFocused && "bg-card/40 ring-1 ring-inset ring-primary/30",
       )}
     >
+      {/* Urgency rail (3px) — silent if no triage */}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full transition-opacity",
+          urgencyTone,
+          triage?.urgency ? "opacity-100" : "opacity-0",
+        )}
+      />
+
       {/* Avatar / channel glyph */}
       <div className="relative shrink-0">
         <div className="w-8 h-8 rounded-full bg-card/60 backdrop-blur-xl border border-border/30 flex items-center justify-center">
@@ -82,13 +134,26 @@ export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: Messa
           </p>
         )}
 
+        {/* AI reasoning line — appears only when triage present */}
+        {triage?.reason && (
+          <p className="mt-1 text-[11.5px] text-primary/80 line-clamp-1 leading-snug flex items-center gap-1">
+            <Sparkles className="w-2.5 h-2.5 shrink-0" />
+            <span className="truncate">{triage.reason}</span>
+          </p>
+        )}
+
         <div className="mt-1 flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
             {message.channelLabel}
           </span>
-          {message.needsReply && (
+          {message.needsReply && !triage?.actionHint && (
             <span className="text-[10px] uppercase tracking-wider text-primary/80">
               · Needs reply
+            </span>
+          )}
+          {triage?.urgency === "high" && (
+            <span className="text-[10px] uppercase tracking-wider text-amber-300/90">
+              · Urgent
             </span>
           )}
         </div>
@@ -103,9 +168,22 @@ export function MessageRow({ message, onTap, onDone, onSnooze, onDelete }: Messa
       )}
 
       {/* Hover actions (desktop) */}
-      {(onDone || onSnooze || onDelete) && (
+      {(onDone || onSnooze || onDelete || primaryAction) && (
         <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onSnooze && (
+          {primaryAction && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTap(message);
+              }}
+              className="h-7 px-2.5 rounded-full bg-primary/15 text-primary border border-primary/30 text-[11px] font-medium hover:bg-primary/25 flex items-center gap-1"
+              aria-label={primaryAction.label}
+            >
+              <primaryAction.Icon className="w-3 h-3" />
+              {primaryAction.label}
+            </button>
+          )}
+          {onSnooze && !primaryAction && (
             <button
               onClick={(e) => {
                 e.stopPropagation();

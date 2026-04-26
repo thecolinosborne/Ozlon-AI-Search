@@ -10,7 +10,7 @@ import {
 } from "@/hooks/useCommunicationsFeed";
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
-import { HeroDigest } from "@/components/communications/HeroDigest";
+import { PulseRibbon } from "@/components/communications/PulseRibbon";
 import { FocusStack } from "@/components/communications/FocusStack";
 import { SummaryChip } from "@/components/communications/SummaryChip";
 import { OutboxBadge } from "@/components/communications/OutboxBadge";
@@ -36,7 +36,7 @@ function greetingFor(name?: string | null) {
 
 export default function Communications() {
   const { user } = useAuth();
-  const { digest, stream, diagnostics, isFetching, refetch } = useCommunicationsFeed();
+  const { digest, stream, diagnostics, triageMap, isFetching, refetch } = useCommunicationsFeed();
   const isMobile = useIsMobile();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
@@ -48,7 +48,10 @@ export default function Communications() {
   const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [focusedIdx, setFocusedIdx] = useState<number>(-1);
   const prevSlackMissing = useRef(false);
+  const filteredRef = useRef<CommMessage[]>([]);
+  const focusedIdxRef = useRef<number>(-1);
 
   // Toast once when Slack flips from missing-scope → loading messages.
   useEffect(() => {
@@ -64,6 +67,43 @@ export default function Communications() {
   const greeting = greetingFor(
     (user?.user_metadata as { full_name?: string })?.full_name ?? user?.email,
   );
+
+  // Keyboard navigation: j/k move, Enter/r opens, e=done, s=snooze. Skip when
+  // a modal is open or the user is typing in an input.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (active) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const list = filteredRef.current;
+      if (!list || list.length === 0) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.min(list.length - 1, (i < 0 ? -1 : i) + 1));
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.max(0, (i < 0 ? 0 : i) - 1));
+      } else if (e.key === "Enter" || e.key === "r") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          openMessage(list[focusedIdxRef.current]);
+        }
+      } else if (e.key === "e") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          handleDone(list[focusedIdxRef.current]);
+        }
+      } else if (e.key === "s") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          handleSnooze(list[focusedIdxRef.current]);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // Counts per channel for chip badges (from full stream, ignoring filters)
   const channelCounts = useMemo(() => {
@@ -81,6 +121,14 @@ export default function Communications() {
     if (stateFilter === "needs-reply") out = out.filter((m) => m.needsReply);
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
+
+  // Keep refs in sync for keyboard handlers (avoid stale closures).
+  useEffect(() => {
+    filteredRef.current = filtered;
+  }, [filtered]);
+  useEffect(() => {
+    focusedIdxRef.current = focusedIdx;
+  }, [focusedIdx]);
 
   // Smart summary counts — derived from already-loaded data, no extra fetch.
   const summaryCounts = useMemo(() => {
@@ -257,21 +305,18 @@ export default function Communications() {
 
       {/* Scrollable surface */}
       <div ref={ref} className="flex-1 overflow-y-auto">
-        <div className="lg:grid lg:grid-cols-[32%_68%] lg:gap-0">
-          {/* Left / hero — desktop only thin "Today" rail; mobile gets nothing here */}
-          {!isMobile && (
-            <aside className="lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-3.5rem)] lg:overflow-y-auto">
-              <HeroDigest
-                digest={digest}
-                collapsed={collapsed}
-                greeting={greeting}
-                onBrief={() => brief.play(digest.briefScript)}
-              />
-            </aside>
-          )}
-
-          {/* Right / unified stream */}
+        <div className="lg:max-w-3xl lg:mx-auto">
           <section>
+            {/* PulseRibbon — calm-at-rest, urgent-when-needed */}
+            <PulseRibbon
+              greeting={greeting}
+              unread={summaryCounts.unread}
+              needsReply={summaryCounts.needsReply}
+              total={summaryCounts.total}
+              briefDurationSec={digest.briefDurationSec}
+              onBrief={() => brief.play(digest.briefScript)}
+            />
+
             {/* Sticky sub-header */}
             <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -342,6 +387,8 @@ export default function Communications() {
                 )}
                 <UnifiedStream
                   messages={filtered}
+                  triageMap={triageMap}
+                  focusedId={filtered[focusedIdx]?.id ?? null}
                   onTap={openMessage}
                   onDone={handleDone}
                   onSnooze={handleSnooze}
