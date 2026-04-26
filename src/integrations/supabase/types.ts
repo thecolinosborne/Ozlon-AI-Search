@@ -1939,6 +1939,133 @@ export type Database = {
         }
         Relationships: []
       }
+      skill_installs: {
+        Row: {
+          config: Json
+          enabled: boolean
+          id: string
+          installed_at: string
+          last_used_at: string | null
+          skill_id: string
+          user_id: string
+        }
+        Insert: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          installed_at?: string
+          last_used_at?: string | null
+          skill_id: string
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          installed_at?: string
+          last_used_at?: string | null
+          skill_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "skill_installs_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      skill_invocations: {
+        Row: {
+          created_at: string
+          id: string
+          outcome: string
+          reflection_id: string | null
+          skill_id: string
+          tools_called: Json
+          trigger_payload: Json
+          trigger_type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          outcome?: string
+          reflection_id?: string | null
+          skill_id: string
+          tools_called?: Json
+          trigger_payload?: Json
+          trigger_type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          outcome?: string
+          reflection_id?: string | null
+          skill_id?: string
+          tools_called?: Json
+          trigger_payload?: Json
+          trigger_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "skill_invocations_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      skills: {
+        Row: {
+          author_user_id: string | null
+          created_at: string
+          description: string
+          id: string
+          manifest: Json
+          name: string
+          slug: string
+          source: string
+          trust_tier: number
+          updated_at: string
+          version: string
+          visibility: string
+        }
+        Insert: {
+          author_user_id?: string | null
+          created_at?: string
+          description?: string
+          id?: string
+          manifest?: Json
+          name: string
+          slug: string
+          source?: string
+          trust_tier?: number
+          updated_at?: string
+          version?: string
+          visibility?: string
+        }
+        Update: {
+          author_user_id?: string | null
+          created_at?: string
+          description?: string
+          id?: string
+          manifest?: Json
+          name?: string
+          slug?: string
+          source?: string
+          trust_tier?: number
+          updated_at?: string
+          version?: string
+          visibility?: string
+        }
+        Relationships: []
+      }
       slack_processed_events: {
         Row: {
           channel: string | null

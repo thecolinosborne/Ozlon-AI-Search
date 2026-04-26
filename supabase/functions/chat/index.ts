@@ -2,6 +2,13 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY as MODEL_REGISTRY_BASE, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
 import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
+import {
+  getInstalledSkills,
+  buildSkillIndex,
+  formatSkillIndexForPrompt,
+  getSkillBySlug,
+  recordInvocation,
+} from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
@@ -3128,6 +3135,36 @@ async function executeToolCall(
         result: `multi_action: ${okCount}/${results.length} succeeded\n` +
           results.map((r) => `  • ${r.success ? '✓' : '✗'} ${r.name}: ${r.result.slice(0, 200)}`).join('\n'),
       };
+    }
+
+    // ---- load_skill: fetch + activate a user-installed skill ----
+    if (toolName === 'load_skill') {
+      const slug = String(args.slug || '').trim();
+      const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+      if (!slug) return { success: false, result: 'load_skill: slug is required' };
+      if (!userId) return { success: false, result: 'load_skill: user not authenticated' };
+      const skill = await getSkillBySlug(userId, slug);
+      if (!skill) {
+        return { success: false, result: `Skill "${slug}" is not installed for this user.` };
+      }
+      const m = skill.manifest;
+      // Best-effort audit (non-blocking)
+      recordInvocation({
+        userId,
+        skillId: skill.id,
+        triggerType: 'load_skill',
+        triggerPayload: { slug },
+      }).catch(() => {});
+      const block = [
+        `## Skill activated: ${m.name} (v${m.version})`,
+        `Description: ${m.description}`,
+        m.requires_confirmation ? `⚠ Requires user confirmation before any write/destructive action.` : '',
+        `Tools available for this skill: ${[...(m.tools_required || []), ...(m.tools_optional || [])].join(', ') || '(none)'}`,
+        '',
+        '### Instructions',
+        m.instructions,
+      ].filter(Boolean).join('\n');
+      return { success: true, result: block };
     }
 
     // ---- Registry dispatcher (manifest-driven tools) ----
@@ -6858,6 +6895,29 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     } as ToolDef);
   }
 
+  // ---- load_skill: progressive skill loader (Skills Platform) ----
+  if (!existingNames.has("load_skill")) {
+    filtered.push({
+      type: "function",
+      function: {
+        name: "load_skill",
+        description:
+          "Activate a user-installed Skill by its slug. Returns the skill's full instructions and the list of tools it expects to use. " +
+          "Call this AS SOON AS you recognize a request matches one of the installed skills listed in the system prompt — do not improvise the workflow when a skill exists for it.",
+        parameters: {
+          type: "object",
+          properties: {
+            slug: {
+              type: "string",
+              description: "The slug of the installed skill, e.g. 'email-triage'.",
+            },
+          },
+          required: ["slug"],
+        },
+      },
+    } as ToolDef);
+  }
+
   // FINAL QUARANTINE PASS — last line of defense before tools hit OpenAI.
   // Drops any individually malformed tool (legacy, manifest, or multi_action)
   // so one bad schema can never again poison the entire payload.
@@ -8005,6 +8065,26 @@ serve(async (req) => {
         console.log(`[Auth] resolved credUserId: ${credUserId ? credUserId.slice(0, 8) + '...' : 'null'}, error: ${authErr?.message || 'none'}`);
       } catch (e) {
         console.error('[Auth] getUser threw:', (e as Error).message);
+      }
+    }
+
+    // Expose userId to tool handlers (used by load_skill, etc.)
+    (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
+
+    // ================================================================
+    // SKILLS PLATFORM — inject compact index of installed skills.
+    // Full instructions are loaded on-demand via the load_skill tool.
+    // ================================================================
+    if (credUserId) {
+      try {
+        const installed = await getInstalledSkills(credUserId);
+        const indexBlock = formatSkillIndexForPrompt(buildSkillIndex(installed));
+        if (indexBlock) {
+          systemPrompt += `\n\n${indexBlock}`;
+          console.log(`[Skills] Injected ${installed.length} installed skill(s) into prompt.`);
+        }
+      } catch (e) {
+        console.error('[Skills] Failed to load installed skills:', (e as Error).message);
       }
     }
 
