@@ -309,11 +309,23 @@ Return your moments via the emit_moments tool.`;
 }
 
 // ─────────── dedup + insert ───────────
-async function insertWithDedup(userId: string, ctx: ContextState, moments: Candidate[]) {
+async function insertWithDedup(
+  userId: string,
+  ctx: ContextState,
+  moments: Candidate[],
+  tuning: Record<string, { floor: number; sample_size: number }> = {},
+) {
   const inserted: string[] = [];
 
   for (const m of moments) {
     if (typeof m.headline !== "string" || !m.headline.trim()) continue;
+
+    // Phase E — enforce learned per-kind salience floor (hard cutoff).
+    const kindFloor = tuning[m.kind]?.floor;
+    if (typeof kindFloor === "number" && (Number(m.salience) || 0) < kindFloor) {
+      console.log(`[signals] dropped kind=${m.kind} salience=${m.salience} below learned floor=${kindFloor}`);
+      continue;
+    }
 
     const emb = await embed(`${m.headline}\n${m.reason ?? ""}`);
     let isDup = false;
