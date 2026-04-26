@@ -36,7 +36,7 @@ function greetingFor(name?: string | null) {
 
 export default function Communications() {
   const { user } = useAuth();
-  const { digest, stream, diagnostics, isFetching, refetch } = useCommunicationsFeed();
+  const { digest, stream, diagnostics, triageMap, isFetching, refetch } = useCommunicationsFeed();
   const isMobile = useIsMobile();
   const { ref, collapsed } = useScrollCollapse(80);
   const brief = useDailyBrief();
