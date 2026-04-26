@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 
 const isDev = import.meta.env.DEV;
@@ -19,6 +20,7 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 export function useConversations() {
@@ -99,13 +101,17 @@ export function useConversations() {
 
     const { data, error } = await supabase
       .from("chat_messages")
-      .select("id, role, content, created_at")
+      .select("id, role, content, created_at, metadata")
       .eq("session_id", sessionId)
       .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
     if (!error && data) {
-      setMessages(data.map((m) => ({ ...m, role: m.role as "user" | "assistant" })));
+      setMessages(data.map((m) => ({
+        ...m,
+        role: m.role as "user" | "assistant",
+        metadata: (m.metadata as Record<string, unknown> | null) ?? null,
+      })));
     }
   }, [user]);
 
@@ -124,7 +130,7 @@ export function useConversations() {
   }, [createSession, setActiveSession]);
 
   // Save a message to the active session
-  const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
+  const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => {
     if (!user) {
       if (isDev) console.warn("[useConversations] saveMessage called without user — skipping.");
       return;
@@ -134,6 +140,7 @@ export function useConversations() {
     const newMsg: ConversationMessage = {
       ...msg,
       created_at: new Date().toISOString(),
+      metadata: msg.metadata ?? null,
     };
     setMessages((prev) => [...prev, newMsg]);
 
@@ -151,6 +158,7 @@ export function useConversations() {
       content: msg.content,
       session_id: sid,
       user_id: user.id,
+      metadata: (msg.metadata ?? null) as Json,
     });
 
     if (error) {
@@ -199,7 +207,7 @@ export function useConversations() {
   }, []);
 
   // Update message in DB after streaming completes
-  const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
+  const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => {
     if (!user) {
       if (isDev) console.warn("[useConversations] finalizeMessage called without user — skipping.");
       return;
@@ -215,6 +223,7 @@ export function useConversations() {
       content: msg.content,
       session_id: sid,
       user_id: user.id,
+      metadata: (msg.metadata ?? null) as Json,
     });
 
     if (error) {
@@ -225,9 +234,9 @@ export function useConversations() {
     setMessages((prev) => {
       const exists = prev.some((m) => m.id === msg.id);
       if (exists) {
-        return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content } : m);
+        return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content, metadata: msg.metadata ?? m.metadata ?? null } : m);
       }
-      return [...prev, { ...msg, created_at: new Date().toISOString() }];
+      return [...prev, { ...msg, created_at: new Date().toISOString(), metadata: msg.metadata ?? null }];
     });
 
     // Auto-title from first user message (fallback before AI summary lands)

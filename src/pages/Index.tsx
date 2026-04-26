@@ -69,7 +69,11 @@ const Index = () => {
 
   // Convert persisted session messages to ChatMessage type
   const persistedMessages: ChatMessage[] = useMemo(
-    () => sessionMessages.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+    () => sessionMessages.map((m) => {
+      const meta = m.metadata as Record<string, unknown> | null | undefined;
+      const artifactId = typeof meta?.artifact_id === "string" ? meta.artifact_id : undefined;
+      return { id: m.id, role: m.role, content: m.content, artifactId };
+    }),
     [sessionMessages]
   );
 
@@ -108,6 +112,7 @@ const Index = () => {
           provider: m.provider ?? overlay.provider,
           toolsUsed: m.toolsUsed ?? overlay.toolsUsed,
           orchestration: m.orchestration ?? overlay.orchestration,
+          artifactId: m.artifactId ?? overlay.artifactId,
         };
       });
     }
