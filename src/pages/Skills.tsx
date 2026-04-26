@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Sparkles, Download, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 export default function Skills() {
@@ -40,6 +40,12 @@ export default function Skills() {
           </Link>
           <Sparkles className="w-5 h-5 text-primary" />
           <h1 className="text-xl font-semibold flex-1">Skills</h1>
+          <Button asChild size="sm" variant="ghost">
+            <Link to="/skills/import">
+              <Upload className="w-4 h-4 mr-2" />
+              Import
+            </Link>
+          </Button>
           <Button asChild size="sm">
             <Link to="/skills/new">
               <Plus className="w-4 h-4 mr-2" />
