@@ -1,11 +1,15 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useSignals, type SignalMoment } from "@/hooks/useSignals";
 
 interface Props {
-  variant?: "page" | "indicator" | "inline";
+  variant?: "page" | "indicator" | "inline" | "voice";
   maxMoments?: number;
+  /** voice variant only: function that injects an utterance into the realtime session */
+  sendText?: (text: string) => void;
+  /** voice variant only: only speak when this is true (e.g. session connected) */
+  enabled?: boolean;
 }
 
 const BreathingDot = ({ active }: { active: boolean }) => (
@@ -28,10 +32,12 @@ const InlinePrompt = ({ children, onClick }: { children: React.ReactNode; onClic
   </button>
 );
 
-export function SignalSurface({ variant = "page", maxMoments = 1 }: Props) {
+export function SignalSurface({ variant = "page", maxMoments = 1, sendText, enabled = true }: Props) {
   const { moments, topMoment, loading, synthesizing, respond } = useSignals();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<{ why: boolean; what: boolean }>({ why: false, what: false });
+  const [hoverPreview, setHoverPreview] = useState(false);
+  const spokenIdsRef = useRef<Set<string>>(new Set());
 
   const handleAct = (m: SignalMoment) => {
     const intent = m.suggested_direction || m.headline;
@@ -39,15 +45,70 @@ export function SignalSurface({ variant = "page", maxMoments = 1 }: Props) {
     navigate(`/?intent=${encodeURIComponent(intent)}&signal=${m.id}`);
   };
 
-  // Indicator variant: small dot in nav
+  // Voice variant: inject the top moment into the realtime session once.
+  // Renders nothing visible. Only speaks when `enabled` is true.
+  useEffect(() => {
+    if (variant !== "voice" || !enabled || !sendText || !topMoment) return;
+    if (spokenIdsRef.current.has(topMoment.id)) return;
+    if (topMoment.salience < 0.6) return; // voice bar — only meaningful moments
+    spokenIdsRef.current.add(topMoment.id);
+    const utter = topMoment.suggested_direction
+      ? `Quiet note: ${topMoment.headline}. ${topMoment.suggested_direction}`
+      : `Quiet note: ${topMoment.headline}.`;
+    // Frame as system context so the assistant relays it naturally
+    sendText(`[Signals layer]: ${utter} Mention this calmly only if it serves the user; otherwise hold it.`);
+  }, [variant, enabled, sendText, topMoment]);
+
+  if (variant === "voice") return null;
+
+  // Indicator variant: breathing dot in nav, links to /signals
   if (variant === "indicator") {
+    const count = moments.length;
     return (
-      <div className="flex items-center gap-1.5" title={topMoment?.headline ?? "Quiet"}>
-        <BreathingDot active={moments.length > 0} />
-        {moments.length > 0 && (
-          <span className="text-xs text-muted-foreground">{moments.length}</span>
+      <div
+        className="relative"
+        onMouseEnter={() => setHoverPreview(true)}
+        onMouseLeave={() => setHoverPreview(false)}
+      >
+        <Link
+          to="/signals"
+          aria-label={count > 0 ? `Signals: ${topMoment?.headline}` : "Signals — quiet"}
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-full hover:bg-neutral-100 transition-colors"
+        >
+          <BreathingDot active={count > 0} />
+          {count > 0 && (
+            <span className="text-xs font-medium text-neutral-600">{count}</span>
+          )}
+        </Link>
+        {hoverPreview && topMoment && (
+          <div className="absolute right-0 top-full mt-2 w-72 p-3 rounded-xl bg-white shadow-lg border border-neutral-200 z-[70] animate-in fade-in slide-in-from-top-1 duration-200">
+            <p className="text-sm font-medium text-neutral-900 leading-snug">
+              {topMoment.headline}
+            </p>
+            {topMoment.reason && (
+              <p className="mt-1.5 text-xs text-neutral-500 leading-relaxed line-clamp-3">
+                {topMoment.reason}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] text-neutral-400">Tap to open Signals</p>
+          </div>
         )}
       </div>
+    );
+  }
+
+  // Inline variant: compact chip embeddable anywhere (e.g. chat composer)
+  if (variant === "inline") {
+    if (!topMoment) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => navigate("/signals")}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-100 hover:bg-neutral-200 transition-colors text-xs text-neutral-700 max-w-full"
+      >
+        <BreathingDot active />
+        <span className="truncate">{topMoment.headline}</span>
+      </button>
     );
   }
 
