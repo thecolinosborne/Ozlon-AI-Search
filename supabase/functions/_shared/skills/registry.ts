@@ -31,6 +31,16 @@ export async function getInstalledSkills(userId: string): Promise<SkillRow[]> {
   return (data ?? []).map((r: any) => r.skill).filter(Boolean) as SkillRow[];
 }
 
+/** Filter skills by current cognitive mode. Skills with no modes_allowed are always available. */
+export function filterSkillsByMode(skills: SkillRow[], mode: string | null): SkillRow[] {
+  if (!mode) return skills;
+  return skills.filter((s) => {
+    const allowed = s.manifest?.modes_allowed;
+    if (!Array.isArray(allowed) || allowed.length === 0) return true;
+    return allowed.includes(mode as "focus" | "idle" | "planning" | "reactive");
+  });
+}
+
 /** Compact one-line entries the AI can scan cheaply. */
 export function buildSkillIndex(skills: SkillRow[]): SkillIndexEntry[] {
   return skills.map((s) => ({
@@ -41,13 +51,21 @@ export function buildSkillIndex(skills: SkillRow[]): SkillIndexEntry[] {
 }
 
 /** Format index entries into a system-prompt block. Returns "" if empty. */
-export function formatSkillIndexForPrompt(entries: SkillIndexEntry[]): string {
+export function formatSkillIndexForPrompt(entries: SkillIndexEntry[], mode?: string | null): string {
   if (entries.length === 0) return "";
   const lines = entries.map((e) => `- ${e.slug}: ${e.description || e.name}`);
-  return [
-    "Installed skills (call load_skill(slug) to activate one):",
-    ...lines,
-  ].join("\n");
+  const header = mode
+    ? `Installed skills available in ${mode} mode (call load_skill(slug) to activate one):`
+    : "Installed skills (call load_skill(slug) to activate one):";
+  return [header, ...lines].join("\n");
+}
+
+/** Look up the active memory_domains for the most recently loaded skill (by slug). */
+export function getMemoryDomains(skill: SkillRow | null): string[] {
+  if (!skill) return [];
+  const d = skill.manifest?.memory_domains;
+  return Array.isArray(d) ? d.filter((x): x is string => typeof x === "string") : [];
+}
 }
 
 /** Look up a skill by slug for a given user (must be installed + enabled). */
