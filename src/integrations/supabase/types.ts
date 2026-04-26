@@ -1873,6 +1873,72 @@ export type Database = {
         }
         Relationships: []
       }
+      signal_moments: {
+        Row: {
+          acted_at: string | null
+          confidence: number
+          created_at: string
+          dismissed_at: string | null
+          embedding: string | null
+          expires_at: string
+          headline: string
+          id: string
+          ignored_at: string | null
+          kind: string
+          mode_context: string
+          outcome_note: string | null
+          reason: string | null
+          salience: number
+          source_refs: Json
+          status: string
+          suggested_direction: string | null
+          user_id: string
+          wisdom_memory_ids: Json
+        }
+        Insert: {
+          acted_at?: string | null
+          confidence?: number
+          created_at?: string
+          dismissed_at?: string | null
+          embedding?: string | null
+          expires_at?: string
+          headline: string
+          id?: string
+          ignored_at?: string | null
+          kind?: string
+          mode_context?: string
+          outcome_note?: string | null
+          reason?: string | null
+          salience?: number
+          source_refs?: Json
+          status?: string
+          suggested_direction?: string | null
+          user_id: string
+          wisdom_memory_ids?: Json
+        }
+        Update: {
+          acted_at?: string | null
+          confidence?: number
+          created_at?: string
+          dismissed_at?: string | null
+          embedding?: string | null
+          expires_at?: string
+          headline?: string
+          id?: string
+          ignored_at?: string | null
+          kind?: string
+          mode_context?: string
+          outcome_note?: string | null
+          reason?: string | null
+          salience?: number
+          source_refs?: Json
+          status?: string
+          suggested_direction?: string | null
+          user_id?: string
+          wisdom_memory_ids?: Json
+        }
+        Relationships: []
+      }
       slack_processed_events: {
         Row: {
           channel: string | null
@@ -2074,6 +2140,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_context_state: {
+        Row: {
+          cognitive_load_estimate: number
+          current_mode: string
+          last_interaction_at: string | null
+          quiet_hours: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cognitive_load_estimate?: number
+          current_mode?: string
+          last_interaction_at?: string | null
+          quiet_hours?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cognitive_load_estimate?: number
+          current_mode?: string
+          last_interaction_at?: string | null
+          quiet_hours?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_goals: {
         Row: {
@@ -2707,6 +2800,24 @@ export type Database = {
           original_question: string
           similarity: number
           sub_queries: Json
+        }[]
+      }
+      match_signal_moments: {
+        Args: {
+          filter_user_id?: string
+          hours_back?: number
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          created_at: string
+          headline: string
+          id: string
+          kind: string
+          salience: number
+          similarity: number
+          status: string
         }[]
       }
       match_wisdom_memories: {
