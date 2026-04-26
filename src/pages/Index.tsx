@@ -13,6 +13,7 @@ import { voiceService } from "@/services/voiceService";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
+import { SignalSurface } from "@/components/signals/SignalSurface";
 import { useConversations } from "@/hooks/useConversations";
 import { useChatStream, ChatMessage } from "@/hooks/useChatStream";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
