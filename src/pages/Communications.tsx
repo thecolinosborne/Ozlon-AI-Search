@@ -48,6 +48,7 @@ export default function Communications() {
   const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [focusedIdx, setFocusedIdx] = useState<number>(-1);
   const prevSlackMissing = useRef(false);
 
   // Toast once when Slack flips from missing-scope → loading messages.
