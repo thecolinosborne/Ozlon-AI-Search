@@ -100,13 +100,17 @@ export function useConversations() {
 
     const { data, error } = await supabase
       .from("chat_messages")
-      .select("id, role, content, created_at")
+      .select("id, role, content, created_at, metadata")
       .eq("session_id", sessionId)
       .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
     if (!error && data) {
-      setMessages(data.map((m) => ({ ...m, role: m.role as "user" | "assistant" })));
+      setMessages(data.map((m) => ({
+        ...m,
+        role: m.role as "user" | "assistant",
+        metadata: (m.metadata as Record<string, unknown> | null) ?? null,
+      })));
     }
   }, [user]);
 
