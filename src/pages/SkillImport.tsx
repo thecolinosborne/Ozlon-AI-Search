@@ -201,8 +201,8 @@ export default function SkillImport() {
             {result.warnings.length > 0 && (
               <div className="space-y-2">
                 {result.warnings.map((i, idx) => (
-                  <div key={idx} className="text-sm border-l-2 border-amber-500 pl-3">
-                    <span className="font-mono text-xs text-amber-600 dark:text-amber-400">{i.field}</span>
+                  <div key={idx} className="text-sm border-l-2 border-muted-foreground/40 pl-3">
+                    <span className="font-mono text-xs text-muted-foreground">{i.field}</span>
                     <p className="text-muted-foreground">{i.message}</p>
                   </div>
                 ))}
