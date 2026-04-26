@@ -308,8 +308,54 @@ Deno.serve(async (req) => {
     if (action === "call") {
       const { needs, messages, tools, run_id, node_type } = payload;
       const active = await getActiveProviders(admin, userId);
-      const picked = pickStone(needs ?? {}, active);
+      let picked = pickStone(needs ?? {}, active);
       if (!picked) return json({ error: "no active stones" }, 400);
+
+      // ── Brain evolution: bias selection for signals-* node_types based on
+      //    this user's historical outcomes (written by signals-tune as
+      //    wisdom_memories.memory_type='brain_routing_pref').
+      let evolutionReason: string | null = null;
+      if (userId && typeof node_type === "string" && node_type.startsWith("signals-")) {
+        try {
+          const { data: prefRow } = await admin
+            .from("wisdom_memories")
+            .select("content")
+            .eq("user_id", userId)
+            .eq("memory_type", "brain_routing_pref")
+            .maybeSingle();
+          const prefMap = prefRow?.content ? JSON.parse(prefRow.content as string) : null;
+          const nodePref = prefMap?.[node_type];
+          if (nodePref && (nodePref.preferred_stones?.length || nodePref.avoid?.length)) {
+            const preferred: string[] = nodePref.preferred_stones ?? [];
+            const avoid: string[] = nodePref.avoid ?? [];
+            // Reorder: preferred first (in order), then current pick + fallbacks
+            // minus avoided ones. Avoided can still be used as last-resort fallback.
+            const chain = [picked.stone, ...picked.fallbacks];
+            const reordered: typeof chain = [];
+            for (const p of preferred) {
+              const found = chain.find((s) => s.provider === p);
+              if (found && !reordered.includes(found)) reordered.push(found);
+            }
+            for (const s of chain) {
+              if (avoid.includes(s.provider)) continue;
+              if (!reordered.includes(s)) reordered.push(s);
+            }
+            for (const s of chain) {
+              if (!reordered.includes(s)) reordered.push(s); // avoided as last resort
+            }
+            if (reordered.length > 0 && reordered[0] !== picked.stone) {
+              evolutionReason = `evolved: ${nodePref.reason}`;
+              picked = {
+                stone: reordered[0],
+                fallbacks: reordered.slice(1),
+                reason: `${evolutionReason} (was ${picked.stone.provider})`,
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("[gauntlet] brain_routing_pref skipped:", e instanceof Error ? e.message : e);
+        }
+      }
 
       const chain = [picked.stone, ...picked.fallbacks];
       let lastError: string | null = null;
