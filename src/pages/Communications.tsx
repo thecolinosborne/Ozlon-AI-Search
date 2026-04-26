@@ -66,6 +66,43 @@ export default function Communications() {
     (user?.user_metadata as { full_name?: string })?.full_name ?? user?.email,
   );
 
+  // Keyboard navigation: j/k move, Enter/r opens, e=done, s=snooze. Skip when
+  // a modal is open or the user is typing in an input.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (active) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const list = filteredRef.current;
+      if (!list || list.length === 0) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.min(list.length - 1, (i < 0 ? -1 : i) + 1));
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.max(0, (i < 0 ? 0 : i) - 1));
+      } else if (e.key === "Enter" || e.key === "r") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          openMessage(list[focusedIdxRef.current]);
+        }
+      } else if (e.key === "e") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          handleDone(list[focusedIdxRef.current]);
+        }
+      } else if (e.key === "s") {
+        if (focusedIdxRef.current >= 0) {
+          e.preventDefault();
+          handleSnooze(list[focusedIdxRef.current]);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
   // Counts per channel for chip badges (from full stream, ignoring filters)
   const channelCounts = useMemo(() => {
     const c: Record<CommChannel, number> = { email: 0, slack: 0, sms: 0, voicemail: 0 };
