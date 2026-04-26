@@ -154,6 +154,7 @@ export function adaptSkill(source: string, companionSource?: string): AdapterRes
   if (fmt === "json") {
     try {
       manifest = JSON.parse(source);
+      manifest = healNativeManifest(manifest);
     } catch (e) {
       return { format: fmt, manifest: null, error: e instanceof Error ? e.message : String(e) };
     }
