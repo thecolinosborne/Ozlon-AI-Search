@@ -480,6 +480,15 @@ export default function Communications() {
 
             {filtered.length === 0 ? (
               <EmptyCaughtUp />
+            ) : mode === "people" ? (
+              <>
+                <PeopleStream
+                  groups={peopleGroups}
+                  triageMap={triageMap}
+                  onTap={openMessage}
+                />
+                <OutboxBadge onRetry={() => refetch()} />
+              </>
             ) : (
               <>
                 {digest.priorities.length > 0 && (
