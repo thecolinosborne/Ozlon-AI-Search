@@ -7,6 +7,8 @@ import { useSkills } from "@/hooks/useSkills";
 interface Props {
   variant?: "page" | "indicator" | "inline" | "voice";
   maxMoments?: number;
+  /** When true on the page variant, render the remaining live moments as a stacked list below the hero. */
+  showList?: boolean;
   /** voice variant only: function that injects an utterance into the realtime session */
   sendText?: (text: string) => void;
   /** voice variant only: only speak when this is true (e.g. session connected) */
@@ -33,7 +35,7 @@ const InlinePrompt = ({ children, onClick }: { children: React.ReactNode; onClic
   </button>
 );
 
-export function SignalSurface({ variant = "page", maxMoments = 1, sendText, enabled = true }: Props) {
+export function SignalSurface({ variant = "page", maxMoments = 1, showList = false, sendText, enabled = true }: Props) {
   const { moments, topMoment, loading, synthesizing, respond } = useSignals();
   const { skills } = useSkills();
   const navigate = useNavigate();
