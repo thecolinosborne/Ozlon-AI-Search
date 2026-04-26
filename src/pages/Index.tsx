@@ -230,6 +230,36 @@ const Index = () => {
     });
   }, [searchParams, sessionsLoaded, activeSessionId, handleSwitchSession, setSearchParams]);
 
+  // Deep-link: /?intent=<text>&signal=<id> — pre-fill composer and auto-send once.
+  // Used by SignalSurface "Handle it" to bridge awareness → execution.
+  const handledIntentRef = useRef<string | null>(null);
+  const arrivedFromSignal = !!searchParams.get('signal');
+  useEffect(() => {
+    const intent = searchParams.get('intent');
+    const signalId = searchParams.get('signal');
+    if (!intent) return;
+    const key = `${signalId ?? ''}|${intent}`;
+    if (handledIntentRef.current === key) return;
+    if (!sessionsLoaded || !activeSessionId) return;
+    handledIntentRef.current = key;
+    setActiveMode("chat");
+    sendMessage(intent);
+    const params = new URLSearchParams(searchParams);
+    params.delete('intent');
+    params.delete('signal');
+    setSearchParams(params, { replace: true });
+  }, [searchParams, sessionsLoaded, activeSessionId, sendMessage, setSearchParams]);
+
+  // Phase D — track user mode for the Signals layer.
+  const location = useLocation();
+  useContextMode({
+    isStreaming: isLoading,
+    hasInput: input.length > 0,
+    routePath: location.pathname,
+    arrivedFromSignal,
+  });
+
+
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     abortStream();
     resetEphemeralState();
