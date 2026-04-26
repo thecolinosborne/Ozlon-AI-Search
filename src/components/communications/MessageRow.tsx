@@ -255,6 +255,7 @@ export function MessageRow({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
