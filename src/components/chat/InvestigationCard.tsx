@@ -93,7 +93,7 @@ export function InvestigationCard({ artifactId }: Props) {
           {artifact.title ?? "Untitled deliverable"}
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5">
-          Open full investigation →
+          Open conversation →
         </div>
       </div>
       <ArrowUpRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary transition-colors" />
