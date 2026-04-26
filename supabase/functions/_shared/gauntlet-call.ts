@@ -9,6 +9,7 @@ export interface GauntletCallOptions {
   agent: AgentName;
   messages: ChatMessage[];
   tools?: any[];
+  tool_choice?: any;
   userId?: string | null;
   authHeader?: string | null;
   body?: Record<string, unknown>;
