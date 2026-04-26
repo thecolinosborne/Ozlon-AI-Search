@@ -20,6 +20,7 @@ export function RealtimeVoiceChat({ systemName, onClose }: RealtimeVoiceChatProp
     connect,
     disconnect,
     isConnected,
+    sendTextMessage,
   } = useRealtimeVoice({
     systemName,
     onTranscript: (text) => {
