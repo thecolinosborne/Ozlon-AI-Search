@@ -121,10 +121,10 @@ async function buildContextSummary(userId: string): Promise<string> {
   return lines.join("\n");
 }
 
-// Wisdom recall — prior beliefs + signal feedback patterns
+// Wisdom recall — prior beliefs + signal feedback patterns + Phase E tuning
 async function recallWisdom(userId: string, queryEmbedding: number[]) {
   const embStr = JSON.stringify(queryEmbedding);
-  const [mems, refs, throttles] = await Promise.all([
+  const [mems, refs, throttles, tuningRow] = await Promise.all([
     admin.rpc("match_wisdom_memories", {
       query_embedding: embStr, match_threshold: 0.4, match_count: 8,
       filter_user_id: userId,
@@ -138,12 +138,24 @@ async function recallWisdom(userId: string, queryEmbedding: number[]) {
       .select("id, content")
       .eq("user_id", userId)
       .eq("memory_type", "signal_throttle"),
+    // Phase E: outcome-driven per-kind tuning written by signals-tune.
+    admin.from("wisdom_memories")
+      .select("content")
+      .eq("user_id", userId)
+      .eq("memory_type", "signal_tuning")
+      .maybeSingle(),
   ]);
+
+  let tuning: Record<string, { floor: number; sample_size: number }> = {};
+  if (tuningRow.data?.content) {
+    try { tuning = JSON.parse(tuningRow.data.content); } catch { tuning = {}; }
+  }
 
   return {
     memories: (mems.data ?? []) as Array<{ id: string; content: string; summary: string | null }>,
     reflections: (refs.data ?? []) as Array<{ id: string; content: string }>,
     throttles: (throttles.data ?? []) as Array<{ id: string; content: string }>,
+    tuning,
   };
 }
 
@@ -175,6 +187,11 @@ async function synthesize(
   const throttleBlock = recall.throttles.length
     ? recall.throttles.map((t) => `- ${t.content}`).join("\n")
     : "(no throttles)";
+  const tuningEntries = Object.entries(recall.tuning ?? {});
+  const tuningBlock = tuningEntries.length
+    ? tuningEntries.map(([kind, t]) =>
+        `- ${kind}: floor=${t.floor.toFixed(2)} (n=${t.sample_size})`).join("\n")
+    : "(no tuning yet)";
 
   const system = `You are the Signals layer of an AI personal operating system.
 Your job is to surface AT MOST 3 moments — often 0 or 1 — that materially shift the user's direction right now.
@@ -197,13 +214,16 @@ ${reflectionBlock}
 THROTTLES (suppress if you'd exceed):
 ${throttleBlock}
 
+LEARNED SALIENCE FLOORS PER KIND (from outcomes — only emit a moment of that kind if its salience clears the floor):
+${tuningBlock}
+
+For each moment include: kind (free text like commitment_due, inbox_pressure, pattern_break, opportunity, risk, reflection), headline, reason, suggested_direction (optional), salience (0–1, how much this matters NOW), confidence (0–1, how sure you are), mode_context (focus|idle|planning|reactive|any), source_refs (array of {type, id} from the context — types include work_task, comm_message, task_event), wisdom_memory_ids (array of memory UUIDs you used).
+
 Voice rules (calm Jarvis tone — strict):
 - Each headline ≤ 14 words. No emoji. No exclamation.
 - Reason ≤ 2 calm sentences. May reference trajectory ("connects to something coming up later").
 - suggested_direction is ONE neutral option, not a command. Optional.
-- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.
-
-For each moment include: kind (free text like commitment_due, inbox_pressure, pattern_break, opportunity, risk, reflection), headline, reason, suggested_direction (optional), salience (0–1, how much this matters NOW), confidence (0–1, how sure you are), mode_context (focus|idle|planning|reactive|any), source_refs (array of {type, id} from the context — types include work_task, comm_message, task_event), wisdom_memory_ids (array of memory UUIDs you used).`;
+- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.`;
 
   const user = `CURRENT CONTEXT (last 24h):
 ${contextSummary}
@@ -289,11 +309,23 @@ Return your moments via the emit_moments tool.`;
 }
 
 // ─────────── dedup + insert ───────────
-async function insertWithDedup(userId: string, ctx: ContextState, moments: Candidate[]) {
+async function insertWithDedup(
+  userId: string,
+  ctx: ContextState,
+  moments: Candidate[],
+  tuning: Record<string, { floor: number; sample_size: number }> = {},
+) {
   const inserted: string[] = [];
 
   for (const m of moments) {
     if (typeof m.headline !== "string" || !m.headline.trim()) continue;
+
+    // Phase E — enforce learned per-kind salience floor (hard cutoff).
+    const kindFloor = tuning[m.kind]?.floor;
+    if (typeof kindFloor === "number" && (Number(m.salience) || 0) < kindFloor) {
+      console.log(`[signals] dropped kind=${m.kind} salience=${m.salience} below learned floor=${kindFloor}`);
+      continue;
+    }
 
     const emb = await embed(`${m.headline}\n${m.reason ?? ""}`);
     let isDup = false;
@@ -435,6 +467,11 @@ async function synthesizeLookahead(
   const throttleBlock = recall.throttles.length
     ? recall.throttles.map((t) => `- ${t.content}`).join("\n")
     : "(no throttles)";
+  const tuningEntries = Object.entries(recall.tuning ?? {});
+  const tuningBlock = tuningEntries.length
+    ? tuningEntries.map(([kind, t]) =>
+        `- ${kind}: floor=${t.floor.toFixed(2)} (n=${t.sample_size})`).join("\n")
+    : "(no tuning yet)";
 
   const system = `You are the Signals layer running an ANTICIPATION pass.
 Look 24 hours to 7 days ahead. Your job is to surface AT MOST 2 moments — usually 0 or 1 — of kind "risk" or "opportunity" that the user should know about NOW so future-them is aligned.
@@ -452,6 +489,9 @@ ${reflectionBlock}
 
 THROTTLES:
 ${throttleBlock}
+
+LEARNED SALIENCE FLOORS PER KIND (only emit if salience clears the floor):
+${tuningBlock}
 
 Voice rules (calm Jarvis, strict):
 - Headline ≤ 14 words. No emoji. No exclamation.
@@ -549,7 +589,7 @@ async function runLookaheadForUser(userId: string) {
     : { memories: [], reflections: [], throttles: [] };
 
   const candidates = await synthesizeLookahead(userId, ctx, summary, recall);
-  const inserted = await insertWithDedup(userId, ctx, candidates);
+  const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
   return { ok: true, candidate_count: candidates.length, inserted_count: inserted.length };
 }
 
@@ -642,7 +682,7 @@ Deno.serve(async (req) => {
       : { memories: [], reflections: [], throttles: [] };
 
     const candidates = await synthesize(userId, ctx, contextSummary, recall);
-    const inserted = await insertWithDedup(userId, ctx, candidates);
+    const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
 
     return new Response(JSON.stringify({
       ok: true,
