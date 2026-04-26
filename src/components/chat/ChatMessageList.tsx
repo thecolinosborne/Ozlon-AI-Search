@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
 import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
+import { InvestigationCard } from "./InvestigationCard";
 
 const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
   if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
@@ -140,6 +141,9 @@ export const ChatMessageList = ({
                       <span className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-pulse delay-150" />
                     </span>
                   ) : null}
+                  {message.content && message.artifactId && (
+                    <InvestigationCard artifactId={message.artifactId} />
+                  )}
                   {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0) || message.orchestration) && (
                     <div className="mt-2 not-prose flex flex-wrap items-center gap-2">
                       {message.provider ? (
