@@ -12,6 +12,7 @@ import {
   Plug,
   Sparkles,
   Brain,
+  Wand2,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -221,6 +222,12 @@ const Settings = () => {
             label="Identity & Memory"
             description="Who your AI is, what it remembers, and the rules it obeys"
             onClick={() => navigate("/settings/identity")}
+          />
+          <SettingsRow
+            icon={Wand2}
+            label="Skills"
+            description="Install and manage scoped workflows your AI can run"
+            onClick={() => navigate("/skills")}
           />
         </SettingsSection>
 
