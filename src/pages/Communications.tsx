@@ -274,6 +274,97 @@ export default function Communications() {
     }
   };
 
+  // Composer slash commands. Free-form text → drafts a message via the focused
+  // row (or opens triage on the top needs-reply if nothing is focused).
+  const composerCommands: ComposerCommand[] = [
+    {
+      keyword: "draft",
+      title: "Draft a reply",
+      description: "AI drafts a contextual response to the selected message.",
+      placeholder: "What should the reply say?",
+    },
+    {
+      keyword: "follow-up",
+      title: "Follow up",
+      description: "Schedule a follow-up nudge if no response by tomorrow.",
+      placeholder: "Notes for the follow-up…",
+    },
+    {
+      keyword: "snooze",
+      title: "Snooze focused message",
+      description: "Hide the highlighted message for 1 hour.",
+    },
+    {
+      keyword: "done",
+      title: "Mark focused as done",
+      description: "Clear the highlighted message from the inbox.",
+    },
+    {
+      keyword: "scan",
+      title: "Refresh inbox",
+      description: "Pull the latest messages from all channels.",
+    },
+    {
+      keyword: "brief",
+      title: "Play daily brief",
+      description: "Listen to the AI-generated audio brief for today.",
+    },
+    {
+      keyword: "triage",
+      title: "Toggle triage mode",
+      description: "Filter to messages that need a reply.",
+    },
+  ];
+
+  const handleComposerSubmit = (text: string, command?: ComposerCommand) => {
+    const focused = filtered[focusedIdx];
+
+    if (command?.keyword === "scan") {
+      refetch();
+      toast({ title: "Scanning…" });
+      return;
+    }
+    if (command?.keyword === "brief") {
+      brief.play(digest.briefScript);
+      return;
+    }
+    if (command?.keyword === "triage") {
+      setTriage((v) => !v);
+      return;
+    }
+    if (command?.keyword === "snooze" && focused) {
+      handleSnooze(focused);
+      toast({ title: "Snoozed", description: focused.fromName });
+      return;
+    }
+    if (command?.keyword === "done" && focused) {
+      handleDone(focused);
+      toast({ title: "Marked done", description: focused.fromName });
+      return;
+    }
+    if (command?.keyword === "draft") {
+      const target = focused ?? filtered.find((m) => m.needsReply);
+      if (!target) {
+        toast({ title: "No message focused", description: "Select one with j/k first." });
+        return;
+      }
+      setActiveDraft(text || undefined);
+      setActive(target);
+      return;
+    }
+    if (command?.keyword === "follow-up") {
+      toast({ title: "Follow-up queued", description: text || "Nudge tomorrow if no reply." });
+      return;
+    }
+    // Free-form: treat as a quick reply draft to the focused message.
+    if (text && focused) {
+      setActiveDraft(text);
+      setActive(focused);
+    } else if (text) {
+      toast({ title: "Tip", description: "Focus a message with j/k, then send to draft a reply." });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Top bar */}
