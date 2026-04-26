@@ -44,8 +44,14 @@ export function useSignals() {
     lastSynthRef.current = Date.now();
     setSynthesizing(true);
     try {
-      await supabase.functions.invoke("signals-synthesize", { body: {} });
+      const { error } = await supabase.functions.invoke("signals-synthesize", { body: {} });
+      if (error) {
+        // Edge runtime hiccups (503/timeout) must NEVER bubble — Signals is best-effort.
+        console.warn("[useSignals] synthesize skipped:", error.message ?? error);
+      }
       await load();
+    } catch (e) {
+      console.warn("[useSignals] synthesize threw (swallowed):", e);
     } finally {
       setSynthesizing(false);
     }
@@ -61,8 +67,8 @@ export function useSignals() {
   // Initial load + on-mount synthesize
   useEffect(() => {
     if (!user) return;
-    load();
-    synthesize();
+    load().catch((e) => console.warn("[useSignals] load failed:", e));
+    synthesize().catch((e) => console.warn("[useSignals] synthesize failed:", e));
   }, [user, load, synthesize]);
 
   // Realtime subscription
