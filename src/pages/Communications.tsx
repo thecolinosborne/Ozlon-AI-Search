@@ -123,15 +123,21 @@ export default function Communications() {
     return c;
   }, [stream]);
 
-  // Apply chip + state + triage + hidden, in order.
+  // Apply chip + state + triage + hidden, in order. In focus mode (and unless
+  // the user has overridden), gently trim to messages that need a reply so the
+  // surface matches the user's cognitive bandwidth.
   const filtered = useMemo(() => {
     let out = stream.filter((m) => !hidden.has(m.id));
     if (triage) out = out.filter((m) => m.needsReply);
     if (chip !== "all") out = out.filter((m) => m.channel === chip);
     if (stateFilter === "unread") out = out.filter((m) => m.isUnread);
     if (stateFilter === "needs-reply") out = out.filter((m) => m.needsReply);
+    if (currentMode === "focus" && !modeOverride && !triage) {
+      const focused = out.filter((m) => m.needsReply);
+      if (focused.length > 0) out = focused;
+    }
     return out;
-  }, [stream, hidden, triage, chip, stateFilter]);
+  }, [stream, hidden, triage, chip, stateFilter, currentMode, modeOverride]);
 
   // People-view groups derived from the same filtered stream.
   const peopleGroups = usePeopleView(filtered, triageMap);
