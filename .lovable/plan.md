@@ -1,60 +1,54 @@
-## Goal
-Get the user's uploaded `marketing-studio-director.skill.json` (extracted from the zip) successfully validated, installed into the catalog, and verified end-to-end with the live mode-gating logic.
+# Signals Section — Upgrade Plan
 
-## Findings from inspecting the upload
+## Why it shows only one signal
 
-The zip contains a single file: `marketing-studio-director.skill.json`. Three issues will block install as-is:
+Two stacked limits collapse the surface to a single moment:
 
-1. **Trigger schema mismatch.** The author wrote `{ "type": "keyword", "value": "Marketing Studio" }`, but our validator (`skills-validate/index.ts` lines 66–71) requires `{ "type": "keyword", "match": ["..."] }`. Every one of the 16 triggers will fail.
-2. **`presentation` block uses the wrong key.** Our adapter merges UI metadata under `ui`, not `presentation`. Cosmetic only — won't block install, but the icon/brand color won't surface.
-3. **`instructions` is exactly 10,000 chars and ends mid-sentence** (`"...the avatar must match exac"`). It just barely passes the `> 10000` cap but is clearly truncated by the author. We'll keep it as-is and surface a warning.
+1. `src/pages/Signals.tsx` passes `maxMoments={1}` to `<SignalSurface variant="page" />`.
+2. `src/hooks/useSignals.ts` query is hard-capped at `.limit(3)`.
 
-The importer also doesn't accept `.zip` — the user already extracted via the upload, so we'll process the `.skill.json` directly.
+Meanwhile the database currently holds **19 live moments** for the active user (many near-duplicate "ad production stalled" reflections from 20:29 → 22:40 today), so the dedup pass in `signals-synthesize` is also under-tuned.
 
-## Plan
+## Changes
 
-### 1. Auto-heal common manifest mistakes in the adapter (additive, surgical)
-File: `supabase/functions/_shared/skills/adapter.ts`
+### 1. `src/hooks/useSignals.ts`
+- Raise query limit from `3` → `12`.
+- Add a new `dismissAll()` helper that batch-marks all live moments `dismissed` (single update + optimistic clear).
+- Add `refresh()` alias exposing `load()` so the page can pull-to-refresh.
 
-Add a `normalizeNativeManifest()` helper that runs when `detectFormat === "json"`:
-- Coerce `triggers[i].value` (string) → `triggers[i].match` (string[]) for keyword triggers. Coerce single-string `match` → `[match]`.
-- Coerce top-level `presentation` → `ui` (merged, doesn't overwrite an existing `ui`).
-- Leave everything else untouched.
+### 2. `src/pages/Signals.tsx`
+- Replace single-moment hero with a **two-pane layout**:
+  - **Top:** featured top moment (current minimalist hero, kept intact — additive).
+  - **Below:** quiet stacked list of remaining live moments (kind chip · headline · salience · time · Handle / Dismiss inline actions).
+- Header row gains a small "Listening…" status, **Refresh**, and **Clear all** buttons (calm, ghost-styled, no emoji).
+- Empty state preserved verbatim.
 
-This makes the importer tolerant of the two most common authoring mistakes (Claude/OpenAI-style YAML uses `value`; some templates use `presentation`) without weakening validation.
+### 3. `src/components/signals/SignalSurface.tsx`
+- New optional prop `showList?: boolean` (default `false` — keeps every existing call site untouched).
+- When `variant="page"` and `showList`, render the list section beneath the hero using existing `BreathingDot` and tone tokens.
+- Keep `maxMoments` semantics: hero still uses `maxMoments`; list uses everything past it.
 
-### 2. Add a focused adapter test
-File: `supabase/functions/skills-validate/adapter_test.ts` (extend existing)
+### 4. `supabase/functions/signals-synthesize/index.ts` (dedup tightening)
+- Lower `match_signal_moments` similarity threshold from `0.88` → `0.82` so the repeating "ad production stalled" cluster collapses into one live moment.
+- When a near-duplicate is detected, mark the older one `superseded` (already supported by the schema) instead of dropping the new one — keeps the freshest phrasing.
+- No prompt or model changes; behaviour stays calm.
 
-- Test: native JSON with `value`-style keyword triggers gets normalized to `match[]` and passes validation.
-- Test: `presentation` is moved under `ui`.
+### 5. One-time cleanup migration
+- Mark the 18 older duplicates from today as `superseded` so the new UI opens with a clean slate. Migration is idempotent (`status = 'live' AND created_at < now() - interval '15 minutes'` against the duplicate cluster keys).
 
-### 3. Copy the extracted skill into the project as a fixture
-File: `public/sample-skills/marketing-studio-director.skill.json`
+## Out of scope
+- No redesign of the indicator/inline/voice variants.
+- No changes to `signals-feedback`, `signals-tune`, or cron jobs.
+- No new tables or RLS changes.
 
-Place a clean copy so the user (and future tests) can re-import it from the importer's "Use sample" picker if we ever extend it.
+## Files touched
+- `src/hooks/useSignals.ts` *(edit)*
+- `src/pages/Signals.tsx` *(edit)*
+- `src/components/signals/SignalSurface.tsx` *(edit, additive prop)*
+- `supabase/functions/signals-synthesize/index.ts` *(edit — dedup threshold + supersede)*
+- `supabase/migrations/<timestamp>_signals_supersede_cleanup.sql` *(new, one-time)*
 
-### 4. Add `modes_allowed` to the manifest before install (recommendation only)
-The uploaded file omits `modes_allowed`, which means our gating treats it as "available in every mode" (per current registry behavior). For mode-gating tests to be meaningful, we'll suggest the user pick — but for this upload pass we will install it as-is (open to all modes) since omitting `modes_allowed` is valid per schema.
-
-### 5. Deploy + install the skill via the existing endpoint
-- `supabase--deploy_edge_functions` for `skills-validate`.
-- `supabase--curl_edge_functions` to POST the file content with `install: true`. Confirm a row appears in `skills` with `source: "imported"`.
-
-### 6. End-to-end mode-gating verification (the actual test the user asked for)
-- `supabase--test_edge_functions` to run the existing `registry_test.ts` and `adapter_test.ts` (plus the new adapter normalization test) — confirm pass.
-- `supabase--read_query` to verify the new `skills` row exists and the manifest looks normalized (triggers are `match[]`, `ui` block present).
-- `supabase--curl_edge_functions` against `chat` with a probe message containing one of the trigger keywords ("create a UGC ad for Ozlon"). Confirm the system prompt route surfaces the skill and that, when we set `current_mode = focus` with a skill scoped to `planning` only (using the existing `morning-briefing` builtin as control), the gate blocks it. This proves both **block** and **allow** paths fire correctly.
-- Capture the responses and report what was allowed/blocked under each mode.
-
-### 7. Report back to the user
-Summarize:
-- Skill installed: yes/no, with id/slug.
-- Adapter auto-heals applied (so they know what we changed silently).
-- Mode-gating matrix actually exercised against the live `chat` function.
-- Note that the source `instructions` are author-truncated at 10k chars and offer to re-import a fuller version if they have one.
-
-## Out of scope (not doing this pass)
-- Adding zip-upload support to the importer UI (separate UX feature).
-- Re-writing the truncated instructions — we don't know what was clipped.
-- Adding `modes_allowed` to the manifest on the user's behalf.
+## Verification
+- Reload `/signals` → hero + list of remaining live moments visible, count matches DB.
+- "Clear all" empties the surface, breathing-dot quiet state returns.
+- Trigger `signals-synthesize` once; confirm new duplicates collapse instead of stacking.
