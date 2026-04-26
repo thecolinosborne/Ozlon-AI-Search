@@ -36,6 +36,32 @@ async function resolveUser(authHeader: string | null): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
+// Retry transient upstream failures (cold-start 503s, 429/502/504, network errors).
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  { tries = 3, baseDelayMs = 500 }: { tries?: number; baseDelayMs?: number } = {},
+): Promise<Response> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      const resp = await fetch(url, init);
+      if (resp.ok) return resp;
+      if (![429, 502, 503, 504].includes(resp.status) || attempt === tries - 1) {
+        return resp;
+      }
+      // drain body so connection can be reused
+      await resp.text().catch(() => "");
+    } catch (e) {
+      lastErr = e;
+      if (attempt === tries - 1) throw e;
+    }
+    const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 250;
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  throw lastErr ?? new Error("fetchWithRetry exhausted");
+}
+
 async function embed(text: string): Promise<number[] | null> {
   if (!OPENAI_API_KEY || !text) return null;
   try {
@@ -231,7 +257,7 @@ ${contextSummary}
 Return your moments via the emit_moments tool.`;
 
   // Call gauntlet-router with explicit OpenAI routing
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+  const resp = await fetchWithRetry(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -506,7 +532,7 @@ ${summary}
 
 Return your moments via the emit_moments tool.`;
 
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+  const resp = await fetchWithRetry(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
