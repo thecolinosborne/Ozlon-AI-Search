@@ -110,21 +110,21 @@ export function pickStone(
 }
 
 // ─────────── Provider drivers (key passed in, never read env directly) ───────────
-async function callLovable(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
+async function callLovable(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
+    body: JSON.stringify({ model, messages, ...(tools && { tools }), ...(toolChoice && { tool_choice: toolChoice }) }),
   });
   if (!res.ok) throw new Error(`Lovable ${res.status}: ${await res.text()}`);
   return await res.json();
 }
 
-async function callOpenAI(model: string, messages: any[], key: string, tools?: any[]): Promise<any> {
+async function callOpenAI(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, ...(tools && { tools }) }),
+    body: JSON.stringify({ model, messages, ...(tools && { tools }), ...(toolChoice && { tool_choice: toolChoice }) }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
   return await res.json();
@@ -373,7 +373,7 @@ Deno.serve(async (req) => {
           if (!resolved.key && stone.provider !== "higgsfield") {
             throw new Error(`no key for ${stone.provider}`);
           }
-          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "");
+          const result = await dispatch(stone.provider, stone.defaultModel, messages, tools, needs, authHeader, resolved.key ?? "", payload.tool_choice);
           const latency = Date.now() - start;
           if (userId) {
             await admin.from("gauntlet_routing_log").insert({
