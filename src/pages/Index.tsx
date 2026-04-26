@@ -112,6 +112,7 @@ const Index = () => {
           provider: m.provider ?? overlay.provider,
           toolsUsed: m.toolsUsed ?? overlay.toolsUsed,
           orchestration: m.orchestration ?? overlay.orchestration,
+          artifactId: m.artifactId ?? overlay.artifactId,
         };
       });
     }
