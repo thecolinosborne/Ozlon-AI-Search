@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
 import { Linkify } from "@/lib/linkify";
+import { useSwipeActions } from "@/hooks/useSwipeActions";
 import type { CommMessage, TriageItem } from "@/hooks/useCommunicationsFeed";
 
 interface MessageRowProps {
@@ -57,25 +58,55 @@ export function MessageRow({
   const urgencyTone = urgencyBarTone(triage?.urgency);
   const primaryAction = actionLabel(triage?.actionHint);
 
+  // Swipe right → Done, Swipe left → Snooze (mobile triage gestures).
+  const swipe = useSwipeActions({
+    onSwipeRight: onDone ? () => onDone(message) : undefined,
+    onSwipeLeft: onSnooze ? () => onSnooze(message) : undefined,
+    threshold: 80,
+  });
+
+  const showRightAction = swipe.offset > 12 && !!onDone;
+  const showLeftAction = swipe.offset < -12 && !!onSnooze;
+
   return (
-    <div
-      onClick={() => onTap(message)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onTap(message);
-        }
-      }}
-      data-message-id={message.id}
-      className={cn(
-        "group relative w-full text-left flex items-start gap-3 px-4 lg:px-6 py-3.5 cursor-pointer",
-        "hover:bg-card/30 active:bg-card/50 transition-colors",
-        "focus-visible:outline-none focus-visible:bg-card/30",
-        isFocused && "bg-card/40 ring-1 ring-inset ring-primary/30",
+    <div className="relative overflow-hidden">
+      {/* Swipe action backdrops (mobile) */}
+      {showRightAction && (
+        <div className="absolute inset-y-0 left-0 flex items-center px-5 bg-primary/15 text-primary text-[12px] font-medium gap-1.5 lg:hidden">
+          <Check className="w-4 h-4" />
+          Done
+        </div>
       )}
-    >
+      {showLeftAction && (
+        <div className="absolute inset-y-0 right-0 flex items-center px-5 bg-amber-500/15 text-amber-300 text-[12px] font-medium gap-1.5 lg:hidden">
+          <Clock className="w-4 h-4" />
+          Later
+        </div>
+      )}
+
+      <div
+        onClick={() => {
+          if (Math.abs(swipe.offset) < 4) onTap(message);
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onTap(message);
+          }
+        }}
+        {...swipe.handlers}
+        style={{ transform: `translateX(${swipe.offset}px)` }}
+        data-message-id={message.id}
+        className={cn(
+          "group relative w-full text-left flex items-start gap-3 px-4 lg:px-6 py-3.5 cursor-pointer bg-background",
+          "hover:bg-card/30 active:bg-card/50 transition-colors",
+          "focus-visible:outline-none focus-visible:bg-card/30",
+          isFocused && "bg-card/40 ring-1 ring-inset ring-primary/30",
+          !swipe.isSwiping && "transition-transform duration-200",
+        )}
+      >
       {/* Urgency rail (3px) — silent if no triage */}
       <span
         aria-hidden
@@ -224,6 +255,7 @@ export function MessageRow({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
