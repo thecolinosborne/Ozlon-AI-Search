@@ -589,7 +589,7 @@ async function runLookaheadForUser(userId: string) {
     : { memories: [], reflections: [], throttles: [] };
 
   const candidates = await synthesizeLookahead(userId, ctx, summary, recall);
-  const inserted = await insertWithDedup(userId, ctx, candidates);
+  const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
   return { ok: true, candidate_count: candidates.length, inserted_count: inserted.length };
 }
 
@@ -682,7 +682,7 @@ Deno.serve(async (req) => {
       : { memories: [], reflections: [], throttles: [] };
 
     const candidates = await synthesize(userId, ctx, contextSummary, recall);
-    const inserted = await insertWithDedup(userId, ctx, candidates);
+    const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
 
     return new Response(JSON.stringify({
       ok: true,

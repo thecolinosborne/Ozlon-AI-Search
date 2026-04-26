@@ -227,6 +227,27 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Phase E: signals tuning tick — outcome-driven salience floors + decay.
+    if (mode === "signals_tune_tick") {
+      const cronKey = Deno.env.get("SIGNALS_CRON_KEY") ?? SERVICE_ROLE;
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/signals-tune?mode=tick`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+            apikey: ANON_KEY,
+            "x-cron-key": cronKey,
+          },
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      return new Response(JSON.stringify({ forwarded: true, status: res.status, ...body }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Manual run: requires routine_id (from query or body)
     let routineId = url.searchParams.get("routine_id");
     if (!routineId && req.method === "POST") {
