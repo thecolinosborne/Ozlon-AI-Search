@@ -84,14 +84,14 @@ Deno.serve(async (req) => {
     const note = (body.outcome_note as string | undefined)?.slice(0, 600) ?? null;
 
     if (!signalId || !outcome || !VALID_OUTCOMES.includes(outcome)) {
-      return new Response(JSON.stringify({ error: "signal_id and outcome (acted|ignored|dismissed) required" }), {
+      return new Response(JSON.stringify({ error: "signal_id and outcome required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Load the signal (RLS check — must belong to caller)
     const { data: signal } = await admin.from("signal_moments")
-      .select("id, user_id, kind, headline, reason, mode_context")
+      .select("id, user_id, kind, headline, reason, suggested_direction, mode_context, metadata")
       .eq("id", signalId).maybeSingle();
     if (!signal || signal.user_id !== userId) {
       return new Response(JSON.stringify({ error: "signal not found" }), {
@@ -99,30 +99,83 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 1. Update lifecycle
-    const tsField = outcome === "acted" ? "acted_at"
-                  : outcome === "ignored" ? "ignored_at"
-                  : "dismissed_at";
-    await admin.from("signal_moments").update({
-      status: outcome,
-      [tsField]: new Date().toISOString(),
-      outcome_note: note,
-    }).eq("id", signalId);
+    // 1. Update lifecycle (extended outcomes map onto canonical statuses)
+    const status = lifecycleStatus(outcome);
+    const updates: Record<string, unknown> = { status, outcome_note: note };
+    if (status === "acted") updates.acted_at = new Date().toISOString();
+    else if (status === "ignored") updates.ignored_at = new Date().toISOString();
+    else if (status === "dismissed") updates.dismissed_at = new Date().toISOString();
 
-    // 2. Write reflection_notes
-    const reflectionContent = `Signal kind=${signal.kind} mode=${signal.mode_context} → ${outcome}. Headline: "${signal.headline}". ${note ? `Note: ${note}` : ""}`;
+    // Merge extended metadata flags so the UI/Brain can see what happened.
+    const existingMeta = (signal.metadata ?? {}) as Record<string, unknown>;
+    const metaPatch: Record<string, unknown> = { ...existingMeta, last_outcome: outcome };
+    if (outcome === "validate") metaPatch.validated = true;
+    if (outcome === "snooze") metaPatch.snoozed_until = new Date(Date.now() + 4 * 3600_000).toISOString();
+
+    // 1a. Side-effects for the new "start_*" outcomes.
+    let createdTaskId: string | null = null;
+    if (outcome === "start_task") {
+      const { data: task } = await admin.from("work_tasks").insert({
+        user_id: userId,
+        title: signal.headline,
+        description: signal.suggested_direction ?? signal.reason ?? null,
+        status: "todo",
+        priority: (existingMeta.priority as string) ?? "med",
+        source: "signal",
+        metadata: { signal_id: signalId, signal_kind: signal.kind },
+      }).select("id").maybeSingle();
+      createdTaskId = task?.id ?? null;
+      if (createdTaskId) metaPatch.task_id = createdTaskId;
+    } else if (outcome === "start_message") {
+      // Fire-and-forget — communications-draft itself routes through the Brain.
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/communications-draft`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: authHeader ?? `Bearer ${SERVICE_ROLE}`,
+          },
+          body: JSON.stringify({
+            intent: signal.suggested_direction || signal.headline,
+            channel: (existingMeta.target_integration as string) ?? "gmail",
+            source: { type: "signal_moment", id: signalId },
+          }),
+        });
+        metaPatch.message_drafted = true;
+      } catch (e) {
+        console.warn("[signals-feedback] communications-draft skipped:", e);
+      }
+    }
+
+    updates.metadata = metaPatch;
+    await admin.from("signal_moments").update(updates).eq("id", signalId);
+
+    // 2. Write reflection_notes (the Brain's training signal — captures the
+    //    stone that triaged this so signals-tune can score it later).
+    const stone = (existingMeta.brain_stone as string | undefined) ?? null;
+    const reflectionContent = `Signal kind=${signal.kind} mode=${signal.mode_context} stone=${stone ?? "n/a"} → ${outcome}. Headline: "${signal.headline}". ${note ? `Note: ${note}` : ""}`;
     const refEmb = await embed(reflectionContent);
 
     const reflectionInsert: Record<string, unknown> = {
       user_id: userId,
       note_type: "signal_feedback",
       content: reflectionContent,
-      importance: outcome === "ignored" ? 0.6 : outcome === "acted" ? 0.7 : 0.4,
+      importance: outcome === "ignored" ? 0.6
+                : outcome === "acted" || outcome === "complete" || outcome === "start_task" || outcome === "start_message" ? 0.75
+                : outcome === "validate" ? 0.7
+                : 0.4,
       source_ids: [{ type: "signal_moment", id: signalId }],
-      metadata: { kind: signal.kind, outcome, mode_context: signal.mode_context },
+      metadata: {
+        kind: signal.kind,
+        outcome,
+        mode_context: signal.mode_context,
+        brain_stone: stone,
+        node_type: (existingMeta.user_created ? "signals-create" : "signals-synthesize"),
+      },
     };
     if (refEmb) reflectionInsert.embedding = JSON.stringify(refEmb);
     await admin.from("reflection_notes").insert(reflectionInsert);
+
 
     // 3. Recurrence check — same kind + outcome, last 14 days
     const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
