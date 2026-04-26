@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { channelIcon, channelTint, formatTime } from "./channelStyle";
 import { VoicemailInline } from "./VoicemailInline";
 import { Linkify } from "@/lib/linkify";
+import { useSwipeActions } from "@/hooks/useSwipeActions";
 import type { CommMessage, TriageItem } from "@/hooks/useCommunicationsFeed";
 
 interface MessageRowProps {
