@@ -247,6 +247,7 @@ Deno.serve(async (req) => {
       reflection_logged: true,
       pattern_promoted: promoted,
       recurrence_count: sameKindOutcome.length,
+      created_task_id: createdTaskId,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e) {
