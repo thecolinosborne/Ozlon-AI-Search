@@ -43,15 +43,25 @@ export function useSignals() {
     if (Date.now() - lastSynthRef.current < 60_000) return; // client throttle
     lastSynthRef.current = Date.now();
     setSynthesizing(true);
+    const invokeOnce = async () => {
+      try {
+        const { error } = await supabase.functions.invoke("signals-synthesize", { body: {} });
+        return error ?? null;
+      } catch (e) {
+        return e instanceof Error ? e : new Error(String(e));
+      }
+    };
     try {
-      const { error } = await supabase.functions.invoke("signals-synthesize", { body: {} });
-      if (error) {
-        // Edge runtime hiccups (503/timeout) must NEVER bubble — Signals is best-effort.
-        console.warn("[useSignals] synthesize skipped:", error.message ?? error);
+      let err = await invokeOnce();
+      // Cold-start 503s self-heal on a single retry after a short delay.
+      if (err && /503|temporarily unavailable|EDGE_RUNTIME_ERROR/i.test(err.message ?? "")) {
+        await new Promise((r) => setTimeout(r, 1500));
+        err = await invokeOnce();
+      }
+      if (err) {
+        console.warn("[useSignals] synthesize skipped (best-effort):", err.message ?? err);
       }
       await load();
-    } catch (e) {
-      console.warn("[useSignals] synthesize threw (swallowed):", e);
     } finally {
       setSynthesizing(false);
     }
