@@ -257,7 +257,7 @@ ${contextSummary}
 Return your moments via the emit_moments tool.`;
 
   // Call gauntlet-router with explicit OpenAI routing
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+  const resp = await fetchWithRetry(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
