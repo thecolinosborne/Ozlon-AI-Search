@@ -508,6 +508,16 @@ export default function Communications() {
         script={digest.briefScript}
         onClose={brief.close}
       />
+
+      {/* Persistent floating composer with ⌘K palette + voice */}
+      <CommandComposer
+        commands={composerCommands}
+        onSubmit={handleComposerSubmit}
+        disabled={!!active}
+      />
+
+      {/* Bottom safe-area spacer so the composer doesn't cover the last row */}
+      <div className="h-20 lg:h-4" aria-hidden />
     </div>
   );
 }
