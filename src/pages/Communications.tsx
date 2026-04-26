@@ -459,6 +459,25 @@ export default function Communications() {
               />
             ) : null}
 
+            {/* Phase D — Signals fusion banner. Surfaces high-salience moments
+                from the Wisdom Engine inline with the inbox. */}
+            <SignalsBanner
+              onAct={({ headline, suggestion }) => {
+                // If the suggestion mentions reply/draft, flip into triage mode
+                // so the user lands on the most relevant message immediately.
+                const text = `${headline} — ${suggestion ?? ""}`.toLowerCase();
+                if (/reply|respond|draft|follow.?up/.test(text)) {
+                  setTriage(true);
+                  toast({
+                    title: "Triage mode on",
+                    description: suggestion ?? headline,
+                  });
+                } else {
+                  toast({ title: "Signal noted", description: suggestion ?? headline });
+                }
+              }}
+            />
+
             {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
             <FocusStack
               priorities={digest.priorities}
