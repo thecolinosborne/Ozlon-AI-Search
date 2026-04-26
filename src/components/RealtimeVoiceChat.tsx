@@ -64,6 +64,8 @@ export function RealtimeVoiceChat({ systemName, onClose }: RealtimeVoiceChatProp
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
+      {/* Signals voice bridge — invisible; injects top moment into the live session */}
+      <SignalSurface variant="voice" sendText={sendTextMessage} enabled={isConnected && !isAISpeaking} />
       {/* Close button */}
       <button
         onClick={() => {
