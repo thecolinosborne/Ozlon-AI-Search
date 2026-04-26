@@ -129,7 +129,7 @@ export function useConversations() {
   }, [createSession, setActiveSession]);
 
   // Save a message to the active session
-  const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
+  const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => {
     if (!user) {
       if (isDev) console.warn("[useConversations] saveMessage called without user — skipping.");
       return;
@@ -139,6 +139,7 @@ export function useConversations() {
     const newMsg: ConversationMessage = {
       ...msg,
       created_at: new Date().toISOString(),
+      metadata: msg.metadata ?? null,
     };
     setMessages((prev) => [...prev, newMsg]);
 
@@ -156,6 +157,7 @@ export function useConversations() {
       content: msg.content,
       session_id: sid,
       user_id: user.id,
+      metadata: msg.metadata ?? null,
     });
 
     if (error) {
