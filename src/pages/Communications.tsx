@@ -47,6 +47,7 @@ export default function Communications() {
   const readState = useCommReadState();
 
   const [chip, setChip] = useState<ChipFilter>("all");
+  const [mode, setMode] = useState<StreamMode>("stream");
   const [stateFilter, setStateFilter] = useState<FilterValue>("all");
   const [active, setActive] = useState<CommMessage | null>(null);
   const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
