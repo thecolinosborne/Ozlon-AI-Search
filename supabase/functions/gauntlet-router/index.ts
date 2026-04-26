@@ -130,11 +130,16 @@ async function callOpenAI(model: string, messages: any[], key: string, tools?: a
   return await res.json();
 }
 
-async function callGemini(model: string, messages: any[], key: string): Promise<any> {
+async function callGemini(model: string, messages: any[], key: string, tools?: any[], toolChoice?: any): Promise<any> {
   const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages }),
+    body: JSON.stringify({
+      model,
+      messages,
+      ...(tools && { tools }),
+      ...(toolChoice && { tool_choice: toolChoice }),
+    }),
   });
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
   return await res.json();
