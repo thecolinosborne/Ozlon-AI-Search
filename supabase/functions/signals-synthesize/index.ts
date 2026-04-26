@@ -187,6 +187,11 @@ async function synthesize(
   const throttleBlock = recall.throttles.length
     ? recall.throttles.map((t) => `- ${t.content}`).join("\n")
     : "(no throttles)";
+  const tuningEntries = Object.entries(recall.tuning ?? {});
+  const tuningBlock = tuningEntries.length
+    ? tuningEntries.map(([kind, t]) =>
+        `- ${kind}: floor=${t.floor.toFixed(2)} (n=${t.sample_size})`).join("\n")
+    : "(no tuning yet)";
 
   const system = `You are the Signals layer of an AI personal operating system.
 Your job is to surface AT MOST 3 moments — often 0 or 1 — that materially shift the user's direction right now.
@@ -209,13 +214,16 @@ ${reflectionBlock}
 THROTTLES (suppress if you'd exceed):
 ${throttleBlock}
 
+LEARNED SALIENCE FLOORS PER KIND (from outcomes — only emit a moment of that kind if its salience clears the floor):
+${tuningBlock}
+
+For each moment include: kind (free text like commitment_due, inbox_pressure, pattern_break, opportunity, risk, reflection), headline, reason, suggested_direction (optional), salience (0–1, how much this matters NOW), confidence (0–1, how sure you are), mode_context (focus|idle|planning|reactive|any), source_refs (array of {type, id} from the context — types include work_task, comm_message, task_event), wisdom_memory_ids (array of memory UUIDs you used).
+
 Voice rules (calm Jarvis tone — strict):
 - Each headline ≤ 14 words. No emoji. No exclamation.
 - Reason ≤ 2 calm sentences. May reference trajectory ("connects to something coming up later").
 - suggested_direction is ONE neutral option, not a command. Optional.
-- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.
-
-For each moment include: kind (free text like commitment_due, inbox_pressure, pattern_break, opportunity, risk, reflection), headline, reason, suggested_direction (optional), salience (0–1, how much this matters NOW), confidence (0–1, how sure you are), mode_context (focus|idle|planning|reactive|any), source_refs (array of {type, id} from the context — types include work_task, comm_message, task_event), wisdom_memory_ids (array of memory UUIDs you used).`;
+- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.`;
 
   const user = `CURRENT CONTEXT (last 24h):
 ${contextSummary}
