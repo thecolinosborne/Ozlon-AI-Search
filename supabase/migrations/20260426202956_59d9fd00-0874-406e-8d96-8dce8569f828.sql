@@ -1,0 +1,1 @@
+DELETE FROM public.skills WHERE source = 'builtin' AND slug IN ('email-triage','weekly-review','meeting-prep','cold-outreach','content-repurposer');

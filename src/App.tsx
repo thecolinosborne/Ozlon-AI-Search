@@ -22,6 +22,7 @@ import Integrations from "@/pages/Integrations";
 import Wisdom from "@/pages/Wisdom";
 import IdentityMemory from "@/pages/IdentityMemory";
 import Skills from "@/pages/Skills";
+import SkillBuilder from "@/pages/SkillBuilder";
 
 import GoHighLevelDetail from "@/pages/integrations/GoHighLevelDetail";
 import DescriptDetail from "@/pages/integrations/DescriptDetail";
@@ -87,6 +88,7 @@ const AppRoutes = () => {
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/wisdom" element={<Wisdom />} />
         <Route path="/skills" element={<Skills />} />
+        <Route path="/skills/new" element={<SkillBuilder />} />
         
         <Route path="/integrations/gohighlevel" element={<GoHighLevelDetail />} />
         <Route path="/integrations/descript" element={<DescriptDetail />} />
