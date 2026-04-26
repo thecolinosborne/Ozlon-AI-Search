@@ -490,6 +490,16 @@ export default function Communications() {
               }}
             />
 
+            {/* Phase F — Mode awareness ribbon. Calmly tells the user how the
+                surface has adapted to their cognitive bandwidth. */}
+            <ModeRibbon
+              mode={currentMode}
+              cognitiveLoad={cognitiveLoad}
+              needsReply={summaryCounts.needsReply}
+              overridden={modeOverride}
+              onToggleOverride={() => setModeOverride((v) => !v)}
+            />
+
             {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
             <FocusStack
               priorities={digest.priorities}
