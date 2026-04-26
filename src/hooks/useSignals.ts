@@ -13,9 +13,12 @@ export interface SignalMoment {
   mode_context: string;
   status: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 }
 
-export type SignalOutcome = "acted" | "ignored" | "dismissed";
+export type SignalOutcome =
+  | "acted" | "ignored" | "dismissed"
+  | "validate" | "start_task" | "start_message" | "complete" | "snooze";
 
 export function useSignals() {
   const { user, session } = useAuth();
@@ -29,11 +32,11 @@ export function useSignals() {
     setLoading(true);
     const { data } = await supabase
       .from("signal_moments")
-      .select("id, kind, headline, reason, suggested_direction, salience, confidence, mode_context, status, created_at")
+      .select("id, kind, headline, reason, suggested_direction, salience, confidence, mode_context, status, created_at, metadata")
       .eq("user_id", user.id)
       .eq("status", "live")
       .order("salience", { ascending: false })
-      .limit(12);
+      .limit(20);
     setMoments((data ?? []) as SignalMoment[]);
     setLoading(false);
   }, [user]);
