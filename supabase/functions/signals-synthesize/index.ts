@@ -603,6 +603,294 @@ Return your moments via the emit_moments tool.`;
   }
 }
 
+// ─────────── Daily Digest: wide cross-integration scan ───────────
+
+async function callIntegration(
+  fnName: string,
+  body: Record<string, unknown>,
+  authHeader: string,
+): Promise<unknown> {
+  try {
+    const res = await fetchWithRetry(
+      `${SUPABASE_URL}/functions/v1/${fnName}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+          apikey: ANON_KEY,
+        },
+        body: JSON.stringify(body),
+      },
+      { tries: 2, baseDelayMs: 400 },
+    );
+    if (!res.ok) {
+      await res.text().catch(() => "");
+      return null;
+    }
+    return await res.json().catch(() => null);
+  } catch (e) {
+    console.log(`[digest] ${fnName} skipped:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function buildDigestSummary(userId: string, authHeader: string): Promise<{ summary: string; sourcesIncluded: string[] }> {
+  const now = new Date();
+  const since24h = new Date(now.getTime() - 24 * 3600_000).toISOString();
+  const sources: string[] = [];
+  const lines: string[] = [];
+  lines.push(`time_utc: ${nowIso()}`);
+
+  // Calendar — today + next 24h (use existing helper)
+  try {
+    const token = await getGoogleAccessToken(userId);
+    if (token) {
+      const qs = new URLSearchParams({
+        timeMin: now.toISOString(),
+        timeMax: new Date(now.getTime() + 24 * 3600_000).toISOString(),
+        singleEvents: "true", orderBy: "startTime", maxResults: "20",
+      });
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${qs.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const items = (data?.items ?? []) as Array<Record<string, unknown>>;
+        if (items.length) {
+          sources.push("calendar");
+          lines.push(`CALENDAR_NEXT_24H:\n` + items.slice(0, 15).map((e) => {
+            const start = (e.start as { dateTime?: string; date?: string })?.dateTime
+              ?? (e.start as { date?: string })?.date ?? "?";
+            const summary = (e.summary as string) ?? "(untitled)";
+            const att = Array.isArray(e.attendees) ? (e.attendees as unknown[]).length : 0;
+            return `- ${start} | ${summary}${att ? ` | ${att} attendees` : ""}`;
+          }).join("\n"));
+        }
+      }
+    }
+  } catch (e) {
+    console.log("[digest] calendar skip:", e instanceof Error ? e.message : e);
+  }
+
+  // Communications digest (already aggregates Gmail/Slack/GHL counts + priorities)
+  const commsRaw = await callIntegration("communications-digest", {}, authHeader);
+  const commsData = (commsRaw && typeof commsRaw === "object")
+    ? ((commsRaw as Record<string, unknown>).data ?? commsRaw) as Record<string, unknown>
+    : null;
+  if (commsData) {
+    sources.push("communications");
+    const hero = commsData.heroLine as string | undefined;
+    const sub = commsData.subLine as string | undefined;
+    const prios = (commsData.priorities ?? []) as Array<{ who?: string; channelLabel?: string; what?: string }>;
+    const block: string[] = [`COMMUNICATIONS_DIGEST:`];
+    if (hero) block.push(`- hero: ${hero}`);
+    if (sub) block.push(`- sub: ${sub}`);
+    if (prios.length) {
+      block.push(`- priorities:`);
+      prios.slice(0, 5).forEach((p, i) =>
+        block.push(`  ${i + 1}. ${p.who ?? "?"} (${p.channelLabel ?? "?"}): ${p.what ?? ""}`));
+    }
+    lines.push(block.join("\n"));
+  }
+
+  // Open tasks due today / overdue (from work_tasks — local source, always available)
+  const todayEnd = new Date(now); todayEnd.setUTCHours(23, 59, 59, 999);
+  const { data: dueToday } = await admin.from("work_tasks")
+    .select("title, status, next_action, due_at")
+    .eq("user_id", userId).is("deleted_at", null)
+    .neq("status", "completed")
+    .lte("due_at", todayEnd.toISOString())
+    .order("due_at", { ascending: true })
+    .limit(15);
+  if (dueToday?.length) {
+    sources.push("tasks");
+    lines.push(`TASKS_DUE_TODAY_OR_OVERDUE:\n` + dueToday.map((t) =>
+      `- ${t.due_at}: ${t.title} [${t.status}/${t.next_action ?? "?"}]`).join("\n"));
+  }
+
+  // Recent activity context (reuse 24h summary builder)
+  const recent = await buildContextSummary(userId);
+  if (recent) {
+    sources.push("activity");
+    lines.push(`RECENT_ACTIVITY:\n${recent}`);
+  }
+
+  void since24h;
+  return { summary: lines.join("\n\n"), sourcesIncluded: sources };
+}
+
+async function synthesizeDigest(
+  userId: string,
+  ctx: ContextState,
+  summary: string,
+  recall: Awaited<ReturnType<typeof recallWisdom>>,
+): Promise<Candidate[]> {
+  const wisdomBlock = recall.memories.length
+    ? recall.memories.map((m) => `[${m.id}] ${m.summary ?? m.content.slice(0, 200)}`).join("\n")
+    : "(no prior beliefs)";
+  const reflectionBlock = recall.reflections.length
+    ? recall.reflections.map((r) => `- ${r.content.slice(0, 200)}`).join("\n")
+    : "(no prior signal feedback)";
+
+  const system = `You are the Signals layer running a DAILY DIGEST pass.
+You have a wide cross-integration snapshot of the user's day: calendar, communications, tasks, recent activity. Produce AT MOST 5 distilled moments — a calm chief-of-staff brief.
+
+Each moment MUST use kind="digest". Cover the day's shape: meetings ahead, awaiting replies, things due, money/SEO/data deltas worth knowing, opportunities. Skip integrations that returned nothing — do not narrate absence.
+
+PRIOR BELIEFS:
+${wisdomBlock}
+
+PAST FEEDBACK (respect strongly):
+${reflectionBlock}
+
+Voice rules (calm Jarvis tone, strict):
+- Headline ≤ 14 words. No emoji. No exclamation.
+- Reason ≤ 2 calm sentences.
+- suggested_direction is ONE neutral option. Optional.
+- mode_context = "any" or "planning".
+- Salience 0.5–0.9 typical.
+- If genuinely nothing matters, return [].`;
+
+  const user = `DIGEST CONTEXT:
+${summary}
+
+Return your moments via the emit_moments tool. Every moment must have kind="digest".`;
+
+  const resp = await fetchWithRetry(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SERVICE_ROLE}`,
+      apikey: ANON_KEY,
+    },
+    body: JSON.stringify({
+      action: "call",
+      node_type: "signals-daily-digest",
+      needs: { modality: "text", complexity: "high", latency_priority: "relaxed", cost_sensitivity: "low" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "emit_moments",
+          description: "Return 0–5 daily digest moments (kind='digest').",
+          parameters: {
+            type: "object",
+            properties: {
+              moments: {
+                type: "array", maxItems: 5,
+                items: {
+                  type: "object",
+                  properties: {
+                    kind: { type: "string" },
+                    headline: { type: "string" },
+                    reason: { type: "string" },
+                    suggested_direction: { type: "string" },
+                    salience: { type: "number" },
+                    confidence: { type: "number" },
+                    mode_context: { type: "string" },
+                    source_refs: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: { type: { type: "string" }, id: { type: "string" } },
+                        required: ["type", "id"],
+                      },
+                    },
+                    wisdom_memory_ids: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["kind", "headline", "reason", "salience", "confidence"],
+                },
+              },
+            },
+            required: ["moments"],
+          },
+        },
+      }],
+    }),
+  });
+
+  if (!resp.ok) {
+    console.error("[digest] router failed", resp.status, await resp.text().catch(() => ""));
+    return [];
+  }
+  const data = await resp.json();
+  const toolCall = data?.result?.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall?.function?.arguments) return [];
+  try {
+    const parsed = JSON.parse(toolCall.function.arguments);
+    const arr = Array.isArray(parsed?.moments) ? parsed.moments as Candidate[] : [];
+    // Force kind=digest so UI filtering is reliable.
+    return arr.map((m) => ({ ...m, kind: "digest" }));
+  } catch {
+    return [];
+  }
+}
+
+async function runDigestForUser(userId: string, authHeader: string) {
+  // 6h throttle: check newest digest moment.
+  const sixHoursAgo = new Date(Date.now() - 6 * 3600_000).toISOString();
+  const { data: recentDigest } = await admin
+    .from("signal_moments")
+    .select("id, created_at")
+    .eq("user_id", userId)
+    .eq("kind", "digest")
+    .gte("created_at", sixHoursAgo)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (recentDigest && recentDigest.length > 0) {
+    return { skipped: "throttled_6h", last_at: recentDigest[0].created_at };
+  }
+
+  const ctx = await getContext(userId);
+  const { summary, sourcesIncluded } = await buildDigestSummary(userId, authHeader);
+  const ctxEmb = await embed(summary);
+  const recall = ctxEmb
+    ? await recallWisdom(userId, ctxEmb)
+    : { memories: [], reflections: [], throttles: [], tuning: {} };
+
+  const candidates = await synthesizeDigest(userId, ctx, summary, recall);
+  const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
+  return {
+    ok: true,
+    sources_included: sourcesIncluded,
+    candidate_count: candidates.length,
+    inserted_count: inserted.length,
+    inserted_ids: inserted,
+  };
+}
+
+async function digestTick() {
+  const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const { data: users } = await admin
+    .from("user_context_state")
+    .select("user_id, last_interaction_at")
+    .gte("last_interaction_at", since)
+    .order("last_interaction_at", { ascending: false })
+    .limit(100);
+
+  const list = (users ?? []) as Array<{ user_id: string }>;
+  let processed = 0;
+  let inserted = 0;
+  // Service-role auth for cron fan-out — integration fns will fall back to
+  // per-user resolution via user_id-bound credentials.
+  const cronAuth = `Bearer ${SERVICE_ROLE}`;
+  for (const u of list) {
+    try {
+      const r = await runDigestForUser(u.user_id, cronAuth);
+      processed++;
+      if ("inserted_count" in r) inserted += (r.inserted_count as number) ?? 0;
+    } catch (e) {
+      console.warn("[digest-tick] user error", u.user_id, e instanceof Error ? e.message : e);
+    }
+  }
+  return { processed, inserted, eligible: list.length };
+}
+
 async function runLookaheadForUser(userId: string) {
   const ctx = await getContext(userId);
   if (isQuietNow(ctx.quiet_hours)) return { skipped: "quiet_hours" };
@@ -653,14 +941,14 @@ Deno.serve(async (req) => {
     const mode = url.searchParams.get("mode") ?? "now";
 
     // Cron path: scheduled-routines invokes with ?mode=lookahead_tick
-    if (mode === "lookahead_tick") {
+    if (mode === "lookahead_tick" || mode === "daily_digest_tick") {
       const provided = req.headers.get("x-cron-key") ?? url.searchParams.get("cron_key");
       if (provided !== CRON_KEY) {
         return new Response(JSON.stringify({ error: "forbidden" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const result = await lookaheadTick();
+      const result = mode === "lookahead_tick" ? await lookaheadTick() : await digestTick();
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -677,6 +965,14 @@ Deno.serve(async (req) => {
     // Per-user lookahead (callable from UI for "look ahead now")
     if (mode === "lookahead") {
       const result = await runLookaheadForUser(userId);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Per-user daily digest (callable from UI "Scan now")
+    if (mode === "daily_digest") {
+      const result = await runDigestForUser(userId, authHeader!);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

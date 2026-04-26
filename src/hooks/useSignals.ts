@@ -78,6 +78,21 @@ export function useSignals() {
     }
   }, [session, synthesizing, load]);
 
+  const scanNow = useCallback(async () => {
+    if (!session || synthesizing) return { ok: false, reason: "busy" };
+    setSynthesizing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("signals-synthesize", {
+        body: { mode: "daily_digest" },
+      });
+      if (error) console.warn("[useSignals] scanNow error:", error.message);
+      await load();
+      return { ok: !error, data, error };
+    } finally {
+      setSynthesizing(false);
+    }
+  }, [session, synthesizing, load]);
+
   const respond = useCallback(async (signalId: string, outcome: SignalOutcome, note?: string) => {
     setMoments((prev) => prev.filter((m) => m.id !== signalId));
     await supabase.functions.invoke("signals-feedback", {
@@ -105,5 +120,5 @@ export function useSignals() {
     return () => { supabase.removeChannel(ch); };
   }, [user, load]);
 
-  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, respond, dismissAll, refresh: load };
+  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, scanNow, respond, dismissAll, refresh: load };
 }

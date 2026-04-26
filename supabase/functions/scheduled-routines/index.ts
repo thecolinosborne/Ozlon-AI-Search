@@ -248,6 +248,27 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Daily Digest tick — fans out cross-integration brief to active users.
+    if (mode === "signals_daily_digest_tick") {
+      const cronKey = Deno.env.get("SIGNALS_CRON_KEY") ?? SERVICE_ROLE;
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/signals-synthesize?mode=daily_digest_tick`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+            apikey: ANON_KEY,
+            "x-cron-key": cronKey,
+          },
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      return new Response(JSON.stringify({ forwarded: true, status: res.status, ...body }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Manual run: requires routine_id (from query or body)
     let routineId = url.searchParams.get("routine_id");
     if (!routineId && req.method === "POST") {
