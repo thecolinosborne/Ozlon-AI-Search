@@ -27,6 +27,7 @@ import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
 import { SignalsBanner } from "@/components/communications/SignalsBanner";
+import { LearningPill } from "@/components/communications/LearningPill";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
@@ -385,6 +386,7 @@ export default function Communications() {
           <span>Communications</span>
         </Link>
         <div className="flex items-center gap-1.5">
+          <LearningPill />
           <button
             onClick={() => refetch()}
             disabled={isFetching}
