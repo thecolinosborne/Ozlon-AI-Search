@@ -1,11 +1,15 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useSignals, type SignalMoment } from "@/hooks/useSignals";
 
 interface Props {
-  variant?: "page" | "indicator" | "inline";
+  variant?: "page" | "indicator" | "inline" | "voice";
   maxMoments?: number;
+  /** voice variant only: function that injects an utterance into the realtime session */
+  sendText?: (text: string) => void;
+  /** voice variant only: only speak when this is true (e.g. session connected) */
+  enabled?: boolean;
 }
 
 const BreathingDot = ({ active }: { active: boolean }) => (
