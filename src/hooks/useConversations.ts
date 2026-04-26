@@ -207,7 +207,7 @@ export function useConversations() {
   }, []);
 
   // Update message in DB after streaming completes
-  const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string }) => {
+  const finalizeMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => {
     if (!user) {
       if (isDev) console.warn("[useConversations] finalizeMessage called without user — skipping.");
       return;
@@ -223,6 +223,7 @@ export function useConversations() {
       content: msg.content,
       session_id: sid,
       user_id: user.id,
+      metadata: (msg.metadata ?? null) as Json,
     });
 
     if (error) {
@@ -233,9 +234,9 @@ export function useConversations() {
     setMessages((prev) => {
       const exists = prev.some((m) => m.id === msg.id);
       if (exists) {
-        return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content } : m);
+        return prev.map((m) => m.id === msg.id ? { ...m, content: msg.content, metadata: msg.metadata ?? m.metadata ?? null } : m);
       }
-      return [...prev, { ...msg, created_at: new Date().toISOString() }];
+      return [...prev, { ...msg, created_at: new Date().toISOString(), metadata: msg.metadata ?? null }];
     });
 
     // Auto-title from first user message (fallback before AI summary lands)
