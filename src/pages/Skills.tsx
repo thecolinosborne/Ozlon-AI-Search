@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Sparkles, Download, Trash2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Download, Trash2, Plus } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 export default function Skills() {
@@ -39,7 +39,13 @@ export default function Skills() {
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <Sparkles className="w-5 h-5 text-primary" />
-          <h1 className="text-xl font-semibold">Skills</h1>
+          <h1 className="text-xl font-semibold flex-1">Skills</h1>
+          <Button asChild size="sm">
+            <Link to="/skills/new">
+              <Plus className="w-4 h-4 mr-2" />
+              Create skill
+            </Link>
+          </Button>
         </div>
       </header>
 
@@ -94,7 +100,7 @@ export default function Skills() {
           </h2>
           {browse.length === 0 ? (
             <Card className="p-6 text-sm text-muted-foreground">
-              No skills available yet. Built-in skill pack is on the way.
+              Your catalog is empty. Build your first skill to give your AI a custom playbook.
             </Card>
           ) : (
             <div className="space-y-3">
