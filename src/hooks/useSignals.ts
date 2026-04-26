@@ -105,5 +105,5 @@ export function useSignals() {
     return () => { supabase.removeChannel(ch); };
   }, [user, load]);
 
-  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, respond };
+  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, respond, dismissAll, refresh: load };
 }
