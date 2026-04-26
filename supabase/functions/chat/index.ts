@@ -2,6 +2,13 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY as MODEL_REGISTRY_BASE, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
 import { getAllRegisteredTools } from "../_shared/integrations/index.ts";
+import {
+  getInstalledSkills,
+  buildSkillIndex,
+  formatSkillIndexForPrompt,
+  getSkillBySlug,
+  recordInvocation,
+} from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
@@ -3128,6 +3135,36 @@ async function executeToolCall(
         result: `multi_action: ${okCount}/${results.length} succeeded\n` +
           results.map((r) => `  • ${r.success ? '✓' : '✗'} ${r.name}: ${r.result.slice(0, 200)}`).join('\n'),
       };
+    }
+
+    // ---- load_skill: fetch + activate a user-installed skill ----
+    if (toolName === 'load_skill') {
+      const slug = String(args.slug || '').trim();
+      const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+      if (!slug) return { success: false, result: 'load_skill: slug is required' };
+      if (!userId) return { success: false, result: 'load_skill: user not authenticated' };
+      const skill = await getSkillBySlug(userId, slug);
+      if (!skill) {
+        return { success: false, result: `Skill "${slug}" is not installed for this user.` };
+      }
+      const m = skill.manifest;
+      // Best-effort audit (non-blocking)
+      recordInvocation({
+        userId,
+        skillId: skill.id,
+        triggerType: 'load_skill',
+        triggerPayload: { slug },
+      }).catch(() => {});
+      const block = [
+        `## Skill activated: ${m.name} (v${m.version})`,
+        `Description: ${m.description}`,
+        m.requires_confirmation ? `⚠ Requires user confirmation before any write/destructive action.` : '',
+        `Tools available for this skill: ${[...(m.tools_required || []), ...(m.tools_optional || [])].join(', ') || '(none)'}`,
+        '',
+        '### Instructions',
+        m.instructions,
+      ].filter(Boolean).join('\n');
+      return { success: true, result: block };
     }
 
     // ---- Registry dispatcher (manifest-driven tools) ----
