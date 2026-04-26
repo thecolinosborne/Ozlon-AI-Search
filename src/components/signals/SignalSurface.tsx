@@ -143,9 +143,24 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
 
   // Page variant: full minimalist surface
   const visible = moments.slice(0, maxMoments);
+  const rest = showList ? moments.slice(maxMoments) : [];
+
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    const diff = (Date.now() - d.getTime()) / 60000;
+    if (diff < 1) return "just now";
+    if (diff < 60) return `${Math.round(diff)}m ago`;
+    if (diff < 1440) return `${Math.round(diff / 60)}h ago`;
+    return `${Math.round(diff / 1440)}d ago`;
+  };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
+    <div
+      className={cn(
+        "min-h-screen bg-background flex flex-col items-center px-6",
+        showList ? "justify-start pt-20 pb-16" : "justify-center",
+      )}
+    >
       <div className="max-w-2xl w-full">
         {visible.length === 0 ? (
           <div className="flex flex-col items-center gap-4 text-center">
@@ -204,6 +219,35 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {showList && rest.length > 0 && (
+          <div className="mt-16 pt-8 border-t border-border/40">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/60 mb-4">
+              Also surfacing · {rest.length}
+            </p>
+            <ul className="divide-y divide-border/30">
+              {rest.map((m) => (
+                <li key={m.id} className="py-3 flex items-start gap-3 group">
+                  <span className="mt-1.5 inline-block w-1 h-1 rounded-full bg-foreground/40 shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground/60">
+                      <span>{m.kind}</span>
+                      <span>·</span>
+                      <span className="tabular-nums">{Math.round(m.salience * 100)}%</span>
+                      <span>·</span>
+                      <span>{formatTime(m.created_at)}</span>
+                    </div>
+                    <p className="text-sm text-foreground/90 leading-snug mt-1">{m.headline}</p>
+                    <div className="flex items-center gap-4 mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <InlinePrompt onClick={() => handleAct(m)}>Handle</InlinePrompt>
+                      <InlinePrompt onClick={() => respond(m.id, "dismissed")}>Dismiss</InlinePrompt>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>
