@@ -37,9 +37,18 @@ export function useSignals() {
       .eq("status", "live")
       .order("salience", { ascending: false })
       .limit(20);
-    setMoments((data ?? []) as SignalMoment[]);
+    setMoments(((data ?? []) as unknown) as SignalMoment[]);
     setLoading(false);
   }, [user]);
+
+  const createSignal = useCallback(async (text: string) => {
+    if (!session || !text.trim()) return { ok: false as const };
+    const { data, error } = await supabase.functions.invoke("signals-create", {
+      body: { text },
+    });
+    if (!error) await load();
+    return { ok: !error, data, error };
+  }, [session, load]);
 
   const dismissAll = useCallback(async () => {
     if (!user || moments.length === 0) return;
@@ -123,5 +132,16 @@ export function useSignals() {
     return () => { supabase.removeChannel(ch); };
   }, [user, load]);
 
-  return { moments, topMoment: moments[0] ?? null, loading, synthesizing, synthesize, scanNow, respond, dismissAll, refresh: load };
+  return {
+    moments,
+    topMoment: moments[0] ?? null,
+    loading,
+    synthesizing,
+    synthesize,
+    scanNow,
+    respond,
+    dismissAll,
+    refresh: load,
+    createSignal,
+  };
 }
