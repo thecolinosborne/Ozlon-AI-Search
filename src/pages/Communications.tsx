@@ -122,6 +122,14 @@ export default function Communications() {
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
 
+  // Keep refs in sync for keyboard handlers (avoid stale closures).
+  useEffect(() => {
+    filteredRef.current = filtered;
+  }, [filtered]);
+  useEffect(() => {
+    focusedIdxRef.current = focusedIdx;
+  }, [focusedIdx]);
+
   // Smart summary counts — derived from already-loaded data, no extra fetch.
   const summaryCounts = useMemo(() => {
     const visible = stream.filter((m) => !hidden.has(m.id));
