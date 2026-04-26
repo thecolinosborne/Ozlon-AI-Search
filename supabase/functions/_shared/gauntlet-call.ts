@@ -133,6 +133,7 @@ export async function gauntletCall(opts: GauntletCallOptions): Promise<CallResul
         needs,
         messages: opts.messages,
         tools: opts.tools,
+        tool_choice: opts.tool_choice,
         node_type: opts.agent,
       }),
     });
