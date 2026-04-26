@@ -357,11 +357,249 @@ async function insertWithDedup(userId: string, ctx: ContextState, moments: Candi
   return inserted;
 }
 
+// ─────────── Phase B: anticipation / lookahead ───────────
+
+// Pull calendar events 24h–7d out + open commitments due in same window.
+async function buildLookaheadSummary(userId: string): Promise<string> {
+  const now = new Date();
+  const startIso = new Date(now.getTime() + 24 * 3600_000).toISOString();
+  const endIso = new Date(now.getTime() + 7 * 24 * 3600_000).toISOString();
+
+  const lines: string[] = [];
+  lines.push(`time_utc: ${nowIso()}`);
+  lines.push(`lookahead_window: ${startIso} → ${endIso}`);
+
+  // Calendar events (best-effort — silent skip if calendar not connected)
+  try {
+    const token = await getGoogleAccessToken(userId);
+    if (token) {
+      const qs = new URLSearchParams({
+        timeMin: startIso, timeMax: endIso,
+        singleEvents: "true", orderBy: "startTime", maxResults: "30",
+      });
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${qs.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const items = (data?.items ?? []) as Array<Record<string, unknown>>;
+        if (items.length) {
+          lines.push(`UPCOMING_EVENTS:\n` + items.slice(0, 25).map((e) => {
+            const start = (e.start as { dateTime?: string; date?: string } | undefined)?.dateTime
+              ?? (e.start as { date?: string } | undefined)?.date ?? "?";
+            const summary = (e.summary as string | undefined) ?? "(untitled)";
+            const attendeeCount = Array.isArray(e.attendees) ? (e.attendees as unknown[]).length : 0;
+            return `- ${start} | ${summary}${attendeeCount ? ` | ${attendeeCount} attendees` : ""}`;
+          }).join("\n"));
+        }
+      }
+    }
+  } catch (e) {
+    console.log("[signals-lookahead] calendar skip:", e instanceof Error ? e.message : e);
+  }
+
+  // Tasks/commitments coming due in window
+  const { data: dueTasks } = await admin.from("work_tasks")
+    .select("title, status, next_action, due_at")
+    .eq("user_id", userId).is("deleted_at", null)
+    .neq("status", "completed")
+    .gte("due_at", now.toISOString())
+    .lte("due_at", endIso)
+    .order("due_at", { ascending: true })
+    .limit(20);
+  if (dueTasks?.length) {
+    lines.push(`COMMITMENTS_DUE_SOON:\n` + dueTasks.map((t) =>
+      `- ${t.due_at}: ${t.title} [${t.status}/${t.next_action ?? "?"}]`).join("\n"));
+  }
+
+  // Recent activity, for trajectory continuity
+  const recentSummary = await buildContextSummary(userId);
+  lines.push(`RECENT_ACTIVITY (last 24h):\n${recentSummary}`);
+
+  return lines.join("\n\n");
+}
+
+async function synthesizeLookahead(
+  userId: string,
+  ctx: ContextState,
+  summary: string,
+  recall: Awaited<ReturnType<typeof recallWisdom>>,
+): Promise<Candidate[]> {
+  const wisdomBlock = recall.memories.length
+    ? recall.memories.map((m) => `[${m.id}] ${m.summary ?? m.content.slice(0, 200)}`).join("\n")
+    : "(no prior beliefs)";
+  const reflectionBlock = recall.reflections.length
+    ? recall.reflections.map((r) => `- ${r.content.slice(0, 200)}`).join("\n")
+    : "(no prior signal feedback)";
+  const throttleBlock = recall.throttles.length
+    ? recall.throttles.map((t) => `- ${t.content}`).join("\n")
+    : "(no throttles)";
+
+  const system = `You are the Signals layer running an ANTICIPATION pass.
+Look 24 hours to 7 days ahead. Your job is to surface AT MOST 2 moments — usually 0 or 1 — of kind "risk" or "opportunity" that the user should know about NOW so future-them is aligned.
+
+Bias hard toward silence. Only emit a moment if:
+- a commitment is drifting (no recent activity, due within 72h) → kind=risk
+- an upcoming meeting needs prep that hasn't happened → kind=risk
+- a pattern in past behavior plus an upcoming event creates a leverage window → kind=opportunity
+
+PRIOR BELIEFS:
+${wisdomBlock}
+
+PAST SIGNAL FEEDBACK (respect strongly):
+${reflectionBlock}
+
+THROTTLES:
+${throttleBlock}
+
+Voice rules (calm Jarvis, strict):
+- Headline ≤ 14 words. No emoji. No exclamation.
+- Reason ≤ 2 sentences. May reference the future event explicitly ("ahead of Thursday's call").
+- suggested_direction is ONE neutral option. Optional.
+- mode_context for anticipation moments should be "any" or "planning".
+- Salience 0.6–0.9 typical; reserve 0.9+ for true blockers.
+- If nothing materially needs attention, return [].`;
+
+  const user = `LOOKAHEAD CONTEXT:
+${summary}
+
+Return your moments via the emit_moments tool.`;
+
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SERVICE_ROLE}`,
+      apikey: ANON_KEY,
+    },
+    body: JSON.stringify({
+      action: "call",
+      node_type: "signals-lookahead",
+      needs: { modality: "text", complexity: "high", latency_priority: "relaxed", cost_sensitivity: "low" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "emit_moments",
+          description: "Return 0–2 anticipation moments (risk or opportunity).",
+          parameters: {
+            type: "object",
+            properties: {
+              moments: {
+                type: "array", maxItems: 2,
+                items: {
+                  type: "object",
+                  properties: {
+                    kind: { type: "string", enum: ["risk", "opportunity"] },
+                    headline: { type: "string" },
+                    reason: { type: "string" },
+                    suggested_direction: { type: "string" },
+                    salience: { type: "number" },
+                    confidence: { type: "number" },
+                    mode_context: { type: "string" },
+                    source_refs: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: { type: { type: "string" }, id: { type: "string" } },
+                        required: ["type", "id"],
+                      },
+                    },
+                    wisdom_memory_ids: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["kind", "headline", "reason", "salience", "confidence"],
+                },
+              },
+            },
+            required: ["moments"],
+          },
+        },
+      }],
+    }),
+  });
+
+  if (!resp.ok) {
+    console.error("[signals-lookahead] router failed", resp.status, await resp.text().catch(() => ""));
+    return [];
+  }
+  const data = await resp.json();
+  const toolCall = data?.result?.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall?.function?.arguments) return [];
+  try {
+    const parsed = JSON.parse(toolCall.function.arguments);
+    return Array.isArray(parsed?.moments) ? parsed.moments : [];
+  } catch {
+    return [];
+  }
+}
+
+async function runLookaheadForUser(userId: string) {
+  const ctx = await getContext(userId);
+  if (isQuietNow(ctx.quiet_hours)) return { skipped: "quiet_hours" };
+  if (ctx.current_mode === "focus") return { skipped: "focus_mode" };
+
+  const summary = await buildLookaheadSummary(userId);
+  const ctxEmb = await embed(summary);
+  const recall = ctxEmb
+    ? await recallWisdom(userId, ctxEmb)
+    : { memories: [], reflections: [], throttles: [] };
+
+  const candidates = await synthesizeLookahead(userId, ctx, summary, recall);
+  const inserted = await insertWithDedup(userId, ctx, candidates);
+  return { ok: true, candidate_count: candidates.length, inserted_count: inserted.length };
+}
+
+// Cron tick: iterate users active in last 7d. Cap to keep it bounded.
+async function lookaheadTick() {
+  const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const { data: users } = await admin
+    .from("user_context_state")
+    .select("user_id, last_interaction_at")
+    .gte("last_interaction_at", since)
+    .order("last_interaction_at", { ascending: false })
+    .limit(50);
+
+  const list = (users ?? []) as Array<{ user_id: string }>;
+  let processed = 0;
+  let inserted = 0;
+  for (const u of list) {
+    try {
+      const r = await runLookaheadForUser(u.user_id);
+      processed++;
+      if ("inserted_count" in r) inserted += r.inserted_count ?? 0;
+    } catch (e) {
+      console.warn("[signals-lookahead] user error", u.user_id, e instanceof Error ? e.message : e);
+    }
+  }
+  return { processed, inserted, eligible: list.length };
+}
+
 // ─────────── handler ───────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const url = new URL(req.url);
+    const mode = url.searchParams.get("mode") ?? "now";
+
+    // Cron path: scheduled-routines invokes with ?mode=lookahead_tick
+    if (mode === "lookahead_tick") {
+      const provided = req.headers.get("x-cron-key") ?? url.searchParams.get("cron_key");
+      if (provided !== CRON_KEY) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const result = await lookaheadTick();
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const authHeader = req.headers.get("Authorization");
     const userId = await resolveUser(authHeader);
     if (!userId) {
@@ -370,7 +608,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Throttle: refuse if a synth ran in the last 60s for this user
+    // Per-user lookahead (callable from UI for "look ahead now")
+    if (mode === "lookahead") {
+      const result = await runLookaheadForUser(userId);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Default: real-time synthesis
     const recentCutoff = new Date(Date.now() - 60_000).toISOString();
     const { count } = await admin.from("signal_moments")
       .select("id", { count: "exact", head: true })
