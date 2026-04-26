@@ -28,6 +28,8 @@ import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
 import { SignalsBanner } from "@/components/communications/SignalsBanner";
 import { LearningPill } from "@/components/communications/LearningPill";
+import { ModeRibbon } from "@/components/communications/ModeRibbon";
+import { useCurrentMode } from "@/hooks/useCurrentMode";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
@@ -56,6 +58,8 @@ export default function Communications() {
   const [triage, setTriage] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusedIdx, setFocusedIdx] = useState<number>(-1);
+  const [modeOverride, setModeOverride] = useState(false);
+  const { mode: currentMode, cognitiveLoad } = useCurrentMode();
   const prevSlackMissing = useRef(false);
   const filteredRef = useRef<CommMessage[]>([]);
   const focusedIdxRef = useRef<number>(-1);
