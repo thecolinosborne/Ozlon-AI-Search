@@ -385,6 +385,7 @@ export function useChatStream({
               provider: inflightAssistant?.provider,
               toolsUsed: inflightAssistant?.toolsUsed,
               orchestration: inflightAssistant?.orchestration,
+              artifactId: inflightAssistant?.artifactId,
             }
           : null;
 
