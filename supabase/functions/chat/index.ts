@@ -8068,6 +8068,26 @@ serve(async (req) => {
       }
     }
 
+    // Expose userId to tool handlers (used by load_skill, etc.)
+    (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
+
+    // ================================================================
+    // SKILLS PLATFORM — inject compact index of installed skills.
+    // Full instructions are loaded on-demand via the load_skill tool.
+    // ================================================================
+    if (credUserId) {
+      try {
+        const installed = await getInstalledSkills(credUserId);
+        const indexBlock = formatSkillIndexForPrompt(buildSkillIndex(installed));
+        if (indexBlock) {
+          systemPrompt += `\n\n${indexBlock}`;
+          console.log(`[Skills] Injected ${installed.length} installed skill(s) into prompt.`);
+        }
+      } catch (e) {
+        console.error('[Skills] Failed to load installed skills:', (e as Error).message);
+      }
+    }
+
     // ================================================================
     // PERSONALITY & IDENTITY LAYER — user-authored persona override
     // Loaded BEFORE other prompt enrichment so user identity sits at top.
