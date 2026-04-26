@@ -33,10 +33,21 @@ export function useSignals() {
       .eq("user_id", user.id)
       .eq("status", "live")
       .order("salience", { ascending: false })
-      .limit(3);
+      .limit(12);
     setMoments((data ?? []) as SignalMoment[]);
     setLoading(false);
   }, [user]);
+
+  const dismissAll = useCallback(async () => {
+    if (!user || moments.length === 0) return;
+    const ids = moments.map((m) => m.id);
+    setMoments([]);
+    await supabase
+      .from("signal_moments")
+      .update({ status: "dismissed" })
+      .in("id", ids)
+      .eq("user_id", user.id);
+  }, [user, moments]);
 
   const synthesize = useCallback(async () => {
     if (!session || synthesizing) return;
