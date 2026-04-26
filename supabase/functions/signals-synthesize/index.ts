@@ -532,7 +532,7 @@ ${summary}
 
 Return your moments via the emit_moments tool.`;
 
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
+  const resp = await fetchWithRetry(`${SUPABASE_URL}/functions/v1/gauntlet-router`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
