@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { useContextMode } from "@/hooks/useContextMode";
 import { Phone, MessageSquare, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserSettings } from "@/services/chatService";
