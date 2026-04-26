@@ -7474,22 +7474,34 @@ async function runToolLoop(
       );
     }
 
-    const response = await fetch(modelConfig.apiEndpoint, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modelConfig.name,
-        messages: openAIMessages,
-        max_completion_tokens: modelConfig.maxTokens,
-        tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
-        tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`OpenAI error in tool loop: ${response.status}`, errText);
-      throw new Error(`AI service error: ${response.status}`);
+    // Retry transient upstream failures (503/502/504/429) with exponential backoff.
+    let response: Response | null = null;
+    let lastErrText = '';
+    const TRANSIENT = new Set([429, 502, 503, 504]);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(modelConfig.apiEndpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelConfig.name,
+          messages: openAIMessages,
+          max_completion_tokens: modelConfig.maxTokens,
+          tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
+          tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
+        }),
+      });
+      if (response.ok) break;
+      lastErrText = await response.text();
+      if (!TRANSIENT.has(response.status) || attempt === 2) {
+        console.error(`OpenAI error in tool loop: ${response.status}`, lastErrText);
+        throw new Error(`AI service error: ${response.status}`);
+      }
+      const delay = 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+      console.warn(`Transient ${response.status} from upstream, retrying in ${delay}ms (attempt ${attempt + 1}/3)`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    if (!response || !response.ok) {
+      throw new Error(`AI service error: ${response?.status ?? 'unknown'}`);
     }
 
     const data = await response.json();
