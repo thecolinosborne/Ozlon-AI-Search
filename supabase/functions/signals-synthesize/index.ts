@@ -11,6 +11,7 @@
 //   7. expire stale live signals; insert survivors
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { getGoogleAccessToken } from "../_shared/google-token.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +22,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+const CRON_KEY = Deno.env.get("SIGNALS_CRON_KEY") ?? SERVICE_ROLE;
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
