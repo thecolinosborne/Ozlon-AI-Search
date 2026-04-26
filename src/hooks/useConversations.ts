@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 
 const isDev = import.meta.env.DEV;
@@ -157,7 +158,7 @@ export function useConversations() {
       content: msg.content,
       session_id: sid,
       user_id: user.id,
-      metadata: msg.metadata ?? null,
+      metadata: (msg.metadata ?? null) as Json,
     });
 
     if (error) {
