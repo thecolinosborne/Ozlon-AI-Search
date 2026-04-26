@@ -43,6 +43,7 @@ import Events from "@/pages/Events";
 import Finance from "@/pages/Finance";
 import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
 import Communications from "@/pages/Communications";
+import Signals from "@/pages/Signals";
 import { Navigate } from "react-router-dom";
 
 import NotFound from "@/pages/NotFound";
@@ -109,6 +110,7 @@ const AppRoutes = () => {
         <Route path="/finance" element={<Finance />} />
         <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
         <Route path="/communications" element={<Communications />} />
+        <Route path="/signals" element={<Signals />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
