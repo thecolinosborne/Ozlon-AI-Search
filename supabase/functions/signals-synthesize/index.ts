@@ -455,6 +455,11 @@ async function synthesizeLookahead(
   const throttleBlock = recall.throttles.length
     ? recall.throttles.map((t) => `- ${t.content}`).join("\n")
     : "(no throttles)";
+  const tuningEntries = Object.entries(recall.tuning ?? {});
+  const tuningBlock = tuningEntries.length
+    ? tuningEntries.map(([kind, t]) =>
+        `- ${kind}: floor=${t.floor.toFixed(2)} (n=${t.sample_size})`).join("\n")
+    : "(no tuning yet)";
 
   const system = `You are the Signals layer running an ANTICIPATION pass.
 Look 24 hours to 7 days ahead. Your job is to surface AT MOST 2 moments — usually 0 or 1 — of kind "risk" or "opportunity" that the user should know about NOW so future-them is aligned.
@@ -472,6 +477,9 @@ ${reflectionBlock}
 
 THROTTLES:
 ${throttleBlock}
+
+LEARNED SALIENCE FLOORS PER KIND (only emit if salience clears the floor):
+${tuningBlock}
 
 Voice rules (calm Jarvis, strict):
 - Headline ≤ 14 words. No emoji. No exclamation.
