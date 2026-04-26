@@ -1,68 +1,87 @@
-# Signals — Daily Digest Upgrade
+# Route Signals Intelligence through The Brain (Gauntlet) + Evolution Layer
 
-Additive on top of the existing real-time + lookahead + tuning passes. Nothing existing is removed or refactored.
+## Why this matters
 
-## Why
-Today, `signals-synthesize` only sees `work_tasks`, cached `communications_messages` metadata, `task_events`, and Wisdom recall. It does not pull a wide cross-integration snapshot the way a daily chief-of-staff brief should. Users have to "know to ask."
+`signals-synthesize` already routes through `gauntlet-router` (The Brain), but the **new user-created signal flow** I proposed last turn would have called Lovable AI Gateway directly — bypassing The Brain. Wrong instinct for a product whose whole point is that the system picks the best stone (OpenAI / Gemini / Anthropic / xAI / DeepSeek / Mistral) per task.
 
-## New: 4th synthesis mode — `daily_digest`
+This plan does two things:
+1. **Force every signal-side AI call through `gauntlet-router`** — classification, drafting, validation, intent inference. No direct gateway calls anywhere in the signals stack.
+2. **Make the Brain *learn* from signal outcomes** so routing actually evolves with use.
 
-### 1. `supabase/functions/signals-synthesize/index.ts` (additive)
-Add a fourth branch alongside `now`, `lookahead`, `lookahead_tick`:
+---
 
-- **`?mode=daily_digest`** — per-user (Bearer JWT or service role + `user_id`).
-  Pulls in parallel (best-effort, each wrapped in try/catch — one failure never blocks the digest):
-  - **Calendar** — today + next 24h events (already wired via `getGoogleAccessToken`).
-  - **Gmail** — unread count + threads awaiting your reply >24h (metadata only via existing `google-gmail` fn, `format=metadata`, capped at 25).
-  - **Slack** — unread mentions + DMs from last 24h (via existing `slack` fn, read-only).
-  - **GoHighLevel** — new SMS/voicemail in last 24h (via existing `gohighlevel` fn).
-  - **ClickUp** — tasks due today / overdue (via existing `clickup` fn).
-  - **Plaid** — balance snapshot + spend anomalies last 24h (via existing `plaid` fn, read-only).
-  - **Search Console** — 7d vs prior-7d clicks/impressions delta (via existing `google-search-console` fn).
-  - **Drive** — files modified in last 24h count (via existing `google-drive` fn).
-  - **Wisdom recall** — same `match_wisdom_memories` + tuning floors as `now` mode.
-- Feeds the consolidated snapshot into `gauntlet-router` (`node_type=signals-daily-digest`, `cost_sensitivity=low` → OpenAI), reusing the existing `emit_moments` tool but with a digest-flavored prompt:
-  - Emit up to **5** moments tagged `kind="digest"`.
-  - Voice rules unchanged (≤14 word headlines, calm, no emoji, no exclamation).
-  - Skip integrations that returned errors silently — note them only in `diagnostics`.
-- Dedup pass uses the same `match_signal_moments` (0.82 threshold) so a digest item that duplicates a live `now` signal supersedes the older one.
-- Throttle: at most one `daily_digest` run per user per 6h (checked via newest `signal_moments` with `metadata->>'mode' = 'daily_digest'`).
+## Part 1 — Brain-routed user signals
 
-- **`?mode=daily_digest_tick`** — cron-gated (`x-cron-key` / `SIGNALS_CRON_KEY`, defaults to service role). Fans out to up to 100 users active in last 7d, respecting per-user timezone (target ~7am local). Reuses the existing `scheduled-routines` forwarder pattern.
+### `supabase/functions/signals-create/index.ts` (new)
+- **No direct `ai.gateway.lovable.dev` calls.** Uses `_shared/gauntlet-call.ts`.
+- `gauntletCall({ agent: "signals-create", node_type: "signals-create", needs: { modality: "text", complexity: "low", latency_priority: "fast", cost_sensitivity: "high" }, tools: [classify_signal] })` — router picks cheapest capable stone.
+- Tool `classify_signal` returns: `signal_type` (`message | task | reminder | thought`), `headline` (≤14 words), `salience` (0–1), `priority`, `suggested_action`, `target_integration` (gmail | slack | clickup | calendar | none).
+- Embeds via `text-embedding-3-small`, calls `match_signal_moments(>0.82)` to merge dupes, else inserts with `kind="user_created"`, `metadata.brain_stone`, `metadata.brain_latency_ms`, `metadata.routing_reason`.
 
-### 2. Cron registration (one-time SQL via insert tool — not a migration, since URL/anon key are user-specific)
-Add `signals-daily-digest-hourly` job calling `scheduled-routines?mode=signals_daily_digest_tick` once per hour at minute 13. The fan-out function decides which users are due based on local time.
+### `supabase/functions/signals-feedback/index.ts` (extend)
+- New outcomes: `validate`, `start_task`, `start_message`, `complete`, `snooze`.
+- `start_task` → inserts `work_tasks` row, links via `signal_moments.metadata.task_id`.
+- `start_message` → calls `communications-draft` (already Brain-routed).
+- `validate` → flips `metadata.validated=true`, writes `reflection_notes(note_type='signal_validation')` so tuner learns "user trusts this kind".
+- All AI summarization goes through `gauntletCall`, never direct gateway.
 
-### 3. `supabase/functions/scheduled-routines/index.ts` (additive)
-Add a `signals_daily_digest_tick` mode that forwards to `signals-synthesize?mode=daily_digest_tick` with the cron key header.
+### Migration `<ts>_signals_user_created.sql`
+- Allow `kind='user_created'` and `kind='digest'` in any check constraints.
+- Partial index `idx_signal_moments_user_kind_status` on `(user_id, kind, status)`.
 
-### 4. Frontend — `src/hooks/useSignals.ts` (additive)
-- Add `scanNow()` helper that invokes `signals-synthesize` with `{ mode: "daily_digest" }`, then `load()`.
-- Keep all existing exports (`synthesize`, `dismissAll`, `refresh`, `respond`).
+---
 
-### 5. Frontend — `src/pages/Signals.tsx` (additive)
-- Add a small **"Scan now"** ghost button next to **Refresh** in the existing fixed top-right action group. Calm tone, spinner while running, disabled if a scan ran in the last 6h (read from newest digest moment timestamp).
-- Above the existing list, render a new **"Today"** section *only when* there are live moments with `metadata.mode === 'daily_digest'`. Same `SignalSurface` list styling — additive, no redesign.
-- Empty state preserved.
+## Part 2 — Brain evolution from signal outcomes
 
-### 6. `src/components/signals/SignalSurface.tsx` (additive)
-- Optional `filterMode?: 'daily_digest' | 'live'` prop on the `showList` path so the page can render two grouped lists (Today / Live). Default behavior unchanged for every other call site.
+### Extend `signals-tune` (already cron hourly)
+- Aggregate `signal_moments.metadata.brain_stone` × outcome from `reflection_notes(note_type='signal_feedback')` over 14d.
+- Per-`node_type` (`signals-create`, `signals-synthesize`, `signals-feedback`) **stone scorecards**: acted/dismissed ratio + median latency + cost.
+- Write one `wisdom_memories(memory_type='brain_routing_pref')` row per user:
+```json
+{ "signals-create": { "preferred_stones": ["gemini-2.5-flash","gpt-5-mini"], "avoid": ["gpt-5"], "reason": "user acted 4/5 on flash, ignored 3/3 on gpt-5" } }
+```
 
-## Out of scope
-- No changes to `signals-feedback`, `signals-tune`, `signals-synthesize` `now` / `lookahead` modes, or any UI variant other than `page`.
-- No new tables, no new RLS, no schema migration.
-- No bodies of emails/messages are read — counts and metadata only, matching existing privacy posture.
+### `gauntlet-router` (additive)
+- On `action: "call"`, when `node_type` starts with `signals-`, look up the user's `brain_routing_pref` and apply soft preference (boost preferred +0.15, deboost avoid −0.2) **before** the existing scorer.
+- Log decision into `routing_decisions` with `reason: "evolved: user pattern N/M"` so the Brain page surfaces it — user literally watches it learn.
 
-## Files touched
-- `supabase/functions/signals-synthesize/index.ts` *(edit — add `daily_digest` + `daily_digest_tick` branches)*
-- `supabase/functions/scheduled-routines/index.ts` *(edit — add forwarder mode)*
-- `src/hooks/useSignals.ts` *(edit — add `scanNow`)*
-- `src/pages/Signals.tsx` *(edit — Scan now button + Today section)*
-- `src/components/signals/SignalSurface.tsx` *(edit — optional `filterMode` prop)*
-- One-time `pg_cron` job inserted via the insert tool
+### Optional polish — `src/pages/ModelRouting.tsx`
+- "Evolved preferences" subsection under Usage reading `brain_routing_pref`, e.g. *"For signals: preferring Gemini Flash (4/5 acted)"*.
 
-## Verification
-- Hit `/signals`, press **Scan now** → digest moments appear in a "Today" group within ~10s; integrations that fail are skipped silently.
-- Re-press within 6h → button disabled with tooltip ("Next scan available in Xh").
-- Cron tick fires hourly; only users at ~7am local get a fresh digest.
-- Existing real-time + lookahead behavior unchanged.
+---
+
+## Part 3 — UI for user-created signals
+
+**`src/pages/Signals.tsx`**
+- Capture composer (textarea + "Capture") above the hero → `useSignals().createSignal(text)`.
+- New "Your captures" section for `kind="user_created"` with inline chips: **Validate** · **Start as task** · **Draft message** · **Complete** · **Dismiss**.
+
+**`src/components/signals/SignalSurface.tsx`**
+- Render `user_created` with subtle brain-stone metadata line (e.g. "Gemini Flash") — reinforces that Brain triaged it.
+
+**`src/hooks/useSignals.ts`**
+- Add `createSignal(text)`, `validate(id)`, `startAsTask(id)`, `startAsMessage(id)`, `complete(id)`. Optimistic update + refresh.
+
+---
+
+## Files
+
+**New**
+- `supabase/functions/signals-create/index.ts`
+- `supabase/migrations/<ts>_signals_user_created.sql`
+
+**Modified**
+- `supabase/functions/signals-feedback/index.ts` — new outcomes, AI via `gauntletCall`
+- `supabase/functions/signals-tune/index.ts` — brain stone scorecards → `brain_routing_pref`
+- `supabase/functions/gauntlet-router/index.ts` — apply `brain_routing_pref` for `signals-*`, log evolution reason
+- `src/hooks/useSignals.ts` — capture/validate/start helpers
+- `src/pages/Signals.tsx` — composer + "Your captures" section
+- `src/components/signals/SignalSurface.tsx` — render user_created with brain stone metadata
+- `src/pages/ModelRouting.tsx` — "Evolved preferences" subsection (optional)
+
+---
+
+## Guarantees
+- **Zero direct calls** to `ai.gateway.lovable.dev` from any signals function. Every model call goes through `_shared/gauntlet-call.ts` → `gauntlet-router`.
+- Additive only — real-time, lookahead, daily-digest, and tuning passes untouched.
+- Evolution is per-user and reversible (delete the `brain_routing_pref` row to reset).
