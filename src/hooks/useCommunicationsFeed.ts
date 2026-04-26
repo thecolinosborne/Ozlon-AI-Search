@@ -398,6 +398,7 @@ export function useCommunicationsFeed(): CommunicationsFeed {
     digest,
     stream,
     diagnostics,
+    triageMap: triageMap ?? new Map(),
     isLoading: (aggregateQ.isLoading && !cachedQ.data) || digestQ.isLoading,
     isFetching: aggregateQ.isFetching || digestQ.isFetching || cachedQ.isFetching || triageQ.isFetching,
     refetch: () => {
