@@ -12,6 +12,9 @@ import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
 import { PulseRibbon } from "@/components/communications/PulseRibbon";
 import { CommandComposer, type ComposerCommand } from "@/components/communications/CommandComposer";
+import { PeopleStream } from "@/components/communications/PeopleStream";
+import { StreamModeToggle, type StreamMode } from "@/components/communications/StreamModeToggle";
+import { usePeopleView } from "@/hooks/usePeopleView";
 import { FocusStack } from "@/components/communications/FocusStack";
 import { SummaryChip } from "@/components/communications/SummaryChip";
 import { OutboxBadge } from "@/components/communications/OutboxBadge";
@@ -44,6 +47,7 @@ export default function Communications() {
   const readState = useCommReadState();
 
   const [chip, setChip] = useState<ChipFilter>("all");
+  const [mode, setMode] = useState<StreamMode>("stream");
   const [stateFilter, setStateFilter] = useState<FilterValue>("all");
   const [active, setActive] = useState<CommMessage | null>(null);
   const [activeDraft, setActiveDraft] = useState<string | undefined>(undefined);
@@ -122,6 +126,9 @@ export default function Communications() {
     if (stateFilter === "needs-reply") out = out.filter((m) => m.needsReply);
     return out;
   }, [stream, hidden, triage, chip, stateFilter]);
+
+  // People-view groups derived from the same filtered stream.
+  const peopleGroups = usePeopleView(filtered, triageMap);
 
   // Keep refs in sync for keyboard handlers (avoid stale closures).
   useEffect(() => {
@@ -412,7 +419,12 @@ export default function Communications() {
             {/* Sticky sub-header */}
             <div className="sticky top-14 z-20 px-4 lg:px-6 py-2.5 bg-background/70 backdrop-blur-2xl space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-[13px] font-medium text-foreground">All Messages</h2>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-[13px] font-medium text-foreground truncate">
+                    {mode === "people" ? `People · ${peopleGroups.length}` : "All Messages"}
+                  </h2>
+                  <StreamModeToggle value={mode} onChange={setMode} />
+                </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => setTriage((v) => !v)}
@@ -468,6 +480,15 @@ export default function Communications() {
 
             {filtered.length === 0 ? (
               <EmptyCaughtUp />
+            ) : mode === "people" ? (
+              <>
+                <PeopleStream
+                  groups={peopleGroups}
+                  triageMap={triageMap}
+                  onTap={openMessage}
+                />
+                <OutboxBadge onRetry={() => refetch()} />
+              </>
             ) : (
               <>
                 {digest.priorities.length > 0 && (
