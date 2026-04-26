@@ -19,6 +19,7 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 export function useConversations() {
