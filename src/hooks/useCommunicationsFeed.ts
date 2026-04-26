@@ -66,6 +66,7 @@ export interface CommunicationsFeed {
   digest: DailyDigest;
   stream: CommMessage[];
   diagnostics: FeedDiagnostics;
+  triageMap: Map<string, TriageItem>;
   isLoading: boolean;
   isFetching: boolean;
   refetch: () => void;
