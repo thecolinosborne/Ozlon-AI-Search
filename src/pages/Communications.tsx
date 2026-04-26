@@ -11,6 +11,7 @@ import {
 import { useScrollCollapse } from "@/hooks/useScrollCollapse";
 import { useDailyBrief } from "@/hooks/useDailyBrief";
 import { PulseRibbon } from "@/components/communications/PulseRibbon";
+import { CommandComposer, type ComposerCommand } from "@/components/communications/CommandComposer";
 import { FocusStack } from "@/components/communications/FocusStack";
 import { SummaryChip } from "@/components/communications/SummaryChip";
 import { OutboxBadge } from "@/components/communications/OutboxBadge";
