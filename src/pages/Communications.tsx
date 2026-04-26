@@ -50,6 +50,8 @@ export default function Communications() {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [focusedIdx, setFocusedIdx] = useState<number>(-1);
   const prevSlackMissing = useRef(false);
+  const filteredRef = useRef<CommMessage[]>([]);
+  const focusedIdxRef = useRef<number>(-1);
 
   // Toast once when Slack flips from missing-scope → loading messages.
   useEffect(() => {
