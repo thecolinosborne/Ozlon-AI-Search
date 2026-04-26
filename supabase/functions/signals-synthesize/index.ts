@@ -121,10 +121,10 @@ async function buildContextSummary(userId: string): Promise<string> {
   return lines.join("\n");
 }
 
-// Wisdom recall — prior beliefs + signal feedback patterns
+// Wisdom recall — prior beliefs + signal feedback patterns + Phase E tuning
 async function recallWisdom(userId: string, queryEmbedding: number[]) {
   const embStr = JSON.stringify(queryEmbedding);
-  const [mems, refs, throttles] = await Promise.all([
+  const [mems, refs, throttles, tuningRow] = await Promise.all([
     admin.rpc("match_wisdom_memories", {
       query_embedding: embStr, match_threshold: 0.4, match_count: 8,
       filter_user_id: userId,
@@ -138,12 +138,24 @@ async function recallWisdom(userId: string, queryEmbedding: number[]) {
       .select("id, content")
       .eq("user_id", userId)
       .eq("memory_type", "signal_throttle"),
+    // Phase E: outcome-driven per-kind tuning written by signals-tune.
+    admin.from("wisdom_memories")
+      .select("content")
+      .eq("user_id", userId)
+      .eq("memory_type", "signal_tuning")
+      .maybeSingle(),
   ]);
+
+  let tuning: Record<string, { floor: number; sample_size: number }> = {};
+  if (tuningRow.data?.content) {
+    try { tuning = JSON.parse(tuningRow.data.content); } catch { tuning = {}; }
+  }
 
   return {
     memories: (mems.data ?? []) as Array<{ id: string; content: string; summary: string | null }>,
     reflections: (refs.data ?? []) as Array<{ id: string; content: string }>,
     throttles: (throttles.data ?? []) as Array<{ id: string; content: string }>,
+    tuning,
   };
 }
 
