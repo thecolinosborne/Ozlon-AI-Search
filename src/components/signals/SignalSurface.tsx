@@ -175,6 +175,18 @@ export function SignalSurface({ variant = "page", maxMoments = 1, sendText, enab
                 )}
 
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2">
+                  {(() => {
+                    const skill = matchSkill(m);
+                    return skill ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRunSkill(m, skill.slug)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-foreground text-background text-xs font-medium hover:bg-foreground/90 transition-colors"
+                      >
+                        Run {skill.name}
+                      </button>
+                    ) : null;
+                  })()}
                   {m.reason && !expanded.why && (
                     <InlinePrompt onClick={() => setExpanded((e) => ({ ...e, why: true }))}>
                       Why?
