@@ -26,6 +26,7 @@ import { ReplySheet } from "@/components/communications/ReplySheet";
 import { BriefMeOverlay } from "@/components/communications/BriefMeOverlay";
 import { EmptyCaughtUp } from "@/components/communications/EmptyCaughtUp";
 import { SlackStatusBanner } from "@/components/communications/SlackStatusBanner";
+import { SignalsBanner } from "@/components/communications/SignalsBanner";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCommReadState } from "@/hooks/useCommReadState";
@@ -457,6 +458,25 @@ export default function Communications() {
                 scope={diagnostics.slackScope ?? null}
               />
             ) : null}
+
+            {/* Phase D — Signals fusion banner. Surfaces high-salience moments
+                from the Wisdom Engine inline with the inbox. */}
+            <SignalsBanner
+              onAct={({ headline, suggestion }) => {
+                // If the suggestion mentions reply/draft, flip into triage mode
+                // so the user lands on the most relevant message immediately.
+                const text = `${headline} — ${suggestion ?? ""}`.toLowerCase();
+                if (/reply|respond|draft|follow.?up/.test(text)) {
+                  setTriage(true);
+                  toast({
+                    title: "Triage mode on",
+                    description: suggestion ?? headline,
+                  });
+                } else {
+                  toast({ title: "Signal noted", description: suggestion ?? headline });
+                }
+              }}
+            />
 
             {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
             <FocusStack
