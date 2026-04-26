@@ -82,3 +82,25 @@ Deno.test("mergeCompanion is a no-op when companion is null", () => {
   const m = { slug: "x" };
   assertEquals(mergeCompanion(m, null), m);
 });
+
+Deno.test("heal: keyword triggers with `value` get coerced to `match[]`; presentation→ui", () => {
+  const m = {
+    slug: "marketing-studio-director",
+    name: "Marketing Studio Director",
+    description: "Turns ad concepts into Higgsfield prompts.",
+    version: "1.0.0",
+    triggers: [
+      { type: "keyword", value: "Marketing Studio" },
+      { type: "keyword", value: "UGC ad" },
+    ],
+    tools_required: [],
+    instructions: "x".repeat(50),
+    presentation: { display_name: "MSD", icon: "video", brand_color: "#111" },
+  };
+  const r = adaptSkill(JSON.stringify(m));
+  assertExists(r.manifest);
+  assertEquals(r.manifest!.triggers[0].match, ["Marketing Studio"]);
+  assertEquals(r.manifest!.triggers[1].match, ["UGC ad"]);
+  assertEquals(r.manifest!.ui?.icon, "video");
+  assertEquals(r.manifest!.presentation, undefined);
+});
