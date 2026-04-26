@@ -3148,6 +3148,16 @@ async function executeToolCall(
       if (!skill) {
         return { success: false, result: `Skill "${slug}" is not installed for this user.` };
       }
+      // Mode-guard: defense in depth — even if the model ignores the gated index,
+      // disallowed modes must not be able to activate the skill at runtime.
+      const currentMode = (globalThis as Record<string, unknown>).__currentMode as string | undefined;
+      const allowed = (skill.manifest as { modes_allowed?: string[] } | undefined)?.modes_allowed;
+      if (currentMode && Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(currentMode)) {
+        return {
+          success: false,
+          result: `Skill "${slug}" is not allowed in ${currentMode} mode (allowed: ${allowed.join(", ")}).`,
+        };
+      }
       const m = skill.manifest;
       // Best-effort audit (non-blocking)
       recordInvocation({
@@ -8093,6 +8103,7 @@ serve(async (req) => {
             .maybeSingle();
           currentMode = (ctx?.current_mode as string | undefined) ?? null;
         } catch (_) { /* mode optional */ }
+        (globalThis as Record<string, unknown>).__currentMode = currentMode ?? undefined;
         const gated = filterSkillsByMode(installed, currentMode);
         const indexBlock = formatSkillIndexForPrompt(buildSkillIndex(gated), currentMode);
         if (indexBlock) {
