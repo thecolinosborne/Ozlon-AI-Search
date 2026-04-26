@@ -66,7 +66,6 @@ export function getMemoryDomains(skill: SkillRow | null): string[] {
   const d = skill.manifest?.memory_domains;
   return Array.isArray(d) ? d.filter((x): x is string => typeof x === "string") : [];
 }
-}
 
 /** Look up a skill by slug for a given user (must be installed + enabled). */
 export async function getSkillBySlug(
