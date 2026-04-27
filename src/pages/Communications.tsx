@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Mic, RefreshCw, Target } from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw, Target, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useCommunicationsFeed,
