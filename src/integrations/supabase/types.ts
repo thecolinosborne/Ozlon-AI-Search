@@ -201,6 +201,7 @@ export type Database = {
       }
       chat_sessions: {
         Row: {
+          active_ghl_location_id: string | null
           created_at: string
           current_artifact_id: string | null
           deleted_at: string | null
@@ -218,6 +219,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active_ghl_location_id?: string | null
           created_at?: string
           current_artifact_id?: string | null
           deleted_at?: string | null
@@ -235,6 +237,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active_ghl_location_id?: string | null
           created_at?: string
           current_artifact_id?: string | null
           deleted_at?: string | null
@@ -1321,6 +1324,7 @@ export type Database = {
           auto_play_responses: boolean | null
           avatar_url: string | null
           created_at: string
+          default_ghl_location_id: string | null
           elevenlabs_voice_id: string | null
           email_signature: string | null
           first_name: string | null
@@ -1343,6 +1347,7 @@ export type Database = {
           auto_play_responses?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          default_ghl_location_id?: string | null
           elevenlabs_voice_id?: string | null
           email_signature?: string | null
           first_name?: string | null
@@ -1365,6 +1370,7 @@ export type Database = {
           auto_play_responses?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          default_ghl_location_id?: string | null
           elevenlabs_voice_id?: string | null
           email_signature?: string | null
           first_name?: string | null

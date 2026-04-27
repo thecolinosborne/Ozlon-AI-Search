@@ -2224,6 +2224,20 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_set_default_sub_account',
+      description: 'Set the user\'s PERMANENT default GoHighLevel sub-account. This persists across all future chat sessions — use when the user says things like "make this my default", "remember this account", or "always use X". For temporary single-conversation switches, use ghl_set_active_sub_account instead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          location_id: { type: 'string', description: 'GHL location/sub-account id' },
+          name: { type: 'string', description: 'Friendly name of the sub-account (fuzzy match)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_smart_search',
       description: 'Unified search across GoHighLevel contacts, opportunities, conversations, and appointments in a single call. Use this when the user asks to "find" or "search for" something in GHL without specifying the resource type — it collapses what would otherwise be 3-4 separate tool calls.',
       parameters: {
@@ -4484,7 +4498,54 @@ async function executeToolCall(
           ghlCreds.locationId = match.id;
           if (match.api_key) ghlCreds.apiKey = match.api_key;
         }
-        return { success: true, result: `Active GHL sub-account is now "${match.name}" (${match.id}).` };
+        // Persist to session memory so the choice survives across messages in this conversation.
+        try {
+          const sid = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+          if (sid && uid) {
+            const { createClient: ccSess } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+            const adminSess = ccSess(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+            await adminSess.from('chat_sessions')
+              .update({ active_ghl_location_id: match.id })
+              .eq('id', sid).eq('user_id', uid);
+          }
+        } catch (e) { console.error('[GHL] session-memory persist failed:', e); }
+        return { success: true, result: `Active GHL sub-account is now "${match.name}" (${match.id}). Remembered for this conversation.` };
+      }
+      case 'ghl_set_default_sub_account': {
+        const subs = ghlCreds?.subAccounts || [];
+        const wantId = (args.location_id as string | undefined)?.trim();
+        const wantName = (args.name as string | undefined)?.trim().toLowerCase();
+        if (!wantId && !wantName) return { success: false, result: 'Provide either location_id or name.' };
+        let match = wantId ? subs.find((s) => s.id === wantId) : undefined;
+        if (!match && wantName) {
+          match = subs.find((s) => s.name.toLowerCase() === wantName)
+            || subs.find((s) => s.name.toLowerCase().includes(wantName));
+        }
+        if (!match) {
+          return {
+            success: false,
+            result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
+          };
+        }
+        try {
+          const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+          if (!uid) return { success: false, result: 'No authenticated user; cannot save default.' };
+          const { createClient: ccDef } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminDef = ccDef(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          const { error } = await adminDef.from('profiles')
+            .update({ default_ghl_location_id: match.id })
+            .eq('user_id', uid);
+          if (error) return { success: false, result: `Failed to save default: ${error.message}` };
+          // Also apply for the rest of this turn.
+          if (ghlCreds) {
+            ghlCreds.locationId = match.id;
+            if (match.api_key) ghlCreds.apiKey = match.api_key;
+          }
+          return { success: true, result: `"${match.name}" is now your permanent default GoHighLevel sub-account. Every new chat will start with it.` };
+        } catch (e) {
+          return { success: false, result: `Failed to save default: ${(e as Error).message}` };
+        }
       }
       case 'ghl_smart_search': {
         const query = (args.query as string | undefined)?.trim();
@@ -6766,6 +6827,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'ghl_delete_media_file': 'ghl',
     'ghl_list_sub_accounts': 'ghl',
     'ghl_set_active_sub_account': 'ghl',
+    'ghl_set_default_sub_account': 'ghl',
     'ghl_smart_search': 'ghl',
     // GSC / SEO tools
     'gsc_list_sites': 'google-search-console',
@@ -8217,6 +8279,53 @@ ${parts.join('\n\n')}
             }
           }
         }
+
+        // ============================================================
+        // GHL ACTIVE-LOCATION MEMORY (3 layers, priority order):
+        //   1. Session-level: chat_sessions.active_ghl_location_id
+        //   2. User default:  profiles.default_ghl_location_id
+        //   3. Metadata fallback (already resolved above)
+        // ============================================================
+        if (GHL_API_KEY_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED.length > 0) {
+          let memoryLocationId: string | null = null;
+          let memorySource: 'session' | 'default' | 'metadata' = 'metadata';
+
+          const sid = (body.sessionId as string | undefined) || undefined;
+          if (sid) {
+            const { data: sess } = await admin
+              .from('chat_sessions')
+              .select('active_ghl_location_id')
+              .eq('id', sid)
+              .eq('user_id', credUserId)
+              .maybeSingle();
+            if (sess?.active_ghl_location_id) {
+              memoryLocationId = sess.active_ghl_location_id;
+              memorySource = 'session';
+            }
+          }
+
+          if (!memoryLocationId) {
+            const { data: prof } = await admin
+              .from('profiles')
+              .select('default_ghl_location_id')
+              .eq('user_id', credUserId)
+              .maybeSingle();
+            if (prof?.default_ghl_location_id) {
+              memoryLocationId = prof.default_ghl_location_id;
+              memorySource = 'default';
+            }
+          }
+
+          if (memoryLocationId) {
+            const match = GHL_SUB_ACCOUNTS_RESOLVED.find((s) => s.id === memoryLocationId);
+            if (match) {
+              GHL_LOCATION_ID_RESOLVED = match.id;
+              if (match.api_key) GHL_API_KEY_RESOLVED = match.api_key;
+              (globalThis as Record<string, unknown>).__ghlMemorySource = memorySource;
+              console.log(`[GHL] Active sub-account from ${memorySource}: "${match.name}" (${match.id})`);
+            }
+          }
+        }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
@@ -8285,16 +8394,27 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // Add GHL to connected services list — name the active sub-account explicitly
       // so the model never claims GHL is "not connected" when the user references an
-      // account by friendly name.
+      // account by friendly name. Also tell the model WHERE the active account came from
+      // (session memory, user default, or fallback) so it can confirm to the user.
       const activeSub = (GHL_SUB_ACCOUNTS_RESOLVED || []).find(s => s.id === GHL_LOCATION_ID_RESOLVED)
         || (GHL_SUB_ACCOUNTS_RESOLVED || [])[0];
       const subList = (GHL_SUB_ACCOUNTS_RESOLVED || []).map(s => `"${s.name}" (id: ${s.id})`).join(', ');
+      const memSrc = (globalThis as Record<string, unknown>).__ghlMemorySource as string | undefined;
+      const memLabel = memSrc === 'session' ? ' [active for this session]'
+        : memSrc === 'default' ? ' [user default]'
+        : '';
       systemPrompt += `\n\n===========================================================
 GOHIGHLEVEL — CONNECTED AND READY
 ===========================================================
 GoHighLevel IS connected. Do NOT tell the user it isn't connected. Do NOT ask them to connect it.
-Active sub-account: ${activeSub ? `"${activeSub.name}" (location_id: ${activeSub.id})` : `location_id: ${GHL_LOCATION_ID_RESOLVED || 'unknown'}`}
+Active sub-account: ${activeSub ? `"${activeSub.name}" (location_id: ${activeSub.id})${memLabel}` : `location_id: ${GHL_LOCATION_ID_RESOLVED || 'unknown'}`}
 ${subList ? `All available sub-accounts: ${subList}` : ''}
+
+ACCOUNT MEMORY:
+- ghl_set_active_sub_account: switches the active account for the rest of THIS conversation only.
+- ghl_set_default_sub_account: makes that account the user's PERMANENT default for all future conversations.
+If the user says "make this my default" or "remember this account", use ghl_set_default_sub_account.
+If the user just says "switch to X", use ghl_set_active_sub_account.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.

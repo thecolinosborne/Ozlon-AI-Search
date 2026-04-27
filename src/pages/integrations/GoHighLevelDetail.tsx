@@ -38,6 +38,8 @@ const GoHighLevelDetail = () => {
   const [testing, setTesting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
+  const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
+  const [savingDefault, setSavingDefault] = useState<string | null>(null);
 
   const subAccounts: SubAccount[] = settings.subAccounts || [];
   const activeId = settings.locationId || subAccounts[0]?.id || "";
@@ -74,6 +76,41 @@ const GoHighLevelDetail = () => {
     checkConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load the user's permanent AI default GHL sub-account.
+  useEffect(() => {
+    const loadDefault = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("default_ghl_location_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data?.default_ghl_location_id) setAiDefaultId(data.default_ghl_location_id);
+    };
+    loadDefault();
+  }, []);
+
+  const handleSetAiDefault = async (id: string) => {
+    setSavingDefault(id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ default_ghl_location_id: id })
+        .eq("user_id", user.id);
+      if (error) throw error;
+      setAiDefaultId(id);
+      const sub = subAccounts.find((s) => s.id === id);
+      toast.success(`"${sub?.name || id}" is now your AI default`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingDefault(null);
+    }
+  };
 
   const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: true };
 
@@ -301,11 +338,16 @@ const GoHighLevelDetail = () => {
                 )}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-foreground truncate">{acct.name}</span>
                     {acct.id === activeId && (
                       <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                         Default
+                      </span>
+                    )}
+                    {acct.id === aiDefaultId && (
+                      <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        AI Default
                       </span>
                     )}
                     {acct.api_key && (
@@ -319,6 +361,16 @@ const GoHighLevelDetail = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  {acct.id !== aiDefaultId && (
+                    <button
+                      onClick={() => handleSetAiDefault(acct.id)}
+                      disabled={savingDefault === acct.id}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                      title="Make this the default account the AI uses in every new chat"
+                    >
+                      {savingDefault === acct.id ? "Saving…" : "AI default"}
+                    </button>
+                  )}
                   {acct.id !== activeId && (
                     <button
                       onClick={() => handleSetActive(acct.id)}
