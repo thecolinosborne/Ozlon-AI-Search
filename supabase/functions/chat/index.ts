@@ -8193,13 +8193,27 @@ ${parts.join('\n\n')}
         if (conns) {
           for (const c of conns) {
             const meta = (c.metadata as Record<string, unknown>) || {};
-            if (typeof meta.api_key === 'string' && meta.api_key) {
-              GHL_API_KEY_RESOLVED = meta.api_key as string;
-              GHL_LOCATION_ID_RESOLVED = (meta.location_id as string) || undefined;
-              if (Array.isArray(meta.sub_accounts)) {
-                GHL_SUB_ACCOUNTS_RESOLVED = (meta.sub_accounts as { id: string; name: string; api_key?: string }[])
-                  .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string');
+            const subAccounts = Array.isArray(meta.sub_accounts)
+              ? (meta.sub_accounts as { id: string; name: string; api_key?: string }[])
+                  .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string')
+              : [];
+
+            // Prefer top-level api_key, otherwise fall back to the first sub-account
+            // that carries its own key (common when only a location-level PIT is stored).
+            let resolvedKey = (typeof meta.api_key === 'string' && meta.api_key) ? meta.api_key : '';
+            let resolvedLocation = (typeof meta.location_id === 'string' && meta.location_id) ? meta.location_id : '';
+            if (!resolvedKey) {
+              const sub = subAccounts.find((s) => typeof s.api_key === 'string' && s.api_key);
+              if (sub) {
+                resolvedKey = sub.api_key as string;
+                if (!resolvedLocation) resolvedLocation = sub.id;
               }
+            }
+
+            if (resolvedKey) {
+              GHL_API_KEY_RESOLVED = resolvedKey;
+              GHL_LOCATION_ID_RESOLVED = resolvedLocation || undefined;
+              GHL_SUB_ACCOUNTS_RESOLVED = subAccounts;
             }
           }
         }
