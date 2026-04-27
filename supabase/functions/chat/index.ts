@@ -8283,8 +8283,22 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
         }
       }
 
-      // Add GHL to connected services list
-      systemPrompt += `\n- GoHighLevel CRM (contacts, pipelines, opportunities, calendars, conversations, campaigns, workflows)`;
+      // Add GHL to connected services list — name the active sub-account explicitly
+      // so the model never claims GHL is "not connected" when the user references an
+      // account by friendly name.
+      const activeSub = (GHL_SUB_ACCOUNTS_RESOLVED || []).find(s => s.id === GHL_LOCATION_ID_RESOLVED)
+        || (GHL_SUB_ACCOUNTS_RESOLVED || [])[0];
+      const subList = (GHL_SUB_ACCOUNTS_RESOLVED || []).map(s => `"${s.name}" (id: ${s.id})`).join(', ');
+      systemPrompt += `\n\n===========================================================
+GOHIGHLEVEL — CONNECTED AND READY
+===========================================================
+GoHighLevel IS connected. Do NOT tell the user it isn't connected. Do NOT ask them to connect it.
+Active sub-account: ${activeSub ? `"${activeSub.name}" (location_id: ${activeSub.id})` : `location_id: ${GHL_LOCATION_ID_RESOLVED || 'unknown'}`}
+${subList ? `All available sub-accounts: ${subList}` : ''}
+
+If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
+If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
+For all GHL actions (create custom field, list contacts, create opportunity, etc.), use the ghl_* tools directly. Do NOT emit a capability-gap or "service_not_connected" report for GHL.`;
 
       // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
