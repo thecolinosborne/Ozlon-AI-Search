@@ -38,6 +38,8 @@ const GoHighLevelDetail = () => {
   const [testing, setTesting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
+  const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
+  const [savingDefault, setSavingDefault] = useState<string | null>(null);
 
   const subAccounts: SubAccount[] = settings.subAccounts || [];
   const activeId = settings.locationId || subAccounts[0]?.id || "";
