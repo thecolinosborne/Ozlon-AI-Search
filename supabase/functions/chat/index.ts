@@ -4484,7 +4484,54 @@ async function executeToolCall(
           ghlCreds.locationId = match.id;
           if (match.api_key) ghlCreds.apiKey = match.api_key;
         }
-        return { success: true, result: `Active GHL sub-account is now "${match.name}" (${match.id}).` };
+        // Persist to session memory so the choice survives across messages in this conversation.
+        try {
+          const sid = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+          if (sid && uid) {
+            const { createClient: ccSess } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+            const adminSess = ccSess(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+            await adminSess.from('chat_sessions')
+              .update({ active_ghl_location_id: match.id })
+              .eq('id', sid).eq('user_id', uid);
+          }
+        } catch (e) { console.error('[GHL] session-memory persist failed:', e); }
+        return { success: true, result: `Active GHL sub-account is now "${match.name}" (${match.id}). Remembered for this conversation.` };
+      }
+      case 'ghl_set_default_sub_account': {
+        const subs = ghlCreds?.subAccounts || [];
+        const wantId = (args.location_id as string | undefined)?.trim();
+        const wantName = (args.name as string | undefined)?.trim().toLowerCase();
+        if (!wantId && !wantName) return { success: false, result: 'Provide either location_id or name.' };
+        let match = wantId ? subs.find((s) => s.id === wantId) : undefined;
+        if (!match && wantName) {
+          match = subs.find((s) => s.name.toLowerCase() === wantName)
+            || subs.find((s) => s.name.toLowerCase().includes(wantName));
+        }
+        if (!match) {
+          return {
+            success: false,
+            result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
+          };
+        }
+        try {
+          const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+          if (!uid) return { success: false, result: 'No authenticated user; cannot save default.' };
+          const { createClient: ccDef } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminDef = ccDef(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          const { error } = await adminDef.from('profiles')
+            .update({ default_ghl_location_id: match.id })
+            .eq('user_id', uid);
+          if (error) return { success: false, result: `Failed to save default: ${error.message}` };
+          // Also apply for the rest of this turn.
+          if (ghlCreds) {
+            ghlCreds.locationId = match.id;
+            if (match.api_key) ghlCreds.apiKey = match.api_key;
+          }
+          return { success: true, result: `"${match.name}" is now your permanent default GoHighLevel sub-account. Every new chat will start with it.` };
+        } catch (e) {
+          return { success: false, result: `Failed to save default: ${(e as Error).message}` };
+        }
       }
       case 'ghl_smart_search': {
         const query = (args.query as string | undefined)?.trim();
