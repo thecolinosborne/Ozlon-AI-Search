@@ -472,5 +472,264 @@ export const goHighLevelIntegration: IntegrationManifest = {
       sideEffect: "write",
       cost: "cheap",
     },
+
+    // ============ CUSTOM FIELDS (full skill family) ============
+    // GHL dataType values + friendly aliases the model can use:
+    //   text -> TEXT, textarea/large_text -> LARGE_TEXT, number/numerical -> NUMERICAL,
+    //   phone -> PHONE, date -> DATE, dropdown/single_select -> SINGLE_OPTIONS,
+    //   multi_select/multiple_options -> MULTIPLE_OPTIONS, radio -> RADIO,
+    //   checkbox -> CHECKBOX, monetary/money -> MONETORY (GHL spelling).
+    {
+      name: "ghl_list_custom_fields",
+      action: "list_custom_fields",
+      description: "List GoHighLevel custom fields. Optionally filter by objectType (contact | opportunity | business). Always run before create/update to detect duplicates.",
+      schema: {
+        type: "object",
+        properties: {
+          objectType: { type: "string", description: "contact | opportunity | business" },
+        },
+        required: [],
+      },
+      mapArgs: (a) => ({ params: { objectType: a.objectType } }),
+      formatter: (data) =>
+        formatList(data, "customFields", { title: "name", sub: "dataType", meta: "id" }, { label: "custom fields" }),
+      sideEffect: "read",
+      cost: "free",
+    },
+    {
+      name: "ghl_get_custom_field",
+      action: "get_custom_field",
+      description: "Fetch a single GoHighLevel custom field by ID for audit or confirmation.",
+      schema: {
+        type: "object",
+        properties: { customFieldId: { type: "string" } },
+        required: ["customFieldId"],
+      },
+      mapArgs: (a) => ({ params: { customFieldId: a.customFieldId } }),
+      sideEffect: "read",
+      cost: "free",
+    },
+    {
+      name: "ghl_create_custom_field",
+      action: "create_custom_field",
+      description: "Create a new GoHighLevel custom field. Specify name, dataType, objectType. For dropdown/multi-select/radio/checkbox provide an `options` array. ALWAYS call ghl_list_custom_fields first to check for duplicates by name and fieldKey — if a match exists, ask the user whether to update the existing field (use ghl_update_custom_field) or create a variant with a different name.",
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Display label." },
+          dataType: { type: "string", description: "text | textarea | number | phone | date | dropdown | multi_select | radio | checkbox | monetary (also accepts GHL raw values)." },
+          objectType: { type: "string", description: "contact | opportunity | business. Defaults to contact." },
+          fieldKey: { type: "string", description: "Internal key. Auto-derived from name if omitted." },
+          placeholder: { type: "string" },
+          defaultValue: { type: "string" },
+          position: { type: "number" },
+          parentId: { type: "string", description: "Folder ID (custom field group)." },
+          options: {
+            type: "array",
+            description: "Required for dropdown/multi_select/radio/checkbox. Each item: { label, value?, position? }. value auto-derived from label if omitted.",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                value: { type: "string" },
+                position: { type: "number" },
+              },
+            },
+          },
+        },
+        required: ["name", "dataType"],
+      },
+      mapArgs: (a) => {
+        const objectType = normalizeObjectType(a.objectType);
+        const dataType = normalizeDataType(a.dataType);
+        const fieldKey = (a.fieldKey as string | undefined) || deriveFieldKey(a.name as string);
+        const body: Record<string, unknown> = {
+          name: a.name,
+          dataType,
+          fieldKey,
+          model: objectType,
+        };
+        if (a.placeholder !== undefined) body.placeholder = a.placeholder;
+        if (a.defaultValue !== undefined) body.defaultValue = a.defaultValue;
+        if (a.position !== undefined) body.position = a.position;
+        if (a.parentId !== undefined) body.parentId = a.parentId;
+        if (Array.isArray(a.options)) body.options = normalizeOptions(a.options as Array<Record<string, unknown>>);
+        return { body };
+      },
+      formatter: (data) => formatReceipt(data, "Created custom field {customField.name} (id: {customField.id}, key: {customField.fieldKey})"),
+      sideEffect: "write",
+      cost: "cheap",
+    },
+    {
+      name: "ghl_update_custom_field",
+      action: "update_custom_field",
+      description: "Update an existing GoHighLevel custom field — rename, change placeholder, edit options, change position.",
+      schema: {
+        type: "object",
+        properties: {
+          customFieldId: { type: "string" },
+          name: { type: "string" },
+          placeholder: { type: "string" },
+          position: { type: "number" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                value: { type: "string" },
+                position: { type: "number" },
+              },
+            },
+          },
+        },
+        required: ["customFieldId"],
+      },
+      mapArgs: (a) => {
+        const body: Record<string, unknown> = {};
+        if (a.name !== undefined) body.name = a.name;
+        if (a.placeholder !== undefined) body.placeholder = a.placeholder;
+        if (a.position !== undefined) body.position = a.position;
+        if (Array.isArray(a.options)) body.options = normalizeOptions(a.options as Array<Record<string, unknown>>);
+        return { params: { customFieldId: a.customFieldId }, body };
+      },
+      formatter: (data) => formatReceipt(data, "Updated custom field (id: {customField.id})"),
+      sideEffect: "write",
+      cost: "cheap",
+    },
+    {
+      name: "ghl_upsert_custom_field",
+      action: "create_custom_field",
+      description: "Upsert a GoHighLevel custom field — create if missing, update if found. The model MUST first call ghl_list_custom_fields with the same objectType, look for a name or fieldKey match, then either call ghl_update_custom_field (if found) or this tool (if not). Best DX for repeatable workflows.",
+      schema: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          dataType: { type: "string" },
+          objectType: { type: "string" },
+          fieldKey: { type: "string" },
+          placeholder: { type: "string" },
+          defaultValue: { type: "string" },
+          position: { type: "number" },
+          parentId: { type: "string" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                value: { type: "string" },
+                position: { type: "number" },
+              },
+            },
+          },
+        },
+        required: ["name", "dataType"],
+      },
+      mapArgs: (a) => {
+        const objectType = normalizeObjectType(a.objectType);
+        const dataType = normalizeDataType(a.dataType);
+        const fieldKey = (a.fieldKey as string | undefined) || deriveFieldKey(a.name as string);
+        const body: Record<string, unknown> = {
+          name: a.name,
+          dataType,
+          fieldKey,
+          model: objectType,
+        };
+        if (a.placeholder !== undefined) body.placeholder = a.placeholder;
+        if (a.defaultValue !== undefined) body.defaultValue = a.defaultValue;
+        if (a.position !== undefined) body.position = a.position;
+        if (a.parentId !== undefined) body.parentId = a.parentId;
+        if (Array.isArray(a.options)) body.options = normalizeOptions(a.options as Array<Record<string, unknown>>);
+        return { body };
+      },
+      formatter: (data) => formatReceipt(data, "Upserted custom field {customField.name} (id: {customField.id})"),
+      sideEffect: "write",
+      cost: "cheap",
+    },
+    {
+      name: "ghl_archive_custom_field",
+      action: "delete_custom_field",
+      description: "Archive (delete) a GoHighLevel custom field. WARNING: GHL only supports hard delete via API — historical data tied to the field may become inaccessible. Always confirm with the user first.",
+      schema: {
+        type: "object",
+        properties: { customFieldId: { type: "string" } },
+        required: ["customFieldId"],
+      },
+      mapArgs: (a) => ({ params: { customFieldId: a.customFieldId } }),
+      formatter: () => "Custom field archived (deleted permanently in GoHighLevel).",
+      sideEffect: "destructive",
+      cost: "free",
+      requiresConfirmation: true,
+    },
   ],
 };
+
+// ---------- Custom field helpers ----------
+const DATA_TYPE_ALIASES: Record<string, string> = {
+  text: "TEXT",
+  string: "TEXT",
+  textarea: "LARGE_TEXT",
+  large_text: "LARGE_TEXT",
+  longtext: "LARGE_TEXT",
+  number: "NUMERICAL",
+  numerical: "NUMERICAL",
+  numeric: "NUMERICAL",
+  phone: "PHONE",
+  date: "DATE",
+  dropdown: "SINGLE_OPTIONS",
+  single_select: "SINGLE_OPTIONS",
+  single_options: "SINGLE_OPTIONS",
+  select: "SINGLE_OPTIONS",
+  multi_select: "MULTIPLE_OPTIONS",
+  multiselect: "MULTIPLE_OPTIONS",
+  multiple_options: "MULTIPLE_OPTIONS",
+  radio: "RADIO",
+  checkbox: "CHECKBOX",
+  monetary: "MONETORY",
+  money: "MONETORY",
+  monetory: "MONETORY",
+  currency: "MONETORY",
+};
+
+function normalizeDataType(input: unknown): string {
+  if (typeof input !== "string") return "TEXT";
+  const trimmed = input.trim();
+  if (!trimmed) return "TEXT";
+  const upper = trimmed.toUpperCase();
+  const knownGhl = new Set([
+    "TEXT", "LARGE_TEXT", "NUMERICAL", "PHONE", "DATE",
+    "SINGLE_OPTIONS", "MULTIPLE_OPTIONS", "RADIO", "CHECKBOX", "MONETORY",
+  ]);
+  if (knownGhl.has(upper)) return upper;
+  const key = trimmed.toLowerCase().replace(/[\s-]+/g, "_");
+  return DATA_TYPE_ALIASES[key] ?? "TEXT";
+}
+
+function normalizeObjectType(input: unknown): string {
+  if (typeof input !== "string" || !input.trim()) return "contact";
+  const v = input.trim().toLowerCase();
+  if (v === "contacts") return "contact";
+  if (v === "opportunities") return "opportunity";
+  if (v === "businesses") return "business";
+  return v;
+}
+
+function deriveFieldKey(name: string): string {
+  if (!name || typeof name !== "string") return "field";
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_{2,}/g, "_") || "field";
+}
+
+function normalizeOptions(opts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return opts.map((o, idx) => {
+    const label = (o.label ?? o.name ?? "") as string;
+    const value = (o.value as string | undefined) ?? deriveFieldKey(label);
+    const position = (o.position as number | undefined) ?? idx;
+    return { label, value, position };
+  });
+}
+
