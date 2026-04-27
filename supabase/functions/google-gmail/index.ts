@@ -794,6 +794,59 @@ serve(async (req) => {
         return jsonOk({ success: true });
       }
 
+      // ── Layer 2: Auto-ingest controls + archive search ──
+      case "enable_auto_ingest": {
+        const accountEmail = String((params as AnyJson).accountEmail || "").trim();
+        const enabled = (params as AnyJson).enabled === undefined ? true : Boolean((params as AnyJson).enabled);
+        if (!accountEmail) return jsonErr("accountEmail is required");
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const { error } = await db
+          .from("email_ingest_state")
+          .upsert(
+            { user_id: userId, account_email: accountEmail, enabled },
+            { onConflict: "user_id,account_email" },
+          );
+        if (error) return jsonErr(`Failed to update ingest state: ${error.message}`, 500);
+        return jsonOk({ success: true, accountEmail, enabled, message: enabled ? `Auto-ingest enabled for ${accountEmail}. Polling every 15 minutes.` : `Auto-ingest paused for ${accountEmail}.` });
+      }
+
+      case "search_attachments_archive": {
+        const query = String((params as AnyJson).query || "").trim();
+        const limit = Number((params as AnyJson).limit || 5);
+        if (!query) return jsonErr("query is required");
+        const OPENAI_KEY = Deno.env.get("OPENAI_API_KEY");
+        if (!OPENAI_KEY) return jsonErr("OPENAI_API_KEY not configured", 500);
+        const embRes = await fetch("https://api.openai.com/v1/embeddings", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "text-embedding-3-small", input: query }),
+        });
+        if (!embRes.ok) return jsonErr(`Embedding failed: ${await embRes.text()}`, 502);
+        const embJson = await embRes.json();
+        const embedding = embJson?.data?.[0]?.embedding;
+        if (!embedding) return jsonErr("No embedding returned", 502);
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const { data, error } = await db.rpc("match_email_attachments", {
+          query_embedding: embedding,
+          match_threshold: 0.3,
+          match_count: limit,
+          filter_user_id: userId,
+        });
+        if (error) return jsonErr(`Search failed: ${error.message}`, 500);
+        const results = (data || []).map((r: AnyJson) => ({
+          filename: r.filename,
+          sender: r.sender,
+          subject: r.subject,
+          received_at: r.received_at,
+          summary: r.summary,
+          excerpt: String(r.extracted_text || "").slice(0, 500),
+          similarity: r.similarity,
+        }));
+        return jsonOk({ success: true, query, count: results.length, results });
+      }
+
       default:
         return jsonErr(`Unknown action: ${action}`);
     }
