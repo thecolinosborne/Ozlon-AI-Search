@@ -692,9 +692,39 @@ serve(async (req) => {
 
     if (!response.ok) {
       console.error('GHL API error:', response.status, JSON.stringify(data));
+      // Categorize for downstream AI consumption (verbatim message preserved)
+      const status = response.status;
+      let category = 'tooling_gap';
+      let minimum_fix = 'Review tool arguments and retry.';
+      if (status === 401 || status === 403) {
+        category = 'auth_gap';
+        minimum_fix = 'Reconnect the GoHighLevel sub-account or refresh the API key.';
+      } else if (status === 404) {
+        category = 'schema_gap';
+        minimum_fix = 'Check the resource ID, objectType, or endpoint path.';
+      } else if (status === 400 || status === 422) {
+        category = 'schema_gap';
+        minimum_fix = 'Fix the payload — required field missing or invalid value.';
+      } else if (status === 429) {
+        category = 'policy_block';
+        minimum_fix = 'Rate limited by GoHighLevel — wait and retry.';
+      } else if (status >= 500) {
+        category = 'upstream_error';
+        minimum_fix = 'GoHighLevel is failing — retry later.';
+      }
+      const verbatim = typeof data === 'string' ? data : JSON.stringify(data);
       return new Response(
-        JSON.stringify({ error: `GHL API error: ${response.status}`, details: data }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({
+          ok: false,
+          error: {
+            category,
+            ghl_status: status,
+            ghl_message: verbatim,
+            minimum_fix,
+          },
+          details: data,
+        }),
+        { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
