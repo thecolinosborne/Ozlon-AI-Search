@@ -758,6 +758,120 @@ export type Database = {
         }
         Relationships: []
       }
+      email_attachments: {
+        Row: {
+          account_email: string | null
+          attachment_id: string
+          created_at: string
+          embedding: string | null
+          entities: Json | null
+          error_message: string | null
+          extracted_text: string | null
+          filename: string
+          id: string
+          message_id: string
+          metadata: Json | null
+          mime_type: string | null
+          received_at: string | null
+          sender: string | null
+          sender_email: string | null
+          size_bytes: number | null
+          status: string
+          subject: string | null
+          summary: string | null
+          thread_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_email?: string | null
+          attachment_id: string
+          created_at?: string
+          embedding?: string | null
+          entities?: Json | null
+          error_message?: string | null
+          extracted_text?: string | null
+          filename: string
+          id?: string
+          message_id: string
+          metadata?: Json | null
+          mime_type?: string | null
+          received_at?: string | null
+          sender?: string | null
+          sender_email?: string | null
+          size_bytes?: number | null
+          status?: string
+          subject?: string | null
+          summary?: string | null
+          thread_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_email?: string | null
+          attachment_id?: string
+          created_at?: string
+          embedding?: string | null
+          entities?: Json | null
+          error_message?: string | null
+          extracted_text?: string | null
+          filename?: string
+          id?: string
+          message_id?: string
+          metadata?: Json | null
+          mime_type?: string | null
+          received_at?: string | null
+          sender?: string | null
+          sender_email?: string | null
+          size_bytes?: number | null
+          status?: string
+          subject?: string | null
+          summary?: string | null
+          thread_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      email_ingest_state: {
+        Row: {
+          account_email: string
+          created_at: string
+          enabled: boolean
+          filters: Json | null
+          id: string
+          last_history_id: string | null
+          last_message_date: string | null
+          last_polled_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_email: string
+          created_at?: string
+          enabled?: boolean
+          filters?: Json | null
+          id?: string
+          last_history_id?: string | null
+          last_message_date?: string | null
+          last_polled_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_email?: string
+          created_at?: string
+          enabled?: boolean
+          filters?: Json | null
+          id?: string
+          last_history_id?: string | null
+          last_message_date?: string | null
+          last_polled_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       gauntlet_routing_log: {
         Row: {
           chosen_model: string | null
@@ -2878,6 +2992,24 @@ export type Database = {
           _user_id: string
         }
         Returns: string
+      }
+      match_email_attachments: {
+        Args: {
+          filter_user_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          extracted_text: string
+          filename: string
+          id: string
+          received_at: string
+          sender: string
+          similarity: number
+          subject: string
+          summary: string
+        }[]
       }
       match_knowledge: {
         Args: {
