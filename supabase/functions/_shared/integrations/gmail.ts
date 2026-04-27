@@ -209,6 +209,32 @@ export const gmailIntegration: IntegrationManifest = {
       },
     },
     {
+      name: "gmail_search_attachments_archive",
+      description: "Semantic search across all auto-ingested email attachments (the user's long-term document memory). Use when the user asks about a previously received document without specifying which email (e.g. 'what did that contract say', 'find the invoice from last month'). Returns matching attachments with summary, sender, subject, and excerpt.",
+      action: "search_attachments_archive",
+      schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural-language description of what to find." },
+          limit: { type: "number", description: "Max results (default 5)." },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "gmail_enable_auto_ingest",
+      description: "Enable background auto-ingestion of email attachments for an account. Once enabled, the system polls every 15 minutes, parses incoming PDFs/DOCX/XLSX/images, and stores them in the user's searchable archive.",
+      action: "enable_auto_ingest",
+      schema: {
+        type: "object",
+        properties: {
+          accountEmail: { type: "string", description: "The Gmail address to monitor (e.g. user@gmail.com)." },
+          enabled: { type: "boolean", description: "true to enable, false to pause. Defaults to true." },
+        },
+        required: ["accountEmail"],
+      },
+    },
+    {
       name: "gmail_star_message",
       description: "Star an email (adds STARRED label).",
       action: "star_message",
