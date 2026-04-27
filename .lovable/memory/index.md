@@ -88,6 +88,7 @@
 - [Event research](mem://features/event-research-architecture) — Tavily + Firecrawl scraping into `discovered_events`
 - [Sentient SEO](mem://features/sentient-seo-intelligence) — GSC snapshots + web_search_google cross-referencing
 - [GoHighLevel support](mem://integrations/gohighlevel-tier-3-support) — 50+ tools including Social Planner, Products, Contacts
+- [GHL account memory](mem://integrations/ghl-account-resolution) — Sub-account resolution: explicit > session (chat_sessions) > user default (profiles) > metadata fallback
 - [ClickUp workspace](mem://integrations/clickup-workspace-discovery) — API-driven Space/Folder/List picker, overrides env vars
 - [AI Processor registry](mem://integrations/ai-processor-registry) — Live verification of provider API keys
 - [Slack multi-tenant OAuth](mem://integrations/slack-multi-tenant-oauth) — Per-user "Add to Slack" install; tokens stored in integration_connections, events routed by team_id
