@@ -981,13 +981,11 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const token = authHeader.replace("Bearer ", "");
-    // deno-lint-ignore no-explicit-any
-    const { data: claims } = await (supabase.auth as any).getClaims(token);
-    if (!claims?.claims?.sub) {
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userData?.user?.id) {
       return jsonResp({ success: false, error: "Unauthorized" }, 401);
     }
-    userId = claims.claims.sub;
+    userId = userData.user.id;
 
     const body = await req.json().catch(() => ({}));
     action = String(body?.action ?? "");
