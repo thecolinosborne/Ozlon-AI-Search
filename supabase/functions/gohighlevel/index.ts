@@ -306,7 +306,33 @@ serve(async (req) => {
 
       // ============ CUSTOM FIELDS ============
       case 'list_custom_fields': {
+        const ot = (params?.objectType as string | undefined);
+        const qs = ot ? `?model=${encodeURIComponent(ot)}` : '';
+        endpoint = `${GHL_BASE_URL}/locations/${GHL_LOCATION_ID}/customFields${qs}`;
+        break;
+      }
+      case 'get_custom_field': {
+        if (!params?.customFieldId) throw new Error('customFieldId required');
+        endpoint = `${GHL_BASE_URL}/locations/${GHL_LOCATION_ID}/customFields/${params.customFieldId}`;
+        break;
+      }
+      case 'create_custom_field': {
         endpoint = `${GHL_BASE_URL}/locations/${GHL_LOCATION_ID}/customFields`;
+        method = 'POST';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+      case 'update_custom_field': {
+        if (!params?.customFieldId) throw new Error('customFieldId required');
+        endpoint = `${GHL_BASE_URL}/locations/${GHL_LOCATION_ID}/customFields/${params.customFieldId}`;
+        method = 'PUT';
+        fetchBody = JSON.stringify(reqBody);
+        break;
+      }
+      case 'delete_custom_field': {
+        if (!params?.customFieldId) throw new Error('customFieldId required');
+        endpoint = `${GHL_BASE_URL}/locations/${GHL_LOCATION_ID}/customFields/${params.customFieldId}`;
+        method = 'DELETE';
         break;
       }
 
