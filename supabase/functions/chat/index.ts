@@ -2224,6 +2224,20 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_set_default_sub_account',
+      description: 'Set the user\'s PERMANENT default GoHighLevel sub-account. This persists across all future chat sessions — use when the user says things like "make this my default", "remember this account", or "always use X". For temporary single-conversation switches, use ghl_set_active_sub_account instead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          location_id: { type: 'string', description: 'GHL location/sub-account id' },
+          name: { type: 'string', description: 'Friendly name of the sub-account (fuzzy match)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_smart_search',
       description: 'Unified search across GoHighLevel contacts, opportunities, conversations, and appointments in a single call. Use this when the user asks to "find" or "search for" something in GHL without specifying the resource type — it collapses what would otherwise be 3-4 separate tool calls.',
       parameters: {
