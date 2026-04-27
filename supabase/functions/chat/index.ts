@@ -8332,16 +8332,27 @@ The following is REAL data from the user's GoHighLevel account. Use this to answ
 
       // Add GHL to connected services list — name the active sub-account explicitly
       // so the model never claims GHL is "not connected" when the user references an
-      // account by friendly name.
+      // account by friendly name. Also tell the model WHERE the active account came from
+      // (session memory, user default, or fallback) so it can confirm to the user.
       const activeSub = (GHL_SUB_ACCOUNTS_RESOLVED || []).find(s => s.id === GHL_LOCATION_ID_RESOLVED)
         || (GHL_SUB_ACCOUNTS_RESOLVED || [])[0];
       const subList = (GHL_SUB_ACCOUNTS_RESOLVED || []).map(s => `"${s.name}" (id: ${s.id})`).join(', ');
+      const memSrc = (globalThis as Record<string, unknown>).__ghlMemorySource as string | undefined;
+      const memLabel = memSrc === 'session' ? ' [active for this session]'
+        : memSrc === 'default' ? ' [user default]'
+        : '';
       systemPrompt += `\n\n===========================================================
 GOHIGHLEVEL — CONNECTED AND READY
 ===========================================================
 GoHighLevel IS connected. Do NOT tell the user it isn't connected. Do NOT ask them to connect it.
-Active sub-account: ${activeSub ? `"${activeSub.name}" (location_id: ${activeSub.id})` : `location_id: ${GHL_LOCATION_ID_RESOLVED || 'unknown'}`}
+Active sub-account: ${activeSub ? `"${activeSub.name}" (location_id: ${activeSub.id})${memLabel}` : `location_id: ${GHL_LOCATION_ID_RESOLVED || 'unknown'}`}
 ${subList ? `All available sub-accounts: ${subList}` : ''}
+
+ACCOUNT MEMORY:
+- ghl_set_active_sub_account: switches the active account for the rest of THIS conversation only.
+- ghl_set_default_sub_account: makes that account the user's PERMANENT default for all future conversations.
+If the user says "make this my default" or "remember this account", use ghl_set_default_sub_account.
+If the user just says "switch to X", use ghl_set_active_sub_account.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
