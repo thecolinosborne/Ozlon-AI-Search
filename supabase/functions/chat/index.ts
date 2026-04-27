@@ -8217,6 +8217,53 @@ ${parts.join('\n\n')}
             }
           }
         }
+
+        // ============================================================
+        // GHL ACTIVE-LOCATION MEMORY (3 layers, priority order):
+        //   1. Session-level: chat_sessions.active_ghl_location_id
+        //   2. User default:  profiles.default_ghl_location_id
+        //   3. Metadata fallback (already resolved above)
+        // ============================================================
+        if (GHL_API_KEY_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED.length > 0) {
+          let memoryLocationId: string | null = null;
+          let memorySource: 'session' | 'default' | 'metadata' = 'metadata';
+
+          const sid = (body.sessionId as string | undefined) || undefined;
+          if (sid) {
+            const { data: sess } = await admin
+              .from('chat_sessions')
+              .select('active_ghl_location_id')
+              .eq('id', sid)
+              .eq('user_id', credUserId)
+              .maybeSingle();
+            if (sess?.active_ghl_location_id) {
+              memoryLocationId = sess.active_ghl_location_id;
+              memorySource = 'session';
+            }
+          }
+
+          if (!memoryLocationId) {
+            const { data: prof } = await admin
+              .from('profiles')
+              .select('default_ghl_location_id')
+              .eq('user_id', credUserId)
+              .maybeSingle();
+            if (prof?.default_ghl_location_id) {
+              memoryLocationId = prof.default_ghl_location_id;
+              memorySource = 'default';
+            }
+          }
+
+          if (memoryLocationId) {
+            const match = GHL_SUB_ACCOUNTS_RESOLVED.find((s) => s.id === memoryLocationId);
+            if (match) {
+              GHL_LOCATION_ID_RESOLVED = match.id;
+              if (match.api_key) GHL_API_KEY_RESOLVED = match.api_key;
+              (globalThis as Record<string, unknown>).__ghlMemorySource = memorySource;
+              console.log(`[GHL] Active sub-account from ${memorySource}: "${match.name}" (${match.id})`);
+            }
+          }
+        }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
