@@ -1,72 +1,68 @@
-# GHL Sub-Account Memory — Three Layers
+## GoHighLevel Custom Fields — Full Skill Family
 
-Make Ozlon remember which GoHighLevel sub-account you're working in across messages, sessions, and forever (as your default).
+Today Ozlon can only hit one half-wired endpoint (`list_custom_fields`) and it isn't even registered as an AI tool. This plan ships the complete field-management skill family the user described, with duplicate-safety, verbatim error surfacing, and the standard active-sub-account resolution.
 
-## What you'll be able to do
+### What gets built
 
-- *"Switch to Daddy Stroller"* → every message in this session now uses that account, automatically.
-- *"Make Daddy Stroller my default GHL account"* → every NEW chat session starts with it, forever.
-- Pick a default visually on the Go High Level integration page.
-- Always see which account is active in the GHL settings page.
+**6 new AI tools** (registered in the GHL manifest so the chat agent can call them):
 
-## How memory resolves on every message
+| Tool | Verb | Notes |
+|---|---|---|
+| `ghl_list_custom_fields` | read | Filter by `objectType` (contact / opportunity / business). Wires up the orphan endpoint. |
+| `ghl_get_custom_field` | read | Fetch one field by ID for audit/confirmation. |
+| `ghl_create_custom_field` | write | Full payload: name, dataType, placeholder, options, defaultValue, position, parentId (folder), objectType. |
+| `ghl_update_custom_field` | write | Rename, edit options, placeholder, position. |
+| `ghl_upsert_custom_field` | write | Lists first → matches by normalized key/name → creates or updates. Best DX for repeatable workflows. |
+| `ghl_archive_custom_field` | destructive | Archive-first. GHL only supports hard delete via API, so this performs a delete and labels it as archive in the receipt + requires confirmation. |
 
-```text
-1. Did you name a sub-account in this message?     → use it + remember at session level
-2. Does this session have an active account set?   → use it
-3. Do you have a personal default account?         → use it
-4. Fall back to the original metadata.location_id  → use it
+**Supported field types** (GHL `dataType` values): TEXT, LARGE_TEXT (textarea), NUMERICAL, PHONE, DATE, SINGLE_OPTIONS (dropdown), MULTIPLE_OPTIONS, RADIO, CHECKBOX, MONETORY (GHL's spelling). The schema accepts a friendly alias map (`textarea` → `LARGE_TEXT`, `dropdown` → `SINGLE_OPTIONS`, `monetary` → `MONETORY`) so the AI can pass natural names.
+
+**Option-based fields** accept an `options` array of `{ label, value?, position? }`. If `value` is omitted we auto-derive it from the label (lowercase, snake_case). `defaultValue` and `placeholder` pass through.
+
+### Skill behavior (built into the create + upsert tools)
+
+1. **Resolve active sub-account** — already handled by the existing 4-step priority (explicit → session → user default → metadata). No change needed.
+2. **Auto-suggest normalized key** — if `fieldKey` is omitted, derive from name: lowercase, replace non-alphanumerics with `_`, collapse repeats, strip leading/trailing `_`. Pass as `fieldKey` to GHL.
+3. **Duplicate detection** — `create` and `upsert` first fetch the existing field list for the target `objectType` and check for name + key collisions.
+   - `create`: returns a structured `duplicate_exists` error with the existing field ID so the AI can ask the user whether to update or create a variant. (No silent overwrite.)
+   - `upsert`: matches → calls update; no match → calls create.
+4. **Return receipt** — `{ id, name, fieldKey, dataType, objectType, optionsCount }`.
+
+### Error surfacing (the user's "fallback behavior" requirement)
+
+The edge function currently swallows GHL errors into a generic message. We update the GHL receiver to return a structured error block on any non-2xx GHL response:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "category": "schema_gap | auth_gap | service_not_connected | policy_block | tooling_gap | upstream_error",
+    "ghl_status": 422,
+    "ghl_message": "<verbatim body from GHL>",
+    "minimum_fix": "<one-line hint based on category>"
+  }
+}
 ```
 
-## Build steps
+Category mapping: 401/403 → `auth_gap`; 404 on the field endpoint → `schema_gap`; missing connection → `service_not_connected`; 422/400 with validation body → `schema_gap`; 429 → `policy_block`; 5xx → `upstream_error`. Anything else → `tooling_gap`. This matches the existing `chat/error-reporting-policy` memory ("never swallow errors, return detailed structured errors").
 
-### 1. Database (one schema migration)
-- Add `default_ghl_location_id TEXT` to `profiles`
-- Add `active_ghl_location_id TEXT` to `chat_sessions`
+### Files touched
 
-### 2. Backend (chat edge function)
-- On every chat turn, resolve the active GHL location using the 4-step priority above
-- When the AI calls `ghl_set_active_sub_account`, persist the choice to `chat_sessions.active_ghl_location_id` (session memory)
-- Add new tool `ghl_set_default_sub_account` — writes to `profiles.default_ghl_location_id` (forever memory)
-- Inject the active account name into the system prompt so the AI always knows which account it's operating on
+- `supabase/functions/gohighlevel/index.ts` — add cases for `get_custom_field`, `create_custom_field`, `update_custom_field`, `delete_custom_field`; tighten the existing `list_custom_fields` to accept `objectType` query param; add the structured error wrapper for non-2xx GHL responses.
+- `supabase/functions/_shared/integrations/gohighlevel.ts` — register all 6 tools with schemas, formatters, `mapArgs`, alias normalization, and `requiresConfirmation: true` on archive.
+- New helper inside the manifest file: `normalizeDataType()`, `deriveFieldKey()`, `normalizeOptions()`.
 
-### 3. UI (GHL detail page)
-- Add a "Default sub-account" selector at the top — radio buttons or dropdown listing all configured sub-accounts
-- Saves to `profiles.default_ghl_location_id` instantly
-- Show a small badge on the active sub-account card: "Default"
+### Out of scope (explicitly)
 
-### 4. Memory rule
-- Save a project memory: "GHL sub-account resolution = explicit > session > user default > metadata fallback"
+- No UI surface for managing fields (the user asked for AI tooling, not a visual field editor). Fields will be created/edited via chat and the existing GHL admin UI.
+- No new memory file — the existing `mem://integrations/ghl-account-resolution` and `mem://chat/error-reporting-policy` cover the patterns this skill family follows.
+- No `ghl_get_custom_field` formatter beyond the default JSON dump (audit use case is intentionally raw).
 
-## Technical details
+### Acceptance check
 
-**Migration**
-```sql
-ALTER TABLE profiles ADD COLUMN default_ghl_location_id TEXT;
-ALTER TABLE chat_sessions ADD COLUMN active_ghl_location_id TEXT;
-```
-Both nullable, no RLS changes (existing policies cover them).
-
-**Chat function changes** (`supabase/functions/chat/index.ts`)
-- After GHL credential resolution (~line 8193), look up `chat_sessions.active_ghl_location_id` for the current `sessionId`, then `profiles.default_ghl_location_id`. Apply the 4-step priority to set `GHL_LOCATION_ID_RESOLVED` and `GHL_API_KEY_RESOLVED` (matching the right sub-account's per-key API token).
-- In `ghl_set_active_sub_account` handler (~line 4462): after mutating `ghlCreds`, write `active_ghl_location_id` to the current session row using the service-role client.
-- New tool `ghl_set_default_sub_account` (description: "Set the user's permanent default GoHighLevel sub-account. Used across all future chat sessions."). Handler writes to `profiles.default_ghl_location_id`.
-- System prompt: change the GHL block to print the resolved active account name AND note "(default)" or "(session override)" so the user can verify in the response.
-
-**Frontend changes** (`src/pages/integrations/GoHighLevelDetail.tsx`)
-- Read `profiles.default_ghl_location_id` on mount.
-- Add a "Default for AI" section above the sub-accounts list with a select/radio control.
-- On change, update `profiles.default_ghl_location_id` via Supabase client.
-- Show a small "Default" pill on whichever sub-account row matches.
-
-**Files touched**
-- `supabase/migrations/<new>.sql` (new)
-- `supabase/functions/chat/index.ts` (additive)
-- `src/pages/integrations/GoHighLevelDetail.tsx` (additive)
-- `mem://integrations/ghl-account-resolution` (new memory)
-
-All changes are additive. No existing flows break — if the new columns are NULL, behavior is identical to today.
-
-## Out of scope (intentionally)
-- Cross-integration default (e.g. unified "active workspace" across GHL + ClickUp + Slack). Doable later as a generalization once GHL pattern proves out.
-- Auto-detection of sub-account from message content (e.g. "create a contact for Daddy Stroller" without explicit "switch to"). The AI can already do this via the existing system-prompt instruction; will improve naturally as the pattern works.
+After deploy, the AI should be able to handle, end-to-end:
+- "List all custom fields on contacts in GHL"
+- "Create a dropdown field called Lead Source on contacts with options Referral, Paid Ads, Organic"
+- "Rename the Lead Source field to Acquisition Channel"
+- "Make sure there's a contact field called Last NPS Score (number) — create or update as needed" (upsert)
+- A duplicate-name attempt returns a clean `duplicate_exists` error with the existing field ID, and the AI asks the user how to proceed instead of failing silently.
