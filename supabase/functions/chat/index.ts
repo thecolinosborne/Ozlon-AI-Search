@@ -6827,6 +6827,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'ghl_delete_media_file': 'ghl',
     'ghl_list_sub_accounts': 'ghl',
     'ghl_set_active_sub_account': 'ghl',
+    'ghl_set_default_sub_account': 'ghl',
     'ghl_smart_search': 'ghl',
     // GSC / SEO tools
     'gsc_list_sites': 'google-search-console',
