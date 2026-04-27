@@ -338,11 +338,16 @@ const GoHighLevelDetail = () => {
                 )}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-foreground truncate">{acct.name}</span>
                     {acct.id === activeId && (
                       <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                         Default
+                      </span>
+                    )}
+                    {acct.id === aiDefaultId && (
+                      <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        AI Default
                       </span>
                     )}
                     {acct.api_key && (
@@ -356,6 +361,16 @@ const GoHighLevelDetail = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  {acct.id !== aiDefaultId && (
+                    <button
+                      onClick={() => handleSetAiDefault(acct.id)}
+                      disabled={savingDefault === acct.id}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                      title="Make this the default account the AI uses in every new chat"
+                    >
+                      {savingDefault === acct.id ? "Saving…" : "AI default"}
+                    </button>
+                  )}
                   {acct.id !== activeId && (
                     <button
                       onClick={() => handleSetActive(acct.id)}
