@@ -872,6 +872,110 @@ export type Database = {
         }
         Relationships: []
       }
+      entities: {
+        Row: {
+          avatar_url: string | null
+          channel_counts: Json
+          created_at: string
+          display_name: string
+          entity_type: string
+          id: string
+          importance_score: number
+          interaction_count: number
+          last_interaction_at: string | null
+          metadata: Json | null
+          muted: boolean
+          primary_email: string | null
+          relationship_summary: string | null
+          starred: boolean
+          tags: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          channel_counts?: Json
+          created_at?: string
+          display_name: string
+          entity_type?: string
+          id?: string
+          importance_score?: number
+          interaction_count?: number
+          last_interaction_at?: string | null
+          metadata?: Json | null
+          muted?: boolean
+          primary_email?: string | null
+          relationship_summary?: string | null
+          starred?: boolean
+          tags?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          channel_counts?: Json
+          created_at?: string
+          display_name?: string
+          entity_type?: string
+          id?: string
+          importance_score?: number
+          interaction_count?: number
+          last_interaction_at?: string | null
+          metadata?: Json | null
+          muted?: boolean
+          primary_email?: string | null
+          relationship_summary?: string | null
+          starred?: boolean
+          tags?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      entity_identities: {
+        Row: {
+          channel: string
+          created_at: string
+          display_label: string | null
+          entity_id: string
+          id: string
+          identifier: string
+          metadata: Json | null
+          user_id: string
+          verified: boolean
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          display_label?: string | null
+          entity_id: string
+          id?: string
+          identifier: string
+          metadata?: Json | null
+          user_id: string
+          verified?: boolean
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          display_label?: string | null
+          entity_id?: string
+          id?: string
+          identifier?: string
+          metadata?: Json | null
+          user_id?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_identities_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       gauntlet_routing_log: {
         Row: {
           chosen_model: string | null

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Mic, RefreshCw, Target } from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw, Target, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useCommunicationsFeed,
@@ -397,6 +397,14 @@ export default function Communications() {
         </Link>
         <div className="flex items-center gap-1.5">
           <LearningPill />
+          <Link
+            to="/people"
+            className="h-9 px-3 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 backdrop-blur-xl border border-primary/20 flex items-center gap-1.5 text-[12px] font-medium text-foreground hover:border-primary/40 transition-colors"
+            aria-label="Open People view"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>People</span>
+          </Link>
           <button
             onClick={() => refetch()}
             disabled={isFetching}
