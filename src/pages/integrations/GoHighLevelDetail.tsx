@@ -77,6 +77,41 @@ const GoHighLevelDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load the user's permanent AI default GHL sub-account.
+  useEffect(() => {
+    const loadDefault = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("default_ghl_location_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data?.default_ghl_location_id) setAiDefaultId(data.default_ghl_location_id);
+    };
+    loadDefault();
+  }, []);
+
+  const handleSetAiDefault = async (id: string) => {
+    setSavingDefault(id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ default_ghl_location_id: id })
+        .eq("user_id", user.id);
+      if (error) throw error;
+      setAiDefaultId(id);
+      const sub = subAccounts.find((s) => s.id === id);
+      toast.success(`"${sub?.name || id}" is now your AI default`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingDefault(null);
+    }
+  };
+
   const syncData = settings.syncData || { contacts: true, pipelines: true, conversations: true };
 
   const persistMetadata = async (next: GHLSettings) => {
