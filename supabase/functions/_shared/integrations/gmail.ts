@@ -182,7 +182,7 @@ export const gmailIntegration: IntegrationManifest = {
     },
     {
       name: "gmail_get_attachment",
-      description: "Download a Gmail attachment by message ID + attachment ID. Returns base64 data.",
+      description: "Download a Gmail attachment by message ID + attachment ID. Returns base64 data. For analysis/summarization, prefer gmail_analyze_attachment.",
       action: "get_attachment",
       schema: {
         type: "object",
@@ -191,6 +191,21 @@ export const gmailIntegration: IntegrationManifest = {
           attachmentId: { type: "string" },
         },
         required: ["messageId", "attachmentId"],
+      },
+    },
+    {
+      name: "gmail_analyze_attachment",
+      description: "Download AND analyze a Gmail attachment. Extracts text from PDFs, DOCX, XLSX, PPTX, plain text/CSV/JSON, and uses vision for images. Pass the messageId, plus EITHER attachmentId OR a filename hint. Optionally pass a `question` to get a targeted answer; otherwise returns a structured summary. Use this whenever the user asks to read, summarize, or ask questions about a file in their inbox.",
+      action: "analyze_attachment",
+      schema: {
+        type: "object",
+        properties: {
+          messageId: { type: "string", description: "The Gmail message ID containing the attachment." },
+          attachmentId: { type: "string", description: "Optional. The specific attachment ID. If omitted, uses filename hint or first attachment." },
+          filename: { type: "string", description: "Optional. Substring of the filename to locate the attachment (e.g. 'invoice')." },
+          question: { type: "string", description: "Optional. A specific question to answer about the document. If omitted, returns a structured summary." },
+        },
+        required: ["messageId"],
       },
     },
     {
