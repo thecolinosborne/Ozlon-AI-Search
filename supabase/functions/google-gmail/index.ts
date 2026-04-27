@@ -459,6 +459,233 @@ serve(async (req) => {
         return jsonOk({ success: true, attachment: data });
       }
 
+      // ── Tier 1: Analyze Attachment (extract content + AI analysis) ──
+      case "analyze_attachment": {
+        const messageId = String((params as AnyJson).messageId || "");
+        let attachmentId = String((params as AnyJson).attachmentId || "");
+        const filenameHint = String((params as AnyJson).filename || "").toLowerCase();
+        const question = String((params as AnyJson).question || "").trim();
+        if (!messageId) return jsonErr("messageId is required");
+
+        // Resolve attachment metadata (mimeType, filename) from the message
+        // payload. If attachmentId is missing, locate it by filename hint or
+        // pick the first non-inline attachment.
+        let mimeType = "";
+        let filename = "";
+        try {
+          const msg = await gFetch(
+            userId,
+            `/messages/${encodeURIComponent(messageId)}?format=full`,
+          );
+          type GPart = {
+            filename?: string;
+            mimeType?: string;
+            body?: { attachmentId?: string };
+            parts?: GPart[];
+          };
+          const flat: GPart[] = [];
+          const walk = (p?: GPart) => {
+            if (!p) return;
+            flat.push(p);
+            (p.parts || []).forEach(walk);
+          };
+          walk((msg as { payload?: GPart }).payload);
+          const candidates = flat.filter(
+            (p) => p.filename && p.body?.attachmentId,
+          );
+          let match: GPart | undefined;
+          if (attachmentId) {
+            match = candidates.find((p) => p.body?.attachmentId === attachmentId);
+          } else if (filenameHint) {
+            match = candidates.find((p) =>
+              (p.filename || "").toLowerCase().includes(filenameHint)
+            );
+          }
+          if (!match) match = candidates[0];
+          if (!match) {
+            return jsonErr(
+              `No downloadable attachments found on message ${messageId}.`,
+              404,
+            );
+          }
+          attachmentId = String(match.body?.attachmentId || "");
+          mimeType = String(match.mimeType || "application/octet-stream");
+          filename = String(match.filename || "attachment");
+        } catch (e) {
+          return jsonErr(
+            `Failed to resolve attachment on message ${messageId}: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+            502,
+          );
+        }
+
+        // Download the binary
+        let dataB64Url = "";
+        let sizeBytes = 0;
+        try {
+          const att = await gFetch(
+            userId,
+            `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+          );
+          dataB64Url = String((att as AnyJson).data || "");
+          sizeBytes = Number((att as AnyJson).size || 0);
+        } catch (e) {
+          return jsonErr(
+            `Failed to download attachment: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+            502,
+          );
+        }
+
+        if (sizeBytes > 20 * 1024 * 1024) {
+          return jsonErr(
+            `Attachment "${filename}" is ${(sizeBytes / 1024 / 1024).toFixed(1)}MB — exceeds 20MB analysis limit.`,
+            413,
+          );
+        }
+        if (!dataB64Url) {
+          return jsonErr("Empty attachment data returned from Gmail.", 502);
+        }
+
+        // Convert Gmail base64url → standard base64
+        const stdB64 = dataB64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = stdB64 + "=".repeat((4 - (stdB64.length % 4)) % 4);
+
+        // Helper: decode base64 → utf8 text
+        const decodeText = (): string => {
+          try {
+            const bin = atob(padded);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+          } catch {
+            return "";
+          }
+        };
+
+        const lower = (filename + " " + mimeType).toLowerCase();
+        const isPlainText =
+          mimeType.startsWith("text/") ||
+          /\.(txt|md|csv|tsv|log|json|xml|html?|yaml|yml)$/i.test(filename) ||
+          mimeType.includes("json") ||
+          mimeType.includes("xml");
+        const isPdf = mimeType === "application/pdf" || lower.endsWith(".pdf");
+        const isImage = mimeType.startsWith("image/");
+        const isOffice =
+          /officedocument|msword|ms-excel|ms-powerpoint/.test(mimeType) ||
+          /\.(docx?|xlsx?|pptx?)$/i.test(filename);
+
+        // Plain text: return directly so the caller LLM can reason on it
+        if (isPlainText) {
+          const text = decodeText();
+          const truncated = text.slice(0, 200_000);
+          return jsonOk({
+            success: true,
+            filename,
+            mimeType,
+            sizeBytes,
+            kind: "text",
+            content: truncated,
+            truncated: text.length > truncated.length,
+          });
+        }
+
+        // PDFs / images / office docs → send to Gemini via Lovable AI Gateway
+        if (isPdf || isImage || isOffice) {
+          const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+          if (!LOVABLE_API_KEY) {
+            return jsonErr(
+              "LOVABLE_API_KEY not configured — cannot analyze binary attachments.",
+              500,
+            );
+          }
+          const analysisPrompt = question
+            ? `Analyze the attached file "${filename}" and answer this specific question:\n\n${question}\n\nQuote relevant text verbatim where it supports the answer.`
+            : `Extract all readable text from "${filename}" and provide a structured summary. Include: (1) document type, (2) key facts/figures/dates/parties, (3) any tables as markdown, (4) action items if applicable. Preserve numeric values exactly.`;
+
+          // Gemini accepts PDFs and images as inline_data; for unsupported
+          // office formats we still try — Gemini 2.5 handles many.
+          const dataUrl = `data:${mimeType};base64,${padded}`;
+          try {
+            const aiRes = await fetch(
+              "https://ai.gateway.lovable.dev/v1/chat/completions",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${LOVABLE_API_KEY}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-2.5-flash",
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        { type: "text", text: analysisPrompt },
+                        { type: "image_url", image_url: { url: dataUrl } },
+                      ],
+                    },
+                  ],
+                }),
+              },
+            );
+            const aiText = await aiRes.text();
+            let aiData: AnyJson;
+            try {
+              aiData = JSON.parse(aiText);
+            } catch {
+              aiData = { raw: aiText };
+            }
+            if (!aiRes.ok) {
+              if (aiRes.status === 429) {
+                return jsonErr(
+                  "AI rate limit hit while analyzing attachment. Please retry in a moment.",
+                  429,
+                );
+              }
+              if (aiRes.status === 402) {
+                return jsonErr(
+                  "AI credits exhausted. Add funds in Settings → Workspace → Usage.",
+                  402,
+                );
+              }
+              return jsonErr(
+                `AI analysis failed [${aiRes.status}]: ${JSON.stringify(aiData).slice(0, 500)}`,
+                502,
+              );
+            }
+            const analysis = String(
+              ((aiData as AnyJson).choices as AnyJson[] | undefined)?.[0]
+                ? ((((aiData as AnyJson).choices as AnyJson[])[0] as AnyJson)
+                  .message as AnyJson)?.content || ""
+                : "",
+            );
+            return jsonOk({
+              success: true,
+              filename,
+              mimeType,
+              sizeBytes,
+              kind: isPdf ? "pdf" : isImage ? "image" : "office",
+              analysis,
+              question: question || null,
+            });
+          } catch (e) {
+            return jsonErr(
+              `AI analysis crashed: ${e instanceof Error ? e.message : String(e)}`,
+              502,
+            );
+          }
+        }
+
+        // Unsupported binary
+        return jsonErr(
+          `Cannot analyze "${filename}" (${mimeType}) — unsupported file type. Supported: PDF, DOCX, XLSX, PPTX, images, plain text/CSV/JSON.`,
+          415,
+        );
+      }
+
       case "send_with_attachment": {
         const to = String((params as AnyJson).to || "");
         const subject = String((params as AnyJson).subject || "");
