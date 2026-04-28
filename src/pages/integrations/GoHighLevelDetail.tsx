@@ -269,12 +269,30 @@ const GoHighLevelDetail = () => {
 
   const handleRemoveSubAccount = async (id: string) => {
     const nextSubs = subAccounts.filter((s) => s.id !== id);
-    const nextActive = settings.locationId === id ? (nextSubs[0]?.id || "") : settings.locationId;
+    const nextActive = settings.locationId === id ? (nextSubs.find((s) => !s.disabled)?.id || "") : settings.locationId;
     const next: GHLSettings = { ...settings, subAccounts: nextSubs, locationId: nextActive };
     try {
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
-      toast.success("Sub-account removed");
+      toast.success("Sub-account forgotten");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const handleToggleConnection = async (sub: SubAccount) => {
+    const nextDisabled = !sub.disabled;
+    const nextSubs = subAccounts.map((s) => (s.id === sub.id ? { ...s, disabled: nextDisabled } : s));
+    // If disconnecting the active default, fall back to another connected sub.
+    let nextActive = settings.locationId;
+    if (nextDisabled && settings.locationId === sub.id) {
+      nextActive = nextSubs.find((s) => !s.disabled)?.id || "";
+    }
+    const next: GHLSettings = { ...settings, subAccounts: nextSubs, locationId: nextActive };
+    try {
+      await persistMetadata(next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      toast.success(nextDisabled ? `"${sub.name}" disconnected (still remembered)` : `"${sub.name}" reconnected`);
     } catch (err) {
       toast.error((err as Error).message);
     }
