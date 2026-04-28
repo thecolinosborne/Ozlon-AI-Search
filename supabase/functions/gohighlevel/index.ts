@@ -56,11 +56,32 @@ async function tryVaultRead(
   }
 }
 
-async function resolveGHLCredentials(req: Request, params?: Record<string, unknown>): Promise<{ apiKey: string; locationId: string }> {
-  // 1. Explicit params
-  const paramKey = params?.apiKey as string | undefined;
-  const paramLoc = params?.locationId as string | undefined;
-  if (paramKey && paramLoc) return { apiKey: paramKey, locationId: paramLoc };
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+async function resolveGHLCredentials(req: Request, payload?: Record<string, unknown>): Promise<{ apiKey: string; locationId: string }> {
+  const params = payload?.params && typeof payload.params === 'object'
+    ? payload.params as Record<string, unknown>
+    : undefined;
+
+  // 1. Explicit request overrides (supports both top-level and nested params).
+  // Chat dispatcher forwards the active sub-account pair at the top level.
+  const explicitKey =
+    readString(payload?.apiKey) ??
+    readString(payload?.api_key) ??
+    readString(params?.apiKey) ??
+    readString(params?.api_key);
+  const explicitLoc =
+    readString(payload?.locationId) ??
+    readString(payload?.location_id) ??
+    readString(params?.locationId) ??
+    readString(params?.location_id);
+
+  if (explicitKey && explicitLoc) {
+    console.log(`[gohighlevel/auth] using explicit request override for location ${explicitLoc}`);
+    return { apiKey: explicitKey, locationId: explicitLoc };
+  }
 
   // 2. Per-user lookup (vault-first, metadata fallback)
   const authHeader = req.headers.get('Authorization');
@@ -75,25 +96,48 @@ async function resolveGHLCredentials(req: Request, params?: Record<string, unkno
       if (user) {
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const adminClient = createClient(supabaseUrl, serviceKey);
-        const { data: conn } = await adminClient
+        const { data: connections } = await adminClient
           .from('integration_connections')
           .select('id, metadata')
           .eq('user_id', user.id)
           .eq('provider', 'gohighlevel')
-          .eq('status', 'connected')
-          .single();
-        if (conn?.id) {
-          const meta = (conn.metadata as Record<string, string>) || {};
-          const apiKey =
+          .eq('status', 'connected');
+
+        for (const conn of connections || []) {
+          if (!conn?.id) continue;
+          const meta = (conn.metadata as Record<string, unknown>) || {};
+          const topLevelKey =
             (await tryVaultRead(adminClient, conn.id, user.id, 'api_key')) ||
-            meta.api_key ||
+            readString(meta.api_key) ||
             '';
-          const locationId =
+          const topLevelLocation =
             (await tryVaultRead(adminClient, conn.id, user.id, 'location_id')) ||
-            meta.location_id ||
-            paramLoc ||
+            readString(meta.location_id) ||
             '';
-          if (apiKey) return { apiKey, locationId };
+          const subAccounts = Array.isArray(meta.sub_accounts)
+            ? (meta.sub_accounts as Record<string, unknown>[])
+            : [];
+          const matchingSub = explicitLoc
+            ? subAccounts.find((sub) => readString(sub?.id) === explicitLoc)
+            : undefined;
+          const matchingSubKey = matchingSub ? readString(matchingSub.api_key) : undefined;
+          const fallbackSub = subAccounts.find((sub) => readString(sub?.api_key));
+
+          // Explicit location requested: prefer its own token, then the top-level token.
+          if (explicitLoc) {
+            const candidateKey = explicitKey || matchingSubKey || topLevelKey;
+            if (candidateKey) {
+              console.log(`[gohighlevel/auth] resolved requested location ${explicitLoc} from stored connection`);
+              return { apiKey: candidateKey, locationId: explicitLoc };
+            }
+            continue;
+          }
+
+          const candidateLocation = topLevelLocation || readString(fallbackSub?.id) || explicitLoc || '';
+          const candidateKey = explicitKey || topLevelKey || readString(fallbackSub?.api_key) || '';
+          if (candidateKey && candidateLocation) {
+            return { apiKey: candidateKey, locationId: candidateLocation };
+          }
         }
       }
     } catch { /* fall through */ }
