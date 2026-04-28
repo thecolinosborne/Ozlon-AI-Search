@@ -7550,6 +7550,8 @@ async function runToolLoop(
   let taskCreated = false;
   const toolsUsed: string[] = [];
   const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
+  // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
+  (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -7834,7 +7836,50 @@ async function runToolLoop(
             }
           }
           if (!result) {
-            result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+            // ============================================================
+            // WRITE GUARDRAIL (Guardrail Fix #2)
+            // Block GHL write tools when the active account came from the
+            // user's permanent default but the conversation mentions a
+            // different sub-account by name. Force the model to call
+            // ghl_set_active_sub_account first.
+            // ============================================================
+            const GHL_WRITE_PREFIXES = ['ghl_create_', 'ghl_update_', 'ghl_delete_', 'ghl_archive_', 'ghl_send_', 'ghl_upsert_', 'ghl_book_', 'ghl_cancel_', 'ghl_add_', 'ghl_remove_', 'ghl_edit_', 'ghl_trigger_', 'ghl_import_', 'ghl_upload_'];
+            const isGhlWrite = GHL_WRITE_PREFIXES.some((p) => tc.function.name.startsWith(p));
+            if (isGhlWrite && ghlCreds?.subAccounts && ghlCreds.subAccounts.length > 1) {
+              const memSrc = (globalThis as Record<string, unknown>).__ghlMemorySource as string | undefined;
+              const mentionedName = (globalThis as Record<string, unknown>).__ghlMentionedSubName as string | undefined;
+              const switchedThisTurn = !!(globalThis as Record<string, unknown>).__ghlSwitchedThisTurn;
+              const activeSub = ghlCreds.subAccounts.find((s) => s.id === ghlCreds.locationId);
+              if (memSrc === 'default' && !switchedThisTurn && mentionedName && activeSub && activeSub.name.toLowerCase() !== mentionedName.toLowerCase()) {
+                const subList = ghlCreds.subAccounts.map((s) => `"${s.name}"`).join(', ');
+                result = {
+                  success: false,
+                  result: JSON.stringify({
+                    error: 'AMBIGUOUS_SUBACCOUNT',
+                    message: `Refusing to write to "${activeSub.name}" — that's your permanent default, but the conversation mentions "${mentionedName}". Call ghl_set_active_sub_account with name="${mentionedName}" first, then retry this write.`,
+                    resolved_account: activeSub.name,
+                    resolved_location_id: activeSub.id,
+                    mentioned_account: mentionedName,
+                    available_accounts: subList,
+                    fix: `ghl_set_active_sub_account(name="${mentionedName}")`,
+                  }),
+                };
+                console.warn(`[GHL guardrail] BLOCKED ${tc.function.name}: default=${activeSub.name} mentioned=${mentionedName}`);
+              }
+            }
+            if (tc.function.name === 'ghl_set_active_sub_account') {
+              (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = true;
+            }
+            if (!result) {
+              result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+              // Echo target sub-account on successful GHL writes so the user sees it.
+              if (isGhlWrite && result.success && ghlCreds?.subAccounts) {
+                const sub = ghlCreds.subAccounts.find((s) => s.id === ghlCreds.locationId);
+                if (sub && !result.result.includes(sub.name)) {
+                  result = { ...result, result: `[Account: ${sub.name}] ${result.result}` };
+                }
+              }
+            }
           }
           console.log(`Tool result (${tc.function.name}):`, result.success ? 'SUCCESS' : 'FAILED', result.result.substring(0, 200));
 
@@ -8603,6 +8648,56 @@ ${parts.join('\n\n')}
             GHL_ACTIVE_SCOPES = match.scopes.slice();
           }
         }
+
+        // ============================================================
+        // CONTEXT-BOUND ACCOUNT BINDING (Guardrail Fix #1)
+        // Scan the last user/assistant messages for sub-account names. If a
+        // name is mentioned, override the resolved location even when the
+        // model didn't explicitly call ghl_set_active_sub_account. This
+        // prevents writes from silently going to the user's default
+        // sub-account when conversation context names a different one.
+        // ============================================================
+        if (GHL_SUB_ACCOUNTS_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED.length > 1) {
+          try {
+            const recent = (Array.isArray(messages) ? messages : [])
+              .slice(-10)
+              .filter((m: { role?: string; content?: unknown }) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+              .map((m: { content: string }) => m.content.toLowerCase())
+              .join(' \n ');
+            // Score each sub-account by name-mention recency (last match wins).
+            let mentioned: { id: string; name: string; api_key?: string; scopes?: string[] } | null = null;
+            let bestPos = -1;
+            for (const sub of GHL_SUB_ACCOUNTS_RESOLVED) {
+              const needle = (sub.name || '').toLowerCase().trim();
+              if (!needle || needle.length < 3) continue;
+              const pos = recent.lastIndexOf(needle);
+              if (pos > bestPos) { bestPos = pos; mentioned = sub; }
+            }
+            if (mentioned && mentioned.id !== GHL_LOCATION_ID_RESOLVED) {
+              console.log(`[GHL] Context-bound override: switching from ${GHL_LOCATION_ID_RESOLVED} → "${mentioned.name}" (${mentioned.id}) — name mentioned in recent history`);
+              GHL_LOCATION_ID_RESOLVED = mentioned.id;
+              if (mentioned.api_key) GHL_API_KEY_RESOLVED = mentioned.api_key;
+              if (Array.isArray(mentioned.scopes) && mentioned.scopes.length > 0) {
+                GHL_ACTIVE_SCOPES = mentioned.scopes.slice();
+              }
+              (globalThis as Record<string, unknown>).__ghlMemorySource = 'context';
+              (globalThis as Record<string, unknown>).__ghlMentionedSubName = mentioned.name;
+              // Persist to chat_sessions so follow-ups stay locked to this account.
+              const sid2 = (body.sessionId as string | undefined) || undefined;
+              if (sid2) {
+                try {
+                  await admin.from('chat_sessions')
+                    .update({ active_ghl_location_id: mentioned.id })
+                    .eq('id', sid2)
+                    .eq('user_id', credUserId);
+                } catch (_e) { /* non-fatal */ }
+              }
+            } else if (mentioned) {
+              // Same account already active — still record for guardrail logic.
+              (globalThis as Record<string, unknown>).__ghlMentionedSubName = mentioned.name;
+            }
+          } catch (e) { console.warn('[GHL] context-binding scan failed:', e); }
+        }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
@@ -8698,6 +8793,7 @@ If the user just says "switch to X", use ghl_set_active_sub_account.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
+GUARDRAIL: If a write tool returns error="AMBIGUOUS_SUBACCOUNT", do NOT retry blindly. Call ghl_set_active_sub_account with name=<mentioned_account> from the error, then retry the original write exactly once. Do NOT ask the user — the answer is in the error.
 For all GHL actions (create custom field, list contacts, create opportunity, etc.), use the ghl_* tools directly. Do NOT emit a capability-gap or "service_not_connected" report for GHL.`;
 
       // Ensure GHL tools are available
