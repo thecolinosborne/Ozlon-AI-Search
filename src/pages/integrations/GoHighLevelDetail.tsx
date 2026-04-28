@@ -683,7 +683,7 @@ const GoHighLevelDetail = () => {
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button
-                onClick={() => { setShowAddModal(false); setNewSub({ id: "", name: "", api_key: "" }); }}
+                onClick={() => { setShowAddModal(false); setEditingPrimary(false); setNewSub({ id: "", name: "", api_key: "" }); }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60"
               >
                 Cancel
@@ -693,7 +693,7 @@ const GoHighLevelDetail = () => {
                 disabled={addingSub}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                {addingSub ? "Verifying…" : "Verify & Add"}
+                {addingSub ? "Verifying…" : editingPrimary ? "Verify & Save" : "Verify & Add"}
               </button>
             </div>
           </div>
