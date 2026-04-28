@@ -4267,7 +4267,27 @@ async function executeToolCall(
 
         const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'POST', body, ghlCreds?.apiKey) as { id?: string; customField?: { id?: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Custom field "${args.name}" created (ID: ${res.id || res.customField?.id || 'created'})${OPTION_TYPES.has(dataType) ? ` with ${(body.options as unknown[]).length} options` : ''}.` };
+        const newId = res.id || res.customField?.id;
+
+        // Self-verify: re-list and confirm the field actually appears. Gives the AI
+        // (and Gauntlet) ground truth instead of trusting the POST response alone.
+        let verified = false;
+        let verifiedSummary = '';
+        try {
+          const listRes = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'GET', undefined, ghlCreds?.apiKey) as { customFields?: Array<{ id?: string; name?: string; fieldKey?: string; dataType?: string }>; error?: string };
+          if (!listRes.error && Array.isArray(listRes.customFields)) {
+            const match = listRes.customFields.find((f) => (newId && f.id === newId) || f.name === args.name);
+            if (match) {
+              verified = true;
+              verifiedSummary = ` Verified live in GHL (id=${match.id}, key=${match.fieldKey || 'n/a'}, type=${match.dataType || dataType}).`;
+            }
+          }
+        } catch (_e) { /* verification is best-effort; do not fail the create */ }
+
+        const optsSuffix = OPTION_TYPES.has(dataType) ? ` with ${(body.options as unknown[]).length} options` : '';
+        const baseMsg = `Custom field "${args.name}" created (ID: ${newId || 'created'})${optsSuffix}.`;
+        if (verified) return { success: true, result: `${baseMsg}${verifiedSummary}` };
+        return { success: true, result: `${baseMsg} Note: post-create verification list did not include this field yet (may be eventual-consistency lag).` };
       }
       case 'ghl_update_custom_field': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
