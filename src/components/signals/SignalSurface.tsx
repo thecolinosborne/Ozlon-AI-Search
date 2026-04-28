@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useSignals, type SignalMoment } from "@/hooks/useSignals";
 import { useSkills } from "@/hooks/useSkills";
+import { SignalDetailSheet } from "@/components/signals/SignalDetailSheet";
 
 interface Props {
   variant?: "page" | "indicator" | "inline" | "voice";
@@ -41,6 +42,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<{ why: boolean; what: boolean }>({ why: false, what: false });
   const [hoverPreview, setHoverPreview] = useState(false);
+  const [detailMoment, setDetailMoment] = useState<SignalMoment | null>(null);
   const spokenIdsRef = useRef<Set<string>>(new Set());
 
   // Map enabled skills to keyword triggers for matching against signal headlines.
@@ -119,9 +121,31 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                 {topMoment.reason}
               </p>
             )}
-            <p className="mt-2 text-[11px] text-neutral-400">Tap to open Signals</p>
+            <div className="mt-2 flex items-center justify-between text-[11px]">
+              <span className="text-neutral-400">Tap to open Signals</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDetailMoment(topMoment);
+                }}
+                className="text-neutral-600 hover:text-neutral-900 underline-offset-2 hover:underline"
+              >
+                View details
+              </button>
+            </div>
           </div>
         )}
+        <SignalDetailSheet
+          moment={detailMoment}
+          open={!!detailMoment}
+          onOpenChange={(o) => !o && setDetailMoment(null)}
+          onAct={(m) => handleAct(m)}
+          onDismiss={(m) => respond(m.id, "dismissed")}
+          onSnooze={(m) => respond(m.id, "snooze")}
+          onMarkWrong={(m) => respond(m.id, "ignored")}
+        />
       </div>
     );
   }
@@ -219,6 +243,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                     </InlinePrompt>
                   )}
                   <InlinePrompt onClick={() => handleAct(m)}>Handle it</InlinePrompt>
+                  <InlinePrompt onClick={() => setDetailMoment(m)}>View details</InlinePrompt>
                   <InlinePrompt onClick={() => respond(m.id, "dismissed")}>Not now</InlinePrompt>
                 </div>
               </div>
@@ -246,6 +271,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                     <p className="text-sm text-foreground/90 leading-snug mt-1">{m.headline}</p>
                     <div className="flex items-center gap-4 mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
                       <InlinePrompt onClick={() => handleAct(m)}>Handle</InlinePrompt>
+                      <InlinePrompt onClick={() => setDetailMoment(m)}>Details</InlinePrompt>
                       <InlinePrompt onClick={() => respond(m.id, "dismissed")}>Dismiss</InlinePrompt>
                     </div>
                   </div>
@@ -255,6 +281,15 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
           </div>
         )}
       </div>
+      <SignalDetailSheet
+        moment={detailMoment}
+        open={!!detailMoment}
+        onOpenChange={(o) => !o && setDetailMoment(null)}
+        onAct={(m) => handleAct(m)}
+        onDismiss={(m) => respond(m.id, "dismissed")}
+        onSnooze={(m) => respond(m.id, "snooze")}
+        onMarkWrong={(m) => respond(m.id, "ignored")}
+      />
     </div>
   );
 }

@@ -12,6 +12,9 @@ import {
 } from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 import { GHL_TOOL_SCOPES as GHL_TOOL_REQUIRED_SCOPES } from "../_shared/integrations/ghl-scopes.ts";
+import { buildSignalEnvelope, pickAccountByPriority } from "../_shared/signals/builder.ts";
+import { renderForChatPrompt } from "../_shared/signals/render.ts";
+import type { Entity } from "../_shared/signals/entities.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
@@ -8703,6 +8706,49 @@ ${parts.join('\n\n')}
 
     // No env fallback for GHL — credentials must be per-user from integration_connections.
     // (env GHL_API_KEY / GHL_LOCATION_ID are reserved for non-user contexts only.)
+
+    // ── Signal Envelope (5-bucket priority context) ───────────────────────
+    // Pure, cacheable. Renders only the top-priority slice into the system prompt.
+    // Generalizes the GHL account-resolution guardrail across all integrations.
+    try {
+      if (credUserId) {
+        const entities: Entity[] = [];
+        for (const sub of (GHL_SUB_ACCOUNTS_RESOLVED || [])) {
+          if (sub?.name && sub?.id) {
+            entities.push({ kind: "ghl", id: sub.id, name: sub.name, payload: { api_key: sub.api_key } });
+          }
+        }
+        const sig = `${entities.length}:${GHL_LOCATION_ID_RESOLVED ?? ""}`;
+        const defaults: Record<string, { id: string; name: string; kind: string }> = {};
+        const active: Record<string, { id: string; name: string; kind: string }> = {};
+        const activeGhl = (GHL_SUB_ACCOUNTS_RESOLVED || []).find((s) => s.id === GHL_LOCATION_ID_RESOLVED);
+        if (activeGhl) {
+          const memSrc = (globalThis as Record<string, unknown>).__ghlMemorySource as string | undefined;
+          const slot = memSrc === "session" || memSrc === "context" ? active : defaults;
+          slot.ghl = { id: activeGhl.id, name: activeGhl.name, kind: "ghl" };
+        }
+        const envelope = buildSignalEnvelope({
+          userId: credUserId,
+          messages,
+          entities,
+          entitiesSignature: sig,
+          defaults,
+          active,
+        });
+        const block = renderForChatPrompt(envelope, { topN: 3 });
+        systemPrompt += `\n\n${block}\n`;
+
+        // Cross-check: if a GHL account is mentioned this turn that differs from
+        // the active one, surface it for the guardrail (already handled below,
+        // but envelope makes this generic for future integrations).
+        const top = pickAccountByPriority(envelope, "ghl");
+        if (top && top.id !== GHL_LOCATION_ID_RESOLVED) {
+          console.log(`[SignalEnvelope] GHL account by priority differs: ${top.name} (${top.priority}) vs active ${GHL_LOCATION_ID_RESOLVED}`);
+        }
+      }
+    } catch (e) {
+      console.warn("[SignalEnvelope] build failed (non-fatal):", e);
+    }
 
     const connMap: MultiConnMap = new Map();
     let availableTools: ToolDef[] = [];

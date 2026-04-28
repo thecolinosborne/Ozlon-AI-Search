@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Sparkles, X, ArrowRight } from "lucide-react";
+import { Sparkles, X, ArrowRight, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSignals } from "@/hooks/useSignals";
+import { SignalDetailSheet } from "@/components/signals/SignalDetailSheet";
 
 interface SignalsBannerProps {
   /** Minimum salience to surface as a fusion banner (default 0.7). */
@@ -20,6 +21,7 @@ interface SignalsBannerProps {
 export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
   const { topMoment, respond } = useSignals();
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   if (!topMoment) return null;
   if ((topMoment.salience ?? 0) < threshold) return null;
@@ -88,9 +90,20 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
             {topMoment.headline}
           </p>
           {topMoment.reason && (
-            <p className="text-[11.5px] text-muted-foreground/85 mt-1 leading-snug line-clamp-2">
-              {topMoment.reason}
-            </p>
+            <button
+              type="button"
+              onClick={() => setDetailOpen(true)}
+              className="mt-1 text-left w-full group/reason"
+              aria-label="Expand signal details"
+            >
+              <p className="text-[11.5px] text-muted-foreground/85 leading-snug line-clamp-2 group-hover/reason:text-foreground/90 transition-colors">
+                {topMoment.reason}
+              </p>
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/50 group-hover/reason:text-foreground/70 transition-colors">
+                <Maximize2 className="w-2.5 h-2.5" />
+                Expand
+              </span>
+            </button>
           )}
 
           {topMoment.suggested_direction && (
@@ -119,6 +132,16 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      <SignalDetailSheet
+        moment={topMoment}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onAct={() => handleAct()}
+        onDismiss={() => handleDismiss()}
+        onSnooze={(m) => respond(m.id, "snooze")}
+        onMarkWrong={(m) => respond(m.id, "ignored")}
+      />
     </div>
   );
 }
