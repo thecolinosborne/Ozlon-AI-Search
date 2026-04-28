@@ -4464,20 +4464,52 @@ async function executeToolCall(
       case 'ghl_list_sub_accounts': {
         const subs = ghlCreds?.subAccounts || [];
         const active = ghlCreds?.locationId || '';
+        // Capability groups (kept in sync with _shared/integrations/ghl-scopes.ts)
+        const CAP_GROUPS: Array<{ key: string; scopes: string[] }> = [
+          { key: 'contacts',      scopes: ['contacts.readonly', 'contacts.write'] },
+          { key: 'custom_fields', scopes: ['locations/customFields.readonly', 'locations/customFields.write'] },
+          { key: 'opportunities', scopes: ['opportunities.readonly', 'opportunities.write'] },
+          { key: 'calendars',     scopes: ['calendars.readonly', 'calendars/events.readonly', 'calendars/events.write'] },
+          { key: 'conversations', scopes: ['conversations.readonly', 'conversations/message.readonly', 'conversations/message.write'] },
+          { key: 'workflows',     scopes: ['workflows.readonly'] },
+          { key: 'campaigns',     scopes: ['campaigns.readonly'] },
+          { key: 'invoices',      scopes: ['invoices.readonly', 'invoices.write'] },
+          { key: 'payments',      scopes: ['payments/orders.readonly', 'payments/transactions.readonly'] },
+          { key: 'forms',         scopes: ['forms.readonly'] },
+          { key: 'surveys',       scopes: ['surveys.readonly'] },
+          { key: 'social_planner',scopes: ['socialplanner/account.readonly', 'socialplanner/post.readonly', 'socialplanner/post.write'] },
+          { key: 'products',      scopes: ['products.readonly', 'products.write'] },
+          { key: 'blogs',         scopes: ['blogs/post.readonly', 'blogs/post.write'] },
+          { key: 'media',         scopes: ['medias.readonly', 'medias.write'] },
+        ];
+        const enrich = (s: { id: string; name: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }) => {
+          const scopeSet = new Set(s.scopes || []);
+          const capabilities = CAP_GROUPS
+            .filter((g) => g.scopes.some((sc) => scopeSet.has(sc)))
+            .map((g) => g.key);
+          return {
+            id: s.id,
+            name: s.name,
+            location_name: s.location_name || null,
+            active: s.id === active,
+            disabled: s.disabled === true,
+            scopes_count: (s.scopes || []).length,
+            capabilities,
+            last_verified_at: s.last_verified_at || null,
+          };
+        };
         if (subs.length === 0) {
           return {
             success: true,
             result: JSON.stringify({
-              sub_accounts: active ? [{ id: active, name: 'Primary', active: true }] : [],
+              sub_accounts: active ? [{ id: active, name: 'Primary', active: true, disabled: false, scopes_count: 0, capabilities: [], location_name: null, last_verified_at: null }] : [],
               note: 'No sub-accounts configured. Add more in Integrations → Go High Level.',
             }),
           };
         }
         return {
           success: true,
-          result: JSON.stringify({
-            sub_accounts: subs.map((s) => ({ id: s.id, name: s.name, active: s.id === active })),
-          }),
+          result: JSON.stringify({ sub_accounts: subs.map(enrich) }),
         };
       }
       case 'ghl_set_active_sub_account': {
