@@ -639,9 +639,9 @@ const GoHighLevelDetail = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-foreground">Add Sub-Account</h3>
+              <h3 className="text-base font-semibold text-foreground">{editingPrimary ? "Set up Primary Account" : "Add Sub-Account"}</h3>
               <button
-                onClick={() => { setShowAddModal(false); setNewSub({ id: "", name: "", api_key: "" }); }}
+                onClick={() => { setShowAddModal(false); setEditingPrimary(false); setNewSub({ id: "", name: "", api_key: "" }); }}
                 className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60"
               >
                 <X className="w-4 h-4" />
