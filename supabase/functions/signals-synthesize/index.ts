@@ -12,6 +12,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { getGoogleAccessToken } from "../_shared/google-token.ts";
+import { renderForChatPrompt } from "../_shared/signals/render.ts";
+import type { SignalEnvelope } from "../_shared/signals/types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -203,6 +205,7 @@ async function synthesize(
   ctx: ContextState,
   contextSummary: string,
   recall: Awaited<ReturnType<typeof recallWisdom>>,
+  envelope: SignalEnvelope | null = null,
 ): Promise<Candidate[]> {
   const wisdomBlock = recall.memories.length
     ? recall.memories.map((m) => `[${m.id}] ${m.summary ?? m.content.slice(0, 200)}`).join("\n")
@@ -249,7 +252,9 @@ Voice rules (calm Jarvis tone — strict):
 - Each headline ≤ 14 words. No emoji. No exclamation.
 - Reason ≤ 2 calm sentences. May reference trajectory ("connects to something coming up later").
 - suggested_direction is ONE neutral option, not a command. Optional.
-- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.`;
+- If nothing materially matters, return an empty array. Silence is the correct answer most of the time.${
+  envelope ? `\n\n${renderForChatPrompt(envelope, { topN: 3 })}\n\nWhen any moment touches an account/entity in the priority context above, prefer it and reference it by name in the headline.` : ""
+}`;
 
   const user = `CURRENT CONTEXT (last 24h):
 ${contextSummary}
@@ -997,13 +1002,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Optional envelope from caller (chat passes its built envelope to align
+    // synthesis with the user's current intent / in-scope account).
+    let envelope: SignalEnvelope | null = null;
+    try {
+      if (req.method === "POST") {
+        const body = await req.json().catch(() => ({}));
+        if (body && typeof body === "object" && body.envelope) {
+          envelope = body.envelope as SignalEnvelope;
+        }
+      }
+    } catch (_e) { /* non-fatal */ }
+
     const contextSummary = await buildContextSummary(userId);
     const ctxEmb = await embed(contextSummary);
     const recall = ctxEmb
       ? await recallWisdom(userId, ctxEmb)
       : { memories: [], reflections: [], throttles: [] };
 
-    const candidates = await synthesize(userId, ctx, contextSummary, recall);
+    const candidates = await synthesize(userId, ctx, contextSummary, recall, envelope);
     const inserted = await insertWithDedup(userId, ctx, candidates, recall.tuning);
 
     return new Response(JSON.stringify({

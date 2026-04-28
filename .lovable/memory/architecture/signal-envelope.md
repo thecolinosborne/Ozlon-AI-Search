@@ -32,7 +32,9 @@ direct → active → durable → contextual → recent → inferred → backgro
 
 ## Wired consumers
 - `supabase/functions/chat/index.ts` — appends `renderForChatPrompt(env, {topN:3})` after GHL resolution; uses `pickAccountByPriority(env, 'ghl')` to detect priority drift.
+- `supabase/functions/signals-synthesize/index.ts` — accepts optional `envelope` in POST body; appends to system prompt so synthesis aligns with the user's current intent and in-scope account.
+- `src/components/RealtimeVoiceChat.tsx` — seeds realtime session on connect via client-side `renderForVoiceClient()` (mirror of server `renderForVoice`). One-line context, sent once per session.
 
-## Pending consumers
-- `signals-synthesize` — accept envelope to align synthesis with user intent
-- `RealtimeVoiceChat` — seed realtime session via `renderForVoice(env)`
+## Next consumers (when needed)
+- Chat → pass its built envelope to `signals-synthesize` invocations so reactive synthesis is aligned with the active turn (currently synthesize falls back to context-only).
+- Communications surface for inbox-side priority filtering.

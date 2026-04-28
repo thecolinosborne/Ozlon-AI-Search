@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Phone, PhoneOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRealtimeVoice } from '@/hooks/useRealtimeVoice';
 import { SignalSurface } from '@/components/signals/SignalSurface';
+import { useSignals } from '@/hooks/useSignals';
+import { renderForVoiceClient } from '@/lib/signals/voiceContext';
 import { toast } from 'sonner';
 
 interface RealtimeVoiceChatProps {
@@ -13,6 +15,8 @@ interface RealtimeVoiceChatProps {
 export function RealtimeVoiceChat({ systemName, onClose }: RealtimeVoiceChatProps) {
   const [userTranscript, setUserTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
+  const { topMoment, moments } = useSignals();
+  const seededRef = useRef(false);
 
   const {
     status,
@@ -33,6 +37,29 @@ export function RealtimeVoiceChat({ systemName, onClose }: RealtimeVoiceChatProp
       toast.error(error);
     },
   });
+
+  // Seed the realtime session with a single-line voice context once per
+  // connection. Mirrors `renderForVoice(env)` on the server. Cheap and scalable.
+  useEffect(() => {
+    if (!isConnected) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
+    const seed = renderForVoiceClient({
+      systemName,
+      topSignal: topMoment
+        ? {
+            headline: topMoment.headline,
+            suggested_direction: topMoment.suggested_direction,
+            salience: topMoment.salience,
+          }
+        : null,
+      liveSignalCount: moments.length,
+    });
+    sendTextMessage(`[Voice context]: ${seed}`);
+  }, [isConnected, systemName, topMoment, moments.length, sendTextMessage]);
 
   const handleToggleCall = async () => {
     if (isConnected) {
