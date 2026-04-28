@@ -1987,8 +1987,8 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_create_custom_field',
-      description: 'Create a custom field in GoHighLevel for the location.',
-      parameters: { type: 'object', properties: { name: { type: 'string' }, dataType: { type: 'string', description: 'TEXT, NUMERICAL, PHONE, MONETARY, CHECKBOX, SINGLE_OPTIONS, MULTIPLE_OPTIONS, DATE, TEXTAREA, RADIO, FILE_UPLOAD, SIGNATURE' }, position: { type: 'number' }, model: { type: 'string', description: 'contact or opportunity', enum: ['contact', 'opportunity'] } }, required: ['name', 'dataType'] },
+      description: 'Create a custom field in GoHighLevel for the location. For SINGLE_OPTIONS, MULTIPLE_OPTIONS, RADIO, or CHECKBOX dataTypes, you MUST provide an `options` array of strings (or {label,value} objects).',
+      parameters: { type: 'object', properties: { name: { type: 'string' }, dataType: { type: 'string', description: 'TEXT, NUMERICAL, PHONE, MONETARY, CHECKBOX, SINGLE_OPTIONS, MULTIPLE_OPTIONS, DATE, TEXTAREA, RADIO, FILE_UPLOAD, SIGNATURE' }, position: { type: 'number' }, model: { type: 'string', description: 'contact or opportunity', enum: ['contact', 'opportunity'] }, options: { type: 'array', description: 'Required for dropdown/radio/checkbox types. Array of option strings like ["Atlanta, GA","Austin, TX"] OR objects {label,value}.', items: { oneOf: [{ type: 'string' }, { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } } }] } } }, required: ['name', 'dataType'] },
     },
   },
   {
