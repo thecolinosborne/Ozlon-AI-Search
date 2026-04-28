@@ -243,6 +243,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                     </InlinePrompt>
                   )}
                   <InlinePrompt onClick={() => handleAct(m)}>Handle it</InlinePrompt>
+                  <InlinePrompt onClick={() => setDetailMoment(m)}>View details</InlinePrompt>
                   <InlinePrompt onClick={() => respond(m.id, "dismissed")}>Not now</InlinePrompt>
                 </div>
               </div>
@@ -270,6 +271,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                     <p className="text-sm text-foreground/90 leading-snug mt-1">{m.headline}</p>
                     <div className="flex items-center gap-4 mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
                       <InlinePrompt onClick={() => handleAct(m)}>Handle</InlinePrompt>
+                      <InlinePrompt onClick={() => setDetailMoment(m)}>Details</InlinePrompt>
                       <InlinePrompt onClick={() => respond(m.id, "dismissed")}>Dismiss</InlinePrompt>
                     </div>
                   </div>
@@ -279,6 +281,15 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
           </div>
         )}
       </div>
+      <SignalDetailSheet
+        moment={detailMoment}
+        open={!!detailMoment}
+        onOpenChange={(o) => !o && setDetailMoment(null)}
+        onAct={(m) => handleAct(m)}
+        onDismiss={(m) => respond(m.id, "dismissed")}
+        onSnooze={(m) => respond(m.id, "snooze")}
+        onMarkWrong={(m) => respond(m.id, "ignored")}
+      />
     </div>
   );
 }
