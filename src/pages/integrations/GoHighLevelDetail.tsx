@@ -147,10 +147,48 @@ const GoHighLevelDetail = () => {
     await upsertIntegrationConnection("gohighlevel", metadata);
   };
 
+  // Auto-verify the default (top-level) credentials and upsert/refresh the
+  // "Primary" sub-account row so it gets the SAME UI treatment (scope chips,
+  // re-sync button, toggle) as added sub-accounts.
+  const verifyAndSeedPrimary = async (next: GHLSettings): Promise<GHLSettings> => {
+    const apiKey = (next.apiKey || "").trim();
+    const locationId = (next.locationId || "").trim();
+    if (!apiKey || !locationId) return next;
+    try {
+      const verification = await verifyToken(apiKey, locationId);
+      const subs = next.subAccounts || [];
+      const existing = subs.find((s) => s.id === locationId);
+      const updated: SubAccount = {
+        id: locationId,
+        name: existing?.name || verification.locationName || "Primary",
+        // Don't store api_key on the Primary row — it falls back to top-level.
+        api_key: existing?.api_key,
+        scopes: verification.ok ? verification.scopes : existing?.scopes,
+        location_name: verification.locationName ?? existing?.location_name,
+        company_id: verification.companyId ?? existing?.company_id,
+        last_verified_at: verification.ok ? new Date().toISOString() : existing?.last_verified_at,
+        disabled: existing?.disabled,
+      };
+      const nextSubs = existing
+        ? subs.map((s) => (s.id === locationId ? updated : s))
+        : [...subs, updated];
+      if (verification.ok) {
+        toast.success(`Default verified — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
+      } else if (verification.hint) {
+        toast.error(verification.hint);
+      }
+      return { ...next, subAccounts: nextSubs };
+    } catch (err) {
+      toast.error(`Couldn't verify default: ${(err as Error).message}`);
+      return next;
+    }
+  };
+
   const handleSaveApiKey = async (key: string) => {
     setSavingApiKey(true);
     try {
-      const next: GHLSettings = { ...settings, apiKey: key };
+      let next: GHLSettings = { ...settings, apiKey: key };
+      next = await verifyAndSeedPrimary(next);
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       setApiKeyConfigured("gohighlevel", true);
@@ -165,11 +203,13 @@ const GoHighLevelDetail = () => {
   const handleSaveLocationId = async (id: string) => {
     setSavingLocationId(true);
     try {
-      // Top-level location_id = active default. Also seed it as a sub-account if not present.
-      const subs = settings.subAccounts || [];
-      const exists = subs.some((s) => s.id === id);
-      const nextSubs = exists ? subs : [...subs, { id, name: "Primary" }];
-      const next: GHLSettings = { ...settings, locationId: id, subAccounts: nextSubs };
+      let next: GHLSettings = { ...settings, locationId: id };
+      next = await verifyAndSeedPrimary(next);
+      // Fallback: ensure a Primary row exists even if verification couldn't run yet.
+      const subs = next.subAccounts || [];
+      if (!subs.some((s) => s.id === id)) {
+        next = { ...next, subAccounts: [...subs, { id, name: "Primary" }] };
+      }
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       toast.success("Location ID saved to your account");
