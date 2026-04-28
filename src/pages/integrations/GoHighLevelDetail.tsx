@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert, Power, PowerOff } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -16,6 +16,7 @@ interface SubAccount {
   location_name?: string;
   company_id?: string;
   last_verified_at?: string;
+  disabled?: boolean; // remembered but disconnected — AI won't auto-pick it
 }
 
 interface GHLSettings {
