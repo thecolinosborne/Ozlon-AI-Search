@@ -860,7 +860,7 @@ serve(async (req) => {
                     ? "Token does not have access to this Location ID. Re-create the Private Integration token in this sub-account in GHL, or double-check the Location ID."
                     : `Could not verify location (HTTP ${locationStatus}).`)
                 : scopes.length === 0
-                  ? 'Connected, but no scopes were detectable in the token. Make sure you used a Private Integration token (not a legacy v1 API key).'
+                  ? 'Connected, but no scopes were detectable. Re-create the Private Integration token in GHL and tick the scopes you want Ozlon to use.'
                   : `Verified — ${scopes.length} scope${scopes.length === 1 ? '' : 's'} detected.`,
         };
 
