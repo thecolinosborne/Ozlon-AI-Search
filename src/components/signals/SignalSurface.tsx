@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useSignals, type SignalMoment } from "@/hooks/useSignals";
 import { useSkills } from "@/hooks/useSkills";
+import { SignalDetailSheet } from "@/components/signals/SignalDetailSheet";
 
 interface Props {
   variant?: "page" | "indicator" | "inline" | "voice";
@@ -41,6 +42,7 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<{ why: boolean; what: boolean }>({ why: false, what: false });
   const [hoverPreview, setHoverPreview] = useState(false);
+  const [detailMoment, setDetailMoment] = useState<SignalMoment | null>(null);
   const spokenIdsRef = useRef<Set<string>>(new Set());
 
   // Map enabled skills to keyword triggers for matching against signal headlines.
