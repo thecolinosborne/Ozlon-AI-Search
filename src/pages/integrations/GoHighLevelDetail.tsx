@@ -42,6 +42,7 @@ const GoHighLevelDetail = () => {
   const [savingLocationId, setSavingLocationId] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPrimary, setEditingPrimary] = useState(false); // when true, modal saves to top-level (Primary)
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
   const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
   const [savingDefault, setSavingDefault] = useState<string | null>(null);
