@@ -12,6 +12,9 @@ import {
 } from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
 import { GHL_TOOL_SCOPES as GHL_TOOL_REQUIRED_SCOPES } from "../_shared/integrations/ghl-scopes.ts";
+import { buildSignalEnvelope, pickAccountByPriority } from "../_shared/signals/builder.ts";
+import { renderForChatPrompt } from "../_shared/signals/render.ts";
+import type { Entity } from "../_shared/signals/entities.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
