@@ -537,7 +537,7 @@ const GoHighLevelDetail = () => {
                   <button
                     onClick={() => handleRemoveSubAccount(acct.id)}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    title="Remove"
+                    title="Forget this sub-account permanently"
                   >
                     <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                   </button>
