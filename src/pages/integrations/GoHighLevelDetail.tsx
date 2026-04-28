@@ -435,18 +435,26 @@ const GoHighLevelDetail = () => {
                     : "border-border/40 bg-card/60"
                 )}
               >
-                <div className="flex-1 min-w-0">
+                <div className={cn("flex-1 min-w-0", acct.disabled && "opacity-50")}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-foreground truncate">{acct.name}</span>
-                    {acct.id === activeId && (
-                      <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                        Default
+                    {acct.disabled ? (
+                      <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        Disconnected
                       </span>
-                    )}
-                    {acct.id === aiDefaultId && (
-                      <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                        AI Default
-                      </span>
+                    ) : (
+                      <>
+                        {acct.id === activeId && (
+                          <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                            Default
+                          </span>
+                        )}
+                        {acct.id === aiDefaultId && (
+                          <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                            AI Default
+                          </span>
+                        )}
+                      </>
                     )}
                     {acct.api_key && (
                       <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
