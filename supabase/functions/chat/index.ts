@@ -8793,6 +8793,7 @@ If the user just says "switch to X", use ghl_set_active_sub_account.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
+GUARDRAIL: If a write tool returns error="AMBIGUOUS_SUBACCOUNT", do NOT retry blindly. Call ghl_set_active_sub_account with name=<mentioned_account> from the error, then retry the original write exactly once. Do NOT ask the user — the answer is in the error.
 For all GHL actions (create custom field, list contacts, create opportunity, etc.), use the ghl_* tools directly. Do NOT emit a capability-gap or "service_not_connected" report for GHL.`;
 
       // Ensure GHL tools are available
