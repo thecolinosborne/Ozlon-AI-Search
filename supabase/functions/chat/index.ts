@@ -4267,7 +4267,27 @@ async function executeToolCall(
 
         const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'POST', body, ghlCreds?.apiKey) as { id?: string; customField?: { id?: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Custom field "${args.name}" created (ID: ${res.id || res.customField?.id || 'created'})${OPTION_TYPES.has(dataType) ? ` with ${(body.options as unknown[]).length} options` : ''}.` };
+        const newId = res.id || res.customField?.id;
+
+        // Self-verify: re-list and confirm the field actually appears. Gives the AI
+        // (and Gauntlet) ground truth instead of trusting the POST response alone.
+        let verified = false;
+        let verifiedSummary = '';
+        try {
+          const listRes = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'GET', undefined, ghlCreds?.apiKey) as { customFields?: Array<{ id?: string; name?: string; fieldKey?: string; dataType?: string }>; error?: string };
+          if (!listRes.error && Array.isArray(listRes.customFields)) {
+            const match = listRes.customFields.find((f) => (newId && f.id === newId) || f.name === args.name);
+            if (match) {
+              verified = true;
+              verifiedSummary = ` Verified live in GHL (id=${match.id}, key=${match.fieldKey || 'n/a'}, type=${match.dataType || dataType}).`;
+            }
+          }
+        } catch (_e) { /* verification is best-effort; do not fail the create */ }
+
+        const optsSuffix = OPTION_TYPES.has(dataType) ? ` with ${(body.options as unknown[]).length} options` : '';
+        const baseMsg = `Custom field "${args.name}" created (ID: ${newId || 'created'})${optsSuffix}.`;
+        if (verified) return { success: true, result: `${baseMsg}${verifiedSummary}` };
+        return { success: true, result: `${baseMsg} Note: post-create verification list did not include this field yet (may be eventual-consistency lag).` };
       }
       case 'ghl_update_custom_field': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
@@ -6743,48 +6763,13 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
  *  No-op if scopes are unknown (legacy sub-account never verified) — preserves existing behavior. */
 function applyGhlScopeFilter(tools: ToolDef[], grantedScopes: string[] | undefined): ToolDef[] {
   if (!grantedScopes || grantedScopes.length === 0) return tools;
-  // Inline minimal scope map — kept in sync with _shared/integrations/ghl-scopes.ts.
-  const REQ: Record<string, string[]> = {
-    ghl_list_contacts: ["contacts.readonly"], ghl_get_contact: ["contacts.readonly"], ghl_search_contacts: ["contacts.readonly"],
-    ghl_create_contact: ["contacts.write"], ghl_update_contact: ["contacts.write"], ghl_delete_contact: ["contacts.write"],
-    ghl_add_tags: ["contacts.write"], ghl_remove_tags: ["contacts.write"],
-    ghl_add_contact_note: ["contacts.write"], ghl_list_contact_notes: ["contacts.readonly"],
-    ghl_add_contact_task: ["contacts.write"], ghl_list_contact_tasks: ["contacts.readonly"],
-    ghl_list_custom_fields: ["locations/customFields.readonly"], ghl_get_custom_field: ["locations/customFields.readonly"],
-    ghl_create_custom_field: ["locations/customFields.write"], ghl_update_custom_field: ["locations/customFields.write"],
-    ghl_upsert_custom_field: ["locations/customFields.write"], ghl_archive_custom_field: ["locations/customFields.write"],
-    ghl_list_custom_values: ["locations/customValues.readonly"],
-    ghl_list_pipelines: ["opportunities.readonly"], ghl_list_opportunities: ["opportunities.readonly"], ghl_get_opportunity: ["opportunities.readonly"],
-    ghl_create_opportunity: ["opportunities.write"], ghl_update_opportunity: ["opportunities.write"],
-    ghl_list_calendars: ["calendars.readonly"], ghl_get_calendar_events: ["calendars/events.readonly"], ghl_get_free_slots: ["calendars.readonly"],
-    ghl_create_appointment: ["calendars/events.write"], ghl_book_appointment: ["calendars/events.write"],
-    ghl_update_appointment: ["calendars/events.write"], ghl_cancel_appointment: ["calendars/events.write"],
-    ghl_list_conversations: ["conversations.readonly"], ghl_get_conversation: ["conversations.readonly"],
-    ghl_get_conversation_messages: ["conversations/message.readonly"], ghl_send_message: ["conversations/message.write"],
-    ghl_list_workflows: ["workflows.readonly"], ghl_trigger_workflow: ["workflows.readonly"], ghl_list_campaigns: ["campaigns.readonly"],
-    ghl_list_invoices: ["invoices.readonly"], ghl_get_invoice: ["invoices.readonly"], ghl_create_invoice: ["invoices.write"],
-    ghl_list_orders: ["payments/orders.readonly"], ghl_list_transactions: ["payments/transactions.readonly"],
-    ghl_list_forms: ["forms.readonly"], ghl_get_form_submissions: ["forms.readonly"],
-    ghl_list_surveys: ["surveys.readonly"], ghl_get_survey_submissions: ["surveys.readonly"],
-    ghl_list_funnels: ["funnels/redirect.readonly"],
-    ghl_list_tags: ["locations.readonly"], ghl_list_users: ["users.readonly"],
-    ghl_list_social_accounts: ["socialplanner/account.readonly"], ghl_list_social_posts: ["socialplanner/post.readonly"], ghl_get_social_post: ["socialplanner/post.readonly"],
-    ghl_create_social_post: ["socialplanner/post.write"], ghl_edit_social_post: ["socialplanner/post.write"], ghl_delete_social_post: ["socialplanner/post.write"],
-    ghl_list_products: ["products.readonly"], ghl_get_product: ["products.readonly"],
-    ghl_create_product: ["products.write"], ghl_update_product: ["products.write"], ghl_delete_product: ["products.write"],
-    ghl_list_courses: ["courses.readonly"], ghl_import_courses: ["courses.write"],
-    ghl_list_blog_sites: ["blogs/post.readonly"], ghl_list_blog_posts: ["blogs/post.readonly"], ghl_get_blog_post: ["blogs/post.readonly"],
-    ghl_create_blog_post: ["blogs/post.write"], ghl_update_blog_post: ["blogs/post.write"], ghl_delete_blog_post: ["blogs/post.write"],
-    ghl_list_media_files: ["medias.readonly"], ghl_upload_media_file: ["medias.write"], ghl_upload_media: ["medias.write"],
-    ghl_list_companies: ["companies.readonly"], ghl_get_company: ["companies.readonly"],
-    ghl_list_businesses: ["businesses.readonly"], ghl_get_business: ["businesses.readonly"],
-    ghl_list_links: ["links.readonly"], ghl_create_link: ["links.write"], ghl_update_link: ["links.write"],
-  };
+  // Single source of truth: GHL_TOOL_REQUIRED_SCOPES from _shared/integrations/ghl-scopes.ts.
+  // No inline duplication — adding a new GHL tool only requires updating that one registry.
   const granted = new Set(grantedScopes);
   return tools.filter((t) => {
     const name = t.function.name;
     if (!name.startsWith('ghl_')) return true;
-    const req = REQ[name];
+    const req = GHL_TOOL_REQUIRED_SCOPES[name];
     if (!req || req.length === 0) return true; // unmapped GHL tool → permissive
     return req.every((s) => granted.has(s));
   });
@@ -7687,11 +7672,49 @@ async function runToolLoop(
       });
       scored.sort((a, b) => b.score - a.score);
 
+      // Reserved-tool floor: critical "always-discoverable" tools per integration.
+      // When the integration is connected (any of its tools exist in the pool), we
+      // guarantee these survive the cap even if the turn isn't classified as that
+      // integration. Prevents the recurring "ghl_create_custom_field not available"
+      // class of bugs after a refactor or a low-confidence classification.
+      const RESERVED_TOOLS_BY_BUCKET: Record<string, string[]> = {
+        ghl: [
+          'ghl_list_custom_fields',
+          'ghl_create_custom_field',
+          'ghl_update_custom_field',
+          'ghl_list_contacts',
+          'ghl_search_contacts',
+          'ghl_create_contact',
+          'ghl_list_pipelines',
+          'ghl_list_calendars',
+          'ghl_list_workflows',
+          'ghl_inspect_capabilities',
+        ],
+      };
+      const reservedFloor = new Set<string>();
+      const presentBuckets = new Set(scored.map((s) => s.bucket));
+      for (const [bucket, names] of Object.entries(RESERVED_TOOLS_BY_BUCKET)) {
+        if (!presentBuckets.has(bucket)) continue;
+        for (const n of names) reservedFloor.add(n);
+      }
+
       // Apply per-integration soft cap (Tier A only) so multi-intent turns don't starve.
       const perIntegrationCount: Record<string, number> = {};
       const kept: typeof scored = [];
       const overflow: typeof scored = [];
+
+      // Pass 0: pin reserved-floor tools first so they cannot be evicted.
+      const pinned = new Set<string>();
       for (const s of scored) {
+        if (reservedFloor.has(s.name)) {
+          kept.push(s);
+          pinned.add(s.name);
+          if (kept.length >= MAX_TOOLS) break;
+        }
+      }
+
+      for (const s of scored) {
+        if (pinned.has(s.name)) continue;
         if (s.score === 1000 && perIntegrationCap !== Infinity) {
           const c = perIntegrationCount[s.bucket] || 0;
           if (c >= perIntegrationCap) {
@@ -7706,6 +7729,7 @@ async function runToolLoop(
       // Backfill from overflow if there's still room.
       if (kept.length < MAX_TOOLS) {
         for (const s of overflow) {
+          if (pinned.has(s.name)) continue;
           kept.push(s);
           if (kept.length >= MAX_TOOLS) break;
         }
@@ -7721,6 +7745,7 @@ async function runToolLoop(
       console.log(
         `Tools capped ${tools.length}→${toolsForRequest.length}. ` +
         `Named: [${Array.from(namedIntegrations).join(',') || 'none'}]. ` +
+        `Reserved-floor pinned: ${pinned.size}. ` +
         `Kept: ${JSON.stringify(distribution)}`,
       );
     }
