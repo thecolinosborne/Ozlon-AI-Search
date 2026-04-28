@@ -42,6 +42,7 @@ const GoHighLevelDetail = () => {
   const [savingLocationId, setSavingLocationId] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPrimary, setEditingPrimary] = useState(false); // when true, modal saves to top-level (Primary)
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
   const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
   const [savingDefault, setSavingDefault] = useState<string | null>(null);
@@ -220,6 +221,24 @@ const GoHighLevelDetail = () => {
     }
   };
 
+  const openAddModal = () => {
+    setEditingPrimary(false);
+    setNewSub({ id: "", name: "", api_key: "" });
+    setShowAddModal(true);
+  };
+
+  const openPrimaryModal = () => {
+    setEditingPrimary(true);
+    const primaryId = settings.locationId || "";
+    const primary = subAccounts.find((s) => s.id === primaryId);
+    setNewSub({
+      id: primaryId,
+      name: primary?.name || "Primary",
+      api_key: settings.apiKey || primary?.api_key || "",
+    });
+    setShowAddModal(true);
+  };
+
   const handleAddSubAccount = async () => {
     const id = newSub.id.trim();
     const name = newSub.name.trim();
@@ -232,7 +251,9 @@ const GoHighLevelDetail = () => {
       toast.error("API token is required so we can verify scopes");
       return;
     }
-    if (subAccounts.some((s) => s.id === id)) {
+    // For ADD: enforce uniqueness. For EDIT Primary: skip the uniqueness check
+    // since we're updating an existing row (or replacing the Primary's locationId).
+    if (!editingPrimary && subAccounts.some((s) => s.id === id)) {
       toast.error("A sub-account with that Location ID already exists");
       return;
     }
@@ -247,23 +268,42 @@ const GoHighLevelDetail = () => {
       const sub: SubAccount = {
         id,
         name,
-        api_key: apiKey,
+        api_key: editingPrimary ? undefined : apiKey, // Primary uses top-level apiKey
         scopes: verification.scopes,
         location_name: verification.locationName,
         company_id: verification.companyId,
         last_verified_at: new Date().toISOString(),
       };
-      const nextSubs = [...subAccounts, sub];
-      const next: GHLSettings = {
-        ...settings,
-        subAccounts: nextSubs,
-        locationId: settings.locationId || sub.id,
-      };
+      let nextSubs: SubAccount[];
+      let next: GHLSettings;
+      if (editingPrimary) {
+        // Replace the Primary row (keyed by old top-level locationId), or upsert it.
+        const oldPrimaryId = settings.locationId || "";
+        const without = subAccounts.filter((s) => s.id !== oldPrimaryId && s.id !== id);
+        nextSubs = [...without, sub];
+        next = {
+          ...settings,
+          apiKey,            // top-level token
+          locationId: id,    // top-level location
+          subAccounts: nextSubs,
+        };
+      } else {
+        nextSubs = [...subAccounts, sub];
+        next = {
+          ...settings,
+          subAccounts: nextSubs,
+          locationId: settings.locationId || sub.id,
+        };
+      }
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      setApiKeyConfigured("gohighlevel", true);
       setShowAddModal(false);
+      setEditingPrimary(false);
       setNewSub({ id: "", name: "", api_key: "" });
-      toast.success(`Connected "${name}" — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
+      toast.success(
+        `${editingPrimary ? "Primary updated" : `Connected "${name}"`} — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`
+      );
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -423,23 +463,29 @@ const GoHighLevelDetail = () => {
         </div>
       }
     >
-      {/* API Credentials */}
-      <ApiKeyInput
-        label="GHL API Key (default)"
-        placeholder="Enter your Go High Level API key…"
-        configured={!!settings.apiKey || integration.status === "connected"}
-        onSave={handleSaveApiKey}
-        saving={savingApiKey}
-        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
-      />
-      <ApiKeyInput
-        label="Default Location ID"
-        placeholder="Enter your primary Location ID…"
-        configured={!!settings.locationId || integration.status === "connected"}
-        onSave={handleSaveLocationId}
-        saving={savingLocationId}
-        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
-      />
+      {/* Primary Account — same UX as a sub-account: token + Location ID + verified scopes */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Primary Account</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Your default GHL location. Same setup flow as a sub-account — paste a Private Integration token to detect scopes.
+            </p>
+          </div>
+          <button
+            onClick={openPrimaryModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
+            {settings.locationId ? "Re-add / Refresh" : "Set up Primary"}
+          </button>
+        </div>
+        {!settings.locationId && (
+          <div className="p-4 rounded-xl border border-dashed border-border/40 bg-card/40 text-xs text-muted-foreground text-center">
+            No primary configured yet. Click Set up Primary.
+          </div>
+        )}
+      </div>
 
       {/* Sub-Accounts */}
       <div className="space-y-3">
@@ -451,7 +497,7 @@ const GoHighLevelDetail = () => {
             </p>
           </div>
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
@@ -593,9 +639,9 @@ const GoHighLevelDetail = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-foreground">Add Sub-Account</h3>
+              <h3 className="text-base font-semibold text-foreground">{editingPrimary ? "Set up Primary Account" : "Add Sub-Account"}</h3>
               <button
-                onClick={() => { setShowAddModal(false); setNewSub({ id: "", name: "", api_key: "" }); }}
+                onClick={() => { setShowAddModal(false); setEditingPrimary(false); setNewSub({ id: "", name: "", api_key: "" }); }}
                 className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60"
               >
                 <X className="w-4 h-4" />
@@ -637,7 +683,7 @@ const GoHighLevelDetail = () => {
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button
-                onClick={() => { setShowAddModal(false); setNewSub({ id: "", name: "", api_key: "" }); }}
+                onClick={() => { setShowAddModal(false); setEditingPrimary(false); setNewSub({ id: "", name: "", api_key: "" }); }}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60"
               >
                 Cancel
@@ -647,7 +693,7 @@ const GoHighLevelDetail = () => {
                 disabled={addingSub}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                {addingSub ? "Verifying…" : "Verify & Add"}
+                {addingSub ? "Verifying…" : editingPrimary ? "Verify & Save" : "Verify & Add"}
               </button>
             </div>
           </div>
