@@ -7550,6 +7550,8 @@ async function runToolLoop(
   let taskCreated = false;
   const toolsUsed: string[] = [];
   const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
+  // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
+  (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
   while (iteration < maxIterations) {
     iteration++;
