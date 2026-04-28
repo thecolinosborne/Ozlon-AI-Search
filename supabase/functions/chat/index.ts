@@ -8603,6 +8603,56 @@ ${parts.join('\n\n')}
             GHL_ACTIVE_SCOPES = match.scopes.slice();
           }
         }
+
+        // ============================================================
+        // CONTEXT-BOUND ACCOUNT BINDING (Guardrail Fix #1)
+        // Scan the last user/assistant messages for sub-account names. If a
+        // name is mentioned, override the resolved location even when the
+        // model didn't explicitly call ghl_set_active_sub_account. This
+        // prevents writes from silently going to the user's default
+        // sub-account when conversation context names a different one.
+        // ============================================================
+        if (GHL_SUB_ACCOUNTS_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED.length > 1) {
+          try {
+            const recent = (Array.isArray(messages) ? messages : [])
+              .slice(-10)
+              .filter((m: { role?: string; content?: unknown }) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+              .map((m: { content: string }) => m.content.toLowerCase())
+              .join(' \n ');
+            // Score each sub-account by name-mention recency (last match wins).
+            let mentioned: { id: string; name: string; api_key?: string; scopes?: string[] } | null = null;
+            let bestPos = -1;
+            for (const sub of GHL_SUB_ACCOUNTS_RESOLVED) {
+              const needle = (sub.name || '').toLowerCase().trim();
+              if (!needle || needle.length < 3) continue;
+              const pos = recent.lastIndexOf(needle);
+              if (pos > bestPos) { bestPos = pos; mentioned = sub; }
+            }
+            if (mentioned && mentioned.id !== GHL_LOCATION_ID_RESOLVED) {
+              console.log(`[GHL] Context-bound override: switching from ${GHL_LOCATION_ID_RESOLVED} → "${mentioned.name}" (${mentioned.id}) — name mentioned in recent history`);
+              GHL_LOCATION_ID_RESOLVED = mentioned.id;
+              if (mentioned.api_key) GHL_API_KEY_RESOLVED = mentioned.api_key;
+              if (Array.isArray(mentioned.scopes) && mentioned.scopes.length > 0) {
+                GHL_ACTIVE_SCOPES = mentioned.scopes.slice();
+              }
+              (globalThis as Record<string, unknown>).__ghlMemorySource = 'context';
+              (globalThis as Record<string, unknown>).__ghlMentionedSubName = mentioned.name;
+              // Persist to chat_sessions so follow-ups stay locked to this account.
+              const sid2 = (body.sessionId as string | undefined) || undefined;
+              if (sid2) {
+                try {
+                  await admin.from('chat_sessions')
+                    .update({ active_ghl_location_id: mentioned.id })
+                    .eq('id', sid2)
+                    .eq('user_id', credUserId);
+                } catch (_e) { /* non-fatal */ }
+              }
+            } else if (mentioned) {
+              // Same account already active — still record for guardrail logic.
+              (globalThis as Record<string, unknown>).__ghlMentionedSubName = mentioned.name;
+            }
+          } catch (e) { console.warn('[GHL] context-binding scan failed:', e); }
+        }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
     }
 
