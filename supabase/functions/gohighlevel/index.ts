@@ -114,11 +114,14 @@ async function resolveGHLCredentials(req: Request, payload?: Record<string, unkn
             (await tryVaultRead(adminClient, conn.id, user.id, 'location_id')) ||
             readString(meta.location_id) ||
             '';
-          const subAccounts = Array.isArray(meta.sub_accounts)
+          const allSubAccounts = Array.isArray(meta.sub_accounts)
             ? (meta.sub_accounts as Record<string, unknown>[])
             : [];
+          // Sub-accounts marked `disabled: true` are remembered but not auto-selected.
+          // They remain usable when explicitly requested by location_id.
+          const subAccounts = allSubAccounts.filter((sub) => sub?.disabled !== true);
           const matchingSub = explicitLoc
-            ? subAccounts.find((sub) => readString(sub?.id) === explicitLoc)
+            ? allSubAccounts.find((sub) => readString(sub?.id) === explicitLoc)
             : undefined;
           const matchingSubKey = matchingSub ? readString(matchingSub.api_key) : undefined;
           const fallbackSub = subAccounts.find((sub) => readString(sub?.api_key));
