@@ -122,6 +122,10 @@ async function resolveGHLCredentials(req: Request, payload?: Record<string, unkn
             : undefined;
           const matchingSubKey = matchingSub ? readString(matchingSub.api_key) : undefined;
           const fallbackSub = subAccounts.find((sub) => readString(sub?.api_key));
+          const defaultSub = topLevelLocation
+            ? subAccounts.find((sub) => readString(sub?.id) === topLevelLocation)
+            : undefined;
+          const defaultSubKey = defaultSub ? readString(defaultSub.api_key) : undefined;
 
           // Explicit location requested: prefer its own token, then the top-level token.
           if (explicitLoc) {
@@ -134,8 +138,11 @@ async function resolveGHLCredentials(req: Request, payload?: Record<string, unkn
           }
 
           const candidateLocation = topLevelLocation || readString(fallbackSub?.id) || explicitLoc || '';
-          const candidateKey = explicitKey || topLevelKey || readString(fallbackSub?.api_key) || '';
+          const candidateKey = explicitKey || defaultSubKey || topLevelKey || readString(fallbackSub?.api_key) || '';
           if (candidateKey && candidateLocation) {
+            if (defaultSubKey && topLevelLocation) {
+              console.log(`[gohighlevel/auth] using sub-account token for default location ${topLevelLocation}`);
+            }
             return { apiKey: candidateKey, locationId: candidateLocation };
           }
         }
