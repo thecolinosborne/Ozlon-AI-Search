@@ -8583,6 +8583,8 @@ ACCOUNT MEMORY:
 - ghl_set_default_sub_account: makes that account the user's PERMANENT default for all future conversations.
 If the user says "make this my default" or "remember this account", use ghl_set_default_sub_account.
 If the user just says "switch to X", use ghl_set_active_sub_account.
+- ghl_list_sub_accounts: when the user asks "which GHL accounts do I have", "what's connected", or "what can X do", call this FIRST and answer from its output (it returns scope counts, capabilities, and disconnected state per account). Never invent accounts.
+- ghl_check_capability: BEFORE any GHL write (create_*, update_*, delete_*, send_*), if you're unsure the active account has the right scope, call this with tool_name. If allowed=false, tell the user exactly which scope is missing and where to add it — do not attempt the call.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
