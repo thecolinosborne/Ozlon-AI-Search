@@ -3197,7 +3197,14 @@ async function executeToolCall(
     // ---- Registry dispatcher (manifest-driven tools) ----
     const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
     if (authHeader) {
-      const dispatched = await dispatchTool(toolName, args, authHeader);
+      // For GHL tools, forward the chat-resolved per-sub-account credentials so the
+      // gohighlevel edge function uses the correct API key for the active sub-account
+      // (otherwise it falls back to the primary connection key → 403 on other locations).
+      let extra: Record<string, unknown> | undefined;
+      if (toolName.startsWith('ghl_') && ghlCreds?.apiKey && ghlCreds?.locationId) {
+        extra = { apiKey: ghlCreds.apiKey, locationId: ghlCreds.locationId };
+      }
+      const dispatched = await dispatchTool(toolName, args, authHeader, extra);
       if (dispatched.routed) return { success: dispatched.success, result: dispatched.result };
     }
 

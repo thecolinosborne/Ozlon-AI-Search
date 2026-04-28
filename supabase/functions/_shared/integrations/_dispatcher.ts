@@ -17,6 +17,7 @@ export async function dispatchTool(
   toolName: string,
   args: Record<string, unknown>,
   authHeader: string,
+  extraPayload?: Record<string, unknown>,
 ): Promise<DispatchResult> {
   const route = getRoute(toolName);
   if (!route) {
@@ -38,9 +39,14 @@ export async function dispatchTool(
     const msg = e instanceof Error ? e.message : String(e);
     return { success: false, routed: true, result: `Tool ${toolName} arg mapping failed: ${msg}` };
   }
+  // Merge extraPayload (e.g. resolved per-sub-account credentials for GHL) underneath mapped args.
+  // extraPayload has LOWEST priority — explicit args from the AI always win.
+  const merged: Record<string, unknown> = extraPayload
+    ? { ...extraPayload, ...mapped }
+    : mapped;
   const payload = route.envelope === "nested"
-    ? { action: route.action, params: mapped }
-    : { action: route.action, ...mapped };
+    ? { action: route.action, params: merged }
+    : { action: route.action, ...merged };
 
   try {
     const res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
@@ -57,9 +63,24 @@ export async function dispatchTool(
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
 
     if (!res.ok || data?.success === false) {
-      const errMsg = (data?.error as string) ||
-        (data?.raw as string) ||
-        `${route.edgeFunction}/${route.action} failed (HTTP ${res.status})`;
+      const rawErr = data?.error;
+      let errMsg: string;
+      if (typeof rawErr === "string" && rawErr.length > 0) {
+        errMsg = rawErr;
+      } else if (rawErr && typeof rawErr === "object") {
+        // Structured error block (e.g. { category, ghl_status, ghl_message, minimum_fix })
+        const e = rawErr as Record<string, unknown>;
+        const parts: string[] = [];
+        if (e.category) parts.push(`category=${e.category}`);
+        if (e.ghl_status) parts.push(`status=${e.ghl_status}`);
+        if (e.ghl_message) parts.push(`message=${typeof e.ghl_message === "string" ? e.ghl_message : JSON.stringify(e.ghl_message)}`);
+        if (e.minimum_fix) parts.push(`fix=${e.minimum_fix}`);
+        errMsg = parts.length > 0 ? parts.join(" | ") : JSON.stringify(rawErr).slice(0, 600);
+      } else if (typeof data?.raw === "string") {
+        errMsg = data.raw as string;
+      } else {
+        errMsg = `${route.edgeFunction}/${route.action} failed (HTTP ${res.status})`;
+      }
       console.warn(`[dispatcher] ${toolName} → ${route.edgeFunction}/${route.action} FAILED: ${errMsg}`);
       // routed=true so caller does NOT fall through to legacy switch (which would
       // hide the real error behind "Unknown tool"). Surface the real error to the AI.
