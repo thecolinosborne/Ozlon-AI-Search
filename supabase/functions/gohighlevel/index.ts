@@ -755,6 +755,7 @@ serve(async (req) => {
         }
 
         // ---- Confirm location access by hitting /locations/{id} ----
+        // (probe-based scope detection happens after this, only if JWT had no scopes)
         let locationName: string | undefined;
         let locationOk = false;
         let locationStatus = 0;
