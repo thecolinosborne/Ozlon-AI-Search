@@ -4227,12 +4227,47 @@ async function executeToolCall(
       case 'ghl_create_custom_field': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const body: Record<string, unknown> = { name: args.name, dataType: args.dataType };
+        const dataType = String(args.dataType || '').toUpperCase();
+        const OPTION_TYPES = new Set(['SINGLE_OPTIONS', 'MULTIPLE_OPTIONS', 'RADIO', 'CHECKBOX']);
+        const body: Record<string, unknown> = { name: args.name, dataType };
         if (args.position !== undefined) body.position = args.position;
         if (args.model) body.model = args.model;
+
+        // Normalize options for dropdown/radio/checkbox types — coerce every value to a string
+        // because GHL API calls .trim() on option values and explodes on non-strings.
+        if (OPTION_TYPES.has(dataType)) {
+          const rawOpts = args.options;
+          if (!Array.isArray(rawOpts) || rawOpts.length === 0) {
+            return { success: false, result: `Validation error: dataType "${dataType}" requires a non-empty "options" array (e.g. ["Atlanta, GA","Austin, TX"]).` };
+          }
+          const normalized: { label: string; value: string; position: number }[] = [];
+          for (let i = 0; i < rawOpts.length; i++) {
+            const opt = rawOpts[i];
+            let label: unknown;
+            let value: unknown;
+            if (opt && typeof opt === 'object' && !Array.isArray(opt)) {
+              label = (opt as Record<string, unknown>).label ?? (opt as Record<string, unknown>).name ?? (opt as Record<string, unknown>).value;
+              value = (opt as Record<string, unknown>).value ?? (opt as Record<string, unknown>).label ?? (opt as Record<string, unknown>).name;
+            } else {
+              label = opt;
+              value = opt;
+            }
+            if (label == null || value == null) {
+              return { success: false, result: `Validation error: options[${i}] is missing a label/value.` };
+            }
+            const labelStr = String(label).trim();
+            const valueStr = String(value).trim();
+            if (!labelStr || !valueStr) {
+              return { success: false, result: `Validation error: options[${i}] label/value cannot be empty after trimming.` };
+            }
+            normalized.push({ label: labelStr, value: valueStr, position: i + 1 });
+          }
+          body.options = normalized;
+        }
+
         const res = await callGHL(`/locations/${GHL_LOCATION_ID}/customFields`, 'POST', body, ghlCreds?.apiKey) as { id?: string; customField?: { id?: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Custom field "${args.name}" created (ID: ${res.id || res.customField?.id || 'created'}).` };
+        return { success: true, result: `Custom field "${args.name}" created (ID: ${res.id || res.customField?.id || 'created'})${OPTION_TYPES.has(dataType) ? ` with ${(body.options as unknown[]).length} options` : ''}.` };
       }
       case 'ghl_update_custom_field': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
