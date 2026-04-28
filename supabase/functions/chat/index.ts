@@ -11,6 +11,7 @@ import {
   filterSkillsByMode,
 } from "../_shared/skills/registry.ts";
 import { dispatchTool, dispatchMulti } from "../_shared/integrations/_dispatcher.ts";
+import { GHL_TOOL_SCOPES as GHL_TOOL_REQUIRED_SCOPES } from "../_shared/integrations/ghl-scopes.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
@@ -2238,6 +2239,21 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_check_capability',
+      description: 'Check whether the active (or specified) GoHighLevel sub-account has the OAuth scopes required to run a given GHL tool. Call this BEFORE attempting a write (create_custom_field, create_opportunity, send_message, etc.) when you are unsure the account has permission. Returns { allowed, missing_scopes, stored_scopes_count, recommendation }.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tool_name: { type: 'string', description: 'The ghl_* tool to check, e.g. "ghl_create_custom_field".' },
+          location_id: { type: 'string', description: 'Optional sub-account id. Defaults to the active account.' },
+        },
+        required: ['tool_name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_smart_search',
       description: 'Unified search across GoHighLevel contacts, opportunities, conversations, and appointments in a single call. Use this when the user asks to "find" or "search for" something in GHL without specifying the resource type — it collapses what would otherwise be 3-4 separate tool calls.',
       parameters: {
@@ -3128,7 +3144,7 @@ async function executeToolCall(
   _connMap: MultiConnMap,
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
-  ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
+  ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }[] },
 ): Promise<{ success: boolean; result: string }> {
   try {
     // ---- multi_action: parallel fan-out ----
@@ -4464,20 +4480,52 @@ async function executeToolCall(
       case 'ghl_list_sub_accounts': {
         const subs = ghlCreds?.subAccounts || [];
         const active = ghlCreds?.locationId || '';
+        // Capability groups (kept in sync with _shared/integrations/ghl-scopes.ts)
+        const CAP_GROUPS: Array<{ key: string; scopes: string[] }> = [
+          { key: 'contacts',      scopes: ['contacts.readonly', 'contacts.write'] },
+          { key: 'custom_fields', scopes: ['locations/customFields.readonly', 'locations/customFields.write'] },
+          { key: 'opportunities', scopes: ['opportunities.readonly', 'opportunities.write'] },
+          { key: 'calendars',     scopes: ['calendars.readonly', 'calendars/events.readonly', 'calendars/events.write'] },
+          { key: 'conversations', scopes: ['conversations.readonly', 'conversations/message.readonly', 'conversations/message.write'] },
+          { key: 'workflows',     scopes: ['workflows.readonly'] },
+          { key: 'campaigns',     scopes: ['campaigns.readonly'] },
+          { key: 'invoices',      scopes: ['invoices.readonly', 'invoices.write'] },
+          { key: 'payments',      scopes: ['payments/orders.readonly', 'payments/transactions.readonly'] },
+          { key: 'forms',         scopes: ['forms.readonly'] },
+          { key: 'surveys',       scopes: ['surveys.readonly'] },
+          { key: 'social_planner',scopes: ['socialplanner/account.readonly', 'socialplanner/post.readonly', 'socialplanner/post.write'] },
+          { key: 'products',      scopes: ['products.readonly', 'products.write'] },
+          { key: 'blogs',         scopes: ['blogs/post.readonly', 'blogs/post.write'] },
+          { key: 'media',         scopes: ['medias.readonly', 'medias.write'] },
+        ];
+        const enrich = (s: { id: string; name: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }) => {
+          const scopeSet = new Set(s.scopes || []);
+          const capabilities = CAP_GROUPS
+            .filter((g) => g.scopes.some((sc) => scopeSet.has(sc)))
+            .map((g) => g.key);
+          return {
+            id: s.id,
+            name: s.name,
+            location_name: s.location_name || null,
+            active: s.id === active,
+            disabled: s.disabled === true,
+            scopes_count: (s.scopes || []).length,
+            capabilities,
+            last_verified_at: s.last_verified_at || null,
+          };
+        };
         if (subs.length === 0) {
           return {
             success: true,
             result: JSON.stringify({
-              sub_accounts: active ? [{ id: active, name: 'Primary', active: true }] : [],
+              sub_accounts: active ? [{ id: active, name: 'Primary', active: true, disabled: false, scopes_count: 0, capabilities: [], location_name: null, last_verified_at: null }] : [],
               note: 'No sub-accounts configured. Add more in Integrations → Go High Level.',
             }),
           };
         }
         return {
           success: true,
-          result: JSON.stringify({
-            sub_accounts: subs.map((s) => ({ id: s.id, name: s.name, active: s.id === active })),
-          }),
+          result: JSON.stringify({ sub_accounts: subs.map(enrich) }),
         };
       }
       case 'ghl_set_active_sub_account': {
@@ -4499,6 +4547,12 @@ async function executeToolCall(
           return {
             success: false,
             result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
+          };
+        }
+        if (match.disabled === true) {
+          return {
+            success: false,
+            result: `"${match.name}" is currently disconnected. Re-enable it in Integrations → Go High Level first, or pick another account.`,
           };
         }
         if (ghlCreds) {
@@ -4535,6 +4589,12 @@ async function executeToolCall(
             result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
           };
         }
+        if (match.disabled === true) {
+          return {
+            success: false,
+            result: `"${match.name}" is currently disconnected. Re-enable it in Integrations → Go High Level before setting it as the default.`,
+          };
+        }
         try {
           const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
           if (!uid) return { success: false, result: 'No authenticated user; cannot save default.' };
@@ -4553,6 +4613,41 @@ async function executeToolCall(
         } catch (e) {
           return { success: false, result: `Failed to save default: ${(e as Error).message}` };
         }
+      }
+      case 'ghl_check_capability': {
+        const toolName2 = (args.tool_name as string | undefined)?.trim();
+        if (!toolName2) return { success: false, result: 'tool_name is required.' };
+        const subs = ghlCreds?.subAccounts || [];
+        const wantId = (args.location_id as string | undefined)?.trim() || ghlCreds?.locationId || '';
+        const target = subs.find((s) => s.id === wantId);
+        const required = GHL_TOOL_REQUIRED_SCOPES[toolName2] || [];
+        const stored = target?.scopes || [];
+        const storedSet = new Set(stored);
+        const missing = required.filter((s) => !storedSet.has(s));
+        // No required scopes mapped → permissive
+        if (required.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: stored.length,
+            recommendation: `${toolName2} has no scope requirements on file — proceed.`,
+          }) };
+        }
+        // Unknown scopes (legacy account never verified) → permissive but warn
+        if (stored.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: 0,
+            recommendation: `Scopes for "${target?.name || wantId}" are not on file. Re-sync the account in Integrations → Go High Level to enable scope-aware checks. Proceeding optimistically.`,
+          }) };
+        }
+        if (missing.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: stored.length,
+            recommendation: `"${target?.name || wantId}" has all required scopes for ${toolName2}.`,
+          }) };
+        }
+        return { success: true, result: JSON.stringify({
+          allowed: false, missing_scopes: missing, stored_scopes_count: stored.length,
+          recommendation: `"${target?.name || wantId}" is missing scope${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}. Edit the Private Integration token in GoHighLevel → Settings → Private Integrations, add the missing scope${missing.length > 1 ? 's' : ''}, then re-sync from Integrations → Go High Level.`,
+        }) };
       }
       case 'ghl_smart_search': {
         const query = (args.query as string | undefined)?.trim();
@@ -6886,6 +6981,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'ghl_list_sub_accounts': 'ghl',
     'ghl_set_active_sub_account': 'ghl',
     'ghl_set_default_sub_account': 'ghl',
+    'ghl_check_capability': 'ghl',
     'ghl_smart_search': 'ghl',
     // GSC / SEO tools
     'gsc_list_sites': 'google-search-console',
@@ -8487,6 +8583,8 @@ ACCOUNT MEMORY:
 - ghl_set_default_sub_account: makes that account the user's PERMANENT default for all future conversations.
 If the user says "make this my default" or "remember this account", use ghl_set_default_sub_account.
 If the user just says "switch to X", use ghl_set_active_sub_account.
+- ghl_list_sub_accounts: when the user asks "which GHL accounts do I have", "what's connected", or "what can X do", call this FIRST and answer from its output (it returns scope counts, capabilities, and disconnected state per account). Never invent accounts.
+- ghl_check_capability: BEFORE any GHL write (create_*, update_*, delete_*, send_*), if you're unsure the active account has the right scope, call this with tool_name. If allowed=false, tell the user exactly which scope is missing and where to add it — do not attempt the call.
 
 If the user names a sub-account that matches one above, call ghl_set_active_sub_account with that name BEFORE the requested action, then proceed.
 If the user names a sub-account NOT in the list above, ask them to add it in Settings → Integrations → Go High Level.
