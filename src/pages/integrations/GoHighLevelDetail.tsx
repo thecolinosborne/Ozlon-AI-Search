@@ -438,8 +438,42 @@ const GoHighLevelDetail = () => {
                   <div className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
                     {acct.id}
                   </div>
+                  {/* Scope chips */}
+                  {acct.scopes && acct.scopes.length > 0 ? (
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      <ShieldCheck className="w-3 h-3 text-emerald-500 shrink-0" strokeWidth={2} />
+                      <span className="text-[10px] text-muted-foreground">
+                        {acct.scopes.length} scope{acct.scopes.length === 1 ? "" : "s"}
+                      </span>
+                      {acct.scopes.slice(0, 6).map((s) => (
+                        <span
+                          key={s}
+                          className="text-[10px] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded"
+                          title={s}
+                        >
+                          {s.replace(/^locations\//, "").replace(/\.readonly$/, ".r").replace(/\.write$/, ".w")}
+                        </span>
+                      ))}
+                      {acct.scopes.length > 6 && (
+                        <span className="text-[10px] text-muted-foreground">+{acct.scopes.length - 6} more</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+                      <ShieldAlert className="w-3 h-3 shrink-0" strokeWidth={2} />
+                      <span>Scopes not yet verified — click Re-sync</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleResyncScopes(acct)}
+                    disabled={verifyingId === acct.id}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                    title="Re-verify token & re-sync scopes"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                  </button>
                   {acct.id !== aiDefaultId && (
                     <button
                       onClick={() => handleSetAiDefault(acct.id)}
