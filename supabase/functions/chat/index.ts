@@ -4533,6 +4533,12 @@ async function executeToolCall(
             result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
           };
         }
+        if (match.disabled === true) {
+          return {
+            success: false,
+            result: `"${match.name}" is currently disconnected. Re-enable it in Integrations → Go High Level first, or pick another account.`,
+          };
+        }
         if (ghlCreds) {
           ghlCreds.locationId = match.id;
           if (match.api_key) ghlCreds.apiKey = match.api_key;
