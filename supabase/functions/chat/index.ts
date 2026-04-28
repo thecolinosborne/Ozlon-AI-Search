@@ -7954,6 +7954,48 @@ function detectDomains(text: string): ToolDomain[] {
   return [...found];
 }
 
+function isContextDependentFollowup(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return false;
+
+  const shortApprovalOrRetry = [
+    'yes', 'yep', 'yeah', 'ok', 'okay', 'sure', 'do it', 'go ahead', 'approved', 'approve',
+    'confirm', 'confirmed', 'proceed', 'retry', 'retry it', 'retry that', 'retry previous task',
+    'try again', 'do it again',
+  ];
+  if (shortApprovalOrRetry.includes(lower)) return true;
+
+  return [
+    'it did it again',
+    'same thing',
+    'still not working',
+    'still broken',
+    'make it work',
+    'wtf',
+    'fuck',
+    'fucking',
+  ].some((signal) => lower.includes(signal));
+}
+
+function detectDomainsFromRecentUserHistory(messages: { role: string; content: string }[], maxUserTurns = 4): ToolDomain[] {
+  const found = new Set<ToolDomain>(['system']);
+  let skippedCurrentUser = false;
+  let inspected = 0;
+
+  for (let i = messages.length - 1; i >= 0 && inspected < maxUserTurns; i--) {
+    const msg = messages[i];
+    if (msg.role !== 'user' || !msg.content) continue;
+    if (!skippedCurrentUser) {
+      skippedCurrentUser = true;
+      continue;
+    }
+    inspected += 1;
+    for (const domain of detectDomains(msg.content)) found.add(domain);
+  }
+
+  return [...found];
+}
+
 function classifyMessage(messages: { role: string; content: string }[]): InfinityClassification {
   const lastUser = [...messages].reverse().find(m => m.role === 'user');
   const text = lastUser?.content || '';
@@ -7965,16 +8007,24 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
   const multimodalKw = ['image', 'photo', 'screenshot', 'picture', 'file', 'pdf', 'document', 'attachment'];
   const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'upload'];
   const liveDataKw = ['weather', 'stock', 'price', 'news', 'current', 'today\'s', 'latest'];
+  const contextualFollowup = isContextDependentFollowup(text);
+  const directDomains = detectDomains(text);
+  const contextualDomains = contextualFollowup ? detectDomainsFromRecentUserHistory(messages) : [];
+  const domains = [...new Set<ToolDomain>([...directDomains, ...contextualDomains])];
+  const inheritedActionIntent = contextualFollowup && [...messages]
+    .slice(0, -1)
+    .reverse()
+    .some((m) => m.role === 'user' && actionKw.some((k) => m.content.toLowerCase().includes(k)));
 
   return {
-    intent: analysisKw.some(k => lower.includes(k)) ? 'analysis' : actionKw.some(k => lower.includes(k)) ? 'action' : 'general',
+    intent: analysisKw.some(k => lower.includes(k)) ? 'analysis' : (actionKw.some(k => lower.includes(k)) || inheritedActionIntent) ? 'action' : 'general',
     input_length: len,
     needs_memory: memoryKw.some(k => lower.includes(k)),
     needs_deep_reasoning: analysisKw.some(k => lower.includes(k)) || len > 2000,
     needs_multimodal: multimodalKw.some(k => lower.includes(k)),
     needs_live_data: liveDataKw.some(k => lower.includes(k)),
-    confidence: len < 20 ? 0.9 : len > 5000 ? 0.5 : 0.7,
-    domains: detectDomains(text),
+    confidence: contextualFollowup ? 0.9 : len < 20 ? 0.9 : len > 5000 ? 0.5 : 0.7,
+    domains,
   };
 }
 
