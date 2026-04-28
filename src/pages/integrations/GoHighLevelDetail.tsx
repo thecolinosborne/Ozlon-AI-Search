@@ -221,6 +221,24 @@ const GoHighLevelDetail = () => {
     }
   };
 
+  const openAddModal = () => {
+    setEditingPrimary(false);
+    setNewSub({ id: "", name: "", api_key: "" });
+    setShowAddModal(true);
+  };
+
+  const openPrimaryModal = () => {
+    setEditingPrimary(true);
+    const primaryId = settings.locationId || "";
+    const primary = subAccounts.find((s) => s.id === primaryId);
+    setNewSub({
+      id: primaryId,
+      name: primary?.name || "Primary",
+      api_key: settings.apiKey || primary?.api_key || "",
+    });
+    setShowAddModal(true);
+  };
+
   const handleAddSubAccount = async () => {
     const id = newSub.id.trim();
     const name = newSub.name.trim();
@@ -233,7 +251,9 @@ const GoHighLevelDetail = () => {
       toast.error("API token is required so we can verify scopes");
       return;
     }
-    if (subAccounts.some((s) => s.id === id)) {
+    // For ADD: enforce uniqueness. For EDIT Primary: skip the uniqueness check
+    // since we're updating an existing row (or replacing the Primary's locationId).
+    if (!editingPrimary && subAccounts.some((s) => s.id === id)) {
       toast.error("A sub-account with that Location ID already exists");
       return;
     }
@@ -248,23 +268,42 @@ const GoHighLevelDetail = () => {
       const sub: SubAccount = {
         id,
         name,
-        api_key: apiKey,
+        api_key: editingPrimary ? undefined : apiKey, // Primary uses top-level apiKey
         scopes: verification.scopes,
         location_name: verification.locationName,
         company_id: verification.companyId,
         last_verified_at: new Date().toISOString(),
       };
-      const nextSubs = [...subAccounts, sub];
-      const next: GHLSettings = {
-        ...settings,
-        subAccounts: nextSubs,
-        locationId: settings.locationId || sub.id,
-      };
+      let nextSubs: SubAccount[];
+      let next: GHLSettings;
+      if (editingPrimary) {
+        // Replace the Primary row (keyed by old top-level locationId), or upsert it.
+        const oldPrimaryId = settings.locationId || "";
+        const without = subAccounts.filter((s) => s.id !== oldPrimaryId && s.id !== id);
+        nextSubs = [...without, sub];
+        next = {
+          ...settings,
+          apiKey,            // top-level token
+          locationId: id,    // top-level location
+          subAccounts: nextSubs,
+        };
+      } else {
+        nextSubs = [...subAccounts, sub];
+        next = {
+          ...settings,
+          subAccounts: nextSubs,
+          locationId: settings.locationId || sub.id,
+        };
+      }
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      setApiKeyConfigured("gohighlevel", true);
       setShowAddModal(false);
+      setEditingPrimary(false);
       setNewSub({ id: "", name: "", api_key: "" });
-      toast.success(`Connected "${name}" — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
+      toast.success(
+        `${editingPrimary ? "Primary updated" : `Connected "${name}"`} — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`
+      );
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
