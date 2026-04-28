@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X } from "lucide-react";
+import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -12,6 +12,10 @@ interface SubAccount {
   id: string;        // GHL location_id
   name: string;
   api_key?: string;  // optional per-sub-account key (falls back to top-level)
+  scopes?: string[]; // OAuth scopes the token actually has, populated by verify_token
+  location_name?: string;
+  company_id?: string;
+  last_verified_at?: string;
 }
 
 interface GHLSettings {
