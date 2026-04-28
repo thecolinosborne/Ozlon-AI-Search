@@ -78,6 +78,7 @@
 - [Additive development](mem://constraints/additive-development-policy) — Preserve all existing UI/UX when adding features
 - [Stabilization policy](mem://architecture/stabilization-policy) — No broad refactors, isolated lifecycle fixes only
 - [Removed features](mem://features/removed-tasks-and-video-studio) — Tasks, Video Studio, Facebook Ads, Maton removed permanently
+- [Signal envelope](mem://architecture/signal-envelope) — 5-bucket signal model + 8-level priority hierarchy. Pure builder, sliced renderers, trie-cached entities. Generalizes per-integration account binding.
 
 ### Integrations Hub & Services
 - [Hub visual identity](mem://integrations/hub-visual-identity) — Vercel/Stripe aesthetic for modular integration cards
