@@ -494,14 +494,28 @@ const GoHighLevelDetail = () => {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => handleResyncScopes(acct)}
-                    disabled={verifyingId === acct.id}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-                    title="Re-verify token & re-sync scopes"
+                    onClick={() => handleToggleConnection(acct)}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors",
+                      acct.disabled
+                        ? "text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10"
+                        : "text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10"
+                    )}
+                    title={acct.disabled ? "Reconnect this sub-account" : "Disconnect (keep remembered)"}
                   >
-                    <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                    {acct.disabled ? <Power className="w-3.5 h-3.5" strokeWidth={1.5} /> : <PowerOff className="w-3.5 h-3.5" strokeWidth={1.5} />}
                   </button>
-                  {acct.id !== aiDefaultId && (
+                  {!acct.disabled && (
+                    <button
+                      onClick={() => handleResyncScopes(acct)}
+                      disabled={verifyingId === acct.id}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                      title="Re-verify token & re-sync scopes"
+                    >
+                      <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                    </button>
+                  )}
+                  {!acct.disabled && acct.id !== aiDefaultId && (
                     <button
                       onClick={() => handleSetAiDefault(acct.id)}
                       disabled={savingDefault === acct.id}
@@ -511,7 +525,7 @@ const GoHighLevelDetail = () => {
                       {savingDefault === acct.id ? "Saving…" : "AI default"}
                     </button>
                   )}
-                  {acct.id !== activeId && (
+                  {!acct.disabled && acct.id !== activeId && (
                     <button
                       onClick={() => handleSetActive(acct.id)}
                       className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
