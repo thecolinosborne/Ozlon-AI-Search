@@ -2238,6 +2238,21 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_check_capability',
+      description: 'Check whether the active (or specified) GoHighLevel sub-account has the OAuth scopes required to run a given GHL tool. Call this BEFORE attempting a write (create_custom_field, create_opportunity, send_message, etc.) when you are unsure the account has permission. Returns { allowed, missing_scopes, stored_scopes_count, recommendation }.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tool_name: { type: 'string', description: 'The ghl_* tool to check, e.g. "ghl_create_custom_field".' },
+          location_id: { type: 'string', description: 'Optional sub-account id. Defaults to the active account.' },
+        },
+        required: ['tool_name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_smart_search',
       description: 'Unified search across GoHighLevel contacts, opportunities, conversations, and appointments in a single call. Use this when the user asks to "find" or "search for" something in GHL without specifying the resource type — it collapses what would otherwise be 3-4 separate tool calls.',
       parameters: {
