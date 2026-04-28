@@ -1,44 +1,107 @@
-# Chat-driven GHL account switching + scope awareness
+# Signal Detail View + Scalable Signal Envelope
 
-Make it so you can list, switch, and inspect your synced GoHighLevel accounts directly from chat — and have the AI tell you exactly which scopes are missing when an action would fail, instead of dying with a raw 403.
+Two coordinated changes. The detail view is small and immediate; the envelope is the architectural piece.
 
-## What you'll be able to say
+---
 
-- *"Which GHL accounts do I have synced?"* → lists Ozlon + Daddy Stroller with scope counts and connected/disconnected state.
-- *"Switch to Daddy Stroller for this conversation."* → flips active account; refuses if that account is toggled off.
-- *"Make Ozlon my permanent default."* → persists across all future chats.
-- *"Create a custom field 'Stroller Model' on Daddy Stroller."* → uses the active account's token; if `customFields.write` scope is missing, AI says exactly that and points you to the GHL token settings instead of failing.
-- *"What can Daddy Stroller actually do?"* → lists capabilities derived from stored scopes.
-- *"Why can't you do X for Ozlon?"* → AI compares required vs stored scopes and names the missing ones.
+## Part 1 — Fix signal truncation (small, ships first)
 
-## Changes (all in `supabase/functions/chat/index.ts`)
+### What you see today
+- Banner: `reason` clamped to 2 lines, no expander
+- Indicator hover: clamped to 3 lines
+- Page hero: suggestion button truncated at 260px
+- Nowhere shows `evidence`, `source_ids`, `mode_context`, `confidence`, lookahead window, or the underlying wisdom memories that produced the signal
 
-**1. Widen the credential type (line 3131)**
-Extend `ghlCreds.subAccounts[]` typing to include `scopes`, `location_name`, `disabled`, `last_verified_at`. These fields already exist in the DB and are loaded at line 8317 — just not typed all the way through.
+### What ships
+1. **`src/components/signals/SignalDetailSheet.tsx`** *(new)*
+   A right-side `Sheet` (shadcn) that opens on signal click and shows the full record:
+   - Full headline + reason (no clamp)
+   - Full suggested direction
+   - `evidence` array rendered as a citation list (with links when source_ids resolve to emails / events / tasks)
+   - Salience, confidence, kind, mode_context, lookahead window, created_at — as a meta strip
+   - Linked wisdom memories (the ones from `match_wisdom_memories` that produced this signal) — fetched lazily
+   - Actions: Handle / Run skill / Snooze / Dismiss / Mark wrong
+2. **Edits (additive only):**
+   - `SignalsBanner.tsx` — add an "Expand" affordance on the reason; clicking the card opens `SignalDetailSheet`
+   - `SignalSurface.tsx` (page variant) — make the truncated suggestion button open the sheet instead of just navigating
+   - `SignalSurface.tsx` (indicator) — hover preview gets a "View details" link
+3. **Backend:** add `signal_moments.evidence` and `signal_moments.linked_memory_ids` to the `useSignals()` select if they're not already returned (read existing hook first; only widen if needed).
 
-**2. Enrich `ghl_list_sub_accounts` handler (lines 4464–4481)**
-Return scope counts, capability groups (contacts / custom_fields / social_planner / products / calendars / etc.), `disabled` flag, `location_name`, and `last_verified_at` for every account — plus which one is currently active. This is what powers the "what can X actually do?" answer.
+No design rewrite. Same Vision-Pro aesthetic. Sheet uses existing tokens.
 
-**3. Guard `ghl_set_active_sub_account` and `ghl_set_default_sub_account`**
-If the matched account has `disabled: true`, refuse with a clear message: *"Daddy Stroller Social Club is currently disconnected. Re-enable it in Integrations → Go High Level first."* No silent switch to a dead account.
+---
 
-**4. New tool: `ghl_check_capability`**
-Single-purpose helper the AI can call before a write. Inputs: `tool_name` (e.g. `ghl_create_custom_field`) and optional `location_id` (defaults to active). Returns: `{ allowed, missing_scopes, stored_scopes_count, recommendation }`. Uses the existing `ghl-scopes.ts` mapping to know which scopes each tool requires.
+## Part 2 — The scalable signal envelope (architecture)
 
-**5. Pre-flight scope check on GHL write tools**
-Before any GHL write runs, compare its required scopes (from `ghl-scopes.ts`) against the active account's stored scopes. If something's missing, return a structured error to the AI immediately — no upstream round-trip, no opaque 403. The AI then tells you exactly which scope to add in your GHL token.
+### The scaling problems with the previous plan
+- Inlining envelope construction in `chat/index.ts` makes a 9.5k-line file worse
+- Rendering the full envelope into every system prompt burns tokens linearly per turn
+- Per-turn entity matching against every account/workspace name doesn't survive 100+ accounts
+- Signal logic gets duplicated between `chat`, `signals-synthesize`, `RealtimeVoiceChat`, and `Communications`
 
-**6. One-line system prompt nudge**
-Add to the GHL section: *"When the user asks 'which GHL accounts do I have', 'switch to X', or 'what can X do', call `ghl_list_sub_accounts` first. Before any GHL write, call `ghl_check_capability` if you're unsure the active account has the right scope."*
+### Scalable shape
 
-## Out of scope
+```text
+                        ┌────────────────────────────────┐
+                        │  signal-envelope (edge fn)     │
+                        │  pure, cacheable, ~30ms        │
+                        │  in:  messages, sessionId,     │
+                        │       userId                   │
+                        │  out: SignalEnvelope (typed)   │
+                        └──────────────┬─────────────────┘
+                                       │
+        ┌──────────────────────────────┼──────────────────────────────┐
+        ▼                              ▼                              ▼
+   chat/index.ts              signals-synthesize           RealtimeVoiceChat
+   (consumer)                 (consumer)                   (consumer)
+```
 
-- Adding GHL accounts from chat — paste tokens in the Integrations UI only (security).
-- Toggling disconnect/reconnect from chat — handled in the Integrations UI.
-- UI changes — the Integrations page already shows scope chips and the toggle.
+One envelope builder, multiple consumers. Each consumer reads only the buckets it cares about.
 
-## Files touched
+### Why this scales
 
-- `supabase/functions/chat/index.ts` — type widening, two handler edits, one new tool + manifest entry, pre-flight wrapper, one system-prompt line.
+| Concern | Mitigation |
+|---|---|
+| Token cost in prompts | Envelope is **never serialized whole**. Each consumer renders only the slice it needs. Chat gets a 6-line "PRIORITY CONTEXT" block (top-3 signals only). Voice gets one line. |
+| Per-turn latency | Builder caches the entity index per user (account names, workspace names) in a Deno KV or in-memory LRU keyed by `userId + integrations.updated_at`. Rebuilt only when integrations change. |
+| Account/workspace explosion | Entity matcher uses a **trie** built once per user, not a linear scan per turn. O(message length) instead of O(accounts × message length). |
+| Schema drift | `SignalEnvelope` lives in `_shared/signals/types.ts`. All consumers import the type — TS catches drift at build. |
+| Adding a new bucket later | New buckets are additive fields. Old consumers ignore them. No migration. |
+| Adding a new consumer (e.g., communications) | Consumer imports the builder, asks for the envelope. Zero changes to other consumers. |
 
-No DB migration. No new edge function. No frontend changes.
+### What ships
+
+**New files**
+- `supabase/functions/_shared/signals/types.ts` — `SignalBucket`, `SignalPriority` (`direct|active|durable|contextual|recent|inferred|background|uncertain`), `Signal`, `SignalEnvelope`
+- `supabase/functions/_shared/signals/builder.ts` — pure `buildSignalEnvelope(input)`. No network. Caller passes already-loaded data (messages, profile, session, integrations snapshot).
+- `supabase/functions/_shared/signals/entities.ts` — trie-based account/workspace name matcher. Cached per user in module-scope `Map<userId, {builtAt, trie}>`.
+- `supabase/functions/_shared/signals/intent.ts` / `importance.ts` / `interaction.ts` — the A/C/E bucket classifiers (deterministic verb/cue tables). Reuse existing `classifyMessage()` for B (context).
+- `supabase/functions/_shared/signals/render.ts` — formatters: `renderForChatPrompt(env, {topN: 3})`, `renderForVoice(env)`, `renderForUI(env)`. Each consumer picks one.
+
+**Edits (small, surgical)**
+- `supabase/functions/chat/index.ts` — ~20 added lines: build envelope, call `renderForChatPrompt(env)`, append to system prompt, replace the ad-hoc GHL account-string scan with `pickAccountByPriority(env, 'ghl')`. The existing classifier and Infinity Router stay exactly as-is.
+- `supabase/functions/signals-synthesize/index.ts` — accept the envelope when chat passes it; otherwise build its own. Lets synthesis prioritize moments that align with the user's current intent bucket.
+- `RealtimeVoiceChat` (frontend) — fetches the envelope once on session start via a thin `signals-envelope` edge fn read endpoint, uses `renderForVoice(env)` to seed the realtime context.
+
+**Frontend (additive, off by default)**
+- `src/components/signals/EnvelopeDebugDrawer.tsx` — visible only when `?debug=signals` is set or toggled in `Developer.tsx`. Streams `event: signal_envelope` from chat SSE.
+
+**Memory**
+- `mem://architecture/signal-envelope` — documents the 8-priority hierarchy, 5 buckets, builder/consumer split, caching strategy.
+- Index update under Architecture & Stability.
+
+### Out of scope (next pass once this lands)
+- Persisting envelopes to DB for analytics
+- Generalizing the GHL guardrail to ClickUp/Slack (envelope already exposes the data; it's a 5-line per-integration change)
+- User-facing "treat this as urgent" override mid-turn
+
+---
+
+## Order of operations
+
+1. **Detail Sheet** (Part 1) — ~1 file new, 3 small edits. Independently shippable.
+2. **Envelope plumbing** (Part 2) — types + builder + render, no consumer wiring yet.
+3. **Wire chat consumer** — replace the ad-hoc GHL account scan with `pickAccountByPriority`. This is the moment the new architecture earns its keep.
+4. **Wire voice + synthesis consumers** — last, once chat proves it.
+
+Each step is independently mergeable. Nothing forces a big-bang switch.
