@@ -662,6 +662,107 @@ serve(async (req) => {
         break;
       }
 
+      // ============ TOKEN INTROSPECTION (no GHL upstream needed) ============
+      // Decodes the Private Integration JWT to extract granted scopes, then
+      // pings GET /locations/{id} to confirm the token actually has access to
+      // that specific location. Returns a structured verification receipt.
+      case 'verify_token': {
+        // For verify_token we accept apiKey + locationId from `params` directly
+        // (the dashboard sends them this way before the connection is saved).
+        const tok = (params?.apiKey as string | undefined) || GHL_API_KEY;
+        const loc = (params?.locationId as string | undefined) || GHL_LOCATION_ID;
+
+        // ---- Decode JWT for embedded scopes ----
+        let scopes: string[] = [];
+        let companyId: string | undefined;
+        let tokenLocationId: string | undefined;
+        try {
+          const parts = (tok || '').split('.');
+          if (parts.length >= 2) {
+            let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            while (b64.length % 4) b64 += '=';
+            const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
+            const oauthMeta = (payload.oauthMeta as Record<string, unknown> | undefined) || {};
+            const rawScopes = oauthMeta.scopes ?? payload.scopes ?? payload.scope;
+            if (Array.isArray(rawScopes)) {
+              scopes = rawScopes.filter((s): s is string => typeof s === 'string');
+            } else if (typeof rawScopes === 'string' && rawScopes.trim()) {
+              scopes = rawScopes.trim().split(/\s+/);
+            }
+            if (typeof payload.company_id === 'string') companyId = payload.company_id;
+            if (typeof payload.location_id === 'string') tokenLocationId = payload.location_id;
+            if (!tokenLocationId && typeof oauthMeta.locationId === 'string') {
+              tokenLocationId = oauthMeta.locationId as string;
+            }
+          }
+        } catch (e) {
+          console.warn('[gohighlevel/verify_token] JWT decode failed:', e);
+        }
+
+        // ---- Confirm location access by hitting /locations/{id} ----
+        let locationName: string | undefined;
+        let locationOk = false;
+        let locationStatus = 0;
+        let locationErr: string | undefined;
+        if (loc && tok) {
+          try {
+            const r = await fetch(`${GHL_BASE_URL}/locations/${loc}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${tok}`,
+                'Version': '2021-07-28',
+              },
+            });
+            locationStatus = r.status;
+            const txt = await r.text();
+            let j: Record<string, unknown> = {};
+            try { j = txt ? JSON.parse(txt) : {}; } catch { j = { raw: txt }; }
+            if (r.ok) {
+              locationOk = true;
+              const locObj = (j.location as Record<string, unknown> | undefined) || j;
+              if (locObj && typeof locObj.name === 'string') locationName = locObj.name as string;
+              if (!companyId && locObj && typeof locObj.companyId === 'string') {
+                companyId = locObj.companyId as string;
+              }
+            } else {
+              locationErr = typeof j === 'string' ? j : (txt?.slice(0, 400) || `HTTP ${r.status}`);
+            }
+          } catch (e) {
+            locationErr = e instanceof Error ? e.message : String(e);
+          }
+        }
+
+        const ok = !!tok && !!loc && locationOk;
+        const result = {
+          ok,
+          scopes,
+          locationName,
+          locationId: loc,
+          companyId,
+          tokenLocationId,
+          location_check: {
+            ok: locationOk,
+            status: locationStatus,
+            error: locationErr,
+          },
+          hint: !tok
+            ? 'Missing API token.'
+            : !loc
+              ? 'Missing Location ID.'
+              : !locationOk
+                ? (locationStatus === 401 || locationStatus === 403
+                    ? "Token does not have access to this Location ID. Re-create the Private Integration token in this sub-account in GHL, or double-check the Location ID."
+                    : `Could not verify location (HTTP ${locationStatus}).`)
+                : scopes.length === 0
+                  ? 'Connected, but no scopes were detectable in the token. Make sure you used a Private Integration token (not a legacy v1 API key).'
+                  : `Verified — ${scopes.length} scope${scopes.length === 1 ? '' : 's'} detected.`,
+        };
+
+        return new Response(JSON.stringify(result), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       // ============ GENERIC PROXY ============
       case 'proxy': {
         if (!path) throw new Error('Path required for proxy action');
