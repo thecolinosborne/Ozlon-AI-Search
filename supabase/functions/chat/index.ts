@@ -8143,7 +8143,8 @@ serve(async (req) => {
     // Native connection discovery + per-user GHL credential resolution
     let GHL_API_KEY_RESOLVED: string | undefined;
     let GHL_LOCATION_ID_RESOLVED: string | undefined;
-    let GHL_SUB_ACCOUNTS_RESOLVED: { id: string; name: string; api_key?: string }[] | undefined;
+    let GHL_SUB_ACCOUNTS_RESOLVED: { id: string; name: string; api_key?: string; scopes?: string[] }[] | undefined;
+    let GHL_ACTIVE_SCOPES: string[] | undefined; // scopes of the active sub-account, used to gate tools
 
     // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
@@ -8263,7 +8264,7 @@ ${parts.join('\n\n')}
           for (const c of conns) {
             const meta = (c.metadata as Record<string, unknown>) || {};
             const subAccounts = Array.isArray(meta.sub_accounts)
-              ? (meta.sub_accounts as { id: string; name: string; api_key?: string }[])
+              ? (meta.sub_accounts as { id: string; name: string; api_key?: string; scopes?: string[] }[])
                   .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string')
               : [];
 
@@ -8328,9 +8329,21 @@ ${parts.join('\n\n')}
             if (match) {
               GHL_LOCATION_ID_RESOLVED = match.id;
               if (match.api_key) GHL_API_KEY_RESOLVED = match.api_key;
+              if (Array.isArray(match.scopes) && match.scopes.length > 0) {
+                GHL_ACTIVE_SCOPES = match.scopes.slice();
+              }
               (globalThis as Record<string, unknown>).__ghlMemorySource = memorySource;
               console.log(`[GHL] Active sub-account from ${memorySource}: "${match.name}" (${match.id})`);
             }
+          }
+        }
+
+        // If no session/default match yet, fall back to scopes of whichever
+        // sub-account corresponds to GHL_LOCATION_ID_RESOLVED (the metadata default).
+        if (!GHL_ACTIVE_SCOPES && GHL_LOCATION_ID_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED) {
+          const match = GHL_SUB_ACCOUNTS_RESOLVED.find((s) => s.id === GHL_LOCATION_ID_RESOLVED);
+          if (match && Array.isArray(match.scopes) && match.scopes.length > 0) {
+            GHL_ACTIVE_SCOPES = match.scopes.slice();
           }
         }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
