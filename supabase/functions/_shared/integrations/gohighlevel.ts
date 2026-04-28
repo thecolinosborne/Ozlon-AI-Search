@@ -724,12 +724,22 @@ function deriveFieldKey(name: string): string {
     .replace(/_{2,}/g, "_") || "field";
 }
 
-function normalizeOptions(opts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  return opts.map((o, idx) => {
-    const label = (o.label ?? o.name ?? "") as string;
-    const value = (o.value as string | undefined) ?? deriveFieldKey(label);
-    const position = (o.position as number | undefined) ?? idx;
-    return { label, value, position };
-  });
+function normalizeOptions(opts: Array<unknown>): Array<string> {
+  // GHL v1 /locations/{id}/customFields expects options as a plain array of strings.
+  // Sending objects ({label,value,position}) causes upstream "v.trim is not a function".
+  const out: string[] = [];
+  for (const o of opts) {
+    let s: unknown;
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      const r = o as Record<string, unknown>;
+      s = r.label ?? r.name ?? r.value ?? r.text;
+    } else {
+      s = o;
+    }
+    if (s == null) continue;
+    const str = String(s).trim();
+    if (str) out.push(str);
+  }
+  return out;
 }
 
