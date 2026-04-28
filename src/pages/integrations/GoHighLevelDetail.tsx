@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert, Power, PowerOff } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -16,6 +16,7 @@ interface SubAccount {
   location_name?: string;
   company_id?: string;
   last_verified_at?: string;
+  disabled?: boolean; // remembered but disconnected — AI won't auto-pick it
 }
 
 interface GHLSettings {
@@ -268,12 +269,30 @@ const GoHighLevelDetail = () => {
 
   const handleRemoveSubAccount = async (id: string) => {
     const nextSubs = subAccounts.filter((s) => s.id !== id);
-    const nextActive = settings.locationId === id ? (nextSubs[0]?.id || "") : settings.locationId;
+    const nextActive = settings.locationId === id ? (nextSubs.find((s) => !s.disabled)?.id || "") : settings.locationId;
     const next: GHLSettings = { ...settings, subAccounts: nextSubs, locationId: nextActive };
     try {
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
-      toast.success("Sub-account removed");
+      toast.success("Sub-account forgotten");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const handleToggleConnection = async (sub: SubAccount) => {
+    const nextDisabled = !sub.disabled;
+    const nextSubs = subAccounts.map((s) => (s.id === sub.id ? { ...s, disabled: nextDisabled } : s));
+    // If disconnecting the active default, fall back to another connected sub.
+    let nextActive = settings.locationId;
+    if (nextDisabled && settings.locationId === sub.id) {
+      nextActive = nextSubs.find((s) => !s.disabled)?.id || "";
+    }
+    const next: GHLSettings = { ...settings, subAccounts: nextSubs, locationId: nextActive };
+    try {
+      await persistMetadata(next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      toast.success(nextDisabled ? `"${sub.name}" disconnected (still remembered)` : `"${sub.name}" reconnected`);
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -416,18 +435,26 @@ const GoHighLevelDetail = () => {
                     : "border-border/40 bg-card/60"
                 )}
               >
-                <div className="flex-1 min-w-0">
+                <div className={cn("flex-1 min-w-0", acct.disabled && "opacity-50")}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-foreground truncate">{acct.name}</span>
-                    {acct.id === activeId && (
-                      <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                        Default
+                    {acct.disabled ? (
+                      <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        Disconnected
                       </span>
-                    )}
-                    {acct.id === aiDefaultId && (
-                      <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                        AI Default
-                      </span>
+                    ) : (
+                      <>
+                        {acct.id === activeId && (
+                          <span className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                            Default
+                          </span>
+                        )}
+                        {acct.id === aiDefaultId && (
+                          <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                            AI Default
+                          </span>
+                        )}
+                      </>
                     )}
                     {acct.api_key && (
                       <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
@@ -467,14 +494,28 @@ const GoHighLevelDetail = () => {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => handleResyncScopes(acct)}
-                    disabled={verifyingId === acct.id}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-                    title="Re-verify token & re-sync scopes"
+                    onClick={() => handleToggleConnection(acct)}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors",
+                      acct.disabled
+                        ? "text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10"
+                        : "text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10"
+                    )}
+                    title={acct.disabled ? "Reconnect this sub-account" : "Disconnect (keep remembered)"}
                   >
-                    <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                    {acct.disabled ? <Power className="w-3.5 h-3.5" strokeWidth={1.5} /> : <PowerOff className="w-3.5 h-3.5" strokeWidth={1.5} />}
                   </button>
-                  {acct.id !== aiDefaultId && (
+                  {!acct.disabled && (
+                    <button
+                      onClick={() => handleResyncScopes(acct)}
+                      disabled={verifyingId === acct.id}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                      title="Re-verify token & re-sync scopes"
+                    >
+                      <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                    </button>
+                  )}
+                  {!acct.disabled && acct.id !== aiDefaultId && (
                     <button
                       onClick={() => handleSetAiDefault(acct.id)}
                       disabled={savingDefault === acct.id}
@@ -484,7 +525,7 @@ const GoHighLevelDetail = () => {
                       {savingDefault === acct.id ? "Saving…" : "AI default"}
                     </button>
                   )}
-                  {acct.id !== activeId && (
+                  {!acct.disabled && acct.id !== activeId && (
                     <button
                       onClick={() => handleSetActive(acct.id)}
                       className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
@@ -496,7 +537,7 @@ const GoHighLevelDetail = () => {
                   <button
                     onClick={() => handleRemoveSubAccount(acct.id)}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    title="Remove"
+                    title="Forget this sub-account permanently"
                   >
                     <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                   </button>
