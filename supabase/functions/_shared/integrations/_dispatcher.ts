@@ -17,6 +17,7 @@ export async function dispatchTool(
   toolName: string,
   args: Record<string, unknown>,
   authHeader: string,
+  extraPayload?: Record<string, unknown>,
 ): Promise<DispatchResult> {
   const route = getRoute(toolName);
   if (!route) {
@@ -38,9 +39,14 @@ export async function dispatchTool(
     const msg = e instanceof Error ? e.message : String(e);
     return { success: false, routed: true, result: `Tool ${toolName} arg mapping failed: ${msg}` };
   }
+  // Merge extraPayload (e.g. resolved per-sub-account credentials for GHL) underneath mapped args.
+  // extraPayload has LOWEST priority — explicit args from the AI always win.
+  const merged: Record<string, unknown> = extraPayload
+    ? { ...extraPayload, ...mapped }
+    : mapped;
   const payload = route.envelope === "nested"
-    ? { action: route.action, params: mapped }
-    : { action: route.action, ...mapped };
+    ? { action: route.action, params: merged }
+    : { action: route.action, ...merged };
 
   try {
     const res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
