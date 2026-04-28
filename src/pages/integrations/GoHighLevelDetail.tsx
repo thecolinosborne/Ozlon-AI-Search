@@ -463,23 +463,29 @@ const GoHighLevelDetail = () => {
         </div>
       }
     >
-      {/* API Credentials */}
-      <ApiKeyInput
-        label="GHL API Key (default)"
-        placeholder="Enter your Go High Level API key…"
-        configured={!!settings.apiKey || integration.status === "connected"}
-        onSave={handleSaveApiKey}
-        saving={savingApiKey}
-        maskedHint={settings.apiKey ? "••••" + settings.apiKey.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
-      />
-      <ApiKeyInput
-        label="Default Location ID"
-        placeholder="Enter your primary Location ID…"
-        configured={!!settings.locationId || integration.status === "connected"}
-        onSave={handleSaveLocationId}
-        saving={savingLocationId}
-        maskedHint={settings.locationId ? "••••" + settings.locationId.slice(-4) : integration.status === "connected" ? "•••••••• (server)" : undefined}
-      />
+      {/* Primary Account — same UX as a sub-account: token + Location ID + verified scopes */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Primary Account</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Your default GHL location. Same setup flow as a sub-account — paste a Private Integration token to detect scopes.
+            </p>
+          </div>
+          <button
+            onClick={openPrimaryModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" strokeWidth={2} />
+            {settings.locationId ? "Re-add / Refresh" : "Set up Primary"}
+          </button>
+        </div>
+        {!settings.locationId && (
+          <div className="p-4 rounded-xl border border-dashed border-border/40 bg-card/40 text-xs text-muted-foreground text-center">
+            No primary configured yet. Click Set up Primary.
+          </div>
+        )}
+      </div>
 
       {/* Sub-Accounts */}
       <div className="space-y-3">
@@ -491,7 +497,7 @@ const GoHighLevelDetail = () => {
             </p>
           </div>
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
