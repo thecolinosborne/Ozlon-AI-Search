@@ -121,9 +121,31 @@ export function SignalSurface({ variant = "page", maxMoments = 1, showList = fal
                 {topMoment.reason}
               </p>
             )}
-            <p className="mt-2 text-[11px] text-neutral-400">Tap to open Signals</p>
+            <div className="mt-2 flex items-center justify-between text-[11px]">
+              <span className="text-neutral-400">Tap to open Signals</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDetailMoment(topMoment);
+                }}
+                className="text-neutral-600 hover:text-neutral-900 underline-offset-2 hover:underline"
+              >
+                View details
+              </button>
+            </div>
           </div>
         )}
+        <SignalDetailSheet
+          moment={detailMoment}
+          open={!!detailMoment}
+          onOpenChange={(o) => !o && setDetailMoment(null)}
+          onAct={(m) => handleAct(m)}
+          onDismiss={(m) => respond(m.id, "dismissed")}
+          onSnooze={(m) => respond(m.id, "snooze")}
+          onMarkWrong={(m) => respond(m.id, "ignored")}
+        />
       </div>
     );
   }
