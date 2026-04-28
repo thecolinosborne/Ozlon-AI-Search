@@ -8366,7 +8366,8 @@ ${parts.join('\n\n')}
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
-        console.log(`Available action tools: ${availableTools.length}`);
+        availableTools = applyGhlScopeFilter(availableTools, GHL_ACTIVE_SCOPES);
+        console.log(`Available action tools: ${availableTools.length}` + (GHL_ACTIVE_SCOPES ? ` (ghl scopes: ${GHL_ACTIVE_SCOPES.length})` : ''));
 
         // Add connected services info to system prompt
         if (connMap.size > 0) {
@@ -8443,6 +8444,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
       // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
+        availableTools = applyGhlScopeFilter(availableTools, GHL_ACTIVE_SCOPES);
       }
     }
 
