@@ -153,9 +153,10 @@ serve(async (req) => {
   }
 
   try {
-    const { action, path, body: reqBody, method: reqMethod, params } = await req.json();
+    const payload = await req.json();
+    const { action, path, body: reqBody, method: reqMethod, params } = payload;
 
-    const { apiKey: GHL_API_KEY, locationId: GHL_LOCATION_ID } = await resolveGHLCredentials(req, params);
+    const { apiKey: GHL_API_KEY, locationId: GHL_LOCATION_ID } = await resolveGHLCredentials(req, payload);
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${GHL_API_KEY}`,
