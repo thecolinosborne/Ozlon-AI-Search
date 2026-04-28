@@ -4613,6 +4613,41 @@ async function executeToolCall(
           return { success: false, result: `Failed to save default: ${(e as Error).message}` };
         }
       }
+      case 'ghl_check_capability': {
+        const toolName2 = (args.tool_name as string | undefined)?.trim();
+        if (!toolName2) return { success: false, result: 'tool_name is required.' };
+        const subs = ghlCreds?.subAccounts || [];
+        const wantId = (args.location_id as string | undefined)?.trim() || ghlCreds?.locationId || '';
+        const target = subs.find((s) => s.id === wantId);
+        const required = GHL_TOOL_REQUIRED_SCOPES[toolName2] || [];
+        const stored = target?.scopes || [];
+        const storedSet = new Set(stored);
+        const missing = required.filter((s) => !storedSet.has(s));
+        // No required scopes mapped → permissive
+        if (required.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: stored.length,
+            recommendation: `${toolName2} has no scope requirements on file — proceed.`,
+          }) };
+        }
+        // Unknown scopes (legacy account never verified) → permissive but warn
+        if (stored.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: 0,
+            recommendation: `Scopes for "${target?.name || wantId}" are not on file. Re-sync the account in Integrations → Go High Level to enable scope-aware checks. Proceeding optimistically.`,
+          }) };
+        }
+        if (missing.length === 0) {
+          return { success: true, result: JSON.stringify({
+            allowed: true, missing_scopes: [], stored_scopes_count: stored.length,
+            recommendation: `"${target?.name || wantId}" has all required scopes for ${toolName2}.`,
+          }) };
+        }
+        return { success: true, result: JSON.stringify({
+          allowed: false, missing_scopes: missing, stored_scopes_count: stored.length,
+          recommendation: `"${target?.name || wantId}" is missing scope${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}. Edit the Private Integration token in GoHighLevel → Settings → Private Integrations, add the missing scope${missing.length > 1 ? 's' : ''}, then re-sync from Integrations → Go High Level.`,
+        }) };
+      }
       case 'ghl_smart_search': {
         const query = (args.query as string | undefined)?.trim();
         if (!query) return { success: false, result: 'query is required.' };
