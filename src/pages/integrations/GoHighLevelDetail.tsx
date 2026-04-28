@@ -44,9 +44,28 @@ const GoHighLevelDetail = () => {
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
   const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
   const [savingDefault, setSavingDefault] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [addingSub, setAddingSub] = useState(false);
 
   const subAccounts: SubAccount[] = settings.subAccounts || [];
   const activeId = settings.locationId || subAccounts[0]?.id || "";
+
+  // Call gohighlevel/verify_token. Returns { ok, scopes[], locationName, companyId, hint }.
+  const verifyToken = async (apiKey: string, locationId: string) => {
+    const { data, error } = await supabase.functions.invoke("gohighlevel", {
+      body: { action: "verify_token", params: { apiKey, locationId } },
+    });
+    if (error) throw new Error(error.message || "Verification failed");
+    if (data?.error?.ghl_message) throw new Error(data.error.ghl_message);
+    return data as {
+      ok: boolean;
+      scopes: string[];
+      locationName?: string;
+      companyId?: string;
+      hint: string;
+      location_check?: { ok: boolean; status: number; error?: string };
+    };
+  };
 
   const callGHL = async (action: string, params?: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("gohighlevel", {
