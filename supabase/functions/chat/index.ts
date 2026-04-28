@@ -4573,6 +4573,12 @@ async function executeToolCall(
             result: `No matching sub-account. Available: ${subs.map((s) => s.name).join(', ') || '(none)'}`,
           };
         }
+        if (match.disabled === true) {
+          return {
+            success: false,
+            result: `"${match.name}" is currently disconnected. Re-enable it in Integrations → Go High Level before setting it as the default.`,
+          };
+        }
         try {
           const uid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
           if (!uid) return { success: false, result: 'No authenticated user; cannot save default.' };
