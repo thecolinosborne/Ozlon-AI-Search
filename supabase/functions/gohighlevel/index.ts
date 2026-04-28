@@ -755,6 +755,7 @@ serve(async (req) => {
         }
 
         // ---- Confirm location access by hitting /locations/{id} ----
+        // (probe-based scope detection happens after this, only if JWT had no scopes)
         let locationName: string | undefined;
         let locationOk = false;
         let locationStatus = 0;
@@ -787,6 +788,56 @@ serve(async (req) => {
           }
         }
 
+        // ---- Probe-based scope detection (PIT tokens are opaque, not JWTs) ----
+        // If JWT decode yielded no scopes but the token works against /locations,
+        // probe a curated set of read endpoints. Each successful (non-401/403)
+        // response implies the corresponding readonly scope is granted. We can't
+        // detect write scopes safely without mutating, so we infer them from the
+        // matching readonly grant being present (GHL almost always pairs them in
+        // PIT setup). Users can still toggle accounts off if a write call fails.
+        if (locationOk && scopes.length === 0 && tok && loc) {
+          const probes: Array<{ url: string; scope: string; writeScope?: string }> = [
+            { url: `/contacts/?locationId=${loc}&limit=1`, scope: 'contacts.readonly', writeScope: 'contacts.write' },
+            { url: `/locations/${loc}/customFields`, scope: 'locations/customFields.readonly', writeScope: 'locations/customFields.write' },
+            { url: `/locations/${loc}/customValues`, scope: 'locations/customValues.readonly' },
+            { url: `/opportunities/pipelines?locationId=${loc}`, scope: 'opportunities.readonly', writeScope: 'opportunities.write' },
+            { url: `/calendars/?locationId=${loc}`, scope: 'calendars.readonly', writeScope: 'calendars/events.write' },
+            { url: `/conversations/search?locationId=${loc}&limit=1`, scope: 'conversations.readonly', writeScope: 'conversations/message.write' },
+            { url: `/locations/${loc}/tags`, scope: 'locations.readonly' },
+            { url: `/users/?locationId=${loc}`, scope: 'users.readonly' },
+            { url: `/social-media-posting/${loc}/accounts`, scope: 'socialplanner/account.readonly', writeScope: 'socialplanner/post.write' },
+            { url: `/products/?locationId=${loc}&limit=1`, scope: 'products.readonly', writeScope: 'products.write' },
+            { url: `/blogs/site/all?locationId=${loc}&limit=1`, scope: 'blogs/post.readonly', writeScope: 'blogs/post.write' },
+            { url: `/medias/files?altId=${loc}&altType=location&limit=1`, scope: 'medias.readonly', writeScope: 'medias.write' },
+            { url: `/forms/?locationId=${loc}&limit=1`, scope: 'forms.readonly' },
+            { url: `/surveys/?locationId=${loc}&limit=1`, scope: 'surveys.readonly' },
+            { url: `/workflows/?locationId=${loc}`, scope: 'workflows.readonly' },
+            { url: `/campaigns/?locationId=${loc}`, scope: 'campaigns.readonly' },
+            { url: `/invoices/?altId=${loc}&altType=location&limit=1`, scope: 'invoices.readonly', writeScope: 'invoices.write' },
+            { url: `/payments/orders?altId=${loc}&altType=location&limit=1`, scope: 'payments/orders.readonly' },
+            { url: `/payments/transactions?altId=${loc}&altType=location&limit=1`, scope: 'payments/transactions.readonly' },
+            { url: `/funnels/funnel/list?locationId=${loc}&limit=1`, scope: 'funnels/redirect.readonly' },
+            { url: `/links/?locationId=${loc}`, scope: 'links.readonly', writeScope: 'links.write' },
+            { url: `/businesses/?locationId=${loc}`, scope: 'businesses.readonly' },
+            { url: `/courses/?locationId=${loc}`, scope: 'courses.readonly' },
+          ];
+          const detected = new Set<string>();
+          await Promise.all(probes.map(async (p) => {
+            try {
+              const r = await fetch(`${GHL_BASE_URL}${p.url}`, {
+                headers: { 'Authorization': `Bearer ${tok}`, 'Version': '2021-07-28' },
+              });
+              // 401/403 => not scoped. Anything else (200, 400, 404, 422) => endpoint
+              // is reachable, scope is granted (just maybe wrong params/no data).
+              if (r.status !== 401 && r.status !== 403) {
+                detected.add(p.scope);
+                if (p.writeScope) detected.add(p.writeScope);
+              }
+            } catch (_e) { /* network error — ignore */ }
+          }));
+          scopes = Array.from(detected);
+        }
+
         const ok = !!tok && !!loc && locationOk;
         const result = {
           ok,
@@ -809,7 +860,7 @@ serve(async (req) => {
                     ? "Token does not have access to this Location ID. Re-create the Private Integration token in this sub-account in GHL, or double-check the Location ID."
                     : `Could not verify location (HTTP ${locationStatus}).`)
                 : scopes.length === 0
-                  ? 'Connected, but no scopes were detectable in the token. Make sure you used a Private Integration token (not a legacy v1 API key).'
+                  ? 'Connected, but no scopes were detectable. Re-create the Private Integration token in GHL and tick the scopes you want Ozlon to use.'
                   : `Verified — ${scopes.length} scope${scopes.length === 1 ? '' : 's'} detected.`,
         };
 
