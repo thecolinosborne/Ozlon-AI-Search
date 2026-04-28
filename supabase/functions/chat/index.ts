@@ -7652,11 +7652,49 @@ async function runToolLoop(
       });
       scored.sort((a, b) => b.score - a.score);
 
+      // Reserved-tool floor: critical "always-discoverable" tools per integration.
+      // When the integration is connected (any of its tools exist in the pool), we
+      // guarantee these survive the cap even if the turn isn't classified as that
+      // integration. Prevents the recurring "ghl_create_custom_field not available"
+      // class of bugs after a refactor or a low-confidence classification.
+      const RESERVED_TOOLS_BY_BUCKET: Record<string, string[]> = {
+        ghl: [
+          'ghl_list_custom_fields',
+          'ghl_create_custom_field',
+          'ghl_update_custom_field',
+          'ghl_list_contacts',
+          'ghl_search_contacts',
+          'ghl_create_contact',
+          'ghl_list_pipelines',
+          'ghl_list_calendars',
+          'ghl_list_workflows',
+          'ghl_inspect_capabilities',
+        ],
+      };
+      const reservedFloor = new Set<string>();
+      const presentBuckets = new Set(scored.map((s) => s.bucket));
+      for (const [bucket, names] of Object.entries(RESERVED_TOOLS_BY_BUCKET)) {
+        if (!presentBuckets.has(bucket)) continue;
+        for (const n of names) reservedFloor.add(n);
+      }
+
       // Apply per-integration soft cap (Tier A only) so multi-intent turns don't starve.
       const perIntegrationCount: Record<string, number> = {};
       const kept: typeof scored = [];
       const overflow: typeof scored = [];
+
+      // Pass 0: pin reserved-floor tools first so they cannot be evicted.
+      const pinned = new Set<string>();
       for (const s of scored) {
+        if (reservedFloor.has(s.name)) {
+          kept.push(s);
+          pinned.add(s.name);
+          if (kept.length >= MAX_TOOLS) break;
+        }
+      }
+
+      for (const s of scored) {
+        if (pinned.has(s.name)) continue;
         if (s.score === 1000 && perIntegrationCap !== Infinity) {
           const c = perIntegrationCount[s.bucket] || 0;
           if (c >= perIntegrationCap) {
@@ -7671,6 +7709,7 @@ async function runToolLoop(
       // Backfill from overflow if there's still room.
       if (kept.length < MAX_TOOLS) {
         for (const s of overflow) {
+          if (pinned.has(s.name)) continue;
           kept.push(s);
           if (kept.length >= MAX_TOOLS) break;
         }
@@ -7686,6 +7725,7 @@ async function runToolLoop(
       console.log(
         `Tools capped ${tools.length}→${toolsForRequest.length}. ` +
         `Named: [${Array.from(namedIntegrations).join(',') || 'none'}]. ` +
+        `Reserved-floor pinned: ${pinned.size}. ` +
         `Kept: ${JSON.stringify(distribution)}`,
       );
     }
