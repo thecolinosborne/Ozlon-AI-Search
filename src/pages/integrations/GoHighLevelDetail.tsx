@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X } from "lucide-react";
+import { Globe, Users, GitBranch, MessageSquare, Plus, Trash2, Star, X, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react";
 import { IntegrationDetailLayout } from "@/components/integrations/IntegrationDetailLayout";
 import { ApiKeyInput } from "@/components/integrations/ApiKeyInput";
 import { useIntegrationsStore } from "@/stores/useIntegrationsStore";
@@ -12,6 +12,10 @@ interface SubAccount {
   id: string;        // GHL location_id
   name: string;
   api_key?: string;  // optional per-sub-account key (falls back to top-level)
+  scopes?: string[]; // OAuth scopes the token actually has, populated by verify_token
+  location_name?: string;
+  company_id?: string;
+  last_verified_at?: string;
 }
 
 interface GHLSettings {
@@ -40,9 +44,28 @@ const GoHighLevelDetail = () => {
   const [newSub, setNewSub] = useState<SubAccount>({ id: "", name: "", api_key: "" });
   const [aiDefaultId, setAiDefaultId] = useState<string | null>(null);
   const [savingDefault, setSavingDefault] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [addingSub, setAddingSub] = useState(false);
 
   const subAccounts: SubAccount[] = settings.subAccounts || [];
   const activeId = settings.locationId || subAccounts[0]?.id || "";
+
+  // Call gohighlevel/verify_token. Returns { ok, scopes[], locationName, companyId, hint }.
+  const verifyToken = async (apiKey: string, locationId: string) => {
+    const { data, error } = await supabase.functions.invoke("gohighlevel", {
+      body: { action: "verify_token", params: { apiKey, locationId } },
+    });
+    if (error) throw new Error(error.message || "Verification failed");
+    if (data?.error?.ghl_message) throw new Error(data.error.ghl_message);
+    return data as {
+      ok: boolean;
+      scopes: string[];
+      locationName?: string;
+      companyId?: string;
+      hint: string;
+      location_check?: { ok: boolean; status: number; error?: string };
+    };
+  };
 
   const callGHL = async (action: string, params?: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("gohighlevel", {
@@ -159,33 +182,89 @@ const GoHighLevelDetail = () => {
   const handleAddSubAccount = async () => {
     const id = newSub.id.trim();
     const name = newSub.name.trim();
+    const apiKey = (newSub.api_key || "").trim();
     if (!id || !name) {
       toast.error("Name and Location ID are required");
+      return;
+    }
+    if (!apiKey) {
+      toast.error("API token is required so we can verify scopes");
       return;
     }
     if (subAccounts.some((s) => s.id === id)) {
       toast.error("A sub-account with that Location ID already exists");
       return;
     }
-    const sub: SubAccount = { id, name };
-    if (newSub.api_key && newSub.api_key.trim()) sub.api_key = newSub.api_key.trim();
-    const nextSubs = [...subAccounts, sub];
-    const next: GHLSettings = {
-      ...settings,
-      subAccounts: nextSubs,
-      // First sub-account becomes the default if none set
-      locationId: settings.locationId || sub.id,
-    };
+    setAddingSub(true);
     try {
+      const verification = await verifyToken(apiKey, id);
+      if (!verification.ok) {
+        toast.error(verification.hint || "Verification failed");
+        setAddingSub(false);
+        return;
+      }
+      const sub: SubAccount = {
+        id,
+        name,
+        api_key: apiKey,
+        scopes: verification.scopes,
+        location_name: verification.locationName,
+        company_id: verification.companyId,
+        last_verified_at: new Date().toISOString(),
+      };
+      const nextSubs = [...subAccounts, sub];
+      const next: GHLSettings = {
+        ...settings,
+        subAccounts: nextSubs,
+        locationId: settings.locationId || sub.id,
+      };
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       setShowAddModal(false);
       setNewSub({ id: "", name: "", api_key: "" });
-      toast.success(`Added sub-account "${name}"`);
+      toast.success(`Connected "${name}" — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
     } catch (err) {
       toast.error((err as Error).message);
+    } finally {
+      setAddingSub(false);
     }
   };
+
+  const handleResyncScopes = async (sub: SubAccount) => {
+    const apiKey = (sub.api_key || settings.apiKey || "").trim();
+    if (!apiKey) {
+      toast.error("This sub-account has no token saved. Remove and re-add it.");
+      return;
+    }
+    setVerifyingId(sub.id);
+    try {
+      const verification = await verifyToken(apiKey, sub.id);
+      if (!verification.ok) {
+        toast.error(verification.hint || "Verification failed");
+        return;
+      }
+      const nextSubs = subAccounts.map((s) =>
+        s.id === sub.id
+          ? {
+              ...s,
+              scopes: verification.scopes,
+              location_name: verification.locationName ?? s.location_name,
+              company_id: verification.companyId ?? s.company_id,
+              last_verified_at: new Date().toISOString(),
+            }
+          : s,
+      );
+      const next: GHLSettings = { ...settings, subAccounts: nextSubs };
+      await persistMetadata(next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      toast.success(`Re-synced — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
 
   const handleRemoveSubAccount = async (id: string) => {
     const nextSubs = subAccounts.filter((s) => s.id !== id);
@@ -359,8 +438,42 @@ const GoHighLevelDetail = () => {
                   <div className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
                     {acct.id}
                   </div>
+                  {/* Scope chips */}
+                  {acct.scopes && acct.scopes.length > 0 ? (
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      <ShieldCheck className="w-3 h-3 text-emerald-500 shrink-0" strokeWidth={2} />
+                      <span className="text-[10px] text-muted-foreground">
+                        {acct.scopes.length} scope{acct.scopes.length === 1 ? "" : "s"}
+                      </span>
+                      {acct.scopes.slice(0, 6).map((s) => (
+                        <span
+                          key={s}
+                          className="text-[10px] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded"
+                          title={s}
+                        >
+                          {s.replace(/^locations\//, "").replace(/\.readonly$/, ".r").replace(/\.write$/, ".w")}
+                        </span>
+                      ))}
+                      {acct.scopes.length > 6 && (
+                        <span className="text-[10px] text-muted-foreground">+{acct.scopes.length - 6} more</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+                      <ShieldAlert className="w-3 h-3 shrink-0" strokeWidth={2} />
+                      <span>Scopes not yet verified — click Re-sync</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleResyncScopes(acct)}
+                    disabled={verifyingId === acct.id}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                    title="Re-verify token & re-sync scopes"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", verifyingId === acct.id && "animate-spin")} strokeWidth={1.5} />
+                  </button>
                   {acct.id !== aiDefaultId && (
                     <button
                       onClick={() => handleSetAiDefault(acct.id)}
@@ -430,13 +543,13 @@ const GoHighLevelDetail = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground">
-                  API Key <span className="text-muted-foreground/70">(optional — falls back to default)</span>
+                  Private Integration API Token <span className="text-destructive">*</span>
                 </label>
                 <input
                   type="password"
                   value={newSub.api_key || ""}
                   onChange={(e) => setNewSub((s) => ({ ...s, api_key: e.target.value }))}
-                  placeholder="Leave blank to use the default key"
+                  placeholder="pit-..."
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-border/60 bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
@@ -450,9 +563,10 @@ const GoHighLevelDetail = () => {
               </button>
               <button
                 onClick={handleAddSubAccount}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                disabled={addingSub}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                Add Sub-Account
+                {addingSub ? "Verifying…" : "Verify & Add"}
               </button>
             </div>
           </div>

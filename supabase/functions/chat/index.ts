@@ -6609,6 +6609,57 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'bulk_update_work_tasks',
 ]);
 
+/** Filter the AI tool list down to GHL tools the active sub-account's token actually has scopes for.
+ *  No-op if scopes are unknown (legacy sub-account never verified) — preserves existing behavior. */
+function applyGhlScopeFilter(tools: ToolDef[], grantedScopes: string[] | undefined): ToolDef[] {
+  if (!grantedScopes || grantedScopes.length === 0) return tools;
+  // Inline minimal scope map — kept in sync with _shared/integrations/ghl-scopes.ts.
+  const REQ: Record<string, string[]> = {
+    ghl_list_contacts: ["contacts.readonly"], ghl_get_contact: ["contacts.readonly"], ghl_search_contacts: ["contacts.readonly"],
+    ghl_create_contact: ["contacts.write"], ghl_update_contact: ["contacts.write"], ghl_delete_contact: ["contacts.write"],
+    ghl_add_tags: ["contacts.write"], ghl_remove_tags: ["contacts.write"],
+    ghl_add_contact_note: ["contacts.write"], ghl_list_contact_notes: ["contacts.readonly"],
+    ghl_add_contact_task: ["contacts.write"], ghl_list_contact_tasks: ["contacts.readonly"],
+    ghl_list_custom_fields: ["locations/customFields.readonly"], ghl_get_custom_field: ["locations/customFields.readonly"],
+    ghl_create_custom_field: ["locations/customFields.write"], ghl_update_custom_field: ["locations/customFields.write"],
+    ghl_upsert_custom_field: ["locations/customFields.write"], ghl_archive_custom_field: ["locations/customFields.write"],
+    ghl_list_custom_values: ["locations/customValues.readonly"],
+    ghl_list_pipelines: ["opportunities.readonly"], ghl_list_opportunities: ["opportunities.readonly"], ghl_get_opportunity: ["opportunities.readonly"],
+    ghl_create_opportunity: ["opportunities.write"], ghl_update_opportunity: ["opportunities.write"],
+    ghl_list_calendars: ["calendars.readonly"], ghl_get_calendar_events: ["calendars/events.readonly"], ghl_get_free_slots: ["calendars.readonly"],
+    ghl_create_appointment: ["calendars/events.write"], ghl_book_appointment: ["calendars/events.write"],
+    ghl_update_appointment: ["calendars/events.write"], ghl_cancel_appointment: ["calendars/events.write"],
+    ghl_list_conversations: ["conversations.readonly"], ghl_get_conversation: ["conversations.readonly"],
+    ghl_get_conversation_messages: ["conversations/message.readonly"], ghl_send_message: ["conversations/message.write"],
+    ghl_list_workflows: ["workflows.readonly"], ghl_trigger_workflow: ["workflows.readonly"], ghl_list_campaigns: ["campaigns.readonly"],
+    ghl_list_invoices: ["invoices.readonly"], ghl_get_invoice: ["invoices.readonly"], ghl_create_invoice: ["invoices.write"],
+    ghl_list_orders: ["payments/orders.readonly"], ghl_list_transactions: ["payments/transactions.readonly"],
+    ghl_list_forms: ["forms.readonly"], ghl_get_form_submissions: ["forms.readonly"],
+    ghl_list_surveys: ["surveys.readonly"], ghl_get_survey_submissions: ["surveys.readonly"],
+    ghl_list_funnels: ["funnels/redirect.readonly"],
+    ghl_list_tags: ["locations.readonly"], ghl_list_users: ["users.readonly"],
+    ghl_list_social_accounts: ["socialplanner/account.readonly"], ghl_list_social_posts: ["socialplanner/post.readonly"], ghl_get_social_post: ["socialplanner/post.readonly"],
+    ghl_create_social_post: ["socialplanner/post.write"], ghl_edit_social_post: ["socialplanner/post.write"], ghl_delete_social_post: ["socialplanner/post.write"],
+    ghl_list_products: ["products.readonly"], ghl_get_product: ["products.readonly"],
+    ghl_create_product: ["products.write"], ghl_update_product: ["products.write"], ghl_delete_product: ["products.write"],
+    ghl_list_courses: ["courses.readonly"], ghl_import_courses: ["courses.write"],
+    ghl_list_blog_sites: ["blogs/post.readonly"], ghl_list_blog_posts: ["blogs/post.readonly"], ghl_get_blog_post: ["blogs/post.readonly"],
+    ghl_create_blog_post: ["blogs/post.write"], ghl_update_blog_post: ["blogs/post.write"], ghl_delete_blog_post: ["blogs/post.write"],
+    ghl_list_media_files: ["medias.readonly"], ghl_upload_media_file: ["medias.write"], ghl_upload_media: ["medias.write"],
+    ghl_list_companies: ["companies.readonly"], ghl_get_company: ["companies.readonly"],
+    ghl_list_businesses: ["businesses.readonly"], ghl_get_business: ["businesses.readonly"],
+    ghl_list_links: ["links.readonly"], ghl_create_link: ["links.write"], ghl_update_link: ["links.write"],
+  };
+  const granted = new Set(grantedScopes);
+  return tools.filter((t) => {
+    const name = t.function.name;
+    if (!name.startsWith('ghl_')) return true;
+    const req = REQ[name];
+    if (!req || req.length === 0) return true; // unmapped GHL tool → permissive
+    return req.every((s) => granted.has(s));
+  });
+}
+
 function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allowedDomains?: string[]): ToolDef[] {
   const hasGHL = hasGHLOverride !== undefined ? hasGHLOverride : !!Deno.env.get('GHL_API_KEY');
 
@@ -8143,7 +8194,8 @@ serve(async (req) => {
     // Native connection discovery + per-user GHL credential resolution
     let GHL_API_KEY_RESOLVED: string | undefined;
     let GHL_LOCATION_ID_RESOLVED: string | undefined;
-    let GHL_SUB_ACCOUNTS_RESOLVED: { id: string; name: string; api_key?: string }[] | undefined;
+    let GHL_SUB_ACCOUNTS_RESOLVED: { id: string; name: string; api_key?: string; scopes?: string[] }[] | undefined;
+    let GHL_ACTIVE_SCOPES: string[] | undefined; // scopes of the active sub-account, used to gate tools
 
     // Resolve user ID early for credential lookup + native discovery
     const authHeaderForCreds = req.headers.get('Authorization');
@@ -8263,7 +8315,7 @@ ${parts.join('\n\n')}
           for (const c of conns) {
             const meta = (c.metadata as Record<string, unknown>) || {};
             const subAccounts = Array.isArray(meta.sub_accounts)
-              ? (meta.sub_accounts as { id: string; name: string; api_key?: string }[])
+              ? (meta.sub_accounts as { id: string; name: string; api_key?: string; scopes?: string[] }[])
                   .filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string')
               : [];
 
@@ -8328,9 +8380,21 @@ ${parts.join('\n\n')}
             if (match) {
               GHL_LOCATION_ID_RESOLVED = match.id;
               if (match.api_key) GHL_API_KEY_RESOLVED = match.api_key;
+              if (Array.isArray(match.scopes) && match.scopes.length > 0) {
+                GHL_ACTIVE_SCOPES = match.scopes.slice();
+              }
               (globalThis as Record<string, unknown>).__ghlMemorySource = memorySource;
               console.log(`[GHL] Active sub-account from ${memorySource}: "${match.name}" (${match.id})`);
             }
+          }
+        }
+
+        // If no session/default match yet, fall back to scopes of whichever
+        // sub-account corresponds to GHL_LOCATION_ID_RESOLVED (the metadata default).
+        if (!GHL_ACTIVE_SCOPES && GHL_LOCATION_ID_RESOLVED && GHL_SUB_ACCOUNTS_RESOLVED) {
+          const match = GHL_SUB_ACCOUNTS_RESOLVED.find((s) => s.id === GHL_LOCATION_ID_RESOLVED);
+          if (match && Array.isArray(match.scopes) && match.scopes.length > 0) {
+            GHL_ACTIVE_SCOPES = match.scopes.slice();
           }
         }
       } catch (e) { console.error('GHL credential lookup failed:', e); }
@@ -8353,7 +8417,8 @@ ${parts.join('\n\n')}
 
         // Determine available tools based on active connections
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
-        console.log(`Available action tools: ${availableTools.length}`);
+        availableTools = applyGhlScopeFilter(availableTools, GHL_ACTIVE_SCOPES);
+        console.log(`Available action tools: ${availableTools.length}` + (GHL_ACTIVE_SCOPES ? ` (ghl scopes: ${GHL_ACTIVE_SCOPES.length})` : ''));
 
         // Add connected services info to system prompt
         if (connMap.size > 0) {
@@ -8430,6 +8495,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
       // Ensure GHL tools are available
       if (!availableTools.some(t => t.function.name.startsWith('ghl_'))) {
         availableTools = getAvailableTools(connMap, !!GHL_API_KEY_RESOLVED, allowedDomains);
+        availableTools = applyGhlScopeFilter(availableTools, GHL_ACTIVE_SCOPES);
       }
     }
 

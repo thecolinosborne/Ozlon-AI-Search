@@ -1,68 +1,78 @@
-## GoHighLevel Custom Fields — Full Skill Family
+## GoHighLevel — Scope-Aware Sub-Account Connection
 
-Today Ozlon can only hit one half-wired endpoint (`list_custom_fields`) and it isn't even registered as an AI tool. This plan ships the complete field-management skill family the user described, with duplicate-safety, verbatim error surfacing, and the standard active-sub-account resolution.
+**The model (revised per your direction):**
+
+User pastes one **Private Integration API token** + its **Location ID** per sub-account. On save, Ozlon calls GHL to introspect what that token can actually do (based on the scopes the user checked when creating the token in GHL), stores the scope list, and uses it to:
+
+1. Mark which capabilities are live for that sub-account (custom fields, contacts, opportunities, calendars, social planner, etc.)
+2. Hide/disable AI tools that the token isn't scoped for (so the AI doesn't try `ghl_create_custom_field` on a token without `customFields.write`)
+3. Show the user a clean per-sub-account capability matrix in the UI
+
+This is the same pattern as Slack/Google OAuth — token + scopes drive what's enabled.
+
+### How scope discovery works
+
+GHL Private Integration tokens are JWTs. The granted scopes are embedded in the token payload (`oauthMeta.scopes` claim) and also returned by `GET /oauth/installedLocations` and the token introspection endpoint. On save, Ozlon will:
+
+1. Decode the JWT payload (no API call needed) → extract `oauthMeta.scopes` array.
+2. Cross-check by hitting `GET /locations/{locationId}` with the token → confirms the token actually has access to that specific location.
+3. If the location call returns 403, surface a clear error: *"Token doesn't include this location. Re-create the token in GHL with the correct location selected."*
+4. Store the scope list on the sub-account record.
 
 ### What gets built
 
-**6 new AI tools** (registered in the GHL manifest so the chat agent can call them):
+**1. UI: Sub-account row enhancements (`GoHighLevelDetail.tsx`)**
+- Existing fields stay: Label, Location ID, API Key.
+- New on save: "Verify & Sync Scopes" runs automatically — shows a spinner, then displays granted scopes as small chips (e.g. `contacts.write`, `customFields.readonly`, `opportunities.write`).
+- New "Re-sync scopes" button on each row for when the user updates their token in GHL.
+- Capability badges: green dot for capabilities the token supports, grey for ones it doesn't. Hover shows the missing scope.
 
-| Tool | Verb | Notes |
-|---|---|---|
-| `ghl_list_custom_fields` | read | Filter by `objectType` (contact / opportunity / business). Wires up the orphan endpoint. |
-| `ghl_get_custom_field` | read | Fetch one field by ID for audit/confirmation. |
-| `ghl_create_custom_field` | write | Full payload: name, dataType, placeholder, options, defaultValue, position, parentId (folder), objectType. |
-| `ghl_update_custom_field` | write | Rename, edit options, placeholder, position. |
-| `ghl_upsert_custom_field` | write | Lists first → matches by normalized key/name → creates or updates. Best DX for repeatable workflows. |
-| `ghl_archive_custom_field` | destructive | Archive-first. GHL only supports hard delete via API, so this performs a delete and labels it as archive in the receipt + requires confirmation. |
+**2. New edge function action: `gohighlevel/verify_token`**
+- Input: `{ apiKey, locationId }`
+- Decodes JWT, calls `GET /locations/{locationId}`, returns `{ ok, scopes: string[], locationName, companyId, errors? }`.
+- Frontend calls this on save and on "Re-sync".
 
-**Supported field types** (GHL `dataType` values): TEXT, LARGE_TEXT (textarea), NUMERICAL, PHONE, DATE, SINGLE_OPTIONS (dropdown), MULTIPLE_OPTIONS, RADIO, CHECKBOX, MONETORY (GHL's spelling). The schema accepts a friendly alias map (`textarea` → `LARGE_TEXT`, `dropdown` → `SINGLE_OPTIONS`, `monetary` → `MONETORY`) so the AI can pass natural names.
+**3. Storage**
+- Each entry in `integration_connections.metadata.sub_accounts[]` gains:
+  ```
+  { label, location_id, api_key, scopes: string[], company_id, location_name, last_verified_at }
+  ```
+- No DB migration needed — `sub_accounts` is already JSON.
 
-**Option-based fields** accept an `options` array of `{ label, value?, position? }`. If `value` is omitted we auto-derive it from the label (lowercase, snake_case). `defaultValue` and `placeholder` pass through.
+**4. Scope-gated tool registration (chat function)**
+- When the chat function loads the active sub-account's credentials, it also reads its `scopes`.
+- The GHL tool manifest gets a `requiredScopes: string[]` field per tool (e.g. `ghl_create_custom_field` → `["customFields.write"]`).
+- `getAvailableTools()` filters out any GHL tool whose required scopes aren't in the active sub-account's scope list.
+- The AI literally can't call a tool it doesn't have permission for → no more silent 403s.
 
-### Skill behavior (built into the create + upsert tools)
+**5. Scope reference map (one new file)**
+- `supabase/functions/_shared/integrations/ghl-scopes.ts` — maps every GHL tool name to the GHL OAuth scopes it needs. Used by both the chat tool filter and the UI capability badges.
+- Initial coverage: contacts, custom fields, custom values, opportunities, calendars, conversations, locations, social planner, products, payments, workflows, surveys, forms, blogs, businesses, companies. (~20 scope strings.)
 
-1. **Resolve active sub-account** — already handled by the existing 4-step priority (explicit → session → user default → metadata). No change needed.
-2. **Auto-suggest normalized key** — if `fieldKey` is omitted, derive from name: lowercase, replace non-alphanumerics with `_`, collapse repeats, strip leading/trailing `_`. Pass as `fieldKey` to GHL.
-3. **Duplicate detection** — `create` and `upsert` first fetch the existing field list for the target `objectType` and check for name + key collisions.
-   - `create`: returns a structured `duplicate_exists` error with the existing field ID so the AI can ask the user whether to update or create a variant. (No silent overwrite.)
-   - `upsert`: matches → calls update; no match → calls create.
-4. **Return receipt** — `{ id, name, fieldKey, dataType, objectType, optionsCount }`.
+### User flow (end state)
 
-### Error surfacing (the user's "fallback behavior" requirement)
-
-The edge function currently swallows GHL errors into a generic message. We update the GHL receiver to return a structured error block on any non-2xx GHL response:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "category": "schema_gap | auth_gap | service_not_connected | policy_block | tooling_gap | upstream_error",
-    "ghl_status": 422,
-    "ghl_message": "<verbatim body from GHL>",
-    "minimum_fix": "<one-line hint based on category>"
-  }
-}
-```
-
-Category mapping: 401/403 → `auth_gap`; 404 on the field endpoint → `schema_gap`; missing connection → `service_not_connected`; 422/400 with validation body → `schema_gap`; 429 → `policy_block`; 5xx → `upstream_error`. Anything else → `tooling_gap`. This matches the existing `chat/error-reporting-policy` memory ("never swallow errors, return detailed structured errors").
+1. User goes to Integrations → GoHighLevel → **Add Sub-Account**.
+2. Enters Label ("Daddy Stroller Social Club"), Location ID, Private Integration API token.
+3. Clicks Save → Ozlon verifies the token, shows: *"Connected — 14 scopes detected"* and renders capability badges.
+4. The active sub-account selector (existing) still works — pick which one is live for the chat.
+5. AI tools available in chat are auto-limited to what the active sub-account's scopes permit. If a tool is missing, the AI tells the user *"This sub-account's token doesn't include `customFields.write`. Re-create the token in GHL with that scope to unlock this."*
 
 ### Files touched
 
-- `supabase/functions/gohighlevel/index.ts` — add cases for `get_custom_field`, `create_custom_field`, `update_custom_field`, `delete_custom_field`; tighten the existing `list_custom_fields` to accept `objectType` query param; add the structured error wrapper for non-2xx GHL responses.
-- `supabase/functions/_shared/integrations/gohighlevel.ts` — register all 6 tools with schemas, formatters, `mapArgs`, alias normalization, and `requiresConfirmation: true` on archive.
-- New helper inside the manifest file: `normalizeDataType()`, `deriveFieldKey()`, `normalizeOptions()`.
+- `src/pages/integrations/GoHighLevelDetail.tsx` — verify-on-save flow, scope chips, capability badges, re-sync button.
+- `supabase/functions/gohighlevel/index.ts` — add `verify_token` action; existing `_shared/integrations/gohighlevel.ts` tool manifest gains `requiredScopes` per tool.
+- `supabase/functions/_shared/integrations/ghl-scopes.ts` — new file: tool→scopes map + `filterToolsByScopes()` helper.
+- `supabase/functions/chat/index.ts` — when resolving GHL credentials, also pull `scopes` and pass to `getAvailableTools()` for scope-based filtering.
 
-### Out of scope (explicitly)
+### Out of scope
 
-- No UI surface for managing fields (the user asked for AI tooling, not a visual field editor). Fields will be created/edited via chat and the existing GHL admin UI.
-- No new memory file — the existing `mem://integrations/ghl-account-resolution` and `mem://chat/error-reporting-policy` cover the patterns this skill family follows.
-- No `ghl_get_custom_field` formatter beyond the default JSON dump (audit use case is intentionally raw).
+- Agency-level auto-discovery (you've explicitly chosen the per-sub-account token model — simpler, scoped, scalable).
+- No DB schema migration (uses existing JSON metadata column).
+- No changes to the custom-fields tool family already in the previous plan — it just becomes scope-gated automatically.
 
 ### Acceptance check
 
-After deploy, the AI should be able to handle, end-to-end:
-- "List all custom fields on contacts in GHL"
-- "Create a dropdown field called Lead Source on contacts with options Referral, Paid Ads, Organic"
-- "Rename the Lead Source field to Acquisition Channel"
-- "Make sure there's a contact field called Last NPS Score (number) — create or update as needed" (upsert)
-- A duplicate-name attempt returns a clean `duplicate_exists` error with the existing field ID, and the AI asks the user how to proceed instead of failing silently.
+- Add a sub-account with a token missing `customFields.write` → UI shows the badge as grey; AI cannot call `ghl_create_custom_field` and explains why.
+- Add a sub-account with full scopes → all GHL tools are available; chat can list/create/update custom fields end-to-end.
+- Re-paste a token after expanding scopes in GHL → "Re-sync scopes" updates the chip list without recreating the row.
+- Wrong location ID for the token → save fails with a specific actionable error, no silent acceptance.
