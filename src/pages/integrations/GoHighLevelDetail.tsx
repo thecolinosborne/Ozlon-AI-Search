@@ -182,33 +182,89 @@ const GoHighLevelDetail = () => {
   const handleAddSubAccount = async () => {
     const id = newSub.id.trim();
     const name = newSub.name.trim();
+    const apiKey = (newSub.api_key || "").trim();
     if (!id || !name) {
       toast.error("Name and Location ID are required");
+      return;
+    }
+    if (!apiKey) {
+      toast.error("API token is required so we can verify scopes");
       return;
     }
     if (subAccounts.some((s) => s.id === id)) {
       toast.error("A sub-account with that Location ID already exists");
       return;
     }
-    const sub: SubAccount = { id, name };
-    if (newSub.api_key && newSub.api_key.trim()) sub.api_key = newSub.api_key.trim();
-    const nextSubs = [...subAccounts, sub];
-    const next: GHLSettings = {
-      ...settings,
-      subAccounts: nextSubs,
-      // First sub-account becomes the default if none set
-      locationId: settings.locationId || sub.id,
-    };
+    setAddingSub(true);
     try {
+      const verification = await verifyToken(apiKey, id);
+      if (!verification.ok) {
+        toast.error(verification.hint || "Verification failed");
+        setAddingSub(false);
+        return;
+      }
+      const sub: SubAccount = {
+        id,
+        name,
+        api_key: apiKey,
+        scopes: verification.scopes,
+        location_name: verification.locationName,
+        company_id: verification.companyId,
+        last_verified_at: new Date().toISOString(),
+      };
+      const nextSubs = [...subAccounts, sub];
+      const next: GHLSettings = {
+        ...settings,
+        subAccounts: nextSubs,
+        locationId: settings.locationId || sub.id,
+      };
       await persistMetadata(next);
       updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
       setShowAddModal(false);
       setNewSub({ id: "", name: "", api_key: "" });
-      toast.success(`Added sub-account "${name}"`);
+      toast.success(`Connected "${name}" — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
     } catch (err) {
       toast.error((err as Error).message);
+    } finally {
+      setAddingSub(false);
     }
   };
+
+  const handleResyncScopes = async (sub: SubAccount) => {
+    const apiKey = (sub.api_key || settings.apiKey || "").trim();
+    if (!apiKey) {
+      toast.error("This sub-account has no token saved. Remove and re-add it.");
+      return;
+    }
+    setVerifyingId(sub.id);
+    try {
+      const verification = await verifyToken(apiKey, sub.id);
+      if (!verification.ok) {
+        toast.error(verification.hint || "Verification failed");
+        return;
+      }
+      const nextSubs = subAccounts.map((s) =>
+        s.id === sub.id
+          ? {
+              ...s,
+              scopes: verification.scopes,
+              location_name: verification.locationName ?? s.location_name,
+              company_id: verification.companyId ?? s.company_id,
+              last_verified_at: new Date().toISOString(),
+            }
+          : s,
+      );
+      const next: GHLSettings = { ...settings, subAccounts: nextSubs };
+      await persistMetadata(next);
+      updateSettings("gohighlevel", next as unknown as Record<string, unknown>);
+      toast.success(`Re-synced — ${verification.scopes.length} scope${verification.scopes.length === 1 ? "" : "s"} detected`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
 
   const handleRemoveSubAccount = async (id: string) => {
     const nextSubs = subAccounts.filter((s) => s.id !== id);
