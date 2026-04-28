@@ -543,13 +543,13 @@ const GoHighLevelDetail = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground">
-                  API Key <span className="text-muted-foreground/70">(optional — falls back to default)</span>
+                  Private Integration API Token <span className="text-destructive">*</span>
                 </label>
                 <input
                   type="password"
                   value={newSub.api_key || ""}
                   onChange={(e) => setNewSub((s) => ({ ...s, api_key: e.target.value }))}
-                  placeholder="Leave blank to use the default key"
+                  placeholder="pit-..."
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-border/60 bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
@@ -563,9 +563,10 @@ const GoHighLevelDetail = () => {
               </button>
               <button
                 onClick={handleAddSubAccount}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                disabled={addingSub}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                Add Sub-Account
+                {addingSub ? "Verifying…" : "Verify & Add"}
               </button>
             </div>
           </div>
