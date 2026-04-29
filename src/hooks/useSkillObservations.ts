@@ -225,17 +225,94 @@ export function useSkillObservations() {
     [load],
   );
 
+  // Run the reviewer: cluster fresh observations into pending proposals.
+  const runReviewer = useCallback(async () => {
+    if (!user) return { ok: false as const, error: "Not signed in" };
+    setReviewing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("skill-reviewer", {
+        body: {},
+      });
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const, data: data as { proposed?: number; reviewed?: number } };
+    } finally {
+      setReviewing(false);
+    }
+  }, [user, load]);
+
+  // Approve a proposal → promote it into cross_cutting_principles (active).
+  const approveProposal = useCallback(
+    async (proposalId: string) => {
+      if (!user) return { ok: false as const, error: "Not signed in" };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: proposal, error: loadErr } = await (supabase as any)
+        .from("proposed_principles")
+        .select("title, principle, source_reflection_ids")
+        .eq("id", proposalId)
+        .maybeSingle();
+      if (loadErr || !proposal) {
+        return { ok: false as const, error: loadErr?.message ?? "Proposal not found" };
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: created, error: insErr } = await (supabase as any)
+        .from("cross_cutting_principles")
+        .insert({
+          user_id: user.id,
+          title: proposal.title,
+          principle: proposal.principle,
+          active: true,
+          source_reflection_ids: proposal.source_reflection_ids ?? [],
+          metadata: { source: "reviewer", proposal_id: proposalId },
+        })
+        .select("id")
+        .maybeSingle();
+      if (insErr) return { ok: false as const, error: insErr.message };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from("proposed_principles")
+        .update({
+          status: "approved",
+          decided_at: new Date().toISOString(),
+          decided_principle_id: created?.id ?? null,
+        })
+        .eq("id", proposalId);
+      await load();
+      return { ok: true as const };
+    },
+    [user, load],
+  );
+
+  const rejectProposal = useCallback(
+    async (proposalId: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("proposed_principles")
+        .update({ status: "rejected", decided_at: new Date().toISOString() })
+        .eq("id", proposalId);
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const };
+    },
+    [load],
+  );
+
   return {
     observationCount,
     recent,
     principles,
+    proposals,
     loading,
+    reviewing,
     refresh: load,
     deactivatePrinciple,
     activatePrinciple,
     createPrinciple,
     updatePrinciple,
     deletePrinciple,
+    runReviewer,
+    approveProposal,
+    rejectProposal,
   };
 }
 
