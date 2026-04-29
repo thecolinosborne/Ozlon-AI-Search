@@ -11,6 +11,7 @@ import { memoryService, type WisdomMemory } from "@/services/memoryService";
 import { Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useSkillObservations } from "@/hooks/useSkillObservations";
+import { PrincipleEditor } from "@/components/wisdom/PrincipleEditor";
 
 type Source = {
   id: string;
@@ -210,8 +211,17 @@ const Wisdom = () => {
  * All" by Eoghan Henn (rebelytics.com), CC BY 4.0.
  */
 function SkillLoopSection() {
-  const { observationCount, recent, principles, deactivatePrinciple } = useSkillObservations();
-  const activePrinciples = principles.filter((p) => p.active);
+  const {
+    observationCount,
+    recent,
+    principles,
+    deactivatePrinciple,
+    activatePrinciple,
+    createPrinciple,
+    updatePrinciple,
+    deletePrinciple,
+  } = useSkillObservations();
+  const activeCount = principles.filter((p) => p.active).length;
 
   return (
     <section className="rounded-2xl border border-border/40 bg-card/30 backdrop-blur-2xl p-5 space-y-4">
@@ -223,7 +233,7 @@ function SkillLoopSection() {
           <div>
             <h2 className="text-sm font-medium leading-tight">Skill loop</h2>
             <p className="text-[11px] text-muted-foreground/80 font-mono uppercase tracking-[0.15em] mt-0.5">
-              {observationCount} observations · 7d · {activePrinciples.length} principles active
+              {observationCount} observations · 7d · {activeCount} of {principles.length} active
             </p>
           </div>
         </div>
@@ -248,33 +258,18 @@ function SkillLoopSection() {
         </div>
       )}
 
-      {activePrinciples.length > 0 && (
-        <div className="space-y-1.5 border-t border-border/40 pt-4">
-          <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
-            Cross-cutting principles
-          </div>
-          {activePrinciples.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-start justify-between gap-3 text-xs py-1"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-foreground/90">{p.title}</div>
-                <div className="text-foreground/60 mt-0.5">{p.principle}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => void deactivatePrinciple(p.id)}
-                className="text-[10px] text-muted-foreground hover:text-destructive transition-colors shrink-0"
-              >
-                Deactivate
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <PrincipleEditor
+        principles={principles}
+        mutators={{
+          createPrinciple,
+          updatePrinciple,
+          deletePrinciple,
+          activatePrinciple,
+          deactivatePrinciple,
+        }}
+      />
 
-      {observationCount === 0 && activePrinciples.length === 0 && (
+      {observationCount === 0 && principles.length === 0 && (
         <p className="text-xs text-muted-foreground/70 leading-relaxed">
           The system will silently watch your sessions and capture lessons that could
           improve its skills. Nothing is shared, nothing is auto-installed — every

@@ -3,22 +3,28 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
- * useSkillObservations — Phase 1 visibility for the meta-skill loop.
+ * useSkillObservations — Phase 1 + 2 surface for the meta-skill loop.
  *
- * Reads the user's skill-observation reflection notes (silent capture from the
- * `skill-observer` edge function) and active cross-cutting principles. No
- * mutations exposed yet beyond deactivating a principle — that's the
- * mandatory revocability for the prompt-injection mitigation.
+ * Phase 1: silent capture visibility (observations + principles read).
+ * Phase 2: manual curation — create / edit / activate / deactivate / delete
+ * cross-cutting principles. All mutations require the user to be signed in
+ * and are gated by RLS (auth.uid() = user_id).
  */
+export type Principle = {
+  id: string;
+  title: string;
+  principle: string;
+  active: boolean;
+  createdAt: string;
+};
+
 export function useSkillObservations() {
   const { user } = useAuth();
   const [observationCount, setObservationCount] = useState(0);
   const [recent, setRecent] = useState<
     Array<{ id: string; title: string; kind: string; createdAt: string; importance: number }>
   >([]);
-  const [principles, setPrinciples] = useState<
-    Array<{ id: string; title: string; principle: string; active: boolean; createdAt: string }>
-  >([]);
+  const [principles, setPrinciples] = useState<Principle[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -45,8 +51,6 @@ export function useSkillObservations() {
         .eq("note_type", "skill_observation")
         .order("created_at", { ascending: false })
         .limit(8),
-      // cross_cutting_principles is post-migration; types may lag for one cycle.
-      // Cast through `any` so the UI doesn't block on generated-type regeneration.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any)
         .from("cross_cutting_principles")
@@ -96,14 +100,81 @@ export function useSkillObservations() {
     void load();
   }, [load]);
 
-  const deactivatePrinciple = useCallback(
-    async (id: string) => {
+  const setPrincipleActive = useCallback(
+    async (id: string, active: boolean) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase as any)
         .from("cross_cutting_principles")
-        .update({ active: false })
+        .update({ active })
         .eq("id", id);
       await load();
+    },
+    [load],
+  );
+
+  const deactivatePrinciple = useCallback(
+    (id: string) => setPrincipleActive(id, false),
+    [setPrincipleActive],
+  );
+
+  const activatePrinciple = useCallback(
+    (id: string) => setPrincipleActive(id, true),
+    [setPrincipleActive],
+  );
+
+  const createPrinciple = useCallback(
+    async (input: { title: string; principle: string }) => {
+      if (!user) return { ok: false as const, error: "Not signed in" };
+      const title = input.title.trim();
+      const principle = input.principle.trim();
+      if (!title || !principle) {
+        return { ok: false as const, error: "Title and principle are required" };
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("cross_cutting_principles")
+        .insert({
+          user_id: user.id,
+          title,
+          principle,
+          active: true,
+          source: "manual",
+        });
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const };
+    },
+    [user, load],
+  );
+
+  const updatePrinciple = useCallback(
+    async (id: string, patch: { title?: string; principle?: string }) => {
+      const update: Record<string, string> = {};
+      if (patch.title !== undefined) update.title = patch.title.trim();
+      if (patch.principle !== undefined) update.principle = patch.principle.trim();
+      if (!Object.keys(update).length) return { ok: true as const };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("cross_cutting_principles")
+        .update(update)
+        .eq("id", id);
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const };
+    },
+    [load],
+  );
+
+  const deletePrinciple = useCallback(
+    async (id: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("cross_cutting_principles")
+        .delete()
+        .eq("id", id);
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const };
     },
     [load],
   );
@@ -115,6 +186,10 @@ export function useSkillObservations() {
     loading,
     refresh: load,
     deactivatePrinciple,
+    activatePrinciple,
+    createPrinciple,
+    updatePrinciple,
+    deletePrinciple,
   };
 }
 
