@@ -45,12 +45,13 @@ export function useSkillObservations() {
       setObservationCount(0);
       setRecent([]);
       setPrinciples([]);
+      setProposals([]);
       return;
     }
     setLoading(true);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 
-    const [countRes, recentRes, principlesRes] = await Promise.all([
+    const [countRes, recentRes, principlesRes, proposalsRes] = await Promise.all([
       supabase
         .from("reflection_notes")
         .select("id", { count: "exact", head: true })
@@ -69,6 +70,13 @@ export function useSkillObservations() {
         .from("cross_cutting_principles")
         .select("id, title, principle, active, created_at")
         .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any)
+        .from("proposed_principles")
+        .select("id, title, principle, rationale, observation_count, confidence, status, created_at")
+        .eq("user_id", user.id)
+        .eq("status", "pending")
         .order("created_at", { ascending: false }),
     ]);
 
@@ -103,6 +111,31 @@ export function useSkillObservations() {
         title: p.title,
         principle: p.principle,
         active: p.active,
+        createdAt: p.created_at,
+      })),
+    );
+    type ProposalRow = {
+      id: string;
+      title: string;
+      principle: string;
+      rationale: string | null;
+      observation_count: number;
+      confidence: number;
+      status: Proposal["status"];
+      created_at: string;
+    };
+    const proposalRows: ProposalRow[] = Array.isArray(proposalsRes.data)
+      ? (proposalsRes.data as unknown as ProposalRow[])
+      : [];
+    setProposals(
+      proposalRows.map((p) => ({
+        id: p.id,
+        title: p.title,
+        principle: p.principle,
+        rationale: p.rationale,
+        observationCount: p.observation_count,
+        confidence: p.confidence,
+        status: p.status,
         createdAt: p.created_at,
       })),
     );
