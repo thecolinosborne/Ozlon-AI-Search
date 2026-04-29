@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { SkillDropzone } from "@/components/skills/SkillDropzone";
 
 export default function Skills() {
-  const { skills, loading, install, uninstall, toggle } = useSkills();
+  const { skills, loading, install, uninstall, toggle, refresh } = useSkills();
   const [busy, setBusy] = useState<string | null>(null);
 
   const handle = async (id: string, fn: () => Promise<void>, label: string) => {
@@ -56,6 +57,10 @@ export default function Skills() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8 space-y-10">
+        <section>
+          <SkillDropzone onInstalled={refresh} />
+        </section>
+
         <section>
           <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
             Installed ({installed.length})
