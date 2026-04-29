@@ -46,10 +46,10 @@ export function useSkillObservations() {
         .order("created_at", { ascending: false })
         .limit(8),
       // cross_cutting_principles is post-migration; types may lag for one cycle.
-      // Cast the builder to avoid blocking the UI on stale generated types.
-      (supabase.from as unknown as (t: string) => ReturnType<typeof supabase.from>)(
-        "cross_cutting_principles",
-      )
+      // Cast through `any` so the UI doesn't block on generated-type regeneration.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any)
+        .from("cross_cutting_principles")
         .select("id, title, principle, active, created_at")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
@@ -70,14 +70,18 @@ export function useSkillObservations() {
         };
       }),
     );
+    type PrincipleRow = {
+      id: string;
+      title: string;
+      principle: string;
+      active: boolean;
+      created_at: string;
+    };
+    const principleRows: PrincipleRow[] = Array.isArray(principlesRes.data)
+      ? (principlesRes.data as unknown as PrincipleRow[])
+      : [];
     setPrinciples(
-      ((principlesRes.data ?? []) as Array<{
-        id: string;
-        title: string;
-        principle: string;
-        active: boolean;
-        created_at: string;
-      }>).map((p) => ({
+      principleRows.map((p) => ({
         id: p.id,
         title: p.title,
         principle: p.principle,
@@ -94,9 +98,9 @@ export function useSkillObservations() {
 
   const deactivatePrinciple = useCallback(
     async (id: string) => {
-      await (supabase.from as unknown as (t: string) => ReturnType<typeof supabase.from>)(
-        "cross_cutting_principles",
-      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from("cross_cutting_principles")
         .update({ active: false })
         .eq("id", id);
       await load();
