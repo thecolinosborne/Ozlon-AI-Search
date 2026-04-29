@@ -1,50 +1,69 @@
 ---
-name: Skill loop — meta-skill self-improvement system
-description: Adapts "One Skill to Rule Them All" (Eoghan Henn / rebelytics.com, CC BY 4.0) into Ozlon. Phase 1 ships silent observation capture; Phases 2-5 deferred.
+name: Skill Loop Phase 3 Reviewer
+description: Clusters captured skill observations into proposed cross-cutting principles for user approval. Wires chat session lifecycle into observation capture.
 type: feature
 ---
 
-## What it is
+# Skill Loop — Phase 3 (Reviewer + Chat Wiring)
 
-A self-improvement loop that watches sessions for skill creation/improvement opportunities, drafts proposals, and stages them for user approval. Adapted from the "task-observer" methodology pack to fit Ozlon's RLS/privacy model — re-homed from a filesystem to Postgres, and reusing existing infrastructure wherever possible.
+Methodology adapted from "One Skill to Rule Them All" by Eoghan Henn (rebelytics.com), CC BY 4.0.
 
-## Reuse map (decided)
+## Pipeline (now end-to-end)
 
-- **Observations** → `reflection_notes.note_type='skill_observation'` (no new table)
-- **Proposals (Phase 3)** → `system_evolution_proposals.proposal_type='skill_*'|'principle_new'` (no new table)
-- **Cron pattern** → mirror `stack-resurface` (Mon/Wed/Fri 06:00 UTC)
-- **Approval UI (Phase 3)** → extend `ProposalInbox.tsx` with a Skills tab
-- **Stack surface (Phase 3)** → `signal_moments.kind='skill_proposal'` flows through existing `StackRow`
+1. **Capture (Phase 1)** — `useConversations.switchSession` / `startNewChat`
+   call `recordSkillObservations` fire-and-forget when leaving a session with
+   ≥4 messages. The `skill-observer` edge function extracts up to 5
+   observations per call and writes to `reflection_notes` with
+   `note_type='skill_observation'`. JWT-scoped, RLS-enforced.
 
-## What's actually new
+2. **Manual curation (Phase 2)** — `PrincipleEditor` lets the user create,
+   edit, pause, or delete principles directly in `cross_cutting_principles`.
+   Manual entries carry `metadata.source = 'manual'`.
 
-- **Table**: `cross_cutting_principles` (owner-only RLS, service-role for cron). The one piece with no good existing home — universal authoring rules re-injected into every future skill build.
-- **Edge function**: `skill-observer` (`verify_jwt = true`). End-of-session extractor. JWT-scoped Supabase client → RLS enforces user_id. Calls Lovable AI Gateway with `google/gemini-2.5-flash`. Writes to `reflection_notes`.
-- **Hook**: `useSkillObservations` (count + recent + principles + `deactivatePrinciple`). `recordSkillObservations(...)` is fire-and-forget for callers.
-- **UI**: `SkillLoopSection` on `/wisdom` — counts, recent observations, active principles with one-click deactivate.
+3. **Review (Phase 3)** — `skill-reviewer` edge function reads fresh
+   observations from the last 30 days, EXCLUDES any already cited by an
+   existing proposal or principle (idempotent), then asks Gemini Flash to
+   cluster them into candidate principles. Each candidate writes one row to
+   `proposed_principles` with `status='pending'`.
 
-## Phase 1 status (shipped)
+4. **Decision** — `ProposalInbox` UI surfaces pending proposals with
+   observation count and confidence. Approve → row inserted into
+   `cross_cutting_principles` (active=true) + proposal marked `approved`.
+   Reject → proposal marked `rejected`. Both decisions are terminal and
+   recorded with `decided_at`.
 
-Silent capture pipeline is live. Auto-trigger from chat lifecycle is **deferred** to avoid touching the 9.6k-line chat function (per stabilization policy). `recordSkillObservations` can be called from anywhere; wire-up happens in a follow-up.
+## Tables
 
-## Security posture
+- `reflection_notes` (existing) — observations live here under
+  `note_type='skill_observation'`, with `metadata.kind` ∈ {correction, gap,
+  workflow, simplify, meta}.
+- `cross_cutting_principles` — accepted, binding rules.
+- `proposed_principles` — pending candidates awaiting decision. Statuses:
+  pending | approved | rejected | superseded.
 
-- All client writes JWT-scoped, RLS owner-only.
-- Confidentiality flag (`internal | open_source_candidate`) on every observation; defaults to `internal`.
-- `cross_cutting_principles` are **never auto-created** — Phase 3 routes them through `system_evolution_proposals` for explicit user approval. One-click deactivate is mandatory (prompt-injection mitigation).
-- Untrusted source content (email bodies, scraped pages) is excluded from principle synthesis at extraction time.
-- AI-generated skills will default to `trust_tier=0`; promotion is user-only.
-- No new external secrets. CC BY 4.0 attribution carried in `metadata.attribution` and edge function header.
+## Hard rules
 
-## Deferred phases
+- All capture and review happens under the user's JWT; no service-role
+  on-behalf-of-user writes.
+- Reviewer only proposes if ≥3 fresh observations exist (or 1 high-importance).
+- Idempotency: once an observation id appears in any proposal or principle's
+  `source_reflection_ids`, it is excluded from future review runs.
+- Phase 1 capture is silent and non-blocking — failures are swallowed, never
+  surfaced to chat UX.
 
-- **2** — Manual principle curation UI on `/wisdom`.
-- **3** — `skill-review` cron + ProposalInbox "Skills" tab + Stack rows + `approve_skill_proposal` SECURITY DEFINER.
-- **4** — `skill-publish-scrub` for visibility=public promotion.
-- **5** — Self-review (`metadata.kind='meta'` observations review the observer prompts).
+## Files
 
-## Constraints honored
+- `supabase/functions/skill-observer/index.ts` — Phase 1 capture
+- `supabase/functions/skill-reviewer/index.ts` — Phase 3 cluster
+- `src/hooks/useSkillObservations.ts` — read state + all mutators (incl.
+  `runReviewer`, `approveProposal`, `rejectProposal`)
+- `src/hooks/useConversations.ts` — `captureLeavingSession` triggers observer
+  on `switchSession` / `startNewChat`
+- `src/components/wisdom/PrincipleEditor.tsx` — Phase 2 manual editor
+- `src/components/wisdom/ProposalInbox.tsx` — Phase 3 review surface
+- `src/pages/Wisdom.tsx` — `SkillLoopSection` composes everything
 
-- Additive only — zero edits to chat function or existing UI shells.
-- No new "tasks" route.
-- No filesystem mirror — Postgres is source of truth.
+## Phase 4 (deferred)
+
+A 5-layer confidentiality scrub before any approved principle could be
+proposed for sharing into a public skill marketplace. Not built.
