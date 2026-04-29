@@ -68,6 +68,13 @@ export default function Signals() {
       </Link>
 
       <div className="fixed top-6 right-6 z-50 flex items-center gap-1 text-[11px] text-muted-foreground/70">
+        <Link
+          to="/stack"
+          className="px-2 py-1 rounded-full hover:text-foreground hover:bg-muted/50 transition-colors"
+          title="Open The Stack — unified actionable inbox"
+        >
+          The Stack
+        </Link>
         {synthesizing && (
           <span className="px-2 py-1 tracking-wide opacity-70">Listening…</span>
         )}
