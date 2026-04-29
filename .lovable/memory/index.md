@@ -47,6 +47,7 @@
 - [Agent execution constraint](mem://backend/agent-execution-constraint) — `enableTools: true` required for backend actions
 - [Error reporting](mem://chat/error-reporting-policy) — Handlers return detailed structured errors, no swallowing
 - [List-confirm-act](mem://interaction/list-confirm-act-protocol) — Ask for explicit user confirmation before destructive actions
+- [Response architecture](mem://chat/response-architecture) — 5-question backbone + 3 shells (Execution / Advisory / Default), omit-by-default, single confidence register
 
 ### Voice Input & Output
 - [Whisper STT](mem://voice/whisper-transcription-integration) — Supabase Edge Function to Whisper API
