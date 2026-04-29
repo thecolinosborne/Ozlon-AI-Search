@@ -48,6 +48,7 @@ import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
 import Communications from "@/pages/Communications";
 import People from "@/pages/People";
 import Signals from "@/pages/Signals";
+import Stack from "@/pages/Stack";
 import { Navigate } from "react-router-dom";
 
 import NotFound from "@/pages/NotFound";
@@ -119,6 +120,7 @@ const AppRoutes = () => {
         <Route path="/communications" element={<Communications />} />
         <Route path="/people" element={<People />} />
         <Route path="/signals" element={<Signals />} />
+        <Route path="/stack" element={<Stack />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
