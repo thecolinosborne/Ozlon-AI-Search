@@ -2282,6 +2282,50 @@ export type Database = {
           },
         ]
       }
+      skill_assets: {
+        Row: {
+          content_text: string | null
+          content_type: string
+          created_at: string
+          id: string
+          path: string
+          size_bytes: number
+          skill_id: string
+          storage_path: string | null
+          user_id: string
+        }
+        Insert: {
+          content_text?: string | null
+          content_type?: string
+          created_at?: string
+          id?: string
+          path: string
+          size_bytes?: number
+          skill_id: string
+          storage_path?: string | null
+          user_id: string
+        }
+        Update: {
+          content_text?: string | null
+          content_type?: string
+          created_at?: string
+          id?: string
+          path?: string
+          size_bytes?: number
+          skill_id?: string
+          storage_path?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "skill_assets_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       skill_installs: {
         Row: {
           config: Json
@@ -2357,6 +2401,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "skill_invocations_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      skill_snapshots: {
+        Row: {
+          autofixes_applied: Json
+          created_at: string
+          id: string
+          manifest_snapshot: Json
+          reason: string
+          scan_report: Json
+          skill_id: string
+          source_format: string | null
+          user_id: string
+        }
+        Insert: {
+          autofixes_applied?: Json
+          created_at?: string
+          id?: string
+          manifest_snapshot: Json
+          reason?: string
+          scan_report?: Json
+          skill_id: string
+          source_format?: string | null
+          user_id: string
+        }
+        Update: {
+          autofixes_applied?: Json
+          created_at?: string
+          id?: string
+          manifest_snapshot?: Json
+          reason?: string
+          scan_report?: Json
+          skill_id?: string
+          source_format?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "skill_snapshots_skill_id_fkey"
             columns: ["skill_id"]
             isOneToOne: false
             referencedRelation: "skills"
