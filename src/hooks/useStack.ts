@@ -406,15 +406,22 @@ export function useStack(): UseStackResult {
   );
 
   const snoozeMany = useCallback(
-    async (items: StackItem[], _minutes: number) => {
-      // Phase 1: route each through respond() so feedback is recorded.
-      await Promise.all(
-        items
-          .filter((it) => it.source !== "comm")
-          .map((it) => respond(it.sourceId, "snooze")),
-      );
+    async (items: StackItem[], minutes: number) => {
+      if (!user) return;
+      const ids = items
+        .filter((it) => it.source === "signal" || it.source === "capture")
+        .map((it) => it.sourceId);
+      if (ids.length === 0) return;
+      const until = new Date(Date.now() + minutes * 60_000).toISOString();
+      const { error } = await supabase
+        .from("signal_moments")
+        .update({ snoozed_until: until })
+        .in("id", ids)
+        .eq("user_id", user.id);
+      if (error) console.warn("[useStack] snoozeMany error:", error.message);
+      await refreshSignals();
     },
-    [respond],
+    [user, refreshSignals],
   );
 
   return {
