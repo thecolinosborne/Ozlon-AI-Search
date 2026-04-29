@@ -110,3 +110,4 @@
 - [Wisdom sources](mem://knowledge/wisdom-engine-sources) — 18+ high-profile frameworks (Hormozi, Munger, etc.)
 - [Skill learning](mem://wisdom/automatic-skill-learning) — Implicit post-turn extraction and `save_memory` tool (>0.9 similarity)
 - [Evolution proposals](mem://features/wisdom-engine-evolution-proposals) — Pending state for AI-suggested memory/logic reorganizations
+- [Skill loop](mem://architecture/skill-loop) — Phase 1 meta-skill: silent observation capture into reflection_notes + cross_cutting_principles table; reuses system_evolution_proposals for Phase 3
