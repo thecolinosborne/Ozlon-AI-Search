@@ -138,7 +138,7 @@ export function useSkillObservations() {
           title,
           principle,
           active: true,
-          source: "manual",
+          metadata: { source: "manual" },
         });
       if (error) return { ok: false as const, error: error.message };
       await load();
