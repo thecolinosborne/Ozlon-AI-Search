@@ -510,7 +510,7 @@ export default function Communications() {
 
             {/* Focus Stack — top 3 AI-ranked priorities with inline actions */}
             <FocusStack
-              priorities={digest.priorities}
+              priorities={digest.priorities.filter((p) => !hidden.has(p.id))}
               onTap={openPriority}
               onReply={handlePriorityReply}
               onSnooze={handlePrioritySnooze}
