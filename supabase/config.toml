@@ -102,4 +102,6 @@ verify_jwt = false
 [functions.research]
 verify_jwt = false
 
+[functions.skill-observer]
+verify_jwt = true
 
