@@ -199,6 +199,13 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Refuse raw .zip blobs — they must be unpacked client-side first.
+    if (files.length > 0 && files.every((f) => /\.zip$/i.test(f.path))) {
+      return new Response(JSON.stringify({
+        error: "zip_not_unpacked",
+        message: "The .zip file wasn't unpacked before upload. Please drop the contents (or the unzipped folder) instead.",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // ---------- 1. Decide primary input ----------
     let manifest: Record<string, unknown> | null = null;

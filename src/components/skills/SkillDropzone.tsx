@@ -185,30 +185,34 @@ export function SkillDropzone({ onInstalled }: SkillDropzoneProps) {
   const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    const droppedFiles = Array.from(e.dataTransfer.files);
     const items = Array.from(e.dataTransfer.items);
     const collected: IngestFile[] = [];
 
-    // Try entries first (folder support)
-    const entries = items.map((it) => (it as any).webkitGetAsEntry?.()).filter(Boolean);
-    if (entries.length > 0) {
+    // Detect zips up front — they must be unpacked, never sent as raw binary.
+    const hasZip = droppedFiles.some((f) => f.name.toLowerCase().endsWith(".zip"));
+    const hasFolder = items
+      .map((it) => (it as any).webkitGetAsEntry?.())
+      .some((entry: any) => entry && entry.isDirectory);
+
+    if (hasFolder && !hasZip) {
+      // Folder drop — walk webkit entries
+      const entries = items.map((it) => (it as any).webkitGetAsEntry?.()).filter(Boolean);
       for (const entry of entries) {
         const sub = await readEntry(entry);
         collected.push(...sub);
         if (collected.length >= MAX_FILES) break;
       }
     } else {
-      for (const f of Array.from(e.dataTransfer.files)) {
+      // File drop (including zips and loose files)
+      for (const f of droppedFiles) {
         if (f.name.toLowerCase().endsWith(".zip")) {
           collected.push(...(await unpackZip(f)));
         } else {
           collected.push(await fileToIngest(f));
         }
+        if (collected.length >= MAX_FILES) break;
       }
-    }
-
-    // If a single file is a zip, unpack
-    if (collected.length === 1 && collected[0].path.toLowerCase().endsWith(".zip")) {
-      // shouldn't happen because we unpack above, but defensive
     }
 
     handleFiles(collected);
