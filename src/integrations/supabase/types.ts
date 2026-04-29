@@ -1645,6 +1645,57 @@ export type Database = {
         }
         Relationships: []
       }
+      proposed_principles: {
+        Row: {
+          confidence: number
+          created_at: string
+          decided_at: string | null
+          decided_principle_id: string | null
+          id: string
+          metadata: Json
+          observation_count: number
+          principle: string
+          rationale: string | null
+          source_reflection_ids: string[]
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          decided_at?: string | null
+          decided_principle_id?: string | null
+          id?: string
+          metadata?: Json
+          observation_count?: number
+          principle: string
+          rationale?: string | null
+          source_reflection_ids?: string[]
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          decided_at?: string | null
+          decided_principle_id?: string | null
+          id?: string
+          metadata?: Json
+          observation_count?: number
+          principle?: string
+          rationale?: string | null
+          source_reflection_ids?: string[]
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       query_patterns: {
         Row: {
           avg_result_count: number | null
