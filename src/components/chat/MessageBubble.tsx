@@ -57,7 +57,7 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
           ) : isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
           ) : (
-            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-a:text-primary prose-a:underline hover:prose-a:opacity-80 break-words">
+            <div className="text-sm leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 prose-a:text-primary prose-a:underline hover:prose-a:opacity-80 break-words prose-h2:text-[11px] prose-h2:font-semibold prose-h2:uppercase prose-h2:tracking-[0.1em] prose-h2:text-muted-foreground/80 prose-h2:mt-4 prose-h2:mb-1.5 prose-h2:first:mt-0 prose-h3:text-[12px] prose-h3:font-semibold prose-h3:text-foreground/90 prose-h3:mt-3 prose-h3:mb-1 prose-blockquote:border-l-2 prose-blockquote:border-primary/40 prose-blockquote:text-muted-foreground prose-blockquote:not-italic prose-blockquote:py-0 prose-blockquote:pl-3 prose-blockquote:my-2 prose-blockquote:text-[11px] prose-blockquote:font-medium prose-blockquote:uppercase prose-blockquote:tracking-[0.08em]">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
