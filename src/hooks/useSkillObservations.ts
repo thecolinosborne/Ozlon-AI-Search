@@ -18,6 +18,17 @@ export type Principle = {
   createdAt: string;
 };
 
+export type Proposal = {
+  id: string;
+  title: string;
+  principle: string;
+  rationale: string | null;
+  observationCount: number;
+  confidence: number;
+  status: "pending" | "approved" | "rejected" | "superseded";
+  createdAt: string;
+};
+
 export function useSkillObservations() {
   const { user } = useAuth();
   const [observationCount, setObservationCount] = useState(0);
@@ -25,7 +36,9 @@ export function useSkillObservations() {
     Array<{ id: string; title: string; kind: string; createdAt: string; importance: number }>
   >([]);
   const [principles, setPrinciples] = useState<Principle[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) {
