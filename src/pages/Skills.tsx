@@ -58,6 +58,10 @@ export default function Skills() {
 
       <main className="max-w-4xl mx-auto px-4 py-8 space-y-10">
         <section>
+          <SkillDropzone onInstalled={refresh} />
+        </section>
+
+        <section>
           <h2 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
             Installed ({installed.length})
           </h2>
