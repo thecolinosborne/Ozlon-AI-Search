@@ -186,6 +186,9 @@ export function StackRow({
                 >
                   <Sparkles className="w-2.5 h-2.5" />
                   {item.agentSuggestion.label}
+                  {item.agentSuggestion.estSeconds ? (
+                    <span className="opacity-70 tabular-nums">· ~{item.agentSuggestion.estSeconds}s</span>
+                  ) : null}
                   <ArrowRight className="w-2.5 h-2.5" />
                 </button>
               )}
