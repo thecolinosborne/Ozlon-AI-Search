@@ -2100,9 +2100,11 @@ export type Database = {
       signal_moments: {
         Row: {
           acted_at: string | null
+          completed_at: string | null
           confidence: number
           created_at: string
           dismissed_at: string | null
+          due_at: string | null
           embedding: string | null
           expires_at: string
           headline: string
@@ -2112,8 +2114,13 @@ export type Database = {
           metadata: Json
           mode_context: string
           outcome_note: string | null
+          parent_id: string | null
+          pinned_at: string | null
           reason: string | null
           salience: number
+          snoozed_until: string | null
+          source_kind: string | null
+          source_ref: string | null
           source_refs: Json
           status: string
           suggested_direction: string | null
@@ -2122,9 +2129,11 @@ export type Database = {
         }
         Insert: {
           acted_at?: string | null
+          completed_at?: string | null
           confidence?: number
           created_at?: string
           dismissed_at?: string | null
+          due_at?: string | null
           embedding?: string | null
           expires_at?: string
           headline: string
@@ -2134,8 +2143,13 @@ export type Database = {
           metadata?: Json
           mode_context?: string
           outcome_note?: string | null
+          parent_id?: string | null
+          pinned_at?: string | null
           reason?: string | null
           salience?: number
+          snoozed_until?: string | null
+          source_kind?: string | null
+          source_ref?: string | null
           source_refs?: Json
           status?: string
           suggested_direction?: string | null
@@ -2144,9 +2158,11 @@ export type Database = {
         }
         Update: {
           acted_at?: string | null
+          completed_at?: string | null
           confidence?: number
           created_at?: string
           dismissed_at?: string | null
+          due_at?: string | null
           embedding?: string | null
           expires_at?: string
           headline?: string
@@ -2156,15 +2172,28 @@ export type Database = {
           metadata?: Json
           mode_context?: string
           outcome_note?: string | null
+          parent_id?: string | null
+          pinned_at?: string | null
           reason?: string | null
           salience?: number
+          snoozed_until?: string | null
+          source_kind?: string | null
+          source_ref?: string | null
           source_refs?: Json
           status?: string
           suggested_direction?: string | null
           user_id?: string
           wisdom_memory_ids?: Json
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "signal_moments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "signal_moments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       skill_installs: {
         Row: {
@@ -2369,6 +2398,42 @@ export type Database = {
           total_failed?: number
           total_returned?: number
           trust_score?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      stack_daily_summary: {
+        Row: {
+          added_count: number
+          cleared_count: number
+          created_at: string
+          day: string
+          dismissed_count: number
+          id: string
+          snoozed_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          added_count?: number
+          cleared_count?: number
+          created_at?: string
+          day: string
+          dismissed_count?: number
+          id?: string
+          snoozed_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          added_count?: number
+          cleared_count?: number
+          created_at?: string
+          day?: string
+          dismissed_count?: number
+          id?: string
+          snoozed_count?: number
           updated_at?: string
           user_id?: string
         }
