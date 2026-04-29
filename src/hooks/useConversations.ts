@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
+import { recordSkillObservations } from "@/hooks/useSkillObservations";
 
 const isDev = import.meta.env.DEV;
 
@@ -115,19 +116,34 @@ export function useConversations() {
     }
   }, [user]);
 
+  // Fire-and-forget: capture skill observations from the session we're leaving.
+  // Phase 1+ wiring — runs only if the prior session had a real exchange (≥4 msgs:
+  // user/assistant/user/assistant minimum). Never blocks UX, never throws.
+  const captureLeavingSession = useCallback((leavingSessionId: string | null) => {
+    if (!leavingSessionId) return;
+    const snapshot = messagesRef.current;
+    if (!snapshot || snapshot.length < 4) return;
+    void recordSkillObservations({
+      sessionId: leavingSessionId,
+      messages: snapshot.map((m) => ({ role: m.role, content: m.content })),
+    });
+  }, []);
+
   // Switch to a session
   const switchSession = useCallback(async (sessionId: string) => {
+    captureLeavingSession(activeSessionIdRef.current);
     setActiveSession(sessionId);
     await loadMessages(sessionId);
-  }, [loadMessages, setActiveSession]);
+  }, [loadMessages, setActiveSession, captureLeavingSession]);
 
   // Start a new chat
   const startNewChat = useCallback(async () => {
+    captureLeavingSession(activeSessionIdRef.current);
     setActiveSession(null);
     setMessages([]);
     const id = await createSession();
     return id;
-  }, [createSession, setActiveSession]);
+  }, [createSession, setActiveSession, captureLeavingSession]);
 
   // Save a message to the active session
   const saveMessage = useCallback(async (msg: { id: string; role: "user" | "assistant"; content: string; metadata?: Record<string, unknown> }) => {

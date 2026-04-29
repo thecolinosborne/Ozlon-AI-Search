@@ -18,6 +18,17 @@ export type Principle = {
   createdAt: string;
 };
 
+export type Proposal = {
+  id: string;
+  title: string;
+  principle: string;
+  rationale: string | null;
+  observationCount: number;
+  confidence: number;
+  status: "pending" | "approved" | "rejected" | "superseded";
+  createdAt: string;
+};
+
 export function useSkillObservations() {
   const { user } = useAuth();
   const [observationCount, setObservationCount] = useState(0);
@@ -25,19 +36,22 @@ export function useSkillObservations() {
     Array<{ id: string; title: string; kind: string; createdAt: string; importance: number }>
   >([]);
   const [principles, setPrinciples] = useState<Principle[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) {
       setObservationCount(0);
       setRecent([]);
       setPrinciples([]);
+      setProposals([]);
       return;
     }
     setLoading(true);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 
-    const [countRes, recentRes, principlesRes] = await Promise.all([
+    const [countRes, recentRes, principlesRes, proposalsRes] = await Promise.all([
       supabase
         .from("reflection_notes")
         .select("id", { count: "exact", head: true })
@@ -56,6 +70,13 @@ export function useSkillObservations() {
         .from("cross_cutting_principles")
         .select("id, title, principle, active, created_at")
         .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any)
+        .from("proposed_principles")
+        .select("id, title, principle, rationale, observation_count, confidence, status, created_at")
+        .eq("user_id", user.id)
+        .eq("status", "pending")
         .order("created_at", { ascending: false }),
     ]);
 
@@ -90,6 +111,31 @@ export function useSkillObservations() {
         title: p.title,
         principle: p.principle,
         active: p.active,
+        createdAt: p.created_at,
+      })),
+    );
+    type ProposalRow = {
+      id: string;
+      title: string;
+      principle: string;
+      rationale: string | null;
+      observation_count: number;
+      confidence: number;
+      status: Proposal["status"];
+      created_at: string;
+    };
+    const proposalRows: ProposalRow[] = Array.isArray(proposalsRes.data)
+      ? (proposalsRes.data as unknown as ProposalRow[])
+      : [];
+    setProposals(
+      proposalRows.map((p) => ({
+        id: p.id,
+        title: p.title,
+        principle: p.principle,
+        rationale: p.rationale,
+        observationCount: p.observation_count,
+        confidence: p.confidence,
+        status: p.status,
         createdAt: p.created_at,
       })),
     );
@@ -179,17 +225,94 @@ export function useSkillObservations() {
     [load],
   );
 
+  // Run the reviewer: cluster fresh observations into pending proposals.
+  const runReviewer = useCallback(async () => {
+    if (!user) return { ok: false as const, error: "Not signed in" };
+    setReviewing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("skill-reviewer", {
+        body: {},
+      });
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const, data: data as { proposed?: number; reviewed?: number } };
+    } finally {
+      setReviewing(false);
+    }
+  }, [user, load]);
+
+  // Approve a proposal → promote it into cross_cutting_principles (active).
+  const approveProposal = useCallback(
+    async (proposalId: string) => {
+      if (!user) return { ok: false as const, error: "Not signed in" };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: proposal, error: loadErr } = await (supabase as any)
+        .from("proposed_principles")
+        .select("title, principle, source_reflection_ids")
+        .eq("id", proposalId)
+        .maybeSingle();
+      if (loadErr || !proposal) {
+        return { ok: false as const, error: loadErr?.message ?? "Proposal not found" };
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: created, error: insErr } = await (supabase as any)
+        .from("cross_cutting_principles")
+        .insert({
+          user_id: user.id,
+          title: proposal.title,
+          principle: proposal.principle,
+          active: true,
+          source_reflection_ids: proposal.source_reflection_ids ?? [],
+          metadata: { source: "reviewer", proposal_id: proposalId },
+        })
+        .select("id")
+        .maybeSingle();
+      if (insErr) return { ok: false as const, error: insErr.message };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from("proposed_principles")
+        .update({
+          status: "approved",
+          decided_at: new Date().toISOString(),
+          decided_principle_id: created?.id ?? null,
+        })
+        .eq("id", proposalId);
+      await load();
+      return { ok: true as const };
+    },
+    [user, load],
+  );
+
+  const rejectProposal = useCallback(
+    async (proposalId: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any)
+        .from("proposed_principles")
+        .update({ status: "rejected", decided_at: new Date().toISOString() })
+        .eq("id", proposalId);
+      if (error) return { ok: false as const, error: error.message };
+      await load();
+      return { ok: true as const };
+    },
+    [load],
+  );
+
   return {
     observationCount,
     recent,
     principles,
+    proposals,
     loading,
+    reviewing,
     refresh: load,
     deactivatePrinciple,
     activatePrinciple,
     createPrinciple,
     updatePrinciple,
     deletePrinciple,
+    runReviewer,
+    approveProposal,
+    rejectProposal,
   };
 }
 

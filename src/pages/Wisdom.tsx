@@ -12,6 +12,7 @@ import { Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useSkillObservations } from "@/hooks/useSkillObservations";
 import { PrincipleEditor } from "@/components/wisdom/PrincipleEditor";
+import { ProposalInbox } from "@/components/wisdom/ProposalInbox";
 
 type Source = {
   id: string;
@@ -215,11 +216,16 @@ function SkillLoopSection() {
     observationCount,
     recent,
     principles,
+    proposals,
+    reviewing,
     deactivatePrinciple,
     activatePrinciple,
     createPrinciple,
     updatePrinciple,
     deletePrinciple,
+    runReviewer,
+    approveProposal,
+    rejectProposal,
   } = useSkillObservations();
   const activeCount = principles.filter((p) => p.active).length;
 
@@ -233,7 +239,7 @@ function SkillLoopSection() {
           <div>
             <h2 className="text-sm font-medium leading-tight">Skill loop</h2>
             <p className="text-[11px] text-muted-foreground/80 font-mono uppercase tracking-[0.15em] mt-0.5">
-              {observationCount} observations · 7d · {activeCount} of {principles.length} active
+              {observationCount} obs · 7d · {proposals.length} pending · {activeCount}/{principles.length} active
             </p>
           </div>
         </div>
@@ -258,6 +264,14 @@ function SkillLoopSection() {
         </div>
       )}
 
+      <ProposalInbox
+        proposals={proposals}
+        reviewing={reviewing}
+        onRunReviewer={runReviewer}
+        onApprove={approveProposal}
+        onReject={rejectProposal}
+      />
+
       <PrincipleEditor
         principles={principles}
         mutators={{
@@ -269,7 +283,7 @@ function SkillLoopSection() {
         }}
       />
 
-      {observationCount === 0 && principles.length === 0 && (
+      {observationCount === 0 && principles.length === 0 && proposals.length === 0 && (
         <p className="text-xs text-muted-foreground/70 leading-relaxed">
           The system will silently watch your sessions and capture lessons that could
           improve its skills. Nothing is shared, nothing is auto-installed — every
