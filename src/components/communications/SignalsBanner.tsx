@@ -48,15 +48,15 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
         className={cn(
           "relative overflow-hidden rounded-2xl border backdrop-blur-2xl px-3.5 py-3 flex items-start gap-3 transition-colors",
           isUrgent
-            ? "bg-amber-500/[0.06] border-amber-500/25"
-            : "bg-primary/[0.05] border-primary/20",
+            ? "bg-card/50 border-amber-500/20"
+            : "bg-card/50 border-primary/15",
         )}
       >
         {/* Pulse accent */}
         <div
           className={cn(
             "absolute inset-y-0 left-0 w-[3px]",
-            isUrgent ? "bg-amber-400/60" : "bg-primary/50",
+            isUrgent ? "bg-amber-500/50" : "bg-primary/40",
           )}
           aria-hidden
         />
@@ -65,8 +65,8 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
           className={cn(
             "shrink-0 mt-0.5 w-7 h-7 rounded-full flex items-center justify-center",
             isUrgent
-              ? "bg-amber-500/15 text-amber-300"
-              : "bg-primary/12 text-primary",
+              ? "bg-amber-500/10 text-amber-500/80"
+              : "bg-primary/10 text-primary",
           )}
         >
           <Sparkles className="w-3.5 h-3.5" />
@@ -77,7 +77,7 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
             <span
               className={cn(
                 "text-[10px] uppercase tracking-[0.18em] font-medium",
-                isUrgent ? "text-amber-300/80" : "text-primary/80",
+                isUrgent ? "text-amber-500/80" : "text-primary/80",
               )}
             >
               {isUrgent ? "Signal · urgent" : "Signal"}
@@ -96,10 +96,10 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
               className="mt-1 text-left w-full group/reason"
               aria-label="Expand signal details"
             >
-              <p className="text-[11.5px] text-muted-foreground/85 leading-snug line-clamp-2 group-hover/reason:text-foreground/90 transition-colors">
+              <p className="text-[11.5px] text-muted-foreground leading-snug line-clamp-2 group-hover/reason:text-foreground transition-colors">
                 {topMoment.reason}
               </p>
-              <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/50 group-hover/reason:text-foreground/70 transition-colors">
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/60 group-hover/reason:text-foreground/80 transition-colors">
                 <Maximize2 className="w-2.5 h-2.5" />
                 Expand
               </span>
@@ -112,7 +112,7 @@ export function SignalsBanner({ threshold = 0.7, onAct }: SignalsBannerProps) {
               className={cn(
                 "mt-2 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11.5px] font-medium transition-colors",
                 isUrgent
-                  ? "bg-amber-500/20 text-amber-200 hover:bg-amber-500/30"
+                  ? "bg-amber-500/15 text-foreground hover:bg-amber-500/25"
                   : "bg-primary/15 text-primary hover:bg-primary/25",
               )}
             >
