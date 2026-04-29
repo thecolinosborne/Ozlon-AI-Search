@@ -314,13 +314,20 @@ export function useStack(): UseStackResult {
   );
 
   const snooze = useCallback(
-    async (item: StackItem, _minutes: number) => {
-      // Phase 1: snooze on signals routes through the existing `snooze` outcome.
-      // Phase 2 persists `snoozed_until` for cron resurfacing.
+    async (item: StackItem, minutes: number) => {
       if (item.source === "comm") return;
-      await respond(item.sourceId, "snooze");
+      if (!user) return;
+      const until = new Date(Date.now() + minutes * 60_000).toISOString();
+      // Optimistic: drop from local list immediately
+      const { error } = await supabase
+        .from("signal_moments")
+        .update({ snoozed_until: until })
+        .eq("id", item.sourceId)
+        .eq("user_id", user.id);
+      if (error) console.warn("[useStack] snooze error:", error.message);
+      await refreshSignals();
     },
-    [respond],
+    [user, refreshSignals],
   );
 
   const dismiss = useCallback(
@@ -399,15 +406,22 @@ export function useStack(): UseStackResult {
   );
 
   const snoozeMany = useCallback(
-    async (items: StackItem[], _minutes: number) => {
-      // Phase 1: route each through respond() so feedback is recorded.
-      await Promise.all(
-        items
-          .filter((it) => it.source !== "comm")
-          .map((it) => respond(it.sourceId, "snooze")),
-      );
+    async (items: StackItem[], minutes: number) => {
+      if (!user) return;
+      const ids = items
+        .filter((it) => it.source === "signal" || it.source === "capture")
+        .map((it) => it.sourceId);
+      if (ids.length === 0) return;
+      const until = new Date(Date.now() + minutes * 60_000).toISOString();
+      const { error } = await supabase
+        .from("signal_moments")
+        .update({ snoozed_until: until })
+        .in("id", ids)
+        .eq("user_id", user.id);
+      if (error) console.warn("[useStack] snoozeMany error:", error.message);
+      await refreshSignals();
     },
-    [respond],
+    [user, refreshSignals],
   );
 
   return {

@@ -33,11 +33,13 @@ export function useSignals() {
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    const nowIso = new Date().toISOString();
     const { data } = await supabase
       .from("signal_moments")
       .select("id, kind, headline, reason, suggested_direction, salience, confidence, mode_context, status, created_at, expires_at, source_refs, wisdom_memory_ids, metadata")
       .eq("user_id", user.id)
       .eq("status", "live")
+      .or(`snoozed_until.is.null,snoozed_until.lte.${nowIso}`)
       .order("salience", { ascending: false })
       .limit(20);
     setMoments(((data ?? []) as unknown) as SignalMoment[]);
