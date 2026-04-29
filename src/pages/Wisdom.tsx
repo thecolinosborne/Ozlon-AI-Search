@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Brain } from "lucide-react";
+import { ArrowLeft, Brain, Sparkles } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WisdomPackGrid } from "@/components/wisdom/WisdomPackGrid";
 import { AddSourcePanel } from "@/components/wisdom/AddSourcePanel";
@@ -10,6 +10,7 @@ import { wisdomService } from "@/services/wisdomService";
 import { memoryService, type WisdomMemory } from "@/services/memoryService";
 import { Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { useSkillObservations } from "@/hooks/useSkillObservations";
 
 type Source = {
   id: string;
@@ -119,6 +120,8 @@ const Wisdom = () => {
         <WisdomPackGrid onInstalled={reload} />
         <AddSourcePanel onIngested={reload} defaultTab={initialAddTab} />
 
+        <SkillLoopSection />
+
         <Tabs defaultValue="sources">
           <TabsList className="grid grid-cols-4 w-full">
             <TabsTrigger value="sources">Sources</TabsTrigger>
@@ -199,5 +202,87 @@ const Wisdom = () => {
     </div>
   );
 };
+
+/**
+ * SkillLoopSection — Phase 1 surface for the meta-skill.
+ * Shows silent capture progress (observations in last 7d) and any active
+ * cross-cutting principles. Methodology adapted from "One Skill to Rule Them
+ * All" by Eoghan Henn (rebelytics.com), CC BY 4.0.
+ */
+function SkillLoopSection() {
+  const { observationCount, recent, principles, deactivatePrinciple } = useSkillObservations();
+  const activePrinciples = principles.filter((p) => p.active);
+
+  return (
+    <section className="rounded-2xl border border-border/40 bg-card/30 backdrop-blur-2xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+            <Sparkles className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-sm font-medium leading-tight">Skill loop</h2>
+            <p className="text-[11px] text-muted-foreground/80 font-mono uppercase tracking-[0.15em] mt-0.5">
+              {observationCount} observations · 7d · {activePrinciples.length} principles active
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {recent.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+            Recent observations
+          </div>
+          {recent.slice(0, 5).map((o) => (
+            <div
+              key={o.id}
+              className="flex items-center gap-3 text-xs text-foreground/85 py-1"
+            >
+              <span className="text-[10px] text-muted-foreground/70 font-mono uppercase w-16 shrink-0">
+                {o.kind}
+              </span>
+              <span className="truncate flex-1">{o.title}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activePrinciples.length > 0 && (
+        <div className="space-y-1.5 border-t border-border/40 pt-4">
+          <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+            Cross-cutting principles
+          </div>
+          {activePrinciples.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-start justify-between gap-3 text-xs py-1"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-foreground/90">{p.title}</div>
+                <div className="text-foreground/60 mt-0.5">{p.principle}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void deactivatePrinciple(p.id)}
+                className="text-[10px] text-muted-foreground hover:text-destructive transition-colors shrink-0"
+              >
+                Deactivate
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {observationCount === 0 && activePrinciples.length === 0 && (
+        <p className="text-xs text-muted-foreground/70 leading-relaxed">
+          The system will silently watch your sessions and capture lessons that could
+          improve its skills. Nothing is shared, nothing is auto-installed — every
+          proposed change requires your approval.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default Wisdom;
