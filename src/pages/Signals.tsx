@@ -120,6 +120,12 @@ export default function Signals() {
       {/* Today layer — Stage 1: living "now line" + life-event preview. Additive. */}
       <TodayHero />
 
+      {/* Top of Mind — single highest-leverage next move. */}
+      <TopOfMindCard topOfMind={brief?.top_of_mind ?? null} loading={briefLoading} />
+
+      {/* Command Center — 8 calm cards (situational + strategic). */}
+      <CommandCenter brief={brief} loading={briefLoading} />
+
       {/* Capture composer — flags pressing items for the Brain to triage. */}
       <div className="pt-4 px-6">
         <div className="max-w-2xl mx-auto">
