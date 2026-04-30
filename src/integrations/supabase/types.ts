@@ -1303,6 +1303,110 @@ export type Database = {
         }
         Relationships: []
       }
+      life_events: {
+        Row: {
+          created_at: string
+          desired_duration_minutes: number | null
+          id: string
+          kind: string
+          last_done_at: string | null
+          metadata: Json
+          next_due_at: string | null
+          notes: string | null
+          person_id: string | null
+          recurrence_days: number | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          desired_duration_minutes?: number | null
+          id?: string
+          kind: string
+          last_done_at?: string | null
+          metadata?: Json
+          next_due_at?: string | null
+          notes?: string | null
+          person_id?: string | null
+          recurrence_days?: number | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          desired_duration_minutes?: number | null
+          id?: string
+          kind?: string
+          last_done_at?: string | null
+          metadata?: Json
+          next_due_at?: string | null
+          notes?: string | null
+          person_id?: string | null
+          recurrence_days?: number | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_events_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "life_people"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      life_people: {
+        Row: {
+          birthday: string | null
+          created_at: string
+          email: string | null
+          id: string
+          last_contact_at: string | null
+          metadata: Json
+          name: string
+          notes: string | null
+          phone: string | null
+          relationship: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          birthday?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_contact_at?: string | null
+          metadata?: Json
+          name: string
+          notes?: string | null
+          phone?: string | null
+          relationship?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          birthday?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_contact_at?: string | null
+          metadata?: Json
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          relationship?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       model_calls: {
         Row: {
           created_at: string
@@ -1389,6 +1493,33 @@ export type Database = {
           model_used?: string
           primary_model?: string | null
           success?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
+      now_line_state: {
+        Row: {
+          metadata: Json
+          source: string | null
+          text: string
+          tone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          metadata?: Json
+          source?: string | null
+          text?: string
+          tone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          metadata?: Json
+          source?: string | null
+          text?: string
+          tone?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
