@@ -3213,6 +3213,74 @@ async function executeToolCall(
       return { success: true, result: block };
     }
 
+    // ---- update_skill / add_skill_prerequisites: patch an installed skill ----
+    if (toolName === 'update_skill' || toolName === 'add_skill_prerequisites') {
+      const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+      const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      if (!userId || !authHeader) {
+        return { success: false, result: `${toolName}: user not authenticated` };
+      }
+      const slug = String(args.slug || '').trim();
+      if (!slug) return { success: false, result: `${toolName}: slug is required` };
+
+      let payload: Record<string, unknown>;
+      if (toolName === 'add_skill_prerequisites') {
+        const prereqs = Array.isArray(args.prerequisites)
+          ? (args.prerequisites as unknown[]).map(String).filter(Boolean)
+          : [];
+        if (prereqs.length === 0) {
+          return { success: false, result: 'add_skill_prerequisites: prerequisites array required' };
+        }
+        payload = { op: 'append_prerequisites', slug, prerequisites: prereqs };
+      } else {
+        // update_skill: either patch_instructions or update_manifest depending on args.
+        if (args.manifest_patch && typeof args.manifest_patch === 'object') {
+          payload = { op: 'update_manifest', slug, patch: args.manifest_patch };
+        } else {
+          const content = String(args.content ?? args.instructions_patch ?? '').trim();
+          if (!content) {
+            return { success: false, result: 'update_skill: content (or manifest_patch) required' };
+          }
+          payload = {
+            op: 'patch_instructions',
+            slug,
+            mode: (args.merge_strategy as string) === 'replace_section' ? 'replace_section'
+              : (args.merge_strategy as string) === 'prepend' ? 'prepend' : 'append',
+            section: args.section ? String(args.section) : undefined,
+            content,
+          };
+        }
+      }
+
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      try {
+        const r = await fetch(`${supabaseUrl}/functions/v1/skills-edit`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.success) {
+          return {
+            success: false,
+            result: `Skill edit failed: ${data.error || r.status}${data.scan ? ` — scan ${data.scan.verdict} (${data.scan.findings?.length || 0} findings)` : ''}`,
+          };
+        }
+        const lines = [
+          `Skill updated: ${data.slug} → v${data.version} (op: ${data.op})`,
+          data.forked_from ? `Forked from "${data.forked_from}" into your private copy.` : null,
+          `Effective instructions (${data.effective_instructions_length} chars), preview:`,
+          data.effective_instructions_summary,
+        ].filter(Boolean);
+        return { success: true, result: lines.join('\n') };
+      } catch (e) {
+        return { success: false, result: `Skill edit error: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
     // ---- Registry dispatcher (manifest-driven tools) ----
     const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
     if (authHeader) {
