@@ -96,6 +96,15 @@ export default function Skills() {
                       size="icon"
                       variant="ghost"
                       disabled={busy === s.id}
+                      onClick={() => setEditing({ slug: s.slug, name: s.name })}
+                      title="Edit skill"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      disabled={busy === s.id}
                       onClick={() => handle(s.id, () => uninstall(s.install_id!), "Uninstalled")}
                     >
                       <Trash2 className="w-4 h-4" />
