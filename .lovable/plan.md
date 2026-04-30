@@ -1,185 +1,63 @@
+# Skill Editing Tools — Plan
 
-## Verdict
+## Goal
+Close the capability gap surfaced by the AI's report: there's currently no tool to update an installed skill's instructions or prerequisites. Today, the AI either improvises or saves "remember to apply X" memories. We'll give it first-class skill-editing tools that produce a new versioned skill record, audited via `skill_snapshots`.
 
-The repo is a **methodology pack** (markdown only — no code, no scripts, no network calls, CC BY 4.0). It's a strong fit for Ozlon and maps almost 1:1 onto systems we already run. The right move is **not** to bolt on a parallel observation system — it's to teach the existing Wisdom Engine + Proposal Inbox + Stack to do meta-skill work, with one new lightweight table for the parts that genuinely don't exist yet.
+## Design Principles
+- **Versioned, not destructive.** Every edit bumps `version` and writes a `skill_snapshots` row (we already have this table from Phase A).
+- **Scoped to ownership.** Users can only patch skills they authored OR private forks of imported/builtin skills. Editing a builtin/imported skill auto-creates a user-owned fork instead of mutating the original.
+- **Re-scanned every edit.** The same Ozlon compatibility scan from `_shared/skills/scan.ts` runs on the patched manifest before save — same safety bar as ingestion.
+- **AI-callable + UI-callable.** Same edge function backs both a chat tool and a future "Edit skill" UI.
 
----
+## Deliverables
 
-## What already exists (reuse, do not duplicate)
+### 1. New edge function: `supabase/functions/skills-edit/index.ts`
+Single endpoint, three operations (chosen via `op` field):
 
-| Capability the pack needs | Ozlon equivalent already shipped |
-|---|---|
-| Per-session observation logging | `reflection_notes` (pgvector, RLS, `match_reflections`) |
-| Skill catalog + per-user installs | `skills` + `skill_installs` (visibility, trust_tier, manifest jsonb) |
-| Pending AI-suggested changes ("staged updates") | `personality_evolve` proposal pattern + `ProposalInbox.tsx` |
-| User-approved memory mutations | Wisdom Engine `wisdom_memories` + `save_memory` tool |
-| Surfacing "do this now" rows | The Stack (`signal_moments` + `useStack`) |
-| 3x/week cron review | `pg_cron` + `stack-resurface` pattern |
-| End-of-turn extraction | `automatic-skill-learning` post-turn hook |
-| Cross-product scrub for confidentiality | Wisdom Engine identity constraints + RLS |
+- `op: "append_prerequisites"` — `{ slug, prerequisites: string[] }`
+  Appends a "## Prerequisites" section (or merges into existing one) at the top of `manifest.instructions`.
+- `op: "patch_instructions"` — `{ slug, mode: "append" | "prepend" | "replace_section", section?: string, content: string }`
+  Free-form instruction patches. `replace_section` looks for `## {section}` headers; falls back to append if not found.
+- `op: "update_manifest"` — `{ slug, patch: Partial<SkillManifest> }`
+  Whitelist-merged patch for `description`, `triggers`, `tools_required`, `tools_optional`, `memory_domains`, `modes_allowed`, `requires_confirmation`. Slug/version/side_effect locked.
 
-So 80% of the pack is already there structurally — it just isn't wired to *skill authorship*.
+Flow for every op:
+1. Auth user via JWT.
+2. Load skill by slug (must be installed by user OR authored by user).
+3. If `source !== "user"` OR `author_user_id !== user.id` → **fork**: clone into a new `skills` row with `source = "user"`, `author_user_id = user.id`, `visibility = "private"`, slug suffixed `-mine` if collision, then re-point the user's `skill_install` to the fork.
+4. Apply patch → produce new manifest.
+5. Bump `version` (semver patch increment).
+6. Run `scanSkill()` — abort with structured error if scan fails.
+7. Update `skills` row, write `skill_snapshots` row with `{ before, after, op, actor }`.
+8. Return `{ slug, version, effective_instructions_summary, scan_summary }`.
 
----
+### 2. Wire two AI tools in `supabase/functions/chat/index.ts`
+Next to the existing `load_skill` block (~line 7189):
 
-## What's genuinely new (the 20% to build)
+- `update_skill` — generic patcher mapping to `patch_instructions` / `update_manifest`.
+- `add_skill_prerequisites` — convenience tool mapping to `append_prerequisites` (matches the AI's requested signature).
 
-Only **two** new database objects, one new edge function, one cron schedule, and one tab in `ProposalInbox`. Everything else routes into existing tables.
+Both call `skills-edit` via internal fetch with the user's auth header (same pattern as other authenticated tool calls). Results are returned as structured JSON the AI can summarize.
 
-### New table: `skill_proposals`
+### 3. UI affordance (minimal)
+Add an "Edit" button on installed skill cards in `src/pages/Skills.tsx` that opens a lightweight dialog reusing `SkillBuilder`'s textarea — POSTs to `skills-edit` with `op: "patch_instructions"`. Out of scope for v1: full visual section editor.
 
-Mirrors the personality_evolve proposal pattern, scoped to skills.
+### 4. No DB migration needed
+`skill_snapshots` already exists from Phase A. We'll just add an `op` column via a small migration: `ALTER TABLE skill_snapshots ADD COLUMN op text` (nullable, default null) so we can distinguish ingest vs edit events.
 
-```
-skill_proposals (
-  id uuid pk,
-  user_id uuid not null,                    -- RLS owner
-  kind text check (kind in ('new','update','simplify','retire')),
-  target_skill_id uuid references skills(id),  -- null when kind='new'
-  draft_manifest jsonb not null,            -- proposed SkillManifest
-  diff_summary text,                        -- human-readable rationale
-  source_reflection_ids uuid[],             -- traceable back to observations
-  confidentiality text default 'internal'   -- 'internal' | 'open_source_candidate'
-                check (confidentiality in ('internal','open_source_candidate')),
-  status text default 'pending'             -- 'pending' | 'approved' | 'declined' | 'superseded'
-                check (status in ('pending','approved','declined','superseded')),
-  created_at timestamptz default now(),
-  decided_at timestamptz
-)
-```
+## Technical Notes
+- Forking logic is the most subtle piece: builtin/imported skills are shared catalog entries. We MUST never mutate them. The fork creates a private copy and re-binds the install in a single transaction.
+- `effective_instructions_summary` returned to the AI is the first 600 chars of the new instructions — enough for the AI to confirm the patch landed without re-loading.
+- Scan failures return `{ success: false, scan_issues: [...] }` so the AI gets a structured error per the existing error-reporting policy (no swallowing).
+- Memory rule for the Higgsfield prerequisites stays in place as belt-and-suspenders, but the AI should prefer `add_skill_prerequisites` going forward.
 
-RLS: owner-only CRUD; service role writes for the cron worker. No client-side approval shortcut — approval flips status server-side via a SECURITY DEFINER `approve_skill_proposal(id)` that writes to `skills`/`skill_installs` atomically.
+## Files Touched
+- **new** `supabase/functions/skills-edit/index.ts`
+- **new** `supabase/migrations/<ts>_skill_snapshots_op.sql`
+- **edit** `supabase/functions/chat/index.ts` — register two new tools + dispatcher routes
+- **edit** `supabase/functions/_shared/skills/registry.ts` — add `forkSkillForUser()` + `applyManifestPatch()` helpers
+- **edit** `src/pages/Skills.tsx` — add Edit button + dialog
+- **new** `src/components/skills/SkillEditDialog.tsx`
 
-### New table: `cross_cutting_principles`
-
-The pack's killer idea — principles that get re-injected into every future skill build.
-
-```
-cross_cutting_principles (
-  id uuid pk,
-  user_id uuid not null,                    -- RLS owner-only
-  title text not null,
-  principle text not null,                  -- the rule itself
-  source_reflection_ids uuid[],             -- traceability + revocability
-  active boolean default true,
-  created_at timestamptz default now()
-)
-```
-
-This is the one table that has no good existing home — `wisdom_memories` is for *user preferences*, `reflection_notes` is for *raw observations*. Principles are the *rules extracted from clusters of observations* that govern skill authorship.
-
-### Reuse `reflection_notes` for observations
-
-The pack's `skill-observations/log.md` becomes:
-
-```
-reflection_notes.note_type = 'skill_observation'
-reflection_notes.metadata.kind = 'correction'|'gap'|'workflow'|'simplify'|'meta'
-reflection_notes.metadata.target_skill_id = uuid | null
-reflection_notes.metadata.session_id = uuid
-reflection_notes.metadata.confidentiality = 'internal'|'open_source_candidate'
-```
-
-Zero new infra. `match_reflections(filter_note_type='skill_observation')` already does clustering for the cron.
-
-### One new edge function: `skill-review` (cron, 3x/week)
-
-Modeled on `stack-resurface`. Per user:
-1. Pull open `reflection_notes` where `note_type='skill_observation'` and `created_at > last_review_at`.
-2. Cluster by `target_skill_id` (and a "no target → new skill" bucket).
-3. For each cluster, call Lovable AI Gateway:
-   - `google/gemini-2.5-flash` for tweaks (cheap, high volume),
-   - `openai/gpt-5.2` for substantive rewrites.
-4. Server-side **5-layer confidentiality scrub** before any draft is marked `open_source_candidate` (the pack's Layer 1–5 — implement as deterministic regex + Gemini judge pass).
-5. Insert one row per draft into `skill_proposals` with `status='pending'`.
-6. Insert one `signal_moments` row per proposal so it lands in **The Stack** automatically (`kind='skill_proposal'`).
-
-Schedule via `pg_cron`: Mon/Wed/Fri 06:00 UTC (mirrors the pack's cadence).
-
-### Observation capture: extend, don't add
-
-The existing `automatic-skill-learning` post-turn hook already runs at end of every chat turn. We extend it: in addition to wisdom memory extraction, it asks Gemini Flash for `0..N` skill observations using the pack's signal taxonomy (correction / gap / workflow / simplify / meta). Writes go to `reflection_notes`. **No new edge function, no new client code path.** Same RLS, same JWT, same cost class.
-
-### UI: extend, don't add
-
-- **`ProposalInbox.tsx`** → add a third tab "Skills" alongside the existing personality/wisdom tabs. Diff view = JSON manifest diff against current `skills.manifest`. Approve/Decline buttons call the SECURITY DEFINER function.
-- **`/skills` page** → add a "Drafts" section showing this user's pending `skill_proposals` count + link.
-- **The Stack** → no change required; `kind='skill_proposal'` rows render through the existing `StackRow` template, with the "Open" action navigating to `ProposalInbox?tab=skills&id=…`.
-- **`/wisdom`** → add a "Principles" section listing `cross_cutting_principles`, with a toggle to deactivate any principle (revocability is mandatory for the prompt-injection mitigation below).
-
----
-
-## Security review of the upstream pack
-
-**Source artifact risk:** zero. The repo is six files: 4 markdown, 1 license, 2 PNGs. The only "executable" content is two `bash grep` snippets shown as documentation examples. Nothing is fetched at runtime.
-
-**Adoption risks (Claude-shaped assumptions that don't fit Ozlon) and how the plan handles each:**
-
-1. **Filesystem assumption** — pack writes to `[shared folder]/skill-observations/` and `skill-updates/`. Ozlon has no client filesystem. Re-homed to Postgres tables with RLS.
-2. **Silent background logging is privacy-sensitive** — extraction happens server-side in the existing `automatic-skill-learning` flow under the user's JWT, written to `reflection_notes` which already has `user_id = auth.uid()` RLS. Nothing service-role-on-behalf-of-user from the client.
-3. **Auto-application of skill changes** — pack is explicit: stage, never auto-install. Mirrored exactly: every change goes through `skill_proposals.status='pending'` and an explicit user click. The `approve_skill_proposal` function is the *only* path that mutates `skills` or `skill_installs.manifest` from AI output.
-4. **Open-source promotion path** — `skills.visibility` already supports `private/org/public`, but today nothing flips it. We add a separate, explicit `skill-publish-scrub` call (gated `verify_jwt = true`, user-initiated only) that re-runs the 5-layer confidentiality sweep before allowing `visibility='public'`. AI cannot promote skills; only the user can.
-5. **Trust tier** — AI-generated skills default to `trust_tier = 0` and stay there. Promotion to tier 1+ is user-only.
-6. **Prompt-injection via principles** — this is the highest-leverage attack: `cross_cutting_principles` get re-injected into every future skill build, so a poisoned email body summarized into a "principle" could rewrite agent behavior across all future skills. Mitigations:
-   - Principles are NEVER auto-created. They require explicit user approval via the same proposal flow (`kind='principle'` reuses `skill_proposals.draft_manifest`).
-   - Every principle carries `source_reflection_ids` so the user can see exactly which observations spawned it.
-   - One-click "Deactivate principle" in `/wisdom` flips `active=false` immediately.
-   - The cron worker treats user-content sources (email bodies, scraped pages) as **untrusted** — observations derived from them are tagged `metadata.untrusted_source=true` and Gemini's prompt explicitly excludes them from principle synthesis.
-7. **License** — CC BY 4.0. Compatible with commercial reuse. Plan keeps `Created by Eoghan Henn / rebelytics.com` attribution in the seeded principles' `metadata.attribution` field and in the `skill-review` function header comment.
-8. **No new external secrets, no new third-party calls, no new SDKs.**
-
----
-
-## Phased rollout
-
-```text
-Phase 1 — Capture (silent, low risk)           [migration + extend automatic-skill-learning]
-   reflection_notes.note_type='skill_observation' starts populating
-   No proposals yet, no UI surface beyond a count in /wisdom
-   1 week of validation against signal quality
-
-Phase 2 — Cross-cutting principles             [migration + /wisdom Principles tab]
-   cross_cutting_principles table + manual user-curated entries
-   AI proposes principles via the same proposal pipeline (built in phase 3)
-
-Phase 3 — Proposals + Stack surface            [migration + edge function + cron + ProposalInbox tab]
-   skill_proposals table + skill-review cron
-   Stack rows for kind='skill_proposal'
-   ProposalInbox "Skills" tab with diff view + Approve/Decline
-   approve_skill_proposal SECURITY DEFINER function
-
-Phase 4 — Confidentiality publish path         [edge function + Skills page button]
-   skill-publish-scrub edge function
-   "Make public" button on user-owned skills (currently disabled)
-   5-layer scrub blocks risky publishes
-
-Phase 5 — Self-review                          [no schema change]
-   Observations tagged metadata.kind='meta' get reviewed by the same cron
-   The skill-review prompts themselves become proposal-driven over time
-```
-
----
-
-## What we explicitly do NOT do
-
-- No new "tasks" route or page (Core constraint).
-- No client-side writes to `skills` or `skill_installs.manifest` for AI-generated content — always via `skill_proposals` + user approval.
-- No auto-publish of any skill to `visibility='public'` without user click + `skill-publish-scrub` passing.
-- No filesystem mirror of `skill-observations/` and `skill-updates/` — Postgres is the single source of truth.
-- No runtime fetch of the upstream repo — the methodology is vendored into edge function prompts with attribution.
-- No new tables for things `reflection_notes` and `skill_installs` already cover.
-
----
-
-## Why this is the right add now
-
-Ozlon already closed two of three self-improvement loops:
-- **Preference loop** → Wisdom Engine
-- **Tone loop** → Personality Evolve
-
-This adds the third:
-- **Capability loop** → every correction the user makes becomes free training data for the agent's own *skills*; every recurring workflow becomes a new installed skill without the user authoring it.
-
-Combined with The Stack as the actionable surface, the system becomes self-curating: it watches itself work, drafts its own improvements, and asks permission before installing them. The upstream author reports 600+ improvements across 40 skills in 3 months under this exact methodology. Adapted to Ozlon's RLS/privacy model, it's strictly additive and reuses every system we already built.
-
-Approve and I'll start with Phase 1: the migration + extending `automatic-skill-learning` to also emit skill observations into `reflection_notes`. No new UI in Phase 1 — just silent capture and a counter, so we can validate signal quality before anything proposes changes.
+## After Approval
+Once you say go, I'll build it, deploy `skills-edit` + redeploy `chat`, and you'll be able to say things like *"add these prerequisites to the Higgsfield skill: …"* and the AI will patch the skill directly with a versioned, audited update.

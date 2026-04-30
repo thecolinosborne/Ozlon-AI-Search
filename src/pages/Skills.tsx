@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload } from "lucide-react";
+import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload, Pencil } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { SkillDropzone } from "@/components/skills/SkillDropzone";
+import { SkillEditDialog } from "@/components/skills/SkillEditDialog";
 
 export default function Skills() {
   const { skills, loading, install, uninstall, toggle, refresh } = useSkills();
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ slug: string; name: string } | null>(null);
 
   const handle = async (id: string, fn: () => Promise<void>, label: string) => {
     setBusy(id);
@@ -94,6 +96,15 @@ export default function Skills() {
                       size="icon"
                       variant="ghost"
                       disabled={busy === s.id}
+                      onClick={() => setEditing({ slug: s.slug, name: s.name })}
+                      title="Edit skill"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      disabled={busy === s.id}
                       onClick={() => handle(s.id, () => uninstall(s.install_id!), "Uninstalled")}
                     >
                       <Trash2 className="w-4 h-4" />
@@ -141,6 +152,15 @@ export default function Skills() {
           )}
         </section>
       </main>
+      {editing && (
+        <SkillEditDialog
+          slug={editing.slug}
+          name={editing.name}
+          open={!!editing}
+          onOpenChange={(v) => !v && setEditing(null)}
+          onSaved={refresh}
+        />
+      )}
     </div>
   );
 }
