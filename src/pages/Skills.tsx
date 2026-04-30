@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload } from "lucide-react";
+import { ArrowLeft, Sparkles, Download, Trash2, Plus, Upload, Pencil } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { SkillDropzone } from "@/components/skills/SkillDropzone";
+import { SkillEditDialog } from "@/components/skills/SkillEditDialog";
 
 export default function Skills() {
   const { skills, loading, install, uninstall, toggle, refresh } = useSkills();
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ slug: string; name: string } | null>(null);
 
   const handle = async (id: string, fn: () => Promise<void>, label: string) => {
     setBusy(id);
