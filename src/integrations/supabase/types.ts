@@ -1362,6 +1362,48 @@ export type Database = {
           },
         ]
       }
+      life_goals: {
+        Row: {
+          created_at: string
+          id: string
+          last_touched_at: string | null
+          metadata: Json
+          progress: number
+          status: string
+          target_date: string | null
+          title: string
+          updated_at: string
+          user_id: string
+          why: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_touched_at?: string | null
+          metadata?: Json
+          progress?: number
+          status?: string
+          target_date?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+          why?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_touched_at?: string | null
+          metadata?: Json
+          progress?: number
+          status?: string
+          target_date?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+          why?: string | null
+        }
+        Relationships: []
+      }
       life_people: {
         Row: {
           birthday: string | null
