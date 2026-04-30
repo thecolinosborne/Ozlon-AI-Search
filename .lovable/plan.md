@@ -1,201 +1,282 @@
+# Your Today — A Calm Chief of Staff (5 Intelligence Layers)
 
-# Today → The Layer Above All The Apps
+This evolves the existing Today surface into a quiet briefing that **observes → interprets → prioritizes → recommends one move at a time**. No dashboard feel, no robotic tone, no extra noise. Every card earns its place by saying something a human chief of staff would say.
 
-You've nailed the real question: **what's the actual job?** So far Ozlon = chat + comms. Useful, but it sits *next to* the other apps you already use. To matter, Today has to be **the layer above them** — the one place that ties everything together so you don't have to.
+The Now Line stays the heartbeat. Everything else supports it.
 
-This plan is short on UI poetry, long on **what it actually does** that nothing else does.
+## The 5 layers, top to bottom
 
----
+```text
+┌────────────────────────────────────────────────────────┐
+│                 ●  (breathing orb)                      │
+│                                                         │
+│   "You have 3 things before lunch.                     │  ← Layer 1: Now Line
+│    Sarah's birthday is tomorrow."                      │
+│                                                         │
+│   Morning · 8:42 AM · Steady day                       │  ← Layer 2: Status Strip
+└────────────────────────────────────────────────────────┘
+┌──────────── Top of Mind ─────────────────  ●  high  ──┐
+│                                                         │
+│   Reply to Jamie before noon.                          │  ← Layer 3: Top of Mind
+│   Open opportunity. Two days waiting. ~6 minutes.      │
+│                                                         │
+│   [ Do it now ]   Snooze 1h   Why this?                │
+└────────────────────────────────────────────────────────┘
+┌── Today's Plan ──┬── Late ──────┬── Up Next ──────────┐
+│ 4 to do · 60%    │ 2 need you   │ Standup 9:30        │  ← Layer 4: Situational
+│ Two quick wins.  │ One blocks   │ 18 min — review     │
+│ One needs focus. │ the launch.  │ yesterday's notes.  │
+│ [ Start first ]  │ [ Clear it ] │ [ Prepare ]         │
+├── People Waiting ┼── Habits ────┼── Goals ────────────┤
+│ 3 follow-ups     │ Walk · Read  │ Q4 Launch · 78%     │  ← Layer 5: Strategic
+│ Jamie is most    │ Walk is your │ Today's page task   │
+│ time-sensitive.  │ easiest win. │ moves this forward. │
+│ [ Draft reply ]  │ [ Start ]    │ [ Next step ]       │
+├── Watch ─────────┴──────────────┼── Won Today ────────┤
+│ 1 deal stalled 5 days           │ 6 done · 2h focus   │
+│ Follow up today keeps it warm.  │ Ahead on admin.     │
+│ [ Create follow-up ]            │ [ Review wins ]     │
+└─────────────────────────────────┴─────────────────────┘
+```
 
-## What's already out there (and where they all stop)
-
-| Category | Examples | What they do well | Where they stop |
-|---|---|---|---|
-| **AI calendar planners** | Motion, Reclaim, Sunsama, Akiflow, Temporal | Auto-schedule tasks into time blocks, protect focus time | They only know about tasks + calendar. They don't know your inbox, your relationships, your money, your body. |
-| **AI meeting notes** | Granola, Fireflies, Otter | Capture meeting context, draft follow-ups | Only during meetings. Forget you the minute you close the laptop. |
-| **AI life trackers** | Lifestack, Bee, Exists, Rewind | Pull together health/calendar/data into a daily energy curve | They show you charts. They don't *do* anything for you. |
-| **AI executive assistants** | Duckbill, alfred_, Martin | Will actually book a haircut, return a package, schedule a doctor | Mostly chat-only, US-only, narrow domains, no memory across asks. |
-| **AI companions** | Pi, Replika | Warm, remember details, good at conversation | Pure conversation. Don't touch your real life — calendar, email, money. |
-| **Morning briefing tools** | alfred_, BriefingAM | Audio/text summary of your day | One-shot per day. Static. Don't react when things change at 2pm. |
-| **Productivity OSes** | Notion, Apple Reminders | Infinite flexibility | Empty by default. You build it. They don't bring intelligence. |
-
-**The gap nobody fills:**
-A single calm surface that **knows you**, **watches everything**, **prepares the next move**, and **does the thing** when you say go — across calendar, email, relationships, money, health, and recurring life admin. **One layer above all the apps.**
-
-That's what Today becomes.
-
----
-
-## The five real jobs Today does (everything else flows from these)
-
-### Job 1 — The Morning Brief That Updates All Day
-
-Other tools: morning email, then silent.
-Today: a **living brief**. Three lines under the orb that change as the day changes.
-
-> 7:42am — *"Slept 6h. Big meeting at 11. Carmen will probably reply today."*
-> 11:15am — *"That ran long. I moved your 12pm call to 12:30."*
-> 2:40pm — *"Carmen replied. Draft ready."*
-> 6:00pm — *"Quiet evening. Tomorrow opens at 9."*
-
-This is what alfred_ does once at 7am. Today does it **continuously**. That alone is differentiated.
-
-### Job 2 — The Inbox Killer
-
-Right now you have email + chat. Today **converts every inbound message that needs you into a card with a draft already attached**, in your tone, with the context auto-pulled from past threads.
-
-You stop opening Gmail. You open Today, see *"Carmen wrote back. Here's a reply."*, tap **Send** or **Edit**. Done.
-
-This is not Superhuman (faster inbox). This is **no inbox at all** — just the things that need you, surfaced one at a time, pre-handled.
-
-### Job 3 — The Life Admin That Actually Gets Done
-
-Birthdays, anniversaries, dentist, oil change, haircut, taxes, renewals, follow-ups. The stuff everyone forgets.
-
-You tell Ozlon once. He remembers forever. He surfaces it at the right time with **the action already prepared**:
-
-> *"Sarah's birthday in 6 days. Want me to plan something?"* → Tap → AI plans it.
-> *"Dentist's been 5 months. Free Tuesday at 3?"* → Tap → calendar event created.
-> *"Car insurance renews Friday. Old quote was $142, here's a $98 alternative."* → Tap → switch.
-
-Duckbill does some of this manually with humans. We do it automatically with AI + your existing connectors.
-
-### Job 4 — The Free-Time Matcher
-
-The single most underused asset is your **free 15 minutes**. Motion blocks calendars but doesn't know what to do with the gaps.
-
-Today watches your calendar all day. When a gap opens AND it matches something you've been meaning to do (haircut, call mom, read, walk), it offers it:
-
-> *"15 min free at 2:15. Want to call mom back?"*
-> *"45 min open at 3. You said you wanted to read more."*
-
-This requires no new tech — just `signals-life` matching `life_events` against Google Calendar free/busy. **It's a feature nobody ships well.**
-
-### Job 5 — The Body-Aware Adjuster
-
-Lifestack shows your energy curve. Today **uses** it. Bad sleep night → softer day, fewer cards, no ambitious nudges. High-energy morning → push the hard creative work into the open block.
-
-> *"Slept 4h. I'll keep today gentle. Moved your gym session to tomorrow."*
-
-Apple Health → `life_pulse_daily` → feeds into the synthesis prompt → changes everything that surfaces. **The system literally treats you differently based on how you actually feel.**
+Tap any card → calm bottom sheet with the full list + AI commentary + actions. Never a page jump.
 
 ---
 
-## What Today does that NO competitor does (the moat)
+## Layer 1 · Now Line (kept as-is)
 
-| Capability | Motion | Granola | Pi | Lifestack | alfred_ | **Today** |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Knows your calendar | ✓ | ✓ | – | ✓ | ✓ | ✓ |
-| Knows your inbox | – | – | – | – | ✓ | ✓ |
-| Drafts replies in your tone | – | partial | – | – | ✓ | ✓ |
-| Remembers people in your life | – | – | partial | – | – | **✓** |
-| Remembers recurring life admin | – | – | – | – | – | **✓** |
-| Matches free time to open intents | – | – | – | – | – | **✓** |
-| Adapts to your physical state | – | – | – | partial | – | **✓** |
-| Updates throughout the day | – | – | – | – | – | **✓** |
-| Voice-first, conversational about *any* card | – | – | ✓ | – | – | **✓** |
-| Plug-in skills (Booksy, etc.) extend any card's action | – | – | – | – | – | **✓** |
-| Learns what to stop showing you | – | – | partial | – | – | **✓** |
+The orb + one-sentence narration already shipped. We **don't touch it**. The new edge function regenerates it so it introduces the Top-of-Mind move ("You have 3 things before lunch. Sarah's birthday is tomorrow.").
 
-The moat is **integration breadth × memory × proactivity**. Others have one or two. Today has all three.
+## Layer 2 · Status Strip (new, tiny)
 
----
+A single muted line under the Now Line:
 
-## How we evolve it from here (the actual build path)
+```
+Morning · 8:42 AM · Steady day
+```
 
-Three honest stages. Each one ships something usable on its own.
+Three words, computed locally:
+- **Mode**: `Morning` (before 12), `Midday` (12–17), `Evening` (after 17).
+- **Time**: short clock.
+- **Capacity** (not "energy"): one of `Light day`, `Steady day`, `Heavy day`, `Overloaded day`. Computed from calendar density + overdue + high-strength signals + open loops. Pure heuristic until health data lands.
 
-### Stage 1 — Make the chat + comms you already have **proactive** (1 build)
-*Goal: prove the "morning brief that updates all day" feeling.*
+No icons. No bars. No tooltips. The capacity label quietly informs the brief's tone and ordering — it doesn't get explained in the UI.
 
-- Ship the Today page (orb + one line + one card + pulse + also-today).
-- Wire `signals-narrate` to update the one line every 30s + on email/calendar events.
-- Connect inbox → for every Gmail reply from someone in your `life_people` (or replied-to in last 30d), draft a reply, put it on Today as a card.
-- Add capture sheet for reminders/people/events.
+## Layer 3 · Top of Mind (the hero card)
 
-After Stage 1, opening Today actually feels useful **today**. No new connectors needed beyond what you have.
+The single most important card on the page. Always rendered unless the day is genuinely clear.
 
-### Stage 2 — Life admin + free-time matcher (1 build)
-*Goal: prove the "I forgot, but Ozlon didn't" moment.*
+Contents:
+- **Headline** — what to do, plain.
+- **Why now** — one sentence ("Open opportunity. Two days waiting.")
+- **Time** — `~6 minutes`
+- **Signal strength dot** — `low | medium | high | critical` (only High/Critical pulse subtly)
+- **Actions** — `Do it now` (primary), `Snooze 1h`, `Why this?`
 
-- Ship `life_events` table + recurring event engine.
-- Ship `signals-life` window pass: free Calendar slot + open `life_event` of intent type → Window card.
-- Add 5–10 prebuilt **Life Admin Skills** users can install with one tap:
-  - `birthday-planner` (researches gift ideas, drafts message)
-  - `appointment-booker` (drafts the call/email to book it)
-  - `subscription-watcher` (flags renewals + finds cheaper alternatives)
-  - `follow-up-tracker` (notices when someone hasn't replied in N days)
-  - `recurring-care-tracker` (dentist, haircut, oil change, etc.)
+If the day is clear:
+> "You're clear right now. Best move: 45 minutes of deep work on Q4 Launch."
+> [ Start focus block ]   Why this?
 
-These are tiny — most are a prompt + 1–2 tool calls. They turn cards from suggestions into **actions**.
+## Layer 4 · Situational Awareness (5 small cards)
 
-### Stage 3 — Body-aware + voice morning (1 build)
-*Goal: prove "this thing knows me".*
+Today's Plan · Late · Up Next · People Waiting · Habits
 
-- Apple Health via `@capacitor-community/health` → `life_pulse_daily`.
-- Health data injected into all synthesis prompts → tone + count of cards adapts.
-- New "Morning" mode: when you open Today before 9am, Ozlon speaks the brief out loud (existing ElevenLabs TTS). 30 seconds. Done. No app.
+Each card carries:
+- status dot (signal strength)
+- plain label (no jargon)
+- short value or tiny progress bar
+- **one AI interpretation line** (this is the difference between data and intelligence)
+- one inline action
+- `Why this?` affordance
 
-After Stage 3, Today is your morning ritual + your continuous safety net. **It becomes a habit, not a tool.**
+Empty cards render `Clear` in muted gray, not `0`, not hidden — the calm of a clear column matters.
 
----
+## Layer 5 · Strategic Awareness (3 cards)
 
-## What we kill / deprioritize to make room
+Goals · Watch · Won Today
 
-Be honest — some current things don't earn their space:
+These connect today to the bigger picture. The AI line on each is the whole point:
+- Goals → "Today's landing page task moves this forward."
+- Watch → "Follow up today keeps it warm."
+- Won Today → "Ahead on admin. Shift to deep work."
 
-- **The Stack** page — fold its "actionable inbox" function INTO Today as the dot-stack under the main card. One less destination.
-- **Skills** page — keep, but reframe as "**Helpers**" and put the most useful ones (Life Admin pack) front and center, not buried.
-- **Personality / Wisdom Library** settings — move under one "**What Ozlon knows about me**" page. Stop scattering memory across 4 routes.
+## Action Layer (context-aware "Do it now")
 
-This consolidation makes the product comprehensible: **Today** (now), **Chat** (talk), **Connections** (what's hooked up), **What Ozlon knows about me** (memory). Four destinations. Done.
+`Do it now` does the *right thing* per card type:
 
----
+| Card | Do it now → |
+|---|---|
+| Top of Mind | runs the `do_now_intent` in chat |
+| Today's Plan | starts a focus block on the first task |
+| Late | opens or reschedules the most urgent overdue |
+| Up Next | opens prep notes for the next event |
+| People Waiting | drafts a reply to the highest-priority person |
+| Habits | starts/checks-in the easiest habit |
+| Goals | opens the goal's next concrete step |
+| Watch | creates a recovery action |
+| Won Today | opens a brief reflection sheet |
 
-## The honest test of usefulness
+Every card also exposes secondary actions in its detail sheet (Snooze, Reschedule, Mark clear, Ask AI, Create next action).
 
-After this ships, the test is simple:
+## Why this? — explainable everywhere
 
-> *"Did I open Today before I opened Gmail this morning?"*
+A bottom sheet that, in plain speech, lays out:
+- the trigger ("Jamie has been waiting 2 days")
+- the connection ("tied to your Ozlon revenue goal")
+- why it matters now ("48-hour follow-ups convert better for you")
+- what happens if ignored ("the deal trends cold")
+- the fastest next action ("a six-minute reply")
 
-If yes — we built the right thing. Every Stage above is tuned to make that answer "yes" for more days, faster.
+The brief includes these per recommendation so the sheet is instant — no second AI call.
 
-A second test, after Stage 2:
+## Daily Arc (morning / midday / evening)
 
-> *"Did Today remind me of something I would have forgotten?"*
+The same eight cards stay; the **AI commentary, ordering, and primary action adapt**.
 
-If yes once a week — habit forms. If yes 3x a week — replacement happens.
+- **Morning** — emphasize planning, prep, priorities, risk prevention. Top of Mind tends toward "start with X."
+- **Midday** — emphasize progress, adjustments, overdue, next move. Top of Mind tends toward "one follow-up still matters before 3 PM."
+- **Evening** — emphasize wins, misses, tomorrow setup. Top of Mind tends toward "set tomorrow's first move."
 
----
+The mode is read from local time and passed into the brief's prompt.
 
-## Files (cumulative across stages)
+## Signal Strength (calm, not loud)
 
-**New**
-- `src/pages/Today.tsx` (the new page; route stays `/signals` for now)
-- `src/components/today/{Orb,NowLine,MainCard,DotStack,PulseStrip,AlsoToday,FloatingPlus,CaptureSheet,CardChat}.tsx`
-- `supabase/functions/signals-narrate/index.ts` — the live one-line updater
-- `supabase/functions/signals-life/index.ts` — anniversary + care + window passes
-- `supabase/functions/signals-capture/index.ts` — unified router for the +
-- `supabase/functions/relationship-watcher/index.ts` — inbound → drafted reply
-- 5 new Skills under `public/sample-skills/life-admin/*.skill.json`
+`low | medium | high | critical`. Visual emphasis is reserved:
+- low/medium → muted dot
+- high → solid foreground dot
+- critical → solid dot + the *only* subtle pulse on the page
 
-**Modified**
-- `signals-synthesize` system prompt — adds plain-speak STYLE block + life context + pulse awareness
-- `chat/index.ts` — adds 4 life tools
-- `Index.tsx` — make Today the default landing for authenticated users (chat moves to `/chat`)
-- Nav: rename "Signals" → "Today", consolidate Stack/Wisdom/Personality into "What Ozlon knows"
-
-**Migrations (one)**
-- `life_people`, `life_events`, `life_pulse_daily`, `now_line_state` — all RLS-protected.
+At most one card at a time may breathe. The Top of Mind card breathes only when it's High or Critical.
 
 ---
 
-## Bottom line
+## Files we'll add
 
-Today isn't a dashboard. It isn't a feed. It isn't a planner.
+- `src/components/today/StatusStrip.tsx` — mode · time · capacity
+- `src/components/today/TopOfMindCard.tsx` — hero recommendation card
+- `src/components/today/CommandCenter.tsx` — grid container for the 8 small cards
+- `src/components/today/CardShell.tsx` — shared shell (status dot, label, value, AI line, action, Why this)
+- `src/components/today/CardDetailSheet.tsx` — bottom sheet (full list, commentary, actions)
+- `src/components/today/WhyThisSheet.tsx` — explainability sheet
+- `src/components/today/cards/PlanCard.tsx`
+- `src/components/today/cards/LateCard.tsx`
+- `src/components/today/cards/UpNextCard.tsx`
+- `src/components/today/cards/PeopleWaitingCard.tsx`
+- `src/components/today/cards/HabitsCard.tsx`
+- `src/components/today/cards/GoalsCard.tsx`
+- `src/components/today/cards/WatchCard.tsx`
+- `src/components/today/cards/WonTodayCard.tsx`
+- `src/hooks/useDailyBriefing.ts` — hydrates capacity + brief + all eight card payloads in parallel
+- `src/lib/today/capacity.ts` — pure helper that scores capacity from calendar/overdue/loops
+- `src/lib/today/dayMode.ts` — morning/midday/evening from local time
+- `supabase/functions/signals-brief/index.ts` — produces the brief (Now Line refresh, Top of Mind, per-card AI lines, Why-this payloads)
+- `supabase/migrations/<ts>_life_goals.sql` — adds `life_goals` table + RLS
 
-It's the **layer above all your apps** — the one that watches everything, prepares the next move, talks to you like a friend, and gets out of the way.
+## Files we'll edit (surgically, additive)
 
-Nothing else on the market does all of this in one place. We have the pieces (chat, comms, wisdom engine, skills, voice, gauntlet routing). We just need to **point them at one job**: be the first thing the user opens every morning.
+- `src/components/today/TodayHero.tsx` — render `<StatusStrip />` directly under the now-line; remove the existing "also coming up" dots **only because they now live in Up Next**.
+- `src/pages/Signals.tsx` — render `<TopOfMindCard />` then `<CommandCenter />` between the hero and the existing capture composer. Composer, "Your captures," daily digest, `<SignalSurface />`, `<FloatingCapture />` all stay below.
+- `src/hooks/useTodayLayer.ts` — extend with goals + brief; existing consumers untouched.
 
-Approve and I'll build Stage 1.
+## Database (one new table)
+
+```sql
+create table public.life_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  title text not null,
+  why text,
+  target_date date,
+  progress numeric not null default 0,    -- 0..1
+  status text not null default 'active',  -- active | paused | done
+  last_touched_at timestamptz,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.life_goals enable row level security;
+-- own-row select/insert/update/delete policies
+```
+
+`signals-capture` (the "+" router) learns one new kind: `goal`.
+
+## The new edge function: `signals-brief`
+
+Single call returns one structured payload that powers every card. Runs on load, on demand, and every 30 min via cache.
+
+Pulls in parallel: today's `life_events`, overdue events, next 4 calendar events, top Stack items, `life_people` overdue for follow-up, `life_goals` (touched/neglected), risk-tagged signals, GHL pipeline drift, recent `wisdom_memories` + `cross_cutting_principles`, day mode, capacity score.
+
+Sends to **gpt-5.4** with a strict JSON schema:
+
+```jsonc
+{
+  "now_line": "string (≤ 14 words)",
+  "capacity_label": "Light day | Steady day | Heavy day | Overloaded day",
+  "top_of_mind": {
+    "headline": "string",
+    "why_now": "string",
+    "est_minutes": 6,
+    "signal_strength": "low | medium | high | critical",
+    "do_now_intent": "string (chat prompt)",
+    "why_this": { "trigger": "...", "connection": "...", "matters_now": "...", "if_ignored": "...", "fastest_next": "..." }
+  },
+  "cards": {
+    "plan":         { "value": "4 to do · 60%", "ai_line": "...", "action": "...", "signal_strength": "...", "why_this": {...} },
+    "late":         { ... },
+    "up_next":      { ... },
+    "people":       { ... },
+    "habits":       { ... },
+    "goals":        { ... },
+    "watch":        { ... },
+    "won_today":    { ... }
+  }
+}
+```
+
+Result cached on `now_line_state.metadata.brief`. Now Line is rewritten in the same response so the orb and the Top of Mind card always agree.
+
+## Wisdom Engine integration (the "personal" part)
+
+The brief prompt receives the user's top-relevant `wisdom_memories` and `cross_cutting_principles`, so the *why_now* and *why_this* lines sound like the user's own values:
+
+- Generic: "It's been two days."
+- Personalized: "You said two-day silence costs trust. Reply now."
+
+Used invisibly. The user only sees the calm sentence.
+
+## Visual + voice rules (enforced everywhere)
+
+- Vision Pro calm aesthetic. Soft glass, subtle depth, rounded corners, generous spacing.
+- No emojis. No icons screaming for attention. No exclamation marks.
+- Plain-speak: ≤ 14 words per sentence; "you"; relative time ("in 18 minutes"); never "task," "ticket," "blocker."
+- Empty cards say `Clear` in muted gray.
+- At most one element pulses on the page at a time.
+- Tap → bottom sheet, never a page jump.
+
+## What stays (additive constraint)
+
+- Unified chat home `/` untouched.
+- `/signals` keeps capture composer, "Your captures," daily digest, `SignalSurface`, `FloatingCapture` — all rendered **below** the Command Center.
+- All existing memories and constraints honored.
+
+## Out of scope (deliberate)
+
+- Real health/biological energy data (Stage 3, later).
+- Push notifications.
+- Drag-to-reorder cards (fixed opinionated order ships first).
+- Per-card hide/show settings.
+
+## Acceptance criteria
+
+1. Hero: orb + Now Line + Status Strip (`Morning · 8:42 AM · Steady day`) at the top.
+2. Top of Mind card directly below: headline, why-now, est time, signal-strength dot, `Do it now` + `Snooze 1h` + `Why this?`.
+3. Eight command cards in a calm grid, each with status dot, value, **one AI interpretation line**, one inline action, `Why this?`.
+4. Empty cards show `Clear` in muted gray.
+5. Tapping any card opens a bottom sheet with the full list and actions — no navigation.
+6. `Do it now` is context-aware per card type (table above).
+7. Card commentary, ordering, and primary action shift between Morning / Midday / Evening modes.
+8. Only the active priority subtly pulses; everything else is calm.
+9. Composer, captures, digest, SignalSurface, FloatingCapture still render below the Command Center.
+10. The page feels like a calm chief-of-staff briefing — not a dashboard.
+
+Approve and I'll build it in one pass.

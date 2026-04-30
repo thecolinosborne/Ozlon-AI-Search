@@ -5,10 +5,14 @@ import { SignalSurface } from "@/components/signals/SignalSurface";
 import { useSignals } from "@/hooks/useSignals";
 import { TodayHero } from "@/components/today/TodayHero";
 import { FloatingCapture } from "@/components/today/FloatingCapture";
+import { TopOfMindCard } from "@/components/today/TopOfMindCard";
+import { CommandCenter } from "@/components/today/CommandCenter";
+import { useDailyBriefing } from "@/hooks/useDailyBriefing";
 import { toast } from "sonner";
 
 export default function Signals() {
   const { moments, synthesizing, synthesize, scanNow, dismissAll, respond, createSignal } = useSignals();
+  const { brief, loading: briefLoading } = useDailyBriefing();
   const navigate = useNavigate();
   const [composerText, setComposerText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -115,6 +119,12 @@ export default function Signals() {
 
       {/* Today layer — Stage 1: living "now line" + life-event preview. Additive. */}
       <TodayHero />
+
+      {/* Top of Mind — single highest-leverage next move. */}
+      <TopOfMindCard topOfMind={brief?.top_of_mind ?? null} loading={briefLoading} />
+
+      {/* Command Center — 8 calm cards (situational + strategic). */}
+      <CommandCenter brief={brief} loading={briefLoading} />
 
       {/* Capture composer — flags pressing items for the Brain to triage. */}
       <div className="pt-4 px-6">
