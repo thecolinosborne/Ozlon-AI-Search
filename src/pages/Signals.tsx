@@ -3,6 +3,8 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, RefreshCw, X, Radar, Send, Loader2 } from "lucide-react";
 import { SignalSurface } from "@/components/signals/SignalSurface";
 import { useSignals } from "@/hooks/useSignals";
+import { TodayHero } from "@/components/today/TodayHero";
+import { FloatingCapture } from "@/components/today/FloatingCapture";
 import { toast } from "sonner";
 
 export default function Signals() {
@@ -111,8 +113,11 @@ export default function Signals() {
         )}
       </div>
 
+      {/* Today layer — Stage 1: living "now line" + life-event preview. Additive. */}
+      <TodayHero />
+
       {/* Capture composer — flags pressing items for the Brain to triage. */}
-      <div className="pt-20 px-6">
+      <div className="pt-4 px-6">
         <div className="max-w-2xl mx-auto">
           <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/60 mb-3">
             Capture · The Brain triages
@@ -257,6 +262,9 @@ export default function Signals() {
       )}
 
       <SignalSurface variant="page" maxMoments={1} showList />
+
+      {/* Floating "+" — capture anything; server routes to person/event/reminder. */}
+      <FloatingCapture />
     </div>
   );
 }
