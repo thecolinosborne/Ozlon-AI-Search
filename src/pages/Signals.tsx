@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 export default function Signals() {
   const { moments, synthesizing, synthesize, scanNow, dismissAll, respond, createSignal } = useSignals();
+  const { brief, loading: briefLoading } = useDailyBriefing();
   const navigate = useNavigate();
   const [composerText, setComposerText] = useState("");
   const [posting, setPosting] = useState(false);
