@@ -152,6 +152,15 @@ export default function Skills() {
           )}
         </section>
       </main>
+      {editing && (
+        <SkillEditDialog
+          slug={editing.slug}
+          name={editing.name}
+          open={!!editing}
+          onOpenChange={(v) => !v && setEditing(null)}
+          onSaved={refresh}
+        />
+      )}
     </div>
   );
 }
