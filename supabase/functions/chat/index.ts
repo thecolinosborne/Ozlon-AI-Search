@@ -7277,7 +7277,67 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     } as ToolDef);
   }
 
-  // FINAL QUARANTINE PASS — last line of defense before tools hit OpenAI.
+  // ---- update_skill: patch instructions or manifest of an installed skill ----
+  if (!existingNames.has("update_skill")) {
+    filtered.push({
+      type: "function",
+      function: {
+        name: "update_skill",
+        description:
+          "Durably modify an installed Skill (instructions or manifest fields). Use this INSTEAD of saving 'remember to do X with skill Y' as a memory. " +
+          "If the skill is builtin/imported, a private fork is auto-created and your install is rebound to it. Every edit bumps the skill version and is audited. " +
+          "Provide either `content` (with optional `merge_strategy` and `section`) to patch instructions, OR `manifest_patch` to update structured fields.",
+        parameters: {
+          type: "object",
+          properties: {
+            slug: { type: "string", description: "Slug of the installed skill to edit." },
+            content: { type: "string", description: "Markdown content to merge into the skill instructions." },
+            merge_strategy: {
+              type: "string",
+              enum: ["append", "prepend", "replace_section"],
+              description: "How to merge `content`. Default: append.",
+            },
+            section: {
+              type: "string",
+              description: "Section header name (without '## ') when merge_strategy is 'replace_section'.",
+            },
+            manifest_patch: {
+              type: "object",
+              description: "Whitelisted manifest fields to update: name, description, triggers, tools_required, tools_optional, memory_domains, modes_allowed, requires_confirmation.",
+              additionalProperties: true,
+            },
+          },
+          required: ["slug"],
+        },
+      },
+    } as ToolDef);
+  }
+
+  // ---- add_skill_prerequisites: convenience tool to append a Prerequisites block ----
+  if (!existingNames.has("add_skill_prerequisites")) {
+    filtered.push({
+      type: "function",
+      function: {
+        name: "add_skill_prerequisites",
+        description:
+          "Append durable prerequisites to an installed Skill so future runs inherit them at the skill level. " +
+          "Prefer this over saving 'always do X when using skill Y' as a memory.",
+        parameters: {
+          type: "object",
+          properties: {
+            slug: { type: "string", description: "Slug of the installed skill, e.g. 'higgsfield-ad-director'." },
+            prerequisites: {
+              type: "array",
+              items: { type: "string" },
+              description: "Bullet items to add under a '## Prerequisites' section at the top of the skill.",
+            },
+          },
+          required: ["slug", "prerequisites"],
+        },
+      },
+    } as ToolDef);
+  }
+
   // Drops any individually malformed tool (legacy, manifest, or multi_action)
   // so one bad schema can never again poison the entire payload.
   return quarantineFinalToolList(filtered);
