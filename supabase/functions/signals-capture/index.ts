@@ -62,10 +62,11 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You route short captures into one of: person, event, reminder, thought.
+            content: `You route short captures into one of: person, event, reminder, goal, thought.
 - "person": about someone in the user's life (name, relationship, birthday, notes).
 - "event": a recurring or one-off life admin item (haircut, dentist, oil change, renewal, follow-up, birthday celebration).
 - "reminder": a one-off reminder with a clear when ("call mom tomorrow", "pay rent friday").
+- "goal": a bigger life or work goal ("ship Q4 launch by Dec 1", "lose 10 lbs", "hire VP of Sales"). Often starts with "goal:" or names a target.
 - "thought": anything else — pass through.
 Today is ${today}. Use that to resolve "tomorrow", "next week", etc.
 Return strict JSON via the route_capture tool.`,
@@ -81,7 +82,7 @@ Return strict JSON via the route_capture tool.`,
               parameters: {
                 type: "object",
                 properties: {
-                  kind: { type: "string", enum: ["person", "event", "reminder", "thought"] },
+                  kind: { type: "string", enum: ["person", "event", "reminder", "goal", "thought"] },
                   title: { type: "string", description: "Short label for the item." },
                   person_name: { type: "string" },
                   relationship: { type: "string" },
@@ -170,6 +171,22 @@ Return strict JSON via the route_capture tool.`,
         .single();
       if (error) throw error;
       return jsonOk({ kind: kind === "reminder" ? "reminder" : "event", id: data.id });
+    }
+
+    if (kind === "goal") {
+      const { data, error } = await admin
+        .from("life_goals")
+        .insert({
+          user_id: user.id,
+          title,
+          why: (parsed.notes as string) ?? null,
+          target_date: (parsed.next_due_at as string)?.slice(0, 10) ?? null,
+          status: "active",
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return jsonOk({ kind: "goal", id: data.id });
     }
 
     // Fallback: thought → goes into signal_moments as a user_created capture so
