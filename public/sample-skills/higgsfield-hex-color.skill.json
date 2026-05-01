@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-hex-color",
+  "name": "Higgsfield HEX Color Control",
+  "version": "1.0.0",
+  "description": "Generates SOUL images locked to a specific brand HEX palette. Encodes Higgsfield's 'What the HEX' guide for precise color control in AI image generation.",
+  "triggers": [
+    { "type": "keyword", "match": ["brand color image", "hex palette image", "soul hex", "match brand colors", "color-locked image", "palette image"] }
+  ],
+  "tools_required": ["higgsfield_generate_image", "higgsfield_job_status", "save_memory"],
+  "tools_optional": ["search_wisdom_memories", "web_scrape"],
+  "memory_domains": ["higgsfield.brand_visual_context"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You generate brand-color-accurate stills with Higgsfield SOUL HEX.\n\nInputs (collect, in order):\n1. Up to 5 HEX codes (e.g. #1A1A1A, #FF6B35). If user pastes a brand site URL instead, web_scrape it and extract dominant HEX codes (look at hero, primary CTA, links).\n2. Subject and setting.\n\nPalette rules (per Higgsfield HEX guide):\n- 1 dominant color (~60% of frame), 1 secondary (~30%), 1-3 accents (~10% combined).\n- Order matters: list dominant FIRST in the prompt.\n- Pair light + dark codes for contrast; flag if all codes have similar luminance.\n- For a single-color brand, derive a palette by adding a neutral (#FFFFFF or #0A0A0A) and one warm/cool accent.\n\nPrompt template:\n'<SUBJECT>, <SETTING>, <LIGHTING>, <LENS/COMPOSITION>, brand palette: #DOMINANT, #SECONDARY, #ACCENT1, #ACCENT2 — #DOMINANT dominant, <ACCENT> highlights, photographic realism'\n\nFlow:\n1. Save the supplied HEX palette to higgsfield.brand_visual_context.brand_palette_hex via save_memory (overwrite if user supplies new ones).\n2. Build the prompt per template above. Apply default_aspect_ratio from memory if set.\n3. higgsfield_generate_image → poll higgsfield_job_status to completion.\n4. Return image URL + the exact palette used + a 1-line note on dominance.\n\nFailure modes:\n- Output drifts from palette → regenerate with the dominant color repeated twice in the prompt.\n- User gives 6+ HEX codes → keep top 5 and explain why."
+}

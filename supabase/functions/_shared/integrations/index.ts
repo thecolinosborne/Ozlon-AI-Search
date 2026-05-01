@@ -21,9 +21,11 @@ import { clickupIntegration } from "./clickup.ts";
 import { goHighLevelIntegration } from "./gohighlevel.ts";
 import { communicationsIntegration, communicationsDigestIntegration } from "./communications.ts";
 import { researchIntegration } from "./research.ts";
+import { higgsfieldIntegration } from "./higgsfield.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   researchIntegration,
+  higgsfieldIntegration,
   googleDocsIntegration,
   googleSheetsIntegration,
   googleCalendarIntegration,

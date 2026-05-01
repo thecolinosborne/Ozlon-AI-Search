@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-popcorn-consistency",
+  "name": "Higgsfield Popcorn Consistency",
+  "version": "1.0.0",
+  "description": "Maintains the same character, lighting, and tone across multiple images or scenes using Higgsfield Popcorn. Solves the AI 'consistency gap' for series, storyboards, and ad campaigns.",
+  "triggers": [
+    { "type": "keyword", "match": ["character consistency", "same character", "same person across", "series of images", "storyboard with same", "popcorn", "consistent look"] }
+  ],
+  "tools_required": ["higgsfield_generate_image", "higgsfield_job_status", "save_memory"],
+  "tools_optional": ["search_wisdom_memories"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.character_refs"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You enforce visual consistency across a sequence using Higgsfield Popcorn principles.\n\nThe consistency gap: faces drift, lighting shifts, palette fades between generations. The fix is a stable CHARACTER CARD that gets appended to every prompt in the series.\n\nCharacter Card schema (save once, reuse forever):\n- char_name: short slug (e.g. 'maya_v1')\n- physical: age range, build, hair (color + style), eyes, skin tone, distinguishing marks (1-2)\n- wardrobe_signature: 1-2 fixed garments that appear in every shot\n- lighting_signature: 1 phrase (e.g. 'warm key from camera left, cool fill')\n- palette_lock: 3-5 HEX from brand_visual_context\n- mood_signature: 2 adjectives\n- reference_image_url: optional anchor still\n\nFlow:\n1. If user names an existing character (e.g. 'use maya_v1'), load it from higgsfield.character_refs.\n2. Otherwise build one: ask for the 5 physical fields + wardrobe in one short message, then save_memory under higgsfield.character_refs.<char_name>.v1.\n3. For every image in the series, prompt = SCENE-SPECIFIC PROMPT + verbatim character card serialized as comma-separated attributes + palette HEX codes.\n4. Generate sequentially (NOT in parallel) so each output can be visually checked against the previous one before continuing.\n5. After generating image N, briefly note: 'Consistency check: face match high/medium/low, palette match high/medium/low'. If 'low' twice in a row, stop and ask the user whether to re-anchor or revise the card.\n6. Return all image URLs in order + the character_name used.\n\nRules:\n- Never describe the character differently between shots — copy the card verbatim.\n- New scene = new SETTING + LIGHTING context only; character block is immutable.\n- For video extension, hand off to higgsfield-dop-camera with the consistent stills as anchors.\n\nFailure modes:\n- Face drift on shot 3+ → regenerate that shot with reference_image_url passed back into the prompt and the card repeated twice."
+}

@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-multi-scene",
+  "name": "Higgsfield Multi-Scene Builder",
+  "version": "1.0.0",
+  "description": "Builds cohesive multi-scene videos and instant-ad packages by storyboarding, generating per-scene assets, and stitching them. Encodes Higgsfield's multi-scene + instant-ads guides.",
+  "triggers": [
+    { "type": "keyword", "match": ["multi scene", "multi-scene", "instant ad", "full ad package", "ad package", "video ad", "30 second ad", "story driven video", "narrative video"] }
+  ],
+  "tools_required": ["load_skill", "higgsfield_generate_image", "higgsfield_generate_video", "higgsfield_job_status", "save_memory"],
+  "tools_optional": ["search_wisdom_memories"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.character_refs", "higgsfield.multiscene_projects"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "external_call",
+  "requires_confirmation": true,
+  "instructions": "You produce a cohesive multi-scene piece: storyboard → per-scene stills → per-scene motion → assembly notes.\n\nStep 1 — Brief intake (one short message, get):\n- objective (ad, social cut, brand film, product launch)\n- duration_total (15s, 30s, 60s)\n- platform (TikTok, Reels, YouTube short, OOH)\n- protagonist (link to a character_card if exists)\n- product or message\n\nStep 2 — Storyboard:\n- Break duration_total into 3-6 beats, each 3-8s.\n- For each beat write: BEAT_NAME, intent (1 line), shot description (framing+subject+action+lighting), motion (camera move + duration), audio cue (1 line).\n- Show storyboard table, ASK USER TO CONFIRM before any generation. (requires_confirmation=true)\n\nStep 3 — Generate stills (sequential):\n- For each beat, hand off to higgsfield-popcorn-consistency to generate the opening still using the locked character_card + brand palette.\n\nStep 4 — Animate each still:\n- For each still, hand off to higgsfield-dop-camera with the beat's motion description and duration.\n\nStep 5 — Assembly notes:\n- Output a final block listing: ordered video URLs, per-clip duration, recommended cut style between clips (hard cut, match cut, dissolve), one suggested SFX per clip, and the on-screen text for any beat that needs it.\n- Save the whole project under higgsfield.multiscene_projects.<project_slug> with brief, storyboard, asset URLs.\n\nRules:\n- Never run scenes in parallel; consistency requires sequential generation with checks.\n- If a beat fails 2x, pause and ask the user to revise that beat's prompt rather than burning more credits.\n- For 'instant ad' requests, default to 6 beats over 30s, 9:16, ending on a 2s product hold + on-screen CTA.\n- No emojis. Plain-speak."
+}
