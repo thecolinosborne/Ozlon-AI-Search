@@ -348,6 +348,8 @@ Produce one structured briefing via the daily_brief tool. Rules:
         day_mode: dayMode,
         top_of_mind: brief.top_of_mind ?? null,
         cards: brief.cards ?? null,
+        calendar_events: calendarEvents,
+        calendar_connected: calendarEvents.length > 0 || (await getGoogleAccessToken(user.id).then(t => !!t).catch(() => false)),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
