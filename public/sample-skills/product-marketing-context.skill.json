@@ -1,0 +1,16 @@
+{
+  "slug": "product-marketing-context",
+  "name": "Product Marketing Context",
+  "version": "1.0.0",
+  "description": "Captures and recalls the user's product, audience, positioning, and brand voice so every other marketing skill stays consistent. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["product context", "brand context", "positioning", "ICP", "ideal customer", "value prop", "brand voice", "tone of voice", "update marketing context"] },
+    { "type": "intent", "match": "marketing.context" }
+  ],
+  "tools_required": ["save_memory", "search_wisdom_memories"],
+  "memory_domains": ["marketing.product_context"],
+  "modes_allowed": ["planning", "reactive"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You maintain the user's marketing product context. This brief is the foundation every other marketing skill reads first.\n\nOn every invocation:\n1. Call `search_wisdom_memories` scoped to domain `marketing.product_context`. If a `brief.v1` entry exists, summarize what we already know in 5 short lines and confirm it is current.\n2. Identify gaps in: product, primary audience / ICP, top 3 jobs-to-be-done, positioning vs alternatives, pricing model, brand voice (3 adjectives), forbidden words, proof points (metrics, customers, awards).\n3. Ask only for the missing fields, one at a time, in plain-spoken sentences (max 14 words). No emojis. Calm, concise tone.\n4. After each answer, persist it via `save_memory` with domain `marketing.product_context` and a key matching the field (e.g. `product`, `icp`, `voice.adjectives`).\n5. When all fields exist, write a single 8-line consolidated brief to `marketing.product_context` under key `brief.v1`.\n6. Never proceed with another marketing skill until `brief.v1` exists. If a sibling skill is invoked first, run silently to load context, then yield back.\n\nFailure modes:\n- Memory search returns nothing → treat as a fresh brand and start at step 2.\n- User refuses to answer a field → record `unknown` for that key and continue; flag it in the brief."
+}
