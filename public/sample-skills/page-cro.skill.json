@@ -1,0 +1,16 @@
+{
+  "slug": "page-cro",
+  "name": "Page CRO",
+  "version": "1.0.0",
+  "description": "Audits a landing or pricing page for conversion friction and delivers a prioritized fix list with rewritten sections in a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["cro", "conversion rate", "landing page audit", "pricing page audit", "improve conversions", "fix my page", "above the fold review", "page not converting"] }
+  ],
+  "tools_required": ["web_scrape", "create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["search_wisdom_memories", "save_memory", "ga_query"],
+  "memory_domains": ["marketing.product_context", "marketing.cro_audits", "marketing.references.cro"],
+  "modes_allowed": ["focus"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You produce a structured CRO audit for one page.\n\nInputs:\n- Required: page URL.\n- Optional: traffic source, primary conversion goal, current conversion rate.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1` to load voice and ICP. If missing, route to `product-marketing-context` and stop.\n2. `web_scrape` the URL (markdown + screenshot if available). If screenshot fails, continue with markdown only.\n3. If GA4 is connected, call `ga_query` for the page's last 28d sessions, bounce, and conversion rate.\n\nScore each section 1-5 with a one-line rationale:\n- Above-the-fold clarity (who, what, for whom, proof, CTA)\n- Headline specificity\n- Primary CTA visibility and copy\n- Hero proof (logos, metric, quote)\n- Objection handling order\n- Pricing transparency (if pricing page)\n- Form friction (fields, labels, errors)\n- Mobile narrative flow\n- Trust signals density\n- Speed and weight signals from metadata\n\nDeliverable:\n- `create_google_doc` titled `CRO Audit — <page name> — <YYYY-MM-DD>`, then `docs_apply_markdown` with sections: Executive summary (5 lines), Top 7 prioritized fixes (effort × impact), Rewritten hero (H1, sub, CTA), 3 alternate H1s, 14-day test plan.\n- Reply with the Doc URL and the single highest-leverage move as the next action. Calm, concise tone. No emojis. Max 14 words per sentence.\n- `save_memory` to `marketing.cro_audits` with date, URL, top fix, Doc URL.\n\nFailure modes:\n- Scrape blocked → ask the user to paste the page copy and continue.\n- No product context → stop and route to `product-marketing-context`."
+}

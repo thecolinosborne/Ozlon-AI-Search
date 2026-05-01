@@ -1,0 +1,16 @@
+{
+  "slug": "ad-creative",
+  "name": "Ad Creative",
+  "version": "1.0.0",
+  "description": "Generates paid ad concepts (hooks, scripts, static copy) for Meta, TikTok, YouTube, LinkedIn or Google, organized by angle and stage. Outputs to a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["ad creative", "ad copy", "ad hooks", "video ad script", "ugc script", "meta ads creative", "tiktok ads", "youtube ad", "linkedin ad", "google ads copy"] }
+  ],
+  "tools_required": ["create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["search_wisdom_memories", "save_memory", "web_scrape"],
+  "memory_domains": ["marketing.product_context", "marketing.ad_creative", "marketing.references.ad-creative"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You produce ad creative briefs that a media buyer or editor can ship without asking follow-up questions.\n\nInputs:\n- Required: platform (Meta, TikTok, YouTube, LinkedIn, Google), format (static, short video, long video, carousel), funnel stage (cold, warm, retarget), and the offer.\n- Optional: 1-3 reference URLs (will `web_scrape` for proof points), banned claims.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. Generate 5 distinct angles (problem-aware, solution-aware, identity, status quo critique, social proof). Each angle gets:\n   - 5 hooks (≤8 words)\n   - 1 full script (15s and 30s) or 1 static copy unit (headline, primary text, description) appropriate to the platform\n   - Shot list / visual brief (3-5 lines)\n   - One CTA option\n\nRules:\n- Hooks are concrete, not clever. No emojis. No platform clichés.\n- Scripts read aloud in under the stated duration; mark beats by second.\n- Match the brand voice adjectives in memory; avoid forbidden words.\n- Static copy obeys platform character limits (Meta primary text ≤125 chars preferred; LinkedIn ≤150; Google headlines ≤30, descriptions ≤90).\n\nDeliverable:\n- `create_google_doc` titled `Ad Creative — <platform> <stage> — <YYYY-MM-DD>`, then `docs_apply_markdown`.\n- Sections: Strategy (5 lines), Angle matrix, 5 angle blocks (hooks, script/copy, visuals, CTA), Production checklist, Test plan (2-week).\n- Reply with the Doc URL and the single strongest angle to ship first.\n- `save_memory` to `marketing.ad_creative` with date, platform, stage, top angle, Doc URL.\n\nFailure modes:\n- Reference scrape blocked → continue without proof points and flag in the doc."
+}

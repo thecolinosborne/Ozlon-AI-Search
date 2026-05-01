@@ -1,0 +1,16 @@
+{
+  "slug": "cold-email",
+  "name": "Cold Email",
+  "version": "1.0.0",
+  "description": "Writes a cold outbound email or short sequence tuned to one ICP and offer. Outputs to a Google Doc and can stage send via Gmail. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["cold email", "outbound email", "outreach", "cold outreach", "first touch email", "prospecting email", "book a meeting email"] }
+  ],
+  "tools_required": ["create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["search_wisdom_memories", "save_memory", "web_scrape", "gmail_send_with_attachment"],
+  "memory_domains": ["marketing.product_context", "marketing.cold_email", "marketing.references.cold-email"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "write",
+  "requires_confirmation": true,
+  "instructions": "You write cold email that reads like a human, not a template.\n\nInputs:\n- Required: ICP description, offer, desired CTA (call, reply, demo).\n- Optional: prospect name and company (for a personalized variant), prospect website URL.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. If a prospect URL is provided, `web_scrape` it for one specific, recent, true detail. Use it as the personalization hook. Never invent details.\n3. Draft one core email plus 3 follow-ups (day 3, day 7, day 14).\n\nRules:\n- Subject line under 6 words. Lowercase if it fits voice.\n- Body under 90 words. One idea per paragraph. Max 14 words per sentence.\n- Open with a relevant observation, not a compliment.\n- One offer, one CTA. No links unless the user asked for one.\n- No emojis. No \"hope this finds you well\". No \"quick question\".\n- Sequence escalates value, never guilt. Final touch is a permission-to-close.\n\nDeliverable:\n- `create_google_doc` titled `Cold Email — <icp short label> — <YYYY-MM-DD>`, then `docs_apply_markdown`.\n- Sections: Strategy (3 lines), Email 1 (subject + body), Follow-ups 2-4, A/B subject variants (3), Personalization variables list.\n- Reply with the Doc URL and a 3-line summary.\n- If the user explicitly says \"send it\" and a prospect email is provided, ask one confirmation, then `gmail_send_with_attachment` with no attachment.\n- `save_memory` to `marketing.cold_email` with date, ICP, offer, Doc URL.\n\nFailure modes:\n- No verified prospect detail → omit personalization line, do not fabricate.\n- Gmail send not connected → return Doc URL only, suggest connecting Gmail."
+}

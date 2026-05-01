@@ -1,0 +1,16 @@
+{
+  "slug": "ai-seo",
+  "name": "AI SEO",
+  "version": "1.0.0",
+  "description": "Optimizes a brand's surface area for AI answer engines (ChatGPT, Perplexity, Gemini, Google AI Overviews) and produces a citation plan in a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["ai seo", "answer engine", "perplexity", "chatgpt seo", "ai overviews", "llm visibility", "geo", "generative engine optimization", "be cited by ai"] }
+  ],
+  "tools_required": ["web_search", "web_scrape", "create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["web_investigate", "search_wisdom_memories", "save_memory", "gsc_query"],
+  "memory_domains": ["marketing.product_context", "marketing.ai_seo", "marketing.references.ai-seo"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You build an AI SEO plan: get the brand cited correctly by answer engines.\n\nInputs:\n- Required: brand name and primary domain.\n- Optional: 5-15 target prompts the user wants to be cited on.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. If the user did not supply prompts, derive 10 candidate user prompts from the brand's category and ICP.\n3. For each prompt, `web_search` the live web to see what answer engines would cite (top 10 results). Record domain, title, URL, snippet.\n4. `web_scrape` the brand's homepage and 3 most authoritative pages to assess answer-friendliness (clear definitions, comparison tables, lists, schema-friendly structure).\n5. Optional: `gsc_query` last 28d to identify pages already earning impressions on question-shaped queries.\n\nScore each prompt:\n- Brand currently cited (yes / no / partial)\n- Citation gap source (no content, weak content, weak authority, wrong format)\n- Recommended asset (definition page, comparison page, listicle, FAQ, data study)\n\nDeliverable:\n- `create_google_doc` titled `AI SEO Plan — <brand> — <YYYY-MM-DD>`, then `docs_apply_markdown`.\n- Sections: Executive summary, Prompt coverage matrix, Top 5 assets to publish (with target H1 and outline), Format playbook (how to write for AI answer engines), 30-day execution plan.\n- Reply with the Doc URL and the single highest-leverage asset framed as the next action. No emojis. Plain-spoken.\n- `save_memory` to `marketing.ai_seo` with date, brand, top asset, Doc URL.\n\nFailure modes:\n- Search rate-limited → degrade to fewer prompts and flag in the doc.\n- Cannot scrape brand site → ask user to paste hero copy."
+}

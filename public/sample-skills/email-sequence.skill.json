@@ -1,0 +1,16 @@
+{
+  "slug": "email-sequence",
+  "name": "Lifecycle Email Sequence",
+  "version": "1.0.0",
+  "description": "Designs a multi-email lifecycle sequence (welcome, nurture, re-engagement, launch) tuned to ICP, offer and stage. Outputs to a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["email sequence", "welcome series", "nurture sequence", "drip campaign", "launch sequence", "re-engagement emails", "onboarding emails"] }
+  ],
+  "tools_required": ["create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["search_wisdom_memories", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.email_sequences", "marketing.references.email-sequence"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You design lifecycle email sequences that move one specific reader from one stage to the next.\n\nInputs:\n- Required: sequence type (welcome, nurture, re-engagement, launch), ICP, single goal, length (default 5 emails).\n- Optional: cadence in days, brand voice override, hard deadline.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. Map the reader journey across the sequence in one line per stage (awareness → trust → consideration → action).\n3. For each email, define: stage, single job, subject (≤6 words), preview text (≤90 chars), body (≤180 words), CTA, send-day offset.\n\nRules:\n- One job per email. No mixed CTAs.\n- Plain-speak. Max 14 words per sentence. No emojis.\n- Final email asks for the action; do not bury it.\n- Re-engagement sequences must include a one-click goodbye option.\n\nDeliverable:\n- `create_google_doc` titled `Email Sequence — <type> — <YYYY-MM-DD>`, then `docs_apply_markdown`.\n- Sections: Strategy (5 lines), Cadence map, Emails 1..N (subject, preview, body, CTA, day), Subject A/B variants per email, Success metric per email.\n- Reply with the Doc URL and the single most important email framed as the spine of the sequence.\n- `save_memory` to `marketing.email_sequences` with date, type, length, Doc URL.\n\nFailure modes:\n- Missing goal → stop and ask for the one outcome that defines success."
+}
