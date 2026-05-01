@@ -219,6 +219,11 @@ Deno.serve(async (req) => {
       signals: signals.slice(0, 5),
       habits: habits.slice(0, 5),
       done_today: doneToday.length,
+      calendar_today: calendarEvents
+        .filter((e) => e.start && new Date(e.start) <= todayEnd)
+        .slice(0, 12)
+        .map((e) => ({ start: e.start, end: e.end, title: e.summary, attendees: e.attendee_count, location: e.location })),
+      calendar_tomorrow_count: calendarEvents.filter((e) => e.start && new Date(e.start) > todayEnd).length,
     };
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
