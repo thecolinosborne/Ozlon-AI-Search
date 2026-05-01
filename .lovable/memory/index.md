@@ -93,6 +93,7 @@
 - [GHL account memory](mem://integrations/ghl-account-resolution) — Sub-account resolution: explicit > session (chat_sessions) > user default (profiles) > metadata fallback
 - [ClickUp workspace](mem://integrations/clickup-workspace-discovery) — API-driven Space/Folder/List picker, overrides env vars
 - [AI Processor registry](mem://integrations/ai-processor-registry) — Live verification of provider API keys
+- [Marketing pack orchestration](mem://features/marketing-pack-orchestration) — 11 marketing skills + orchestrator that routes via wisdom memory and learns from each route
 - [Slack multi-tenant OAuth](mem://integrations/slack-multi-tenant-oauth) — Per-user "Add to Slack" install; tokens stored in integration_connections, events routed by team_id
 
 ### Google Services & Email (Native)

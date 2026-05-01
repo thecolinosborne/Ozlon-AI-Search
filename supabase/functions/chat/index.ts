@@ -2419,6 +2419,23 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Memory Recall Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'search_wisdom_memories',
+      description: 'Semantic search over the user\'s saved wisdom memories (preferences, patterns, facts, goals, values, context). Call this BEFORE acting on a request when prior preferences or patterns might apply — e.g. before routing a marketing skill, before drafting copy in the user\'s voice, before choosing tone or format. Returns the top matches by semantic similarity. Pass memory_type to scope the search when a skill\'s memory_domains list narrows the scope (e.g. "pattern" for routing history, "preference" for tone rules).',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Natural language query to search for. Be specific to the decision you are making.' },
+          memory_type: { type: 'string', description: 'Optional filter. One of: fact, preference, pattern, context, goal, value', enum: ['fact', 'preference', 'pattern', 'context', 'goal', 'value'] },
+          limit: { type: 'number', description: 'Max results to return, 1-20 (default 5).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
@@ -5192,6 +5209,60 @@ async function executeToolCall(
         }
       }
 
+      case 'search_wisdom_memories': {
+        try {
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          if (!OPENAI_KEY) return { success: false, result: 'Embedding API not configured.' };
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database not configured.' };
+
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated for memory search.' };
+
+          const query = String(args.query || '').trim();
+          if (!query) return { success: false, result: 'query is required' };
+          const memoryType = (args.memory_type as string) || null;
+          const limit = Math.min(Math.max(Number(args.limit ?? 5), 1), 20);
+
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: query }),
+          });
+          if (!embRes.ok) return { success: false, result: 'Failed to generate query embedding.' };
+          const embData = await embRes.json();
+          const embedding = embData.data[0].embedding;
+
+          const { data, error } = await adminClient.rpc('match_wisdom_memories', {
+            query_embedding: JSON.stringify(embedding),
+            match_threshold: 0.5,
+            match_count: limit,
+            filter_user_id: userId,
+            filter_memory_type: memoryType,
+          });
+          if (error) {
+            console.error('[search_wisdom_memories] error:', error);
+            return { success: false, result: `Memory search failed: ${error.message}` };
+          }
+          const rows = (data ?? []) as Array<{ id: string; memory_type: string; summary: string; content: string; salience: number; recurrence_count: number; similarity: number }>;
+          if (rows.length === 0) {
+            return { success: true, result: `No matching memories found for "${query}"${memoryType ? ` (type=${memoryType})` : ''}.` };
+          }
+          const formatted = rows.map((r, i) =>
+            `${i + 1}. [${r.memory_type}] ${r.summary} (sim ${r.similarity.toFixed(2)}, seen ${r.recurrence_count}x)\n   ${r.content}`,
+          ).join('\n');
+          console.log(`[search_wisdom_memories] ${rows.length} matches for "${query}"`);
+          return { success: true, result: `Found ${rows.length} memory match(es):\n${formatted}` };
+        } catch (e) {
+          console.error('[search_wisdom_memories] Error:', e);
+          return { success: false, result: `Memory search error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
       case 'create_routine': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
@@ -6849,6 +6920,7 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'generate_video', domain: 'creative' },
   { prefix: 'upload_youtube_video', domain: 'creative' },
   { prefix: 'save_memory', domain: 'memory' },
+  { prefix: 'search_wisdom_memories', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
   { prefix: 'remove_standing_order', domain: 'memory' },
   { prefix: 'update_standing_order', domain: 'memory' },
@@ -7128,6 +7200,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'searchatlas_rank_tracker': '_always_',
     'web_search_google': '_always_',
     'save_memory': '_always_',
+    'search_wisdom_memories': '_always_',
     'add_standing_order': '_always_',
     'remove_standing_order': '_always_',
     'update_standing_order': '_always_',
@@ -7544,6 +7617,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'searchatlas_rank_tracker': 'Loading tracked rankings',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
+  'search_wisdom_memories': 'Recalling memory',
   'add_standing_order': 'Setting standing order',
   'remove_standing_order': 'Removing standing order',
   'update_standing_order': 'Updating standing order',
@@ -7795,7 +7869,7 @@ async function runToolLoop(
 
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
-        'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
+        'save_memory', 'search_wisdom_memories', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
@@ -7982,7 +8056,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -9248,7 +9322,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
         creative: ['higgsfield_', 'descript_', 'upload_youtube_video', 'video_'],
         seo: ['gsc_', 'analytics_', 'web_search_google'],
         finance: ['plaid_'],
-        memory: ['save_memory', 'add_standing_order', 'add_goal'],
+        memory: ['save_memory', 'search_wisdom_memories', 'add_standing_order', 'add_goal'],
       };
       const prefixSet = new Set<string>();
       for (const d of wisdomSignal.dominant_domains) {
