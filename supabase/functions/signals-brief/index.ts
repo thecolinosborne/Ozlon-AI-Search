@@ -167,6 +167,12 @@ Deno.serve(async (req) => {
         .select("full_name")
         .eq("user_id", user.id)
         .maybeSingle(),
+      // Pull Google Calendar from now → end of tomorrow so Today's Plan + Up Next have real meetings
+      fetchCalendarEvents(
+        user.id,
+        now.toISOString(),
+        new Date(todayEnd.getTime() + 24 * 3600_000).toISOString(),
+      ),
     ]);
 
     const lifeEvents = lifeEventsRes.data ?? [];
