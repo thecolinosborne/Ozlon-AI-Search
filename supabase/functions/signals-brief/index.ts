@@ -119,6 +119,7 @@ Deno.serve(async (req) => {
       signalsRes,
       doneTodayRes,
       profileRes,
+      calendarEvents,
     ] = await Promise.all([
       admin
         .from("life_events")
