@@ -11,6 +11,59 @@
 // Result is cached on now_line_state.metadata.brief.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getGoogleAccessToken } from "../_shared/google-token.ts";
+
+interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: string | null;
+  end: string | null;
+  all_day: boolean;
+  location: string | null;
+  hangout_link: string | null;
+  attendee_count: number;
+  organizer_self: boolean;
+  status: string | null;
+}
+
+async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: string): Promise<CalendarEvent[]> {
+  try {
+    const token = await getGoogleAccessToken(userId);
+    if (!token) return [];
+    const qs = new URLSearchParams({
+      timeMin, timeMax,
+      singleEvents: "true", orderBy: "startTime", maxResults: "40",
+    });
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${qs.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items = (data?.items ?? []) as Array<Record<string, unknown>>;
+    return items.map((e) => {
+      const startObj = e.start as { dateTime?: string; date?: string } | undefined;
+      const endObj = e.end as { dateTime?: string; date?: string } | undefined;
+      const allDay = !!startObj?.date && !startObj?.dateTime;
+      const attendees = Array.isArray(e.attendees) ? (e.attendees as Array<Record<string, unknown>>) : [];
+      return {
+        id: String(e.id ?? crypto.randomUUID()),
+        summary: (e.summary as string) ?? "(untitled)",
+        start: startObj?.dateTime ?? startObj?.date ?? null,
+        end: endObj?.dateTime ?? endObj?.date ?? null,
+        all_day: allDay,
+        location: (e.location as string) ?? null,
+        hangout_link: (e.hangoutLink as string) ?? null,
+        attendee_count: attendees.length,
+        organizer_self: (e.organizer as { self?: boolean } | undefined)?.self === true,
+        status: (e.status as string) ?? null,
+      };
+    });
+  } catch (err) {
+    console.log("[signals-brief] calendar skip:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,6 +119,7 @@ Deno.serve(async (req) => {
       signalsRes,
       doneTodayRes,
       profileRes,
+      calendarEvents,
     ] = await Promise.all([
       admin
         .from("life_events")
@@ -114,6 +168,12 @@ Deno.serve(async (req) => {
         .select("full_name")
         .eq("user_id", user.id)
         .maybeSingle(),
+      // Pull Google Calendar from now → end of tomorrow so Today's Plan + Up Next have real meetings
+      fetchCalendarEvents(
+        user.id,
+        now.toISOString(),
+        new Date(todayEnd.getTime() + 24 * 3600_000).toISOString(),
+      ),
     ]);
 
     const lifeEvents = lifeEventsRes.data ?? [];
@@ -159,6 +219,11 @@ Deno.serve(async (req) => {
       signals: signals.slice(0, 5),
       habits: habits.slice(0, 5),
       done_today: doneToday.length,
+      calendar_today: calendarEvents
+        .filter((e) => e.start && new Date(e.start) <= todayEnd)
+        .slice(0, 12)
+        .map((e) => ({ start: e.start, end: e.end, title: e.summary, attendees: e.attendee_count, location: e.location })),
+      calendar_tomorrow_count: calendarEvents.filter((e) => e.start && new Date(e.start) > todayEnd).length,
     };
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -283,6 +348,8 @@ Produce one structured briefing via the daily_brief tool. Rules:
         day_mode: dayMode,
         top_of_mind: brief.top_of_mind ?? null,
         cards: brief.cards ?? null,
+        calendar_events: calendarEvents,
+        calendar_connected: calendarEvents.length > 0 || (await getGoogleAccessToken(user.id).then(t => !!t).catch(() => false)),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
