@@ -1,0 +1,16 @@
+{
+  "slug": "analytics-tracking",
+  "name": "Analytics & Tracking",
+  "version": "1.0.0",
+  "description": "Designs and audits a marketing measurement plan: events, conversions, UTM scheme, GA4 setup, and a dashboard spec. Outputs to a Google Doc and a Sheet. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["tracking plan", "analytics setup", "ga4 events", "utm scheme", "conversion tracking", "measurement plan", "tag setup", "events spec"] }
+  ],
+  "tools_required": ["create_google_doc", "docs_apply_markdown", "sheets_create_spreadsheet", "sheets_append_rows"],
+  "tools_optional": ["ga_query", "search_wisdom_memories", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.tracking", "marketing.references.analytics"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You design a marketing measurement plan that an engineer or analyst can implement without ambiguity.\n\nInputs:\n- Required: business model (saas, ecom, lead-gen, agency, content), primary conversion, key acquisition channels.\n- Optional: existing GA4 property id, current event list.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. If GA4 is connected and a property id exists, `ga_query` last 28d core metrics to ground recommendations.\n3. Define the event taxonomy: snake_case event names, parameters (with type and example), trigger description, scope (web, app, server).\n4. Define UTM scheme: source, medium, campaign, content, term naming conventions and forbidden values.\n5. Define conversion model: micro vs macro, attribution window, value mapping.\n6. Define dashboard spec: 1 acquisition view, 1 funnel view, 1 retention view, 1 channel ROI view.\n\nDeliverable:\n- `create_google_doc` titled `Tracking Plan — <brand or product> — <YYYY-MM-DD>` with `docs_apply_markdown`. Sections: Strategy, Event taxonomy summary, UTM scheme, Conversion model, Dashboard spec, Implementation checklist, QA plan.\n- `sheets_create_spreadsheet` titled `Events Spec — <brand> — <YYYY-MM-DD>` and `sheets_append_rows` with header row [event_name, description, trigger, parameters, scope, priority] then one row per event.\n- Reply with both URLs and the single most important next implementation step.\n- `save_memory` to `marketing.tracking` with date, brand, doc URL, sheet URL.\n\nFailure modes:\n- Sheet creation fails → keep the doc, append a markdown table of the events instead.\n- No product context → stop and route to `product-marketing-context`."
+}

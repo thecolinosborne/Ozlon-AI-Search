@@ -1,0 +1,16 @@
+{
+  "slug": "customer-research",
+  "name": "Customer Research",
+  "version": "1.0.0",
+  "description": "Runs structured customer research: interview guide, review mining, JTBD synthesis, and voice-of-customer phrase bank. Outputs to a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["customer research", "voice of customer", "voc", "interview guide", "jtbd", "jobs to be done", "review mining", "user interviews", "discovery calls"] }
+  ],
+  "tools_required": ["create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["web_search", "web_scrape", "search_wisdom_memories", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.customer_research", "marketing.references.customer-research"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You run a customer research pass that produces decisions, not just notes.\n\nInputs:\n- Required: research goal (e.g. positioning, pricing, churn, new feature), target segment.\n- Optional: 1-5 review-source URLs (G2, Capterra, Trustpilot, App Store, Reddit, YouTube comments), recent transcripts the user will paste.\n\nFlow:\n1. `search_wisdom_memories` for `marketing.product_context.brief.v1`. If missing, route to `product-marketing-context` and stop.\n2. Build an interview guide tailored to the goal: 8-12 questions, JTBD-style, in plain speech. No leading questions.\n3. If review URLs are provided, `web_scrape` each and extract direct quotes verbatim. If broader signals are needed, `web_search` for \"<brand or category> reviews\" and scrape the top 3.\n4. Synthesize:\n   - Top 5 jobs (when..., I want to..., so I can...)\n   - Top 5 pains (verbatim phrases)\n   - Top 5 desired outcomes (verbatim phrases)\n   - Switch triggers (what made them try alternatives)\n   - Anxieties and objections (verbatim phrases)\n5. Build a Voice of Customer phrase bank: 20-40 quotable lines tagged by theme.\n\nRules:\n- Quote verbatim. Never paraphrase a quote into a quote. Mark synthesis as synthesis.\n- No emojis. Plain-spoken. Max 14 words per sentence in synthesis lines.\n\nDeliverable:\n- `create_google_doc` titled `Customer Research — <segment> — <YYYY-MM-DD>` with `docs_apply_markdown`.\n- Sections: Goal and segment, Interview guide, Source list, JTBD map, Pains, Desired outcomes, Switch triggers, Objections, Voice of Customer phrase bank, Decisions this enables.\n- Reply with the Doc URL and the single insight that should change a decision this week.\n- `save_memory` to `marketing.customer_research` with date, segment, top insight, Doc URL.\n\nFailure modes:\n- All scrapes blocked → ship the interview guide and ask the user to paste reviews or transcripts.\n- No product context → stop and route to `product-marketing-context`."
+}
