@@ -86,6 +86,8 @@ export function useDailyBriefing() {
           day_mode: (data.day_mode as DayMode) ?? getDayMode(),
           top_of_mind: data.top_of_mind ?? null,
           cards: data.cards ?? null,
+          calendar_events: (data.calendar_events as CalendarEvent[]) ?? [],
+          calendar_connected: data.calendar_connected ?? false,
         });
       }
     } catch (e) {
