@@ -6920,6 +6920,7 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'generate_video', domain: 'creative' },
   { prefix: 'upload_youtube_video', domain: 'creative' },
   { prefix: 'save_memory', domain: 'memory' },
+  { prefix: 'search_wisdom_memories', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
   { prefix: 'remove_standing_order', domain: 'memory' },
   { prefix: 'update_standing_order', domain: 'memory' },
@@ -7199,6 +7200,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'searchatlas_rank_tracker': '_always_',
     'web_search_google': '_always_',
     'save_memory': '_always_',
+    'search_wisdom_memories': '_always_',
     'add_standing_order': '_always_',
     'remove_standing_order': '_always_',
     'update_standing_order': '_always_',
@@ -7615,6 +7617,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'searchatlas_rank_tracker': 'Loading tracked rankings',
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
+  'search_wisdom_memories': 'Recalling memory',
   'add_standing_order': 'Setting standing order',
   'remove_standing_order': 'Removing standing order',
   'update_standing_order': 'Updating standing order',
@@ -7866,7 +7869,7 @@ async function runToolLoop(
 
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
-        'save_memory', 'add_goal', 'update_goal_progress', 'complete_goal',
+        'save_memory', 'search_wisdom_memories', 'add_goal', 'update_goal_progress', 'complete_goal',
         'add_standing_order', 'remove_standing_order', 'update_standing_order', 'update_memory',
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
@@ -9319,7 +9322,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
         creative: ['higgsfield_', 'descript_', 'upload_youtube_video', 'video_'],
         seo: ['gsc_', 'analytics_', 'web_search_google'],
         finance: ['plaid_'],
-        memory: ['save_memory', 'add_standing_order', 'add_goal'],
+        memory: ['save_memory', 'search_wisdom_memories', 'add_standing_order', 'add_goal'],
       };
       const prefixSet = new Set<string>();
       for (const d of wisdomSignal.dominant_domains) {

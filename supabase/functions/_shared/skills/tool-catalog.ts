@@ -78,6 +78,7 @@ export const KNOWN_TOOLS: CatalogTool[] = [
   { name: "search_wisdom_memories", description: "Semantic search over wisdom_memories", side_effect: "read", category: "memory" },
   { name: "search_knowledge", description: "Semantic search over knowledge_entries", side_effect: "read", category: "memory" },
   { name: "save_memory", description: "Persist a new wisdom_memory", side_effect: "write", category: "memory" },
+  { name: "load_skill", description: "Activate an installed skill by slug (used by orchestrator skills to hand off)", side_effect: "read", category: "memory" },
 
   // Image / video
   { name: "generate_image", description: "Generate an image", side_effect: "write", category: "media" },
