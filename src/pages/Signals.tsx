@@ -124,6 +124,13 @@ export default function Signals() {
       {/* Top of Mind — single highest-leverage next move. */}
       <TopOfMindCard topOfMind={brief?.top_of_mind ?? null} loading={briefLoading} />
 
+      {/* Calendar — synced from Google Calendar; grouped Now / Next / Later / Tomorrow. */}
+      <CalendarCard
+        events={brief?.calendar_events}
+        connected={brief?.calendar_connected}
+        loading={briefLoading}
+      />
+
       {/* Command Center — 8 calm cards (situational + strategic). */}
       <CommandCenter brief={brief} loading={briefLoading} />
 
