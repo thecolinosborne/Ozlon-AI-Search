@@ -2419,6 +2419,23 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Memory Recall Tool ============
+  {
+    type: 'function',
+    function: {
+      name: 'search_wisdom_memories',
+      description: 'Semantic search over the user\'s saved wisdom memories (preferences, patterns, facts, goals, values, context). Call this BEFORE acting on a request when prior preferences or patterns might apply — e.g. before routing a marketing skill, before drafting copy in the user\'s voice, before choosing tone or format. Returns the top matches by semantic similarity. Pass memory_type to scope the search when a skill\'s memory_domains list narrows the scope (e.g. "pattern" for routing history, "preference" for tone rules).',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Natural language query to search for. Be specific to the decision you are making.' },
+          memory_type: { type: 'string', description: 'Optional filter. One of: fact, preference, pattern, context, goal, value', enum: ['fact', 'preference', 'pattern', 'context', 'goal', 'value'] },
+          limit: { type: 'number', description: 'Max results to return, 1-20 (default 5).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
