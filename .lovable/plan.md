@@ -77,3 +77,14 @@ One idempotent SQL migration to insert all 9 skills into `public.skills` with `s
 - `.lovable/memory/features/higgsfield-pack-orchestration.md` (new)
 
 Approve and I'll ship it.
+
+---
+
+## Status: SHIPPED (2026-05-01T19:23:03Z)
+
+- 9 Higgsfield skill manifests in public/sample-skills/
+- supabase/functions/_shared/integrations/higgsfield.ts (4 tools) registered in index.ts
+- supabase/migrations/20260501192228_seed_higgsfield_skills_pack.sql (idempotent, ON CONFLICT update)
+- .lovable/memory/features/higgsfield-pack-orchestration.md + index.md updated
+
+The migration deploys to Cloud automatically; no UI changes required.
