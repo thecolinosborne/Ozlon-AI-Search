@@ -151,6 +151,19 @@ export default function Skills() {
             </div>
           )}
         </section>
+
+        <p className="text-xs text-muted-foreground/70 text-center pt-4">
+          Marketing pack adapted from{" "}
+          <a
+            href="https://github.com/coreyhaines31/marketingskills"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            coreyhaines31/marketingskills
+          </a>{" "}
+          (MIT).
+        </p>
       </main>
       {editing && (
         <SkillEditDialog

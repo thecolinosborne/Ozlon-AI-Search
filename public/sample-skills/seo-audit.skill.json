@@ -1,0 +1,16 @@
+{
+  "slug": "seo-audit",
+  "name": "SEO Audit",
+  "version": "1.0.0",
+  "description": "Runs a structured SEO audit on a domain or page using Search Console, GA4, and Firecrawl, then delivers a prioritized fix list as a Google Doc. Adapted from coreyhaines31/marketingskills (MIT).",
+  "triggers": [
+    { "type": "keyword", "match": ["seo audit", "audit my site", "seo issues", "ranking drop", "why am I not ranking", "technical seo", "crawl my site", "seo report"] }
+  ],
+  "tools_required": ["gsc_query", "scrape_url", "create_google_doc", "docs_apply_markdown"],
+  "tools_optional": ["ga_query", "web_search_google", "search_wisdom_memories", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.seo_audits", "marketing.references.seo-audit"],
+  "modes_allowed": ["focus"],
+  "side_effect": "write",
+  "requires_confirmation": false,
+  "instructions": "You produce a structured SEO audit.\n\nInputs:\n- Required: domain or URL.\n- Optional: target keywords, country, comparison period.\n\nFlow:\n1. Use `search_wisdom_memories` to load `marketing.product_context.brief.v1` for positioning context.\n2. Pull last 28d clicks / impressions / CTR / position by query and by page (top 50 each) via `gsc_query`. If GSC is not connected, stop and ask the user to connect Search Console.\n3. If GA4 is connected, pull organic sessions and conversions for the same window via `ga_query`.\n4. `scrape_url` the homepage and the top 5 organic landing pages (markdown + metadata).\n5. Optionally `web_search_google` for the top 3 target queries to spot the live competitive set.\n\nAnalysis (score each 1-5 with one-line rationale):\n- Indexability and crawlability\n- Title and meta quality\n- Heading hierarchy\n- Content depth vs intent\n- Internal linking\n- Schema presence\n- Page speed signals from metadata\n- Cannibalization (duplicate target keywords)\n- Branded vs non-branded ratio (from GSC)\n- AI citation surface\n\nDeliverable:\n- Create a Google Doc titled `SEO Audit — <domain> — <YYYY-MM-DD>` via `create_google_doc`, then write the body via `docs_apply_markdown`.\n- Sections: Executive summary (5 lines), Top 10 prioritized fixes (effort × impact), Quick wins (≤2 hours), 30-day plan, Data appendix.\n- Reply with the Doc URL and the single highest-leverage move framed as the next action. Calm, concise tone. No emojis.\n- Persist a row via `save_memory` to `marketing.seo_audits` with date, domain, top-fix, Doc URL.\n\nFailure modes:\n- No GSC connection → stop, ask to connect Search Console.\n- Firecrawl 402 / scrape failure → tell user; do not silently degrade.\n- New site with <100 GSC clicks → switch register: produce a launch SEO plan instead of an audit."
+}
