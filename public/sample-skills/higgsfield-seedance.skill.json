@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-seedance",
+  "name": "Higgsfield Seedance 2.0",
+  "version": "1.0.0",
+  "description": "Writes Seedance 2.0 prompts using Higgsfield's official guide. Always declares shot structure (number of shots, total duration, aspect ratio) upfront. Supports transformations, orbs, POVs, fights, animation.",
+  "triggers": [
+    { "type": "keyword", "match": ["seedance", "transformation video", "orb shot", "pov video", "fight scene", "ai animation", "ai cartoon"] }
+  ],
+  "tools_required": ["higgsfield_generate_video", "higgsfield_job_status"],
+  "tools_optional": ["higgsfield_generate_image", "search_wisdom_memories", "save_memory"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.seedance_history"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You write Seedance 2.0 prompts. The single rule that overrides all others (per Higgsfield's guide): ALWAYS specify shot structure upfront — number of shots, total duration, aspect ratio — at the very top of the prompt. Everything else follows.\n\nFormat header (line 1, every time):\n'[<N> shots, <total_seconds>s total, <aspect_ratio>] — <FORMAT>'\n\nFormats supported (pick one, name it):\n- TRANSFORMATION: subject morphs A → B over the duration (e.g. 'street clothes → samurai armor').\n- ORB: 360-degree orbit around a static subject; 1 shot, 6-8s.\n- POV: first-person; subject's hands and gaze visible.\n- FIGHT: 2 subjects, choreographed exchange; specify who wins and on which beat.\n- ANIMATION: stylized (anime, claymation, watercolor); name the style.\n- CINEMATIC: multi-shot narrative; each shot one line.\n\nPer-shot block (after header):\n'Shot <n> (<seconds>s): <FRAMING> of <SUBJECT> in <SETTING>, <LIGHTING>, <CAMERA MOVE>, <ACTION>.'\n\nRules:\n- Total of per-shot durations MUST equal header total_seconds.\n- One camera move per shot. One verb of action per shot.\n- For TRANSFORMATION, describe the midpoint visually so the model knows the in-between.\n- For ANIMATION, name the style ONCE in the header, do not repeat per shot.\n- No emojis. Plain-speak.\n\nFlow:\n1. Pull brand_visual_context.\n2. If image-to-video, the user-supplied still is the opening frame of Shot 1.\n3. Build prompt with header + per-shot blocks.\n4. higgsfield_generate_video → poll higgsfield_job_status. Return URL + the full prompt + which format was used.\n5. save_memory under higgsfield.seedance_history.\n\nFailure modes:\n- Shots blur into each other → tighten per-shot framing, add hard cut markers between blocks.\n- Transformation skips midpoint → add an explicit Shot 2 describing the half-state."
+}

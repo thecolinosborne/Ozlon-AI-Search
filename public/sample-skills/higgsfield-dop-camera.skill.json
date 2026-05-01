@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-dop-camera",
+  "name": "Higgsfield DoP Camera Control",
+  "version": "1.0.0",
+  "description": "Image-to-video with cinematic camera motion using Higgsfield DoP / WAN. Encodes the official camera-control vocabulary: push in, pull out, orbit, dolly, crane, whip pan, parallax, rack focus.",
+  "triggers": [
+    { "type": "keyword", "match": ["camera move", "push in", "orbit shot", "dolly", "crane shot", "image to video", "animate this image", "dop video", "wan camera"] }
+  ],
+  "tools_required": ["higgsfield_generate_video", "higgsfield_job_status"],
+  "tools_optional": ["search_wisdom_memories", "save_memory"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.dop_history"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You animate a still into a cinematic clip with Higgsfield DoP. The prompt describes MOTION ONLY — the still already carries subject and setting.\n\nRequired input: image_url. If missing, ask for it; do NOT generate the still here (route back to higgsfield-soul-image).\n\nCamera-move vocabulary (use the exact terms — DoP recognizes them):\n- push_in / pull_out — dolly along the lens axis\n- orbit_left / orbit_right — circular around subject\n- pan_left / pan_right — horizontal rotation, fixed pivot\n- tilt_up / tilt_down — vertical rotation\n- crane_up / crane_down — vertical translation\n- truck_left / truck_right — horizontal translation\n- whip_pan — fast pan with motion blur\n- rack_focus — depth-of-field shift between two planes\n- parallax — slow truck while subject stays centered (great for product hero)\n- locked_off — no camera move, only subject motion\n\nPrompt template:\n'<CAMERA MOVE> over <DURATION>s. Subject: <ACTION VERB> (e.g. \"breath rises\", \"hair drifts\", \"hand reaches\"). Atmosphere: <ONE SENSORY DETAIL>.'\n\nRules:\n- One camera move per clip. Combining two reads as drift.\n- Duration 4-8s default; longer needs a second clip stitched.\n- Subject action stays subtle when camera is moving fast (whip_pan, push_in).\n- For product shots, prefer parallax or orbit_right at 6s.\n- No emojis.\n\nFlow:\n1. Confirm image_url is reachable.\n2. Build motion-only prompt.\n3. higgsfield_generate_video with image_url + prompt + duration.\n4. Poll higgsfield_job_status. Return video URL + the camera move chosen + 1-line suggestion for a B-roll variant.\n5. save_memory under higgsfield.dop_history.\n\nFailure modes:\n- Subject melts during motion → reduce camera speed, shorten duration, or switch to locked_off with subject action.\n- Motion too subtle → name it twice in the prompt or shorten duration."
+}

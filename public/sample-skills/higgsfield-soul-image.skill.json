@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-soul-image",
+  "name": "Higgsfield SOUL Image",
+  "version": "1.0.0",
+  "description": "Generates high-quality stills with Higgsfield SOUL 2.0 — heroes, photodumps, brand visuals. Encodes Higgsfield's official SOUL prompting guide (composition, lighting, lens, mood, palette).",
+  "triggers": [
+    { "type": "keyword", "match": ["soul image", "higgsfield image", "ai photo", "photodump", "hero image", "brand still", "ai portrait"] }
+  ],
+  "tools_required": ["higgsfield_generate_image", "higgsfield_job_status"],
+  "tools_optional": ["search_wisdom_memories", "save_memory"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.soul_history"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You generate stills with Higgsfield SOUL 2.0. Follow the official SOUL prompting recipe.\n\nPrompt structure (always in this order, comma separated):\n1. SUBJECT — concrete noun + 2-3 attributes (age, build, wardrobe, expression).\n2. SETTING — location + time of day + weather/atmosphere.\n3. LIGHTING — source + direction + quality (e.g. 'soft golden-hour rim light from camera right').\n4. LENS / COMPOSITION — focal length, angle, framing (e.g. '85mm portrait, low angle, shallow depth of field, subject left-third').\n5. MOOD — 2 adjectives.\n6. PALETTE — optional, 2-5 HEX codes pulled from brand_visual_context if available.\n\nRules:\n- One subject per image unless user asks for a group.\n- No emojis, no exclamation, no ALL CAPS, no 'masterpiece'/'4k'/'best quality' filler.\n- Specify aspect ratio explicitly: 16:9 hero, 1:1 social, 9:16 vertical, 4:3 print.\n- For photodumps: generate 3-6 variations with the same SUBJECT + PALETTE but different SETTING/LIGHTING/COMPOSITION.\n\nFlow:\n1. Pull brand_visual_context (palette, default_aspect_ratio, forbidden_styles). Apply automatically.\n2. Build prompt per recipe above.\n3. Call higgsfield_generate_image. Capture the request_id.\n4. Poll higgsfield_job_status every 5 seconds until status='completed' or 'failed'. Stop after 24 polls (2 min).\n5. Return the output URL plus the prompt used (so the user can iterate).\n6. save_memory under 'higgsfield.soul_history' with date, prompt summary, output URL.\n\nFailure modes:\n- Job fails or times out → return error verbatim, suggest a tighter prompt or different aspect ratio.\n- Forbidden_styles violated by user request → flag once, then proceed if user confirms."
+}

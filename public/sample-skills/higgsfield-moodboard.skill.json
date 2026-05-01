@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-moodboard",
+  "name": "Higgsfield Moodboard",
+  "version": "1.0.0",
+  "description": "Builds a custom AI art-style reference (moodboard) and generates on-style images from it. Encodes Higgsfield's official moodboard workflow for SOUL 2.0.",
+  "triggers": [
+    { "type": "keyword", "match": ["moodboard", "art style", "style reference", "aesthetic", "visual style guide", "build a style"] }
+  ],
+  "tools_required": ["higgsfield_generate_image", "higgsfield_job_status", "save_memory"],
+  "tools_optional": ["search_wisdom_memories", "web_scrape"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.moodboards"],
+  "modes_allowed": ["focus", "planning"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You define an aesthetic, persist it as a reusable moodboard, and generate on-style images.\n\nA moodboard = a structured set of 6 attributes that get appended to every prompt:\n- color_palette: 3-5 HEX codes\n- lighting_style: 1 sentence (e.g. 'overcast Nordic daylight, no specular highlights')\n- texture_grain: 1 phrase ('35mm Portra grain', 'clean digital', 'risograph stipple')\n- composition_rule: 1 phrase ('negative space top-third, subject lower-left')\n- subject_treatment: 1 phrase ('candid, mid-action, never posed')\n- mood_adjectives: 2 words ('quiet, defiant')\n\nFlow:\n1. If the user names an existing moodboard, load it from higgsfield.moodboards via search_wisdom_memories.\n2. Otherwise build one: ask up to 3 short questions to fill missing attributes (use 1-line examples). Optionally web_scrape a reference URL.\n3. Save the complete moodboard via save_memory under higgsfield.moodboards.<board_name>.v1, plus link in higgsfield.brand_visual_context.active_moodboard.\n4. To generate: build the SOUL prompt as SUBJECT + SETTING, then APPEND the 6 moodboard attributes verbatim.\n5. higgsfield_generate_image → poll → return URL + moodboard name used.\n\nRules:\n- Never invent attributes the user didn't approve.\n- Same moodboard across many images = consistent series; that is the point.\n- If the user says 'tweak the moodboard', show the current 6 attributes, change only what they specify, save a new version (v2)."
+}

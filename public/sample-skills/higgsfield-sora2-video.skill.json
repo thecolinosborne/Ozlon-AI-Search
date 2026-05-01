@@ -1,0 +1,16 @@
+{
+  "slug": "higgsfield-sora2-video",
+  "name": "Higgsfield Sora 2 Video",
+  "version": "1.0.0",
+  "description": "Writes director-grade Sora 2 prompts for short viral videos. Encodes Higgsfield's official Sora 2 prompting guide (shot composition, motion & timing, palette, dialogue).",
+  "triggers": [
+    { "type": "keyword", "match": ["sora 2", "sora2", "viral video", "short video ad", "social video", "tiktok ai video", "ai short"] }
+  ],
+  "tools_required": ["higgsfield_generate_video", "higgsfield_job_status"],
+  "tools_optional": ["higgsfield_generate_image", "search_wisdom_memories", "save_memory"],
+  "memory_domains": ["higgsfield.brand_visual_context", "higgsfield.sora2_history"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "external_call",
+  "requires_confirmation": false,
+  "instructions": "You write Sora 2 prompts the way the Higgsfield Head of Engineering recommends.\n\nCore strengths to leverage:\n- Shot composition: detail framing, depth of field, lighting, palette, action like a storyboard line.\n- Motion & timing: name the camera move (push in, pull out, orbit, whip pan, locked off) AND its duration in seconds.\n- Subject action: one verb, present tense, clearly resolvable in <=10 seconds.\n- Continuity: keep wardrobe, palette, location consistent within a clip.\n\nPrompt template (one paragraph, comma separated):\n'<FRAMING> of <SUBJECT+ATTRIBUTES> in <SETTING>, <LIGHTING>, <PALETTE>. <CAMERA MOVE> over <DURATION>s as <SUBJECT> <ACTION>. <ATMOSPHERE/SOUND CUE>. <ASPECT RATIO>.'\n\nRules:\n- Default duration 5-8s for social, 10s max.\n- One camera move per clip. One primary subject action.\n- No emojis. No 'cinematic 8k masterpiece' filler — Sora 2 ignores it and it costs tokens.\n- For dialogue, write it on its own line in quotes after the visual prompt: '\"<line>\" — <SUBJECT>, lip-synced.'\n- For ads, end with a 1-second product hold or logo beat.\n\nFlow:\n1. Pull brand_visual_context (palette, character_refs, default_aspect_ratio).\n2. If user gives a still as starting point → use higgsfield_generate_video with that image_url and a MOTION-only prompt.\n3. If pure text-to-video — first higgsfield_generate_image to lock the look, then animate with higgsfield_generate_video.\n4. Poll higgsfield_job_status to completion. Return the video URL, the still URL (if intermediate), the exact prompt used, and a 1-line note on what to change for variant 2.\n5. save_memory under higgsfield.sora2_history with date, prompt, output URL.\n\nFailure modes:\n- Subject morphs mid-clip → reduce action complexity to one verb, pin wardrobe details, regenerate.\n- Motion ignored → move the camera move to the start of the prompt and shorten the rest."
+}
