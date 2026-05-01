@@ -40,6 +40,21 @@ export interface DailyBrief {
   day_mode: DayMode;
   top_of_mind: TopOfMind | null;
   cards: Record<CardKey, BriefCard> | null;
+  calendar_events?: CalendarEvent[];
+  calendar_connected?: boolean;
+}
+
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: string | null;
+  end: string | null;
+  all_day: boolean;
+  location: string | null;
+  hangout_link: string | null;
+  attendee_count: number;
+  organizer_self: boolean;
+  status: string | null;
 }
 
 const STALE_MS = 15 * 60_000;
