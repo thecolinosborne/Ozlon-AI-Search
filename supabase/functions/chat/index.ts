@@ -5209,6 +5209,60 @@ async function executeToolCall(
         }
       }
 
+      case 'search_wisdom_memories': {
+        try {
+          const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY');
+          if (!OPENAI_KEY) return { success: false, result: 'Embedding API not configured.' };
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database not configured.' };
+
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated for memory search.' };
+
+          const query = String(args.query || '').trim();
+          if (!query) return { success: false, result: 'query is required' };
+          const memoryType = (args.memory_type as string) || null;
+          const limit = Math.min(Math.max(Number(args.limit ?? 5), 1), 20);
+
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          const embRes = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: query }),
+          });
+          if (!embRes.ok) return { success: false, result: 'Failed to generate query embedding.' };
+          const embData = await embRes.json();
+          const embedding = embData.data[0].embedding;
+
+          const { data, error } = await adminClient.rpc('match_wisdom_memories', {
+            query_embedding: JSON.stringify(embedding),
+            match_threshold: 0.5,
+            match_count: limit,
+            filter_user_id: userId,
+            filter_memory_type: memoryType,
+          });
+          if (error) {
+            console.error('[search_wisdom_memories] error:', error);
+            return { success: false, result: `Memory search failed: ${error.message}` };
+          }
+          const rows = (data ?? []) as Array<{ id: string; memory_type: string; summary: string; content: string; salience: number; recurrence_count: number; similarity: number }>;
+          if (rows.length === 0) {
+            return { success: true, result: `No matching memories found for "${query}"${memoryType ? ` (type=${memoryType})` : ''}.` };
+          }
+          const formatted = rows.map((r, i) =>
+            `${i + 1}. [${r.memory_type}] ${r.summary} (sim ${r.similarity.toFixed(2)}, seen ${r.recurrence_count}x)\n   ${r.content}`,
+          ).join('\n');
+          console.log(`[search_wisdom_memories] ${rows.length} matches for "${query}"`);
+          return { success: true, result: `Found ${rows.length} memory match(es):\n${formatted}` };
+        } catch (e) {
+          console.error('[search_wisdom_memories] Error:', e);
+          return { success: false, result: `Memory search error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
       case 'create_routine': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
