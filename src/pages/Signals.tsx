@@ -7,6 +7,7 @@ import { TodayHero } from "@/components/today/TodayHero";
 import { FloatingCapture } from "@/components/today/FloatingCapture";
 import { TopOfMindCard } from "@/components/today/TopOfMindCard";
 import { CommandCenter } from "@/components/today/CommandCenter";
+import { CalendarCard } from "@/components/today/CalendarCard";
 import { useDailyBriefing } from "@/hooks/useDailyBriefing";
 import { toast } from "sonner";
 
