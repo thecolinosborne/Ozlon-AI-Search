@@ -1,55 +1,79 @@
-## Scope
+## Goal
 
-Add one new skill manifest: `marketing-orchestrator`. It's the front door for the 10 marketing skills — users say "help me with marketing" / "write an ad" / "improve my page" and this skill picks the right sub-skill (and ensures `product-marketing-context` runs first).
+Turn Higgsfield's official how-to library into a usable skill pack inside Ozlon, so the assistant can plan and execute Higgsfield image/video generations using the techniques the Higgsfield team actually recommends (SOUL prompting, HEX color control, DoP/Sora 2/Seedance/WAN motion, Popcorn character consistency, multi-scene, instant ads).
 
-No code changes. No DB migration. No UI changes. One new JSON file.
+Today there is **zero Higgsfield skill coverage** — only the `higgsfield` edge function with `generate_image`, `generate_video`, `get_job_status`, `cancel_job`. The AI can't actually call those because no integration manifest exposes them as tools. We fix both gaps.
 
-## Why a skill, not router code
+## What we'll add
 
-Ozlon's skill loop already supports composition: a loaded skill's instructions can tell the model to call `load_skill(slug)` to hand off. That's exactly what the orchestrator does. Keeping it as a manifest means it's installable, versionable, and overridable like any other skill.
+### 1. Expose Higgsfield as AI tools (one new file)
+Create `supabase/functions/_shared/integrations/higgsfield.ts` (mirrors `research.ts` pattern). Tools:
+- `higgsfield_generate_image` — SOUL text→image, args: prompt, aspect_ratio, resolution, optional hex_palette
+- `higgsfield_generate_video` — DoP image→video, args: image_url, prompt, duration
+- `higgsfield_job_status` / `higgsfield_cancel_job`
 
-## File added (1)
+Register it in the integrations index so chat picks the tools up automatically.
 
-`public/sample-skills/marketing-orchestrator.skill.json`
+### 2. Higgsfield skill pack (8 manifests in `public/sample-skills/`)
 
-### Behavior encoded in instructions
+Each one encodes the prompting rules from the corresponding official guide so the AI follows Higgsfield's own playbook instead of guessing.
 
-1. **Triage** the user's ask in one sentence (no preamble).
-2. **Context gate** — if `marketing.product_context.brief.v1` is missing in memory, hand off to `product-marketing-context` first via `load_skill`, then resume.
-3. **Route** to exactly one sub-skill using a decision table baked into the instructions:
+| Slug | Source guide | Job |
+|---|---|---|
+| `higgsfield-orchestrator` | index page | Triage: pick the right Higgsfield sub-skill from intent |
+| `higgsfield-soul-image` | SOUL 2.0 + Photodump | High-quality stills with SOUL — composition, lighting, palette |
+| `higgsfield-hex-color` | "What the HEX" guide | Brand-color image generation, palette extraction → SOUL prompt |
+| `higgsfield-moodboard` | Moodboards guide | Build a custom style reference, then generate on-style images |
+| `higgsfield-sora2-video` | Sora 2 prompt guide | Director-style shot list (framing, motion, timing, palette) |
+| `higgsfield-seedance` | Seedance 2.0 guide | Shot-structure-first prompts (shots, duration, aspect ratio upfront), transformations / orbs / POV |
+| `higgsfield-dop-camera` | WAN/DoP camera control | Image→video with cinematic camera moves + motion language |
+| `higgsfield-popcorn-consistency` | Popcorn consistency guide | Character/lighting/tone consistency across multi-frame sequences |
+| `higgsfield-multi-scene` | Multi-scene + Instant Ads | Stitch multiple scenes into one cohesive piece (storyboard → render → assemble) |
 
-   | User intent | Hand off to |
-   |---|---|
-   | Write/rewrite copy, headlines, CTAs | `copywriting` |
-   | Audit a landing or pricing page | `page-cro` |
-   | SEO audit, ranking issues, GSC | `seo-audit` |
-   | LLM citations, GEO, AI search | `ai-seo` |
-   | Outbound cold email | `cold-email` |
-   | Welcome / nurture / launch sequence | `email-sequence` |
-   | Meta / TikTok / YouTube / Google ads | `ad-creative` |
-   | Tracking, GA4 events, measurement | `analytics-tracking` |
-   | Reviews, JTBD, voice-of-customer | `customer-research` |
-   | Set or update brand DNA | `product-marketing-context` |
+(That's 1 orchestrator + 8 specialists = 9 manifests.)
 
-4. **Ambiguous** — if two skills tie, present 2 options in one line and ask the user to pick. Never run two in parallel.
-5. **Out of scope** — if the ask isn't marketing (e.g. "summarize my email"), say so in one line and stop. Don't try to absorb non-marketing work.
-6. **Always** end the routing turn with a one-line confirmation of which skill it's handing off to, then call `load_skill(slug)`.
+Each manifest follows the exact shape of the existing marketing skills (`copywriting.skill.json` style): `slug`, `name`, `version`, `description`, `triggers`, `tools_required`, `tools_optional`, `memory_domains`, `instructions` containing the actual Higgsfield prompting rules distilled from the guide.
 
-### Manifest fields
+### 3. Orchestrator behavior (`higgsfield-orchestrator`)
 
-- `slug`: `marketing-orchestrator`
-- `triggers` (keyword): `marketing`, `marketing help`, `grow`, `growth`, `acquisition`, `improve marketing`, `marketing plan`, `which marketing skill`
-- `tools_required`: `["load_skill", "search_wisdom_memories"]`
-- `tools_optional`: `["save_memory"]`
-- `memory_domains`: `["marketing.product_context"]`
-- `modes_allowed`: `["focus", "planning", "reactive"]`
-- `side_effect`: `read`
-- `requires_confirmation`: `false`
+- Detects intent: image vs video, style vs motion vs consistency vs multi-scene.
+- Calls `search_wisdom_memories` against `higgsfield.brand_visual_context` (HEX palette, character refs, brand voice). If empty, asks 3 quick questions and saves the answers via `save_memory` so future runs are one-shot.
+- Routes via `load_skill(<slug>)` to the right specialist.
+- After each successful generation, saves a `pattern` memory (user phrase → skill chosen → output URL) so the orchestrator improves over time — same self-improvement loop the marketing-orchestrator uses.
 
-### Tone rules in instructions
+### 4. Memory domain
+New domain: `higgsfield.brand_visual_context` storing HEX palette, character reference image URLs, default aspect ratio, brand mood adjectives, forbidden styles. Used by every sub-skill.
 
-Plain-speak. Max 14 words per sentence. No emojis. Calm, decisive — same Jarvis/Batman tone the rest of the marketing pack uses. Never list all 10 skills to the user; just pick.
+### 5. Seed migration
+One idempotent SQL migration to insert all 9 skills into `public.skills` with `source='builtin'`, `visibility='public'` — same pattern as the marketing pack seed.
 
-## Stop point
+### 6. Memory file
+`.lovable/memory/features/higgsfield-pack-orchestration.md` documenting routing table + prompting rules per model, + index.md update.
 
-Ship the one file. No edits to `Skills.tsx`, no edits to existing skill manifests, no edge function changes. Verification + UI grouping deferred to follow-ups.
+## What we will NOT do
+- No UI changes.
+- No edits to the existing `higgsfield` edge function (it already has the actions we need).
+- No new sample integrations beyond Higgsfield.
+- No automatic credit/spend changes.
+
+## Files touched
+
+**New (11):**
+- `supabase/functions/_shared/integrations/higgsfield.ts`
+- `public/sample-skills/higgsfield-orchestrator.skill.json`
+- `public/sample-skills/higgsfield-soul-image.skill.json`
+- `public/sample-skills/higgsfield-hex-color.skill.json`
+- `public/sample-skills/higgsfield-moodboard.skill.json`
+- `public/sample-skills/higgsfield-sora2-video.skill.json`
+- `public/sample-skills/higgsfield-seedance.skill.json`
+- `public/sample-skills/higgsfield-dop-camera.skill.json`
+- `public/sample-skills/higgsfield-popcorn-consistency.skill.json`
+- `public/sample-skills/higgsfield-multi-scene.skill.json`
+- `supabase/migrations/<ts>_seed_higgsfield_skills_pack.sql`
+
+**Edited (3):**
+- Integrations index (to register the new manifest)
+- `.lovable/memory/index.md`
+- `.lovable/memory/features/higgsfield-pack-orchestration.md` (new)
+
+Approve and I'll ship it.
