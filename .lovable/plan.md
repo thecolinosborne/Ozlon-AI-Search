@@ -1,90 +1,79 @@
-## Goal
+# Fix two latest issues: signals-synthesize 401 + web_investigate "query required"
 
-Turn Higgsfield's official how-to library into a usable skill pack inside Ozlon, so the assistant can plan and execute Higgsfield image/video generations using the techniques the Higgsfield team actually recommends (SOUL prompting, HEX color control, DoP/Sora 2/Seedance/WAN motion, Popcorn character consistency, multi-scene, instant ads).
+## Issue 1 — signals-synthesize 401 unauthorized
 
-Today there is **zero Higgsfield skill coverage** — only the `higgsfield` edge function with `generate_image`, `generate_video`, `get_job_status`, `cancel_job`. The AI can't actually call those because no integration manifest exposes them as tools. We fix both gaps.
+**Cause.** `resolveUser()` in `supabase/functions/signals-synthesize/index.ts` (lines 32–47) uses `sb.auth.getClaims(token)` and explicit-token `sb.auth.getUser(token)`. With `@supabase/supabase-js@2.49.1` and Supabase's signing-keys JWTs, both paths fail for some live sessions (we see this for the currently signed-in user). Other working functions (e.g. `signals-brief`, `research`) use the **header-injection pattern** and succeed.
 
-## What we'll add
+**Fix (one file).** Replace `resolveUser()` with the same pattern used in `signals-brief` and `research`:
 
-### 1. Expose Higgsfield as AI tools (one new file)
-Create `supabase/functions/_shared/integrations/higgsfield.ts` (mirrors `research.ts` pattern). Tools:
-- `higgsfield_generate_image` — SOUL text→image, args: prompt, aspect_ratio, resolution, optional hex_palette
-- `higgsfield_generate_video` — DoP image→video, args: image_url, prompt, duration
-- `higgsfield_job_status` / `higgsfield_cancel_job`
+```ts
+async function resolveUser(authHeader: string | null): Promise<string | null> {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const sb = createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false },
+  });
+  try {
+    const { data, error } = await sb.auth.getUser();
+    if (!error && data?.user?.id) return data.user.id;
+  } catch (_) { /* ignore */ }
+  // Last-resort fallback for older sessions
+  try {
+    const token = authHeader.slice(7);
+    const { data } = await sb.auth.getUser(token);
+    if (data.user?.id) return data.user.id;
+  } catch (_) { /* ignore */ }
+  return null;
+}
+```
 
-Register it in the integrations index so chat picks the tools up automatically.
+Also add a one-line `console.warn("[signals-synthesize] auth failed; header present:", !!authHeader)` next to the 401 response (line 972) so future regressions are diagnosable from edge logs.
 
-### 2. Higgsfield skill pack (8 manifests in `public/sample-skills/`)
-
-Each one encodes the prompting rules from the corresponding official guide so the AI follows Higgsfield's own playbook instead of guessing.
-
-| Slug | Source guide | Job |
-|---|---|---|
-| `higgsfield-orchestrator` | index page | Triage: pick the right Higgsfield sub-skill from intent |
-| `higgsfield-soul-image` | SOUL 2.0 + Photodump | High-quality stills with SOUL — composition, lighting, palette |
-| `higgsfield-hex-color` | "What the HEX" guide | Brand-color image generation, palette extraction → SOUL prompt |
-| `higgsfield-moodboard` | Moodboards guide | Build a custom style reference, then generate on-style images |
-| `higgsfield-sora2-video` | Sora 2 prompt guide | Director-style shot list (framing, motion, timing, palette) |
-| `higgsfield-seedance` | Seedance 2.0 guide | Shot-structure-first prompts (shots, duration, aspect ratio upfront), transformations / orbs / POV |
-| `higgsfield-dop-camera` | WAN/DoP camera control | Image→video with cinematic camera moves + motion language |
-| `higgsfield-popcorn-consistency` | Popcorn consistency guide | Character/lighting/tone consistency across multi-frame sequences |
-| `higgsfield-multi-scene` | Multi-scene + Instant Ads | Stitch multiple scenes into one cohesive piece (storyboard → render → assemble) |
-
-(That's 1 orchestrator + 8 specialists = 9 manifests.)
-
-Each manifest follows the exact shape of the existing marketing skills (`copywriting.skill.json` style): `slug`, `name`, `version`, `description`, `triggers`, `tools_required`, `tools_optional`, `memory_domains`, `instructions` containing the actual Higgsfield prompting rules distilled from the guide.
-
-### 3. Orchestrator behavior (`higgsfield-orchestrator`)
-
-- Detects intent: image vs video, style vs motion vs consistency vs multi-scene.
-- Calls `search_wisdom_memories` against `higgsfield.brand_visual_context` (HEX palette, character refs, brand voice). If empty, asks 3 quick questions and saves the answers via `save_memory` so future runs are one-shot.
-- Routes via `load_skill(<slug>)` to the right specialist.
-- After each successful generation, saves a `pattern` memory (user phrase → skill chosen → output URL) so the orchestrator improves over time — same self-improvement loop the marketing-orchestrator uses.
-
-### 4. Memory domain
-New domain: `higgsfield.brand_visual_context` storing HEX palette, character reference image URLs, default aspect ratio, brand mood adjectives, forbidden styles. Used by every sub-skill.
-
-### 5. Seed migration
-One idempotent SQL migration to insert all 9 skills into `public.skills` with `source='builtin'`, `visibility='public'` — same pattern as the marketing pack seed.
-
-### 6. Memory file
-`.lovable/memory/features/higgsfield-pack-orchestration.md` documenting routing table + prompting rules per model, + index.md update.
-
-## What we will NOT do
-- No UI changes.
-- No edits to the existing `higgsfield` edge function (it already has the actions we need).
-- No new sample integrations beyond Higgsfield.
-- No automatic credit/spend changes.
-
-## Files touched
-
-**New (11):**
-- `supabase/functions/_shared/integrations/higgsfield.ts`
-- `public/sample-skills/higgsfield-orchestrator.skill.json`
-- `public/sample-skills/higgsfield-soul-image.skill.json`
-- `public/sample-skills/higgsfield-hex-color.skill.json`
-- `public/sample-skills/higgsfield-moodboard.skill.json`
-- `public/sample-skills/higgsfield-sora2-video.skill.json`
-- `public/sample-skills/higgsfield-seedance.skill.json`
-- `public/sample-skills/higgsfield-dop-camera.skill.json`
-- `public/sample-skills/higgsfield-popcorn-consistency.skill.json`
-- `public/sample-skills/higgsfield-multi-scene.skill.json`
-- `supabase/migrations/<ts>_seed_higgsfield_skills_pack.sql`
-
-**Edited (3):**
-- Integrations index (to register the new manifest)
-- `.lovable/memory/index.md`
-- `.lovable/memory/features/higgsfield-pack-orchestration.md` (new)
-
-Approve and I'll ship it.
+Cron path (`?mode=lookahead_tick` / `?mode=daily_digest_tick`) is untouched — it uses `x-cron-key`.
 
 ---
 
-## Status: SHIPPED (2026-05-01T19:23:03Z)
+## Issue 2 — `web_investigate` returns "Investigation failed: query required"
 
-- 9 Higgsfield skill manifests in public/sample-skills/
-- supabase/functions/_shared/integrations/higgsfield.ts (4 tools) registered in index.ts
-- supabase/migrations/20260501192228_seed_higgsfield_skills_pack.sql (idempotent, ON CONFLICT update)
-- .lovable/memory/features/higgsfield-pack-orchestration.md + index.md updated
+Edge log shows the streaming upgrade firing and the research function rejecting it:
+```
+[web_investigate] delivered_via=stream
+Tool result (web_investigate): FAILED Investigation failed: query required
+```
 
-The migration deploys to Cloud automatically; no UI changes required.
+**Cause.** `streamWebInvestigate()` in `supabase/functions/chat/index.ts` (lines 7449–7463) posts a **flat** body to `/functions/v1/research`:
+```ts
+body: JSON.stringify({
+  action: 'web_investigate_stream',
+  query: args.query,
+  contextHint: args.contextHint,
+}),
+```
+but `research/index.ts` (line 992) reads `const params = (body?.params ?? {})`, then `runInvestigation` requires `params.query` (line 766–767, throws "query required"). So the SSE emits an `error` event → chat surfaces "Investigation failed: query required".
+
+The non-streaming path works because it goes through `_dispatcher.ts`, which already wraps args under `params` for `envelope: "nested"` integrations (line 47–49). The streaming path bypasses the dispatcher.
+
+**Fix (one file).** Wrap the body under `params` in `streamWebInvestigate()`:
+
+```ts
+body: JSON.stringify({
+  action: 'web_investigate_stream',
+  params: {
+    query: args.query,
+    contextHint: args.contextHint,
+  },
+}),
+```
+
+That matches the envelope `research/index.ts` actually parses, with no changes to research itself.
+
+---
+
+## Verification
+
+1. Deploy `signals-synthesize` and `chat`.
+2. **Signals**: load `/signals`, trigger "Scan now" — expect 200, no `unauthorized`. Edge logs should be clean.
+3. **Investigate**: send a chat message that triggers `web_investigate` (e.g. "research the best hair product ecommerce niche") — expect streamed task updates ("Planned N sub-queries", "Searched: …", "Synthesizing answer", "Self-critique complete") and a real answer instead of "Investigation failed: query required".
+
+## Out of scope
+No schema, RLS, UI, or other edge function changes. Two surgical fixes, two files.
