@@ -7457,8 +7457,10 @@ async function streamWebInvestigate(
       },
       body: JSON.stringify({
         action: 'web_investigate_stream',
-        query: args.query,
-        contextHint: args.contextHint,
+        params: {
+          query: args.query,
+          contextHint: args.contextHint,
+        },
       }),
     });
   } catch (e) {
