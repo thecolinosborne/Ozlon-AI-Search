@@ -9516,7 +9516,27 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       try {
         // Use TransformStream for real-time SSE streaming of task updates
         const { readable, writable } = new TransformStream();
-        const writer = writable.getWriter();
+        const rawWriter = writable.getWriter();
+        let toolStreamClosed = false;
+        const writer = {
+          async write(chunk: Uint8Array) {
+            if (toolStreamClosed) return;
+            try {
+              await rawWriter.write(chunk);
+            } catch {
+              toolStreamClosed = true;
+            }
+          },
+          async close() {
+            if (toolStreamClosed) return;
+            toolStreamClosed = true;
+            try {
+              await rawWriter.close();
+            } catch {
+              // Client disconnected — nothing left to stream.
+            }
+          },
+        };
         const encoder = new TextEncoder();
 
         // Run tool loop in background, streaming task updates as they happen
@@ -9796,7 +9816,27 @@ Execute these in order. Be decisive — the user has already been shown this pla
 
     // Wrap upstream stream so we can prepend infinity-debug and append provider_used.
     const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
+    const rawWriter = writable.getWriter();
+    let streamClosed = false;
+    const writer = {
+      async write(chunk: Uint8Array) {
+        if (streamClosed) return;
+        try {
+          await rawWriter.write(chunk);
+        } catch {
+          streamClosed = true;
+        }
+      },
+      async close() {
+        if (streamClosed) return;
+        streamClosed = true;
+        try {
+          await rawWriter.close();
+        } catch {
+          // Client disconnected — nothing left to stream.
+        }
+      },
+    };
     const encoder = new TextEncoder();
     const providerEvent = `event: provider_used\ndata: ${JSON.stringify({
       model: modelConfig.name,
