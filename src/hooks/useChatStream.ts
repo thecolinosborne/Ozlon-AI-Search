@@ -213,10 +213,11 @@ export function useChatStream({
       let outcome: RequestOutcome = "pending";
       let timedOut = false;
 
+      // 5-minute ceiling — research/tool loops can run 2–4 minutes.
       const timeoutId = setTimeout(() => {
         timedOut = true;
         abortRef.current?.abort("timeout");
-      }, 120_000);
+      }, 300_000);
 
       try {
         await streamChat({
