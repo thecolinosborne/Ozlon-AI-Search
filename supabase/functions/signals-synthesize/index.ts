@@ -31,11 +31,19 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession:
 // ─────────── helpers ───────────
 async function resolveUser(authHeader: string | null): Promise<string | null> {
   if (!authHeader?.startsWith("Bearer ")) return null;
-  const sb = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data } = await sb.auth.getUser();
-  return data.user?.id ?? null;
+  const token = authHeader.slice(7);
+  const sb = createClient(SUPABASE_URL, ANON_KEY);
+  // Prefer getClaims (signing-keys aware, tolerates sessions whose /user lookup fails).
+  try {
+    const { data, error } = await sb.auth.getClaims(token);
+    if (!error && data?.claims?.sub) return data.claims.sub as string;
+  } catch (_) { /* fall through */ }
+  // Fallback: explicit token-based getUser
+  try {
+    const { data } = await sb.auth.getUser(token);
+    if (data.user?.id) return data.user.id;
+  } catch (_) { /* ignore */ }
+  return null;
 }
 
 // Retry transient upstream failures (cold-start 503s, 429/502/504, network errors).
