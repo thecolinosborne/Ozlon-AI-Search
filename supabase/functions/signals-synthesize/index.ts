@@ -976,6 +976,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     const userId = await resolveUser(authHeader);
     if (!userId) {
+      console.warn("[signals-synthesize] auth failed; header present:", !!authHeader);
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
