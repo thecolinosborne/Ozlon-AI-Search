@@ -4,6 +4,45 @@ import { AIOrb } from "@/components/AIOrb";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MessagePlayButton } from "./MessagePlayButton";
+import { useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { Copy, Check } from "lucide-react";
+
+const extractText = (node: ReactNode): string => {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (typeof node === "object" && "props" in (node as object)) {
+    return extractText((node as { props: { children?: ReactNode } }).props.children);
+  }
+  return "";
+};
+
+const CopyButton = ({ text, className }: { text: string; className?: string }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied" : "Copy"}
+      className={cn(
+        "inline-flex items-center justify-center rounded-md bg-card/70 backdrop-blur-md border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-all duration-200",
+        className
+      )}
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+    </button>
+  );
+};
 
 const linkifyPlainUrls = (text: string): string => {
   const parts = text.split(/(```[\s\S]*?```|`[^`]*`)/g);
