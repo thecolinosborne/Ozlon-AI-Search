@@ -105,6 +105,20 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
                       {children}
                     </a>
                   ),
+                  pre: ({ children }) => {
+                    const raw = extractText(children);
+                    return (
+                      <div className="relative group/codeblock my-2">
+                        <pre className="overflow-x-auto rounded-lg bg-muted/50 border border-border/40 p-3 text-xs">
+                          {children}
+                        </pre>
+                        <CopyButton
+                          text={raw}
+                          className="absolute top-2 right-2 w-7 h-7 opacity-0 group-hover/codeblock:opacity-100"
+                        />
+                      </div>
+                    );
+                  },
                 }}
               >
                 {linkifyPlainUrls(message.text)}
