@@ -36,17 +36,40 @@ export const googleAnalyticsIntegration: IntegrationManifest = {
           dimensions: { type: "array", items: { type: "string" } },
           metrics: { type: "array", items: { type: "string" } },
           limit: { type: "number" },
+          report: { type: "object", description: "Optional raw GA4 RunReport body. If provided, used as-is." },
         },
-        required: ["propertyId", "startDate", "endDate", "metrics"],
+        required: ["propertyId"],
       },
-      mapArgs: (a) => ({
-        propertyId: a.propertyId,
-        startDate: a.startDate,
-        endDate: a.endDate,
-        dimensions: a.dimensions,
-        metrics: a.metrics,
-        limit: a.limit,
-      }),
+      mapArgs: (a) => {
+        if (a.report && typeof a.report === "object") {
+          return { propertyId: a.propertyId, report: a.report };
+        }
+        const dims = Array.isArray(a.dimensions) ? a.dimensions : [];
+        const mets = Array.isArray(a.metrics) ? a.metrics : [];
+        const report: Record<string, unknown> = {
+          dateRanges: [{ startDate: a.startDate ?? "7daysAgo", endDate: a.endDate ?? "today" }],
+          dimensions: dims.map((name: string) => ({ name })),
+          metrics: mets.map((name: string) => ({ name })),
+        };
+        if (a.limit) report.limit = a.limit;
+        return { propertyId: a.propertyId, report };
+      },
+      formatter: (data) => {
+        const d = data as Record<string, unknown>;
+        const rows = (d?.rows as Array<Record<string, unknown>>) || [];
+        const dimHeaders = ((d?.dimensionHeaders as Array<{ name: string }>) || []).map((h) => h.name);
+        const metHeaders = ((d?.metricHeaders as Array<{ name: string }>) || []).map((h) => h.name);
+        if (!rows.length) return JSON.stringify({ rows: [], totals: d?.totals ?? null }, null, 2);
+        const flat = rows.map((r) => {
+          const dimVals = (r.dimensionValues as Array<{ value: string }>) || [];
+          const metVals = (r.metricValues as Array<{ value: string }>) || [];
+          const out: Record<string, string> = {};
+          dimHeaders.forEach((h, i) => (out[h] = dimVals[i]?.value ?? ""));
+          metHeaders.forEach((h, i) => (out[h] = metVals[i]?.value ?? ""));
+          return out;
+        });
+        return JSON.stringify({ rowCount: d?.rowCount ?? flat.length, rows: flat, totals: d?.totals ?? null }, null, 2);
+      },
     },
     {
       name: "ga4_realtime_report",
@@ -58,10 +81,24 @@ export const googleAnalyticsIntegration: IntegrationManifest = {
           propertyId: { type: "string" },
           dimensions: { type: "array", items: { type: "string" } },
           metrics: { type: "array", items: { type: "string" } },
+          report: { type: "object", description: "Optional raw GA4 realtime body." },
         },
         required: ["propertyId", "metrics"],
       },
-      mapArgs: (a) => ({ propertyId: a.propertyId, dimensions: a.dimensions, metrics: a.metrics }),
+      mapArgs: (a) => {
+        if (a.report && typeof a.report === "object") {
+          return { propertyId: a.propertyId, report: a.report };
+        }
+        const dims = Array.isArray(a.dimensions) ? a.dimensions : [];
+        const mets = Array.isArray(a.metrics) ? a.metrics : [];
+        return {
+          propertyId: a.propertyId,
+          report: {
+            dimensions: dims.map((name: string) => ({ name })),
+            metrics: mets.map((name: string) => ({ name })),
+          },
+        };
+      },
     },
     {
       name: "ga4_get_metadata",
