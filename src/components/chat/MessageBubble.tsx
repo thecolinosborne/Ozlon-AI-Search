@@ -146,7 +146,10 @@ export const MessageBubble = ({ message, onAction }: MessageBubbleProps) => {
             {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
           {!isUser && !message.isLoading && message.text && (
-            <MessagePlayButton text={message.text} />
+            <>
+              <MessagePlayButton text={message.text} />
+              <CopyButton text={message.text} className="w-5 h-5" />
+            </>
           )}
         </div>
       </div>
