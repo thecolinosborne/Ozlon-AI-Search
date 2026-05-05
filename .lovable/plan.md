@@ -1,79 +1,59 @@
-# Fix two latest issues: signals-synthesize 401 + web_investigate "query required"
+## 1. Fix GA4 `ga4_run_report` / `ga4_realtime_report` schema mismatch
 
-## Issue 1 — signals-synthesize 401 unauthorized
+**Root cause:** The manifest in `supabase/functions/_shared/integrations/google-analytics.ts` exposes flat fields (`propertyId`, `startDate`, `endDate`, `dimensions`, `metrics`, `limit`) to the AI, but its `mapArgs` passes them through unchanged. The edge function `supabase/functions/google-analytics/index.ts` expects a nested `report` object containing GA4's `dateRanges`, `dimensions`, `metrics`, `limit`. Result: every call returns `"report object is required"`.
 
-**Cause.** `resolveUser()` in `supabase/functions/signals-synthesize/index.ts` (lines 32–47) uses `sb.auth.getClaims(token)` and explicit-token `sb.auth.getUser(token)`. With `@supabase/supabase-js@2.49.1` and Supabase's signing-keys JWTs, both paths fail for some live sessions (we see this for the currently signed-in user). Other working functions (e.g. `signals-brief`, `research`) use the **header-injection pattern** and succeed.
+**Fix (manifest only — edge function stays as the canonical GA4 shape):**
 
-**Fix (one file).** Replace `resolveUser()` with the same pattern used in `signals-brief` and `research`:
+In `_shared/integrations/google-analytics.ts`, update `mapArgs` for the two report tools to build the GA4 payload from the flat inputs:
 
-```ts
-async function resolveUser(authHeader: string | null): Promise<string | null> {
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const sb = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false },
-  });
-  try {
-    const { data, error } = await sb.auth.getUser();
-    if (!error && data?.user?.id) return data.user.id;
-  } catch (_) { /* ignore */ }
-  // Last-resort fallback for older sessions
-  try {
-    const token = authHeader.slice(7);
-    const { data } = await sb.auth.getUser(token);
-    if (data.user?.id) return data.user.id;
-  } catch (_) { /* ignore */ }
-  return null;
-}
-```
+- `ga4_run_report.mapArgs(a)` returns:
+  ```
+  {
+    propertyId: a.propertyId,
+    report: {
+      dateRanges: [{ startDate: a.startDate, endDate: a.endDate }],
+      dimensions: (a.dimensions ?? []).map(name => ({ name })),
+      metrics:    (a.metrics    ?? []).map(name => ({ name })),
+      ...(a.limit ? { limit: a.limit } : {}),
+    }
+  }
+  ```
+- `ga4_realtime_report.mapArgs(a)` returns:
+  ```
+  {
+    propertyId: a.propertyId,
+    report: {
+      dimensions: (a.dimensions ?? []).map(name => ({ name })),
+      metrics:    (a.metrics    ?? []).map(name => ({ name })),
+    }
+  }
+  ```
 
-Also add a one-line `console.warn("[signals-synthesize] auth failed; header present:", !!authHeader)` next to the 401 response (line 972) so future regressions are diagnosable from edge logs.
+Also accept an already-nested `report` passthrough so the AI can send raw GA4 JSON if it wants:
+- If `a.report` is provided, use it as-is and only forward `propertyId` + `report`.
 
-Cron path (`?mode=lookahead_tick` / `?mode=daily_digest_tick`) is untouched — it uses `x-cron-key`.
+**Optional formatter** (small, additive): add a `formatter` for `ga4_run_report` that flattens `rows[]` into `{ dimensions: {...}, metrics: {...} }` plus a `totals` summary so the AI gets clean tabular data instead of GA4's verbose envelope. Falls back to default JSON if shape is unexpected.
 
----
+No edge function change, no new tools, no schema field renames — the AI keeps using the documented flat schema.
 
-## Issue 2 — `web_investigate` returns "Investigation failed: query required"
+## 2. Easy-to-copy prompt / code / text blocks in chat
 
-Edge log shows the streaming upgrade firing and the research function rejecting it:
-```
-[web_investigate] delivered_via=stream
-Tool result (web_investigate): FAILED Investigation failed: query required
-```
+**Where:** `src/components/chat/MessageBubble.tsx` (assistant markdown branch only — user bubbles untouched).
 
-**Cause.** `streamWebInvestigate()` in `supabase/functions/chat/index.ts` (lines 7449–7463) posts a **flat** body to `/functions/v1/research`:
-```ts
-body: JSON.stringify({
-  action: 'web_investigate_stream',
-  query: args.query,
-  contextHint: args.contextHint,
-}),
-```
-but `research/index.ts` (line 992) reads `const params = (body?.params ?? {})`, then `runInvestigation` requires `params.query` (line 766–767, throws "query required"). So the SSE emits an `error` event → chat surfaces "Investigation failed: query required".
+**Changes:**
 
-The non-streaming path works because it goes through `_dispatcher.ts`, which already wraps args under `params` for `envelope: "nested"` integrations (line 47–49). The streaming path bypasses the dispatcher.
+1. Add a small `CopyButton` subcomponent (icon-only, `Copy` → `Check` for 1.5s on success, uses `navigator.clipboard.writeText`, calm Vision-Pro styling: `bg-card/60 backdrop-blur` border, `opacity-0 group-hover:opacity-100` reveal, top-right absolute).
 
-**Fix (one file).** Wrap the body under `params` in `streamWebInvestigate()`:
+2. Override `ReactMarkdown` `components` for:
+   - **`pre`**: wrap in a `relative group` div, render the existing `<pre>` inside, drop a `CopyButton` in the top-right that copies the inner text. This covers all fenced ``` blocks (prompts, code, JSON).
+   - **`code`** (inline): leave untouched (no button, just styled).
 
-```ts
-body: JSON.stringify({
-  action: 'web_investigate_stream',
-  params: {
-    query: args.query,
-    contextHint: args.contextHint,
-  },
-}),
-```
+3. Add a single "copy whole message" `CopyButton` next to the existing timestamp + `MessagePlayButton` row at line 91-98, assistant messages only. Copies `message.text` (raw markdown — best for re-use as a prompt).
 
-That matches the envelope `research/index.ts` actually parses, with no changes to research itself.
-
----
+No layout shift, no redesign, no new dependencies (lucide `Copy`/`Check` already available).
 
 ## Verification
 
-1. Deploy `signals-synthesize` and `chat`.
-2. **Signals**: load `/signals`, trigger "Scan now" — expect 200, no `unauthorized`. Edge logs should be clean.
-3. **Investigate**: send a chat message that triggers `web_investigate` (e.g. "research the best hair product ecommerce niche") — expect streamed task updates ("Planned N sub-queries", "Searched: …", "Synthesizing answer", "Self-critique complete") and a real answer instead of "Investigation failed: query required".
-
-## Out of scope
-No schema, RLS, UI, or other edge function changes. Two surgical fixes, two files.
+- Trigger `ga4_run_report` from chat with `{propertyId, startDate:"7daysAgo", endDate:"today", dimensions:["pagePath"], metrics:["screenPageViews"]}` → expect rows back, no schema error.
+- Render an assistant message with a fenced code block → hover shows copy button; click → clipboard contains the block; check icon flashes.
+- Hover the message footer → "copy message" button appears next to the play button.
