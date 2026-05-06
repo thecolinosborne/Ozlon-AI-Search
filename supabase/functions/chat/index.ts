@@ -3007,7 +3007,7 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   mark_email_read: { fn: 'google-gmail', action: 'modify_message', mapArgs: (a) => ({ id: a.message_id, removeLabelIds: ['UNREAD'] }) },
   // Tier 1 Gmail tools migrated to manifest registry — see _shared/integrations/gmail.ts
   // Drive
-  search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ q: a.query, pageSize: a.max_results }) },
+  search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ name: a.query, pageSize: a.max_results }) },
   // Calendar
   create_calendar_event: { fn: 'google-calendar', action: 'create_event', mapArgs: (a) => ({ summary: a.title, description: a.description, start: a.start_time, end: a.end_time, attendees: a.attendees, location: a.location }) },
   // Tier 2: Calendar Pro — additive
