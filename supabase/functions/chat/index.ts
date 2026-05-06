@@ -3007,7 +3007,7 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   mark_email_read: { fn: 'google-gmail', action: 'modify_message', mapArgs: (a) => ({ id: a.message_id, removeLabelIds: ['UNREAD'] }) },
   // Tier 1 Gmail tools migrated to manifest registry — see _shared/integrations/gmail.ts
   // Drive
-  search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ q: a.query, pageSize: a.max_results }) },
+  search_google_drive: { fn: 'google-drive', action: 'search_files', mapArgs: (a) => ({ name: a.query, pageSize: a.max_results }) },
   // Calendar
   create_calendar_event: { fn: 'google-calendar', action: 'create_event', mapArgs: (a) => ({ summary: a.title, description: a.description, start: a.start_time, end: a.end_time, attendees: a.attendees, location: a.location }) },
   // Tier 2: Calendar Pro — additive
@@ -3617,8 +3617,10 @@ async function executeToolCall(
       case 'ghl_search_contacts': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageSize: (args.limit as number) || 20 };
-        if (args.query) searchBody.query = args.query;
+        const rawLimit = Number(args.limit ?? 20);
+        const pageLimit = Math.max(1, Math.min(100, isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20));
+        const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageLimit };
+        if (args.query) searchBody.query = String(args.query);
         if (args.filters) { try { Object.assign(searchBody, JSON.parse(args.filters as string)); } catch { /* ignore */ } }
         const data = await callGHL('/contacts/search', 'POST', searchBody, ghlCreds?.apiKey) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
         const contacts = data.contacts || [];

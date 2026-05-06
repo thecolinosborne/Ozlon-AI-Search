@@ -59,8 +59,8 @@ serve(async (req) => {
       }
 
       case "search_files": {
-        const name = String((params as AnyJson).name || "");
-        if (!name) return jsonErr("name is required");
+        const name = String((params as AnyJson).name || (params as AnyJson).q || (params as AnyJson).query || "");
+        if (!name) return jsonErr("name (or q/query) is required");
         const q = `name contains '${name.replace(/'/g, "\\'")}' and trashed = false`;
         const qs = new URLSearchParams();
         qs.set("q", q);
