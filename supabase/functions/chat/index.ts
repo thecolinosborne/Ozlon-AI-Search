@@ -3617,8 +3617,10 @@ async function executeToolCall(
       case 'ghl_search_contacts': {
         const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
         if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured.' };
-        const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageSize: (args.limit as number) || 20 };
-        if (args.query) searchBody.query = args.query;
+        const rawLimit = Number(args.limit ?? 20);
+        const pageLimit = Math.max(1, Math.min(100, isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20));
+        const searchBody: Record<string, unknown> = { locationId: GHL_LOCATION_ID, pageLimit };
+        if (args.query) searchBody.query = String(args.query);
         if (args.filters) { try { Object.assign(searchBody, JSON.parse(args.filters as string)); } catch { /* ignore */ } }
         const data = await callGHL('/contacts/search', 'POST', searchBody, ghlCreds?.apiKey) as { contacts?: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }[] };
         const contacts = data.contacts || [];
