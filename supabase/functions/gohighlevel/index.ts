@@ -205,9 +205,19 @@ serve(async (req) => {
         break;
       }
       case 'search_contacts': {
+        const body: Record<string, unknown> = { locationId: GHL_LOCATION_ID, ...reqBody };
+        if (body.limit != null && body.pageLimit == null) {
+          body.pageLimit = Math.min(100, Math.max(1, Number(body.limit) || 20));
+          delete body.limit;
+        }
+        if (body.pageSize != null && body.pageLimit == null) {
+          body.pageLimit = Math.min(100, Math.max(1, Number(body.pageSize) || 20));
+          delete body.pageSize;
+        }
+        if (body.pageLimit == null) body.pageLimit = 20;
         endpoint = `${GHL_BASE_URL}/contacts/search`;
-        method = 'POST'; // V2 uses POST for search (was GET before, now uses POST with body)
-        fetchBody = JSON.stringify({ locationId: GHL_LOCATION_ID, ...reqBody });
+        method = 'POST';
+        fetchBody = JSON.stringify(body);
         break;
       }
 
