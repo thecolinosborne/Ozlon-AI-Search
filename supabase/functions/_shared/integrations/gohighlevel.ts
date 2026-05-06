@@ -87,7 +87,7 @@ export const goHighLevelIntegration: IntegrationManifest = {
         },
         required: ["query"],
       },
-      mapArgs: (a) => ({ params: { query: a.query, limit: a.limit } }),
+      mapArgs: (a) => ({ params: { query: a.query, pageLimit: a.limit ?? 20 } }),
       formatter: fmtContacts,
       sideEffect: "read",
       cost: "cheap",
