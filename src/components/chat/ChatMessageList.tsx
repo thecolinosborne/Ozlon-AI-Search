@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRight, Cog } from "lucide-react";
+import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRight, Cog, Copy, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
@@ -79,13 +79,65 @@ interface ChatMessageListProps {
   playMessage: (id: string, text: string) => void;
   playingMessageId: string | null;
   loadingAudioId: string | null;
+  onRegenerate?: (messageId: string) => void;
+  isLoading?: boolean;
 }
+
+const ActionIconButton = ({
+  onClick,
+  disabled,
+  active,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    title={title}
+    aria-label={title}
+    className={cn(
+      "inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors",
+      "text-muted-foreground hover:text-foreground hover:bg-muted/60",
+      "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+      active && "text-foreground"
+    )}
+  >
+    {children}
+  </button>
+);
+
+const CopyAction = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  const handle = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <ActionIconButton onClick={handle} title={copied ? "Copied" : "Copy"} active={copied}>
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+    </ActionIconButton>
+  );
+};
 
 export const ChatMessageList = ({
   messages,
   playMessage,
   playingMessageId,
   loadingAudioId,
+  onRegenerate,
+  isLoading,
 }: ChatMessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -100,8 +152,8 @@ export const ChatMessageList = ({
           <div
             key={message.id}
             className={cn(
-              "flex",
-              message.role === "user" ? "justify-end" : "justify-start"
+              "flex flex-col",
+              message.role === "user" ? "items-end" : "items-start"
             )}
           >
             <div
@@ -187,25 +239,32 @@ export const ChatMessageList = ({
               )}
             </div>
             {message.role === "assistant" && message.content && (
-              <button
-                onClick={() => playMessage(message.id, message.content)}
-                disabled={loadingAudioId === message.id}
-                className={cn(
-                  "mt-1 p-1.5 rounded-full transition-all",
-                  "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
-                  playingMessageId === message.id && "text-blue-500",
-                  loadingAudioId === message.id && "opacity-50"
+              <div className="mt-1.5 flex items-center gap-0.5 -ml-1">
+                <CopyAction text={message.content} />
+                <ActionIconButton
+                  onClick={() => playMessage(message.id, message.content)}
+                  disabled={loadingAudioId === message.id}
+                  active={playingMessageId === message.id}
+                  title={playingMessageId === message.id ? "Stop" : "Speak"}
+                >
+                  {loadingAudioId === message.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : playingMessageId === message.id ? (
+                    <VolumeX className="w-3.5 h-3.5" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                </ActionIconButton>
+                {onRegenerate && (
+                  <ActionIconButton
+                    onClick={() => onRegenerate(message.id)}
+                    disabled={isLoading}
+                    title="Regenerate"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </ActionIconButton>
                 )}
-                title={playingMessageId === message.id ? "Stop" : "Play"}
-              >
-                {loadingAudioId === message.id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : playingMessageId === message.id ? (
-                  <VolumeX className="w-4 h-4" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
+              </div>
             )}
           </div>
         ))}
