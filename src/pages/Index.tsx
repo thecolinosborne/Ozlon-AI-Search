@@ -194,6 +194,18 @@ const Index = () => {
     sendMessage(action.message, action.intent);
   }, [sendMessage]);
 
+  const handleRegenerate = useCallback((messageId: string) => {
+    if (isLoading) return;
+    const idx = renderedMessages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (renderedMessages[i].role === "user" && renderedMessages[i].content) {
+        sendMessage(renderedMessages[i].content);
+        return;
+      }
+    }
+  }, [renderedMessages, sendMessage, isLoading]);
+
   // ── Session transition handlers ──────────────────────────────────────
   // All transitions: abort stream (which fails stale tasks), reset ephemeral,
   // and clear completed task UI to prevent cross-session leaks.
