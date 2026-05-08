@@ -152,8 +152,8 @@ export const ChatMessageList = ({
           <div
             key={message.id}
             className={cn(
-              "flex",
-              message.role === "user" ? "justify-end" : "justify-start"
+              "flex flex-col",
+              message.role === "user" ? "items-end" : "items-start"
             )}
           >
             <div
