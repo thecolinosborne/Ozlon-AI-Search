@@ -239,25 +239,32 @@ export const ChatMessageList = ({
               )}
             </div>
             {message.role === "assistant" && message.content && (
-              <button
-                onClick={() => playMessage(message.id, message.content)}
-                disabled={loadingAudioId === message.id}
-                className={cn(
-                  "mt-1 p-1.5 rounded-full transition-all",
-                  "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100",
-                  playingMessageId === message.id && "text-blue-500",
-                  loadingAudioId === message.id && "opacity-50"
+              <div className="mt-1.5 flex items-center gap-0.5 -ml-1">
+                <CopyAction text={message.content} />
+                <ActionIconButton
+                  onClick={() => playMessage(message.id, message.content)}
+                  disabled={loadingAudioId === message.id}
+                  active={playingMessageId === message.id}
+                  title={playingMessageId === message.id ? "Stop" : "Speak"}
+                >
+                  {loadingAudioId === message.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : playingMessageId === message.id ? (
+                    <VolumeX className="w-3.5 h-3.5" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                </ActionIconButton>
+                {onRegenerate && (
+                  <ActionIconButton
+                    onClick={() => onRegenerate(message.id)}
+                    disabled={isLoading}
+                    title="Regenerate"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </ActionIconButton>
                 )}
-                title={playingMessageId === message.id ? "Stop" : "Play"}
-              >
-                {loadingAudioId === message.id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : playingMessageId === message.id ? (
-                  <VolumeX className="w-4 h-4" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
+              </div>
             )}
           </div>
         ))}
