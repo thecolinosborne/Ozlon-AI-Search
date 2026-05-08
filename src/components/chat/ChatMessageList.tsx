@@ -79,13 +79,65 @@ interface ChatMessageListProps {
   playMessage: (id: string, text: string) => void;
   playingMessageId: string | null;
   loadingAudioId: string | null;
+  onRegenerate?: (messageId: string) => void;
+  isLoading?: boolean;
 }
+
+const ActionIconButton = ({
+  onClick,
+  disabled,
+  active,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    title={title}
+    aria-label={title}
+    className={cn(
+      "inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors",
+      "text-muted-foreground hover:text-foreground hover:bg-muted/60",
+      "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+      active && "text-foreground"
+    )}
+  >
+    {children}
+  </button>
+);
+
+const CopyAction = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  const handle = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <ActionIconButton onClick={handle} title={copied ? "Copied" : "Copy"} active={copied}>
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+    </ActionIconButton>
+  );
+};
 
 export const ChatMessageList = ({
   messages,
   playMessage,
   playingMessageId,
   loadingAudioId,
+  onRegenerate,
+  isLoading,
 }: ChatMessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
