@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, memo, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRight, Cog, Copy, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
