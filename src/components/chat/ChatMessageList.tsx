@@ -180,6 +180,50 @@ export const ChatMessageList = ({
                             {children}
                           </a>
                         ),
+                        pre: ({ children, ...props }) => {
+                          const extractText = (node: any): string => {
+                            if (node == null) return "";
+                            if (typeof node === "string") return node;
+                            if (Array.isArray(node)) return node.map(extractText).join("");
+                            if (node.props?.children) return extractText(node.props.children);
+                            return "";
+                          };
+                          const text = extractText(children);
+                          const blockId = `${message.id}-block-${text.slice(0, 24)}`;
+                          return (
+                            <div className="not-prose group relative my-2 rounded-lg border border-border/40 bg-muted">
+                              <pre {...props} className="whitespace-pre-wrap break-words p-3 pr-3 text-sm text-foreground overflow-hidden">
+                                {children}
+                              </pre>
+                              <div className="flex items-center justify-end gap-0.5 border-t border-border/30 px-1 py-1">
+                                <CopyAction text={text} />
+                                <ActionIconButton
+                                  onClick={() => playMessage(blockId, text)}
+                                  disabled={loadingAudioId === blockId}
+                                  active={playingMessageId === blockId}
+                                  title={playingMessageId === blockId ? "Stop" : "Speak"}
+                                >
+                                  {loadingAudioId === blockId ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : playingMessageId === blockId ? (
+                                    <VolumeX className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Volume2 className="w-3.5 h-3.5" />
+                                  )}
+                                </ActionIconButton>
+                                {onRegenerate && (
+                                  <ActionIconButton
+                                    onClick={() => onRegenerate(message.id)}
+                                    disabled={isLoading}
+                                    title="Regenerate"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </ActionIconButton>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        },
                       }}
                       remarkPlugins={[remarkGfm]}
                       urlTransform={(url) => url}
