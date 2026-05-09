@@ -238,6 +238,11 @@ export const ChatMessageList = ({
                 <span className="whitespace-pre-wrap">{message.content}</span>
               )}
             </div>
+            {message.role === "user" && message.content && (
+              <div className="mt-1.5 flex items-center gap-0.5 -mr-1">
+                <CopyAction text={message.content} />
+              </div>
+            )}
             {message.role === "assistant" && message.content && (
               <div className="mt-1.5 flex items-center gap-0.5 -ml-1">
                 <CopyAction text={message.content} />
