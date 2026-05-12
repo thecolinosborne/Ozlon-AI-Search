@@ -16,6 +16,7 @@ export type ChatMessage = {
   orchestration?: OrchestrationTraceEvent;
   liveSteps?: LiveStep[];
   artifactId?: string;
+  researchReportId?: string;
 };
 
 /**
