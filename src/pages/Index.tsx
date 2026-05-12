@@ -74,7 +74,8 @@ const Index = () => {
     () => sessionMessages.map((m) => {
       const meta = m.metadata as Record<string, unknown> | null | undefined;
       const artifactId = typeof meta?.artifact_id === "string" ? meta.artifact_id : undefined;
-      return { id: m.id, role: m.role, content: m.content, artifactId };
+      const researchReportId = typeof meta?.research_report_id === "string" ? meta.research_report_id : undefined;
+      return { id: m.id, role: m.role, content: m.content, artifactId, researchReportId };
     }),
     [sessionMessages]
   );
