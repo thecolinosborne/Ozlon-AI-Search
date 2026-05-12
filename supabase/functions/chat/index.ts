@@ -3309,7 +3309,7 @@ async function executeToolCall(
         extra = { apiKey: ghlCreds.apiKey, locationId: ghlCreds.locationId };
       }
       const dispatched = await dispatchTool(toolName, args, authHeader, extra);
-      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result };
+      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
     }
 
     // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
