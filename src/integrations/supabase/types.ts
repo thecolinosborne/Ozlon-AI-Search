@@ -2079,6 +2079,78 @@ export type Database = {
         }
         Relationships: []
       }
+      research_reports: {
+        Row: {
+          answer: string
+          confidence: number | null
+          conversation_id: string | null
+          created_at: string
+          embedding: string | null
+          follow_ups: Json
+          id: string
+          is_living_thread: boolean
+          last_refreshed_at: string | null
+          message_id: string | null
+          metadata: Json
+          mode: string
+          personal_context: Json
+          query: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          answer: string
+          confidence?: number | null
+          conversation_id?: string | null
+          created_at?: string
+          embedding?: string | null
+          follow_ups?: Json
+          id?: string
+          is_living_thread?: boolean
+          last_refreshed_at?: string | null
+          message_id?: string | null
+          metadata?: Json
+          mode?: string
+          personal_context?: Json
+          query: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          answer?: string
+          confidence?: number | null
+          conversation_id?: string | null
+          created_at?: string
+          embedding?: string | null
+          follow_ups?: Json
+          id?: string
+          is_living_thread?: boolean
+          last_refreshed_at?: string | null
+          message_id?: string | null
+          metadata?: Json
+          mode?: string
+          personal_context?: Json
+          query?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_reports_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "research_reports_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       research_runs: {
         Row: {
           action: string
@@ -2138,6 +2210,59 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "research_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      research_sources: {
+        Row: {
+          citation_index: number | null
+          created_at: string
+          id: string
+          metadata: Json
+          reference_id: string | null
+          relevance_score: number | null
+          report_id: string
+          snippet: string | null
+          source_type: string
+          title: string | null
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          citation_index?: number | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          reference_id?: string | null
+          relevance_score?: number | null
+          report_id: string
+          snippet?: string | null
+          source_type: string
+          title?: string | null
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          citation_index?: number | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          reference_id?: string | null
+          relevance_score?: number | null
+          report_id?: string
+          snippet?: string | null
+          source_type?: string
+          title?: string | null
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_sources_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
             referencedColumns: ["id"]
           },
         ]
