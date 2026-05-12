@@ -250,6 +250,9 @@ const MessageItemInner = ({
             {message.content && message.artifactId && (
               <InvestigationCard artifactId={message.artifactId} />
             )}
+            {message.content && message.researchReportId && (
+              <ResearchCard reportId={message.researchReportId} />
+            )}
             {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0) || message.orchestration) && (
               <div className="mt-2 not-prose flex flex-wrap items-center gap-2">
                 {message.provider ? (
