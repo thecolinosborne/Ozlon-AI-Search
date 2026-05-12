@@ -194,5 +194,45 @@ export const researchIntegration: IntegrationManifest = {
         ).join("\n\n---\n\n");
       },
     },
+    {
+      name: "personal_research",
+      description:
+        "DECISION-GRADE research that fuses live web findings with the user's own Wisdom Engine memories (principles, prior decisions, preferences, goals). Use this when the user asks anything where THEIR context matters: 'should I…', 'what do you think about…', 'help me decide…', 'research X for me', 'who is X' (when they may know them), 'is this a good idea', or any open question where remembering what they care about would change the answer. ALWAYS prefer this over web_investigate when the user is asking for a recommendation, opinion, or decision. Returns: a synthesized answer with web [n] and personal [Wn] citations, a confidence score, follow-up questions, and a persisted reportId so it can be saved as a living thread. The frontend renders a Research Card automatically.",
+      action: "personal_research",
+      sideEffect: "external_call",
+      cost: "expensive",
+      schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The user's question, exactly as asked or lightly cleaned." },
+          contextHint: { type: "string", description: "Optional context from the conversation to disambiguate." },
+          saveAsThread: { type: "boolean", description: "Persist as a living thread the user can re-open later. Default false; set true if user says 'save this' or 'remember this research'." },
+        },
+        required: ["query"],
+      },
+      mapArgs: (a) => ({
+        query: a.query,
+        contextHint: a.contextHint,
+        saveAsThread: a.saveAsThread === true,
+      }),
+      formatter: (data) => {
+        const d = data as {
+          answer?: string;
+          confidence?: number;
+          sources?: Array<{ source_type: string; index: number; url?: string; title?: string }>;
+          personalContext?: string[];
+          followUps?: string[];
+        };
+        if (!d?.answer) return "No research synthesized.";
+        const conf = typeof d.confidence === "number" ? ` (confidence ${(d.confidence * 100).toFixed(0)}%)` : "";
+        const web = (d.sources ?? []).filter((s) => s.source_type === "web")
+          .map((s) => `[${s.index}] ${s.title ?? s.url} — ${s.url ?? ""}`).join("\n");
+        const wisdom = (d.sources ?? []).filter((s) => s.source_type === "wisdom")
+          .map((s) => `[W${s.index}] ${s.title ?? ""}`).join("\n");
+        const ctx = d.personalContext && d.personalContext.length ? `\n\nPersonal context:\n${d.personalContext.map((c) => `• ${c}`).join("\n")}` : "";
+        const fu = d.followUps && d.followUps.length ? `\n\nFollow-ups:\n${d.followUps.map((f) => `• ${f}`).join("\n")}` : "";
+        return `${d.answer}${conf}${ctx}${web ? `\n\nSources:\n${web}` : ""}${wisdom ? `\n${wisdom}` : ""}${fu}`;
+      },
+    },
   ],
 };
