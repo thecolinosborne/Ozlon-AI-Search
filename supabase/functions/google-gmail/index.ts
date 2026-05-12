@@ -447,6 +447,93 @@ serve(async (req) => {
         return jsonOk({ success: true, message: data });
       }
 
+      // ── Tier 1: List attachments on a single message ──
+      case "list_attachments": {
+        const messageId = String((params as AnyJson).messageId || "");
+        if (!messageId) return jsonErr("messageId is required");
+        const msg = await gFetch(
+          userId,
+          `/messages/${encodeURIComponent(messageId)}?format=full`,
+        );
+        type GPart = {
+          filename?: string;
+          mimeType?: string;
+          body?: { attachmentId?: string; size?: number };
+          headers?: Array<{ name?: string; value?: string }>;
+          parts?: GPart[];
+        };
+        const flat: GPart[] = [];
+        const walk = (p?: GPart) => {
+          if (!p) return;
+          flat.push(p);
+          (p.parts || []).forEach(walk);
+        };
+        walk((msg as { payload?: GPart }).payload);
+        const attachments = flat
+          .filter((p) => p.filename && p.body?.attachmentId)
+          .map((p) => {
+            const cd = (p.headers || []).find(
+              (h) => (h.name || "").toLowerCase() === "content-disposition",
+            )?.value || "";
+            return {
+              attachmentId: p.body!.attachmentId,
+              filename: p.filename,
+              mimeType: p.mimeType || "application/octet-stream",
+              sizeBytes: Number(p.body?.size || 0),
+              inline: /inline/i.test(cd),
+            };
+          });
+        return jsonOk({ success: true, messageId, count: attachments.length, attachments });
+      }
+
+      // ── Tier 1: List attachments across every message in a thread ──
+      case "list_thread_attachments": {
+        const threadId = String((params as AnyJson).threadId || "");
+        if (!threadId) return jsonErr("threadId is required");
+        const thread = await gFetch(
+          userId,
+          `/threads/${encodeURIComponent(threadId)}?format=full`,
+        );
+        type GPart = {
+          filename?: string;
+          mimeType?: string;
+          body?: { attachmentId?: string; size?: number };
+          parts?: GPart[];
+        };
+        type GMsg = {
+          id?: string;
+          internalDate?: string;
+          payload?: { headers?: Array<{ name?: string; value?: string }> } & GPart;
+        };
+        const out: AnyJson[] = [];
+        for (const m of ((thread as { messages?: GMsg[] }).messages || [])) {
+          const headers = m.payload?.headers || [];
+          const hdr = (n: string) =>
+            headers.find((h) => (h.name || "").toLowerCase() === n.toLowerCase())?.value || "";
+          const flat: GPart[] = [];
+          const walk = (p?: GPart) => {
+            if (!p) return;
+            flat.push(p);
+            (p.parts || []).forEach(walk);
+          };
+          walk(m.payload);
+          for (const p of flat) {
+            if (!p.filename || !p.body?.attachmentId) continue;
+            out.push({
+              messageId: m.id,
+              internalDate: m.internalDate,
+              from: hdr("From"),
+              subject: hdr("Subject"),
+              attachmentId: p.body.attachmentId,
+              filename: p.filename,
+              mimeType: p.mimeType || "application/octet-stream",
+              sizeBytes: Number(p.body?.size || 0),
+            });
+          }
+        }
+        return jsonOk({ success: true, threadId, count: out.length, attachments: out });
+      }
+
       // ── Tier 1: Attachments ──
       case "get_attachment": {
         const messageId = String((params as AnyJson).messageId || "");
