@@ -181,6 +181,26 @@ export const gmailIntegration: IntegrationManifest = {
       },
     },
     {
+      name: "gmail_list_attachments",
+      description: "List downloadable attachments on a single Gmail message. Returns attachmentId, filename, mimeType, sizeBytes for each.",
+      action: "list_attachments",
+      schema: {
+        type: "object",
+        properties: { messageId: { type: "string" } },
+        required: ["messageId"],
+      },
+    },
+    {
+      name: "gmail_list_thread_attachments",
+      description: "List downloadable attachments across EVERY message in a Gmail thread. Use this when the user references a file in an email but you don't yet know which specific message in the thread carries the attachment (e.g. 'the PDF in Ben's email').",
+      action: "list_thread_attachments",
+      schema: {
+        type: "object",
+        properties: { threadId: { type: "string" } },
+        required: ["threadId"],
+      },
+    },
+    {
       name: "gmail_get_attachment",
       description: "Download a Gmail attachment by message ID + attachment ID. Returns base64 data. For analysis/summarization, prefer gmail_analyze_attachment.",
       action: "get_attachment",
