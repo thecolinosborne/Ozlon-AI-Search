@@ -1308,6 +1308,12 @@ Deno.serve(async (req) => {
       succeeded = attempted;
       resultCount = (r.matches as unknown[]).length;
       result = r;
+    } else if (action === "personal_research") {
+      attempted = ["planner", "tavily", "firecrawl", "wisdom", "gateway"];
+      const r = await handlePersonalResearch(params, userId);
+      succeeded = attempted;
+      resultCount = ((r.sources as unknown[]) ?? []).length;
+      result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
     }
