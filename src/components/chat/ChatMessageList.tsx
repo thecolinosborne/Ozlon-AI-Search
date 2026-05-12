@@ -7,6 +7,7 @@ import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
 import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
 import { InvestigationCard } from "./InvestigationCard";
+import { ResearchCard } from "./ResearchCard";
 
 const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
   if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
@@ -248,6 +249,9 @@ const MessageItemInner = ({
             ) : null}
             {message.content && message.artifactId && (
               <InvestigationCard artifactId={message.artifactId} />
+            )}
+            {message.content && message.researchReportId && (
+              <ResearchCard reportId={message.researchReportId} />
             )}
             {message.content && (message.provider || (message.toolsUsed && message.toolsUsed.length > 0) || message.orchestration) && (
               <div className="mt-2 not-prose flex flex-wrap items-center gap-2">

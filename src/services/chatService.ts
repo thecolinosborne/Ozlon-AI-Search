@@ -155,6 +155,13 @@ export interface InvestigationArtifactEvent {
   question: string;
 }
 
+export interface ResearchArtifactEvent {
+  report_id: string;
+  message_id: string | null;
+  query: string;
+  confidence: number;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -175,6 +182,7 @@ export interface StreamChatOptions {
   onToolsUsed?: (data: ToolsUsedEvent) => void;
   onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
   onInvestigationArtifact?: (data: InvestigationArtifactEvent) => void;
+  onResearchArtifact?: (data: ResearchArtifactEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -203,6 +211,7 @@ export async function streamChat({
   onToolsUsed,
   onOrchestrationTrace,
   onInvestigationArtifact,
+  onResearchArtifact,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -354,6 +363,12 @@ export async function streamChat({
           // Handle investigation_artifact events (persisted research artifact id)
           if (currentEventType === 'investigation_artifact' && onInvestigationArtifact) {
             onInvestigationArtifact(parsed as InvestigationArtifactEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle research_artifact events (personal_research report id)
+          if (currentEventType === 'research_artifact' && onResearchArtifact) {
+            onResearchArtifact(parsed as ResearchArtifactEvent);
             currentEventType = 'message';
             continue;
           }

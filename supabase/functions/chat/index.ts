@@ -3165,7 +3165,7 @@ async function executeToolCall(
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }[] },
-): Promise<{ success: boolean; result: string }> {
+): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> }> {
   try {
     // ---- multi_action: parallel fan-out ----
     if (toolName === 'multi_action') {
@@ -3309,7 +3309,7 @@ async function executeToolCall(
         extra = { apiKey: ghlCreds.apiKey, locationId: ghlCreds.locationId };
       }
       const dispatched = await dispatchTool(toolName, args, authHeader, extra);
-      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result };
+      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
     }
 
     // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
@@ -7821,12 +7821,13 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }> }> {
+): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }>; researchReports: Array<{ reportId: string; query: string; confidence: number }> }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
   const toolsUsed: string[] = [];
   const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
+  const researchReports: Array<{ reportId: string; query: string; confidence: number }> = [];
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
@@ -8167,6 +8168,18 @@ async function runToolLoop(
               payload: result.structured,
             });
           }
+          // Capture personal_research report for ResearchCard rendering.
+          if (tc.function.name === 'personal_research' && result.success && result.structured) {
+            const s = result.structured as Record<string, unknown>;
+            const rid = typeof s.reportId === 'string' ? s.reportId : null;
+            if (rid) {
+              researchReports.push({
+                reportId: rid,
+                query: (typeof s.query === 'string' ? s.query : (args.query as string)) || '',
+                confidence: typeof s.confidence === 'number' ? s.confidence : 0,
+              });
+            }
+          }
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
@@ -8206,10 +8219,10 @@ async function runToolLoop(
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '', toolsUsed, investigations };
+    return { role: 'assistant', content: msg.content || '', toolsUsed, investigations, researchReports };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations };
+  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations, researchReports };
 }
 
 // ============================================================================
@@ -9746,6 +9759,23 @@ Execute these in order. Be decisive — the user has already been shown this pla
               }
             } catch (e) {
               console.warn('[investigation_artifact] persistence error:', e);
+            }
+
+            // Emit research_report artifacts so the client can render <ResearchCard />
+            try {
+              if (result.researchReports && result.researchReports.length > 0) {
+                const assistantMessageId = (body.assistantMessageId as string) || null;
+                for (const r of result.researchReports) {
+                  await writer.write(encoder.encode(`event: research_artifact\ndata: ${JSON.stringify({
+                    report_id: r.reportId,
+                    message_id: assistantMessageId,
+                    query: r.query,
+                    confidence: r.confidence,
+                  })}\n\n`));
+                }
+              }
+            } catch (e) {
+              console.warn('[research_artifact] emit error:', e);
             }
 
             // Emit orchestration trace before DONE so the client can attach it to the message

@@ -16,6 +16,7 @@ export type ChatMessage = {
   orchestration?: OrchestrationTraceEvent;
   liveSteps?: LiveStep[];
   artifactId?: string;
+  researchReportId?: string;
 };
 
 /**
@@ -116,7 +117,7 @@ export function useChatStream({
 
   // Keep ephemeral chip metadata (provider/toolsUsed/orchestration/artifactId) alive
   // after a message is persisted, since persistence only stores {id, role, content}.
-  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId">>>(new Map());
+  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId">>>(new Map());
   const [metadataOverlayVersion, setMetadataOverlayVersion] = useState(0);
 
   const persistAssistantMessage = useCallback(
@@ -328,6 +329,14 @@ export function useChatStream({
               )
             );
           },
+          onResearchArtifact: (info) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, researchReportId: info.report_id } : m
+              )
+            );
+          },
           onDone: () => {
             if (!isCurrentRequest()) return;
             outcome = "success";
@@ -387,6 +396,7 @@ export function useChatStream({
               toolsUsed: inflightAssistant?.toolsUsed,
               orchestration: inflightAssistant?.orchestration,
               artifactId: inflightAssistant?.artifactId,
+              researchReportId: inflightAssistant?.researchReportId,
             }
           : null;
 
@@ -409,19 +419,21 @@ export function useChatStream({
               toolsUsed: finalAssistantMessage.toolsUsed,
               orchestration: finalAssistantMessage.orchestration,
               artifactId: finalAssistantMessage.artifactId,
+              researchReportId: finalAssistantMessage.researchReportId,
             };
-            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId;
+            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId || overlay.researchReportId;
             if (hasAny) {
               metadataOverlayRef.current.set(assistantId, overlay);
               setMetadataOverlayVersion((v) => v + 1);
             }
 
-            // Pass artifactId through finalize/save metadata so it persists to DB
+            // Pass artifactId / researchReportId through finalize/save metadata so it persists to DB
+            const persistedMeta: Record<string, unknown> = {};
+            if (finalAssistantMessage.artifactId) persistedMeta.artifact_id = finalAssistantMessage.artifactId;
+            if (finalAssistantMessage.researchReportId) persistedMeta.research_report_id = finalAssistantMessage.researchReportId;
             const messageWithMetadata = {
               ...finalAssistantMessage,
-              metadata: finalAssistantMessage.artifactId
-                ? { artifact_id: finalAssistantMessage.artifactId }
-                : undefined,
+              metadata: Object.keys(persistedMeta).length > 0 ? persistedMeta : undefined,
             };
             persistAssistantMessage(messageWithMetadata).catch((err) => {
               console.error("[useChatStream] Failed to persist assistant message:", err);
