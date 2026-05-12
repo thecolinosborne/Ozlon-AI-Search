@@ -8168,6 +8168,18 @@ async function runToolLoop(
               payload: result.structured,
             });
           }
+          // Capture personal_research report for ResearchCard rendering.
+          if (tc.function.name === 'personal_research' && result.success && result.structured) {
+            const s = result.structured as Record<string, unknown>;
+            const rid = typeof s.reportId === 'string' ? s.reportId : null;
+            if (rid) {
+              researchReports.push({
+                reportId: rid,
+                query: (typeof s.query === 'string' ? s.query : (args.query as string)) || '',
+                confidence: typeof s.confidence === 'number' ? s.confidence : 0,
+              });
+            }
+          }
 
           if (onTaskUpdate) await onTaskUpdate({ taskId, title: '', step: stepLabel, status: result.success ? 'done' : 'error' });
 
