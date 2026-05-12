@@ -103,7 +103,8 @@ export const clickupIntegration: IntegrationManifest = {
         dataBase64: a.dataBase64,
       }),
     },
-
+    {
+      name: "set_clickup_task_status",
       action: "set_task_status",
       description: "Change the status of a ClickUp task (e.g. 'open', 'in progress', 'complete').",
       schema: { type: "object", properties: { task_id: { type: "string" }, status: { type: "string" } }, required: ["task_id", "status"] },
