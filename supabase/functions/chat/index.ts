@@ -3165,7 +3165,7 @@ async function executeToolCall(
   _userMessage?: string,
   _aliasMap?: AliasEntry[],
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }[] },
-): Promise<{ success: boolean; result: string }> {
+): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> }> {
   try {
     // ---- multi_action: parallel fan-out ----
     if (toolName === 'multi_action') {
