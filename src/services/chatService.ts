@@ -182,6 +182,7 @@ export interface StreamChatOptions {
   onToolsUsed?: (data: ToolsUsedEvent) => void;
   onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
   onInvestigationArtifact?: (data: InvestigationArtifactEvent) => void;
+  onResearchArtifact?: (data: ResearchArtifactEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
