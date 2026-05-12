@@ -116,6 +116,7 @@ const Index = () => {
           toolsUsed: m.toolsUsed ?? overlay.toolsUsed,
           orchestration: m.orchestration ?? overlay.orchestration,
           artifactId: m.artifactId ?? overlay.artifactId,
+          researchReportId: m.researchReportId ?? overlay.researchReportId,
         };
       });
     }
