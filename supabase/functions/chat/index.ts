@@ -7821,12 +7821,13 @@ async function runToolLoop(
   userId?: string | null,
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] },
   serviceIntents?: string[],
-): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }> }> {
+): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: Array<{ question: string; payload: Record<string, unknown> }>; researchReports: Array<{ reportId: string; query: string; confidence: number }> }> {
   let iteration = 0;
   const taskId = crypto.randomUUID();
   let taskCreated = false;
   const toolsUsed: string[] = [];
   const investigations: Array<{ question: string; payload: Record<string, unknown> }> = [];
+  const researchReports: Array<{ reportId: string; query: string; confidence: number }> = [];
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
