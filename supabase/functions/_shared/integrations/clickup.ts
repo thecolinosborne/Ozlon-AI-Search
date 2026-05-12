@@ -82,6 +82,28 @@ export const clickupIntegration: IntegrationManifest = {
       mapArgs: (a) => ({ taskId: a.task_id }),
     },
     {
+      name: "upload_clickup_task_attachment",
+      action: "upload_task_attachment",
+      description: "Upload a file as an attachment on a ClickUp task. Provide the task_id, filename, mimeType, and base64-encoded file data. Use this to attach files (PDFs, images, docs) pulled from Gmail or other sources directly onto a ClickUp task.",
+      sideEffect: "write",
+      schema: {
+        type: "object",
+        properties: {
+          task_id: { type: "string" },
+          filename: { type: "string" },
+          mimeType: { type: "string" },
+          dataBase64: { type: "string", description: "Base64-encoded file bytes (standard or base64url)." },
+        },
+        required: ["task_id", "filename", "dataBase64"],
+      },
+      mapArgs: (a) => ({
+        taskId: a.task_id,
+        filename: a.filename,
+        mimeType: a.mimeType || "application/octet-stream",
+        dataBase64: a.dataBase64,
+      }),
+    },
+    {
       name: "set_clickup_task_status",
       action: "set_task_status",
       description: "Change the status of a ClickUp task (e.g. 'open', 'in progress', 'complete').",

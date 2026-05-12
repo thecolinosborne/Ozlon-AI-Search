@@ -1058,6 +1058,43 @@ serve(async (req) => {
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      case 'upload_task_attachment': {
+        const taskId = params?.taskId || params?.task_id;
+        const filename = String(params?.filename || '');
+        const mimeType = String(params?.mimeType || 'application/octet-stream');
+        const dataBase64 = String(params?.dataBase64 || '');
+        if (!taskId || !filename || !dataBase64) {
+          throw new Error('taskId, filename, and dataBase64 are required');
+        }
+        // Convert base64url -> standard base64, then decode to bytes
+        const std = dataBase64.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = std + '='.repeat((4 - (std.length % 4)) % 4);
+        let bytes: Uint8Array;
+        try {
+          const bin = atob(padded);
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        } catch (e) {
+          throw new Error(`Invalid base64 data: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        const form = new FormData();
+        form.append('attachment', new Blob([bytes], { type: mimeType }), filename);
+        const url = `${CLICKUP_BASE}/task/${encodeURIComponent(String(taskId))}/attachment${
+          params?.custom_task_ids ? `?custom_task_ids=true&team_id=${encodeURIComponent(String(params.team_id || ''))}` : ''
+        }`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: resolvedToken },
+          body: form,
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`ClickUp upload ${res.status}: ${text}`);
+        const out = text ? JSON.parse(text) : {};
+        return new Response(JSON.stringify({ success: true, attachment: out }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'set_task_status': {
         if (!params?.taskId || !params?.status) throw new Error('taskId and status required');
         const data = await clickupCall(`/task/${params.taskId}`, 'PUT', { status: params.status });
