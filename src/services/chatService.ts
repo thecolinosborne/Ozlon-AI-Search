@@ -155,6 +155,13 @@ export interface InvestigationArtifactEvent {
   question: string;
 }
 
+export interface ResearchArtifactEvent {
+  report_id: string;
+  message_id: string | null;
+  query: string;
+  confidence: number;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
