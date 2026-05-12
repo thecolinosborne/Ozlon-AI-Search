@@ -918,6 +918,238 @@ async function handleWebInvestigate(params: Record<string, unknown>, userId: str
   return await runInvestigation(params, userId, NOOP_EMIT);
 }
 
+// ============================================================
+// PERSONAL RESEARCH — fuses web_investigate with the user's
+// Wisdom Engine memories to produce a cited, decision-grade
+// brief. Persists to research_reports + research_sources.
+// ============================================================
+async function embedQuery(text: string): Promise<number[] | null> {
+  if (!LOVABLE_API_KEY) return null;
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: "google/gemini-embedding-001", input: text.slice(0, 4000) }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const v = j?.data?.[0]?.embedding;
+    return Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+
+interface WisdomMatch {
+  id: string;
+  memory_type: string;
+  content: string;
+  summary: string | null;
+  similarity: number;
+}
+
+async function fetchWisdomContext(query: string, userId: string): Promise<WisdomMatch[]> {
+  try {
+    const emb = await embedQuery(query);
+    if (!emb) return [];
+    const admin = createClient(supabaseUrl, serviceKey);
+    const { data, error } = await admin.rpc("match_wisdom_memories", {
+      query_embedding: emb,
+      match_threshold: 0.65,
+      match_count: 5,
+      filter_user_id: userId,
+      filter_memory_type: null,
+    });
+    if (error) {
+      console.warn("[personal_research] wisdom rpc error:", error.message);
+      return [];
+    }
+    return (data ?? []) as WisdomMatch[];
+  } catch (e) {
+    console.warn("[personal_research] wisdom failed:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+async function synthesizePersonalAnswer(args: {
+  query: string;
+  webAnswer: string;
+  webCitations: Array<{ index: number; url: string; title: string }>;
+  wisdom: WisdomMatch[];
+  systemName: string;
+}): Promise<{ answer: string; followUps: string[]; personalContext: string[] }> {
+  if (!LOVABLE_API_KEY) {
+    return { answer: args.webAnswer, followUps: [], personalContext: [] };
+  }
+  const wisdomBlock = args.wisdom.length
+    ? args.wisdom.map((w, i) => `[W${i + 1}] (${w.memory_type}, ${(w.similarity * 100).toFixed(0)}% match) ${w.summary ?? w.content.slice(0, 240)}`).join("\n")
+    : "(no relevant personal memories)";
+  const sys = `You are ${args.systemName || "Ozlon"}, a calm decision-grade research synthesizer. Fuse the web findings with the user's personal memories into a single, decisive brief. Rules: lead with the conclusion in 1-2 sentences. Use inline [1][2] citations from the web sources. When personal memory is relevant, cite as [W1][W2] and add a one-line "from your memory" callout. Plain-speak, ~14-word sentences, no emojis, no jargon. End with a short Recommendation line.`;
+  const user = `Question: ${args.query}\n\n=== WEB FINDINGS (cite as [n]) ===\n${args.webAnswer}\n\n=== YOUR PERSONAL MEMORY (cite as [Wn]) ===\n${wisdomBlock}\n\nReturn a JSON object with keys: answer (markdown string with citations), followUps (array of 3 short follow-up questions), personalContext (array of 1-3 short strings naming which personal memories influenced the answer, or empty array).`;
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!r.ok) {
+      console.warn("[personal_research] synth http", r.status);
+      return { answer: args.webAnswer, followUps: [], personalContext: [] };
+    }
+    const j = await r.json();
+    const raw = j?.choices?.[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw);
+    return {
+      answer: typeof parsed.answer === "string" ? parsed.answer : args.webAnswer,
+      followUps: Array.isArray(parsed.followUps) ? parsed.followUps.slice(0, 5).map((s: unknown) => String(s)) : [],
+      personalContext: Array.isArray(parsed.personalContext) ? parsed.personalContext.slice(0, 5).map((s: unknown) => String(s)) : [],
+    };
+  } catch (e) {
+    console.warn("[personal_research] synth failed:", e instanceof Error ? e.message : e);
+    return { answer: args.webAnswer, followUps: [], personalContext: [] };
+  }
+}
+
+async function persistResearchReport(args: {
+  userId: string;
+  conversationId: string | null;
+  messageId: string | null;
+  query: string;
+  answer: string;
+  webCitations: Array<{ index: number; url: string; title: string }>;
+  wisdom: WisdomMatch[];
+  followUps: string[];
+  personalContext: string[];
+  confidence: number;
+  saveAsThread: boolean;
+}): Promise<string | null> {
+  try {
+    const admin = createClient(supabaseUrl, serviceKey);
+    const queryEmbedding = await embedQuery(args.query);
+    const { data: report, error } = await admin
+      .from("research_reports")
+      .insert({
+        user_id: args.userId,
+        conversation_id: args.conversationId,
+        message_id: args.messageId,
+        query: args.query,
+        answer: args.answer,
+        mode: "personal",
+        confidence: args.confidence,
+        follow_ups: args.followUps,
+        personal_context: args.personalContext,
+        is_living_thread: args.saveAsThread,
+        last_refreshed_at: new Date().toISOString(),
+        embedding: queryEmbedding,
+      })
+      .select("id")
+      .maybeSingle();
+    if (error || !report) {
+      console.warn("[personal_research] persist failed:", error?.message);
+      return null;
+    }
+    const reportId = report.id as string;
+    const sourceRows = [
+      ...args.webCitations.map((c) => ({
+        report_id: reportId,
+        user_id: args.userId,
+        source_type: "web",
+        url: c.url,
+        title: c.title,
+        citation_index: c.index,
+      })),
+      ...args.wisdom.map((w, i) => ({
+        report_id: reportId,
+        user_id: args.userId,
+        source_type: "wisdom",
+        title: w.summary ?? w.content.slice(0, 80),
+        snippet: w.content.slice(0, 400),
+        citation_index: i + 1,
+        relevance_score: Number(w.similarity.toFixed(2)),
+        reference_id: w.id,
+        metadata: { memory_type: w.memory_type },
+      })),
+    ];
+    if (sourceRows.length > 0) {
+      await admin.from("research_sources").insert(sourceRows);
+    }
+    return reportId;
+  } catch (e) {
+    console.warn("[personal_research] persist exception:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function handlePersonalResearch(params: Record<string, unknown>, userId: string): Promise<Record<string, unknown>> {
+  const query = String(params.query ?? "").trim();
+  if (!query) throw new Error("query required");
+  const conversationId = typeof params.conversationId === "string" ? params.conversationId : null;
+  const messageId = typeof params.messageId === "string" ? params.messageId : null;
+  const systemName = typeof params.systemName === "string" ? params.systemName : "Ozlon";
+  const saveAsThread = params.saveAsThread === true;
+
+  // Fan out: web investigation + Wisdom retrieval in parallel
+  const [webResult, wisdom] = await Promise.all([
+    runInvestigation({ query, contextHint: params.contextHint }, userId, NOOP_EMIT).catch((e) => {
+      console.warn("[personal_research] web layer failed:", e instanceof Error ? e.message : e);
+      return { answer: "Web research unavailable.", citations: [], confidence: 0.3 } as Record<string, unknown>;
+    }),
+    fetchWisdomContext(query, userId),
+  ]);
+
+  const webAnswer = String((webResult as Record<string, unknown>).answer ?? "");
+  const webCitations = ((webResult as Record<string, unknown>).citations ?? []) as Array<{ index: number; url: string; title: string }>;
+  const baseConfidence = Number((webResult as Record<string, unknown>).confidence ?? 0.6);
+
+  const synth = await synthesizePersonalAnswer({
+    query, webAnswer, webCitations, wisdom, systemName,
+  });
+
+  // Boost confidence when we have strong personal context
+  const personalLift = Math.min(0.15, wisdom.length * 0.03);
+  const confidence = Math.max(0, Math.min(1, baseConfidence + personalLift));
+
+  const reportId = await persistResearchReport({
+    userId, conversationId, messageId, query,
+    answer: synth.answer,
+    webCitations, wisdom,
+    followUps: synth.followUps,
+    personalContext: synth.personalContext,
+    confidence, saveAsThread,
+  });
+
+  return {
+    reportId,
+    query,
+    answer: synth.answer,
+    confidence,
+    sources: [
+      ...webCitations.map((c) => ({ source_type: "web", index: c.index, url: c.url, title: c.title })),
+      ...wisdom.map((w, i) => ({
+        source_type: "wisdom",
+        index: i + 1,
+        title: w.summary ?? w.content.slice(0, 80),
+        snippet: w.content.slice(0, 240),
+        memory_type: w.memory_type,
+        similarity: w.similarity,
+      })),
+    ],
+    personalContext: synth.personalContext,
+    followUps: synth.followUps,
+  };
+}
+
 function streamInvestigation(params: Record<string, unknown>, userId: string): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -1075,6 +1307,12 @@ Deno.serve(async (req) => {
       const r = await handleWebRecall(params, userId);
       succeeded = attempted;
       resultCount = (r.matches as unknown[]).length;
+      result = r;
+    } else if (action === "personal_research") {
+      attempted = ["planner", "tavily", "firecrawl", "wisdom", "gateway"];
+      const r = await handlePersonalResearch(params, userId);
+      succeeded = attempted;
+      resultCount = ((r.sources as unknown[]) ?? []).length;
       result = r;
     } else {
       return jsonResp({ success: false, error: `Unknown action: ${action}` }, 400);
