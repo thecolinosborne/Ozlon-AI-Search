@@ -9761,6 +9761,23 @@ Execute these in order. Be decisive — the user has already been shown this pla
               console.warn('[investigation_artifact] persistence error:', e);
             }
 
+            // Emit research_report artifacts so the client can render <ResearchCard />
+            try {
+              if (result.researchReports && result.researchReports.length > 0) {
+                const assistantMessageId = (body.assistantMessageId as string) || null;
+                for (const r of result.researchReports) {
+                  await writer.write(encoder.encode(`event: research_artifact\ndata: ${JSON.stringify({
+                    report_id: r.reportId,
+                    message_id: assistantMessageId,
+                    query: r.query,
+                    confidence: r.confidence,
+                  })}\n\n`));
+                }
+              }
+            } catch (e) {
+              console.warn('[research_artifact] emit error:', e);
+            }
+
             // Emit orchestration trace before DONE so the client can attach it to the message
             await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
