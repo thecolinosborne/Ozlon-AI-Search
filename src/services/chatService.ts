@@ -211,6 +211,7 @@ export async function streamChat({
   onToolsUsed,
   onOrchestrationTrace,
   onInvestigationArtifact,
+  onResearchArtifact,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
