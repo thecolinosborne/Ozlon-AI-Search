@@ -366,6 +366,12 @@ export async function streamChat({
             currentEventType = 'message';
             continue;
           }
+          // Handle research_artifact events (personal_research report id)
+          if (currentEventType === 'research_artifact' && onResearchArtifact) {
+            onResearchArtifact(parsed as ResearchArtifactEvent);
+            currentEventType = 'message';
+            continue;
+          }
           currentEventType = 'message';
 
           const choice = parsed.choices?.[0];
