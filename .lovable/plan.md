@@ -1,88 +1,83 @@
-## Ozlon Research — Phase 1
+## Problem
 
-A research engine that answers like Perplexity, but fuses your personal context (Gmail, Calendar, Wisdom) and remembers every answer as a living thread. Phase 1 lives **inside the existing chat** — no new page, no UI rewrites. Additive only.
+The chat tool loop in `supabase/functions/chat/index.ts` calls OpenAI directly via `MODEL_REGISTRY` (line 57–90) with a single endpoint and a single API key. When OpenAI returns `429 insufficient_quota` (or any non-transient error), there is no fallback — the function throws "AI service error" and the user sees a dead chat.
 
-### What you'll be able to do after Phase 1
+Today's behavior:
+- Retries 429/502/503/504 three times against the **same** model (line 8033–8061).
+- No provider switch. No model switch. Hard fail on `insufficient_quota` because OpenAI returns 429 with a body that means "you're out of money," not "slow down" — retrying never helps.
+- The Lovable AI Gateway (`LOVABLE_API_KEY`) is already configured and used elsewhere in the same file (line 8450), but the main tool loop ignores it.
 
-1. Ask any research question in chat ("research X", "deep dive on Y", "who is Z").
-2. Get a cited Research Card inline with: synthesized answer, source cards, personal-context callouts ("from your inbox…", "your Wisdom says…"), confidence level, and follow-up suggestions.
-3. Tap "Save as living thread" → it persists in the Wisdom Engine and can be re-opened later with a freshness diff.
-4. Voice works the same — ask aloud, get a narrated cited brief.
+## Goal
 
-### Architecture
+Chat should **never lapse** because one provider/key is degraded. The tool loop must auto-rotate through a priority-ordered list of providers/models until one succeeds, while preserving tool-calling behavior.
 
-```text
-User asks in chat
-        │
-        ▼
-chat/index.ts detects research intent  ──►  routes to new tool: run_research
-        │
-        ▼
-supabase/functions/research/index.ts  (new edge function)
-        │
-        ├── 1. Plan: classify query → fast | deep | personal
-        ├── 2. Fan-out (parallel):
-        │       • Web layer  → Perplexity Sonar (fast cited)  +  Tavily/Firecrawl (deep crawl)
-        │       • Personal layer → Gmail search, Calendar, Wisdom pgvector retrieval
-        ├── 3. Synthesize → gpt-5.4 merges web + personal into one cited brief
-        ├── 4. Persist → research_reports + research_sources tables
-        └── 5. Return Research Card payload (artifact)
-                │
-                ▼
-ChatMessageList renders <ResearchCard /> artifact
+## Plan
+
+### 1. Define a failover chain (`MODEL_REGISTRY` upgrade)
+
+Replace the single `ModelConfig` per id with an ordered `fallbacks: ModelConfig[]` array. Each entry carries: endpoint, key env var, model name, supports_tools.
+
+Default chain for `gpt-5.4` (priority order — try top-down):
+
+```
+1. openai-direct     → api.openai.com         OPENAI_API_KEY      gpt-5.4
+2. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     openai/gpt-5.4
+3. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     openai/gpt-5
+4. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     google/gemini-3-flash-preview
+5. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     google/gemini-2.5-flash
 ```
 
-### Backend
+Same chain reused for `gpt-5`, `gpt-5-mini`, `gpt-4.1` with their own top entries. All chains terminate in the Gemini fallback so chat is alive as long as **either** OpenAI billing or Lovable AI works.
 
-**New edge function:** `supabase/functions/research/index.ts`
-- Accepts `{ query, mode?: "fast"|"deep"|"personal", saveAsThread?: boolean }`
-- Router picks providers per mode
-- Returns `{ reportId, answer, sources[], personalContext[], confidence, followUps[] }`
+### 2. Classify errors (don't retry the unretryable)
 
-**New connector:** Perplexity Sonar via existing standard connector (`perplexity`). Gemini grounding + Tavily + Firecrawl already wired.
+Introduce `classifyError(status, bodyText)`:
+- `transient` → 502/503/504, plain 429 without "insufficient_quota". Retry on **same** entry with backoff (existing logic).
+- `quota` → 429 with `insufficient_quota`/`exceeded_quota`, or 402. Skip remaining attempts on this entry; advance to next chain entry immediately.
+- `auth` → 401/403, or missing API key. Advance to next entry.
+- `bad_request` → 400. Don't fail over (it's our payload). Throw.
+- `unknown` → other 5xx. One retry on same entry, then advance.
 
-**New tool registered in chat:** `run_research` — wired into the existing tool loop in `supabase/functions/chat/index.ts` so the AI calls it automatically when intent matches.
+### 3. New helper: `callModelWithFallback(chain, body, signal)`
 
-**System prompt addition:** small block instructing the AI to call `run_research` for "research / deep dive / look up / find me / who is" patterns instead of answering from training data.
+Wrap the existing fetch+retry block (line 8033–8061) into a function that:
+1. Iterates `chain` in priority order.
+2. For each entry: resolve API key, build endpoint-appropriate `model` field, attempt up to 3 retries on transient errors.
+3. On `quota`/`auth`/exhausted retries → log `[failover] model=X reason=Y → trying next` and continue.
+4. On success → return `{ response, modelUsed, attempts, failoverPath }`.
+5. If the entire chain fails → throw with the last error and a structured summary.
 
-### Database (one migration)
+Telemetry is logged so we can confirm failovers happened in edge logs.
 
-Two tables, both RLS'd to `auth.uid()`:
+### 4. Wire it into the tool loop
 
-- `research_reports` — query, answer (markdown), mode, confidence, is_living_thread, last_refreshed_at, embedding (pgvector for Wisdom retrieval)
-- `research_sources` — report_id, url, title, snippet, source_type ('web'|'gmail'|'calendar'|'wisdom'), relevance_score
+Replace lines 8033–8061 in `supabase/functions/chat/index.ts` with `callModelWithFallback(chainFor(modelId), { messages, tools, tool_choice, max_completion_tokens })`. Tool-calling payload stays identical — both OpenAI and the Lovable gateway accept the same OpenAI-compatible `tools`/`tool_choice` schema, so Gemini-via-gateway also gets tools.
 
-### Frontend (additive, no redesigns)
+### 5. Surface attribution to the UI (small, additive)
 
-**One new artifact component:** `src/components/chat/ResearchCard.tsx`
-- Translucent card matching Vision Pro language
-- Header: query + confidence chip
-- Body: cited answer (markdown, citation pills inline)
-- Source rail: horizontal scroll of source cards (web favicon, gmail icon, calendar icon, wisdom icon)
-- Footer: "Save as living thread" toggle + follow-up chips
+When the chosen entry isn't the primary, append a structured SSE event before `[DONE]`:
 
-**Wired into existing renderer:** `ChatMessageList.tsx` detects `artifact.type === 'research'` and renders `<ResearchCard />`. No changes to message bubbles, voice, or composer.
+```
+event: model_failover
+data: { from: "gpt-5.4@openai", to: "openai/gpt-5.4@lovable", reason: "quota" }
+```
 
-**Voice:** zero work needed — existing TTS auto-plays the answer field, existing voice input already feeds chat.
+The frontend already handles custom SSE events (`research_artifact`). A tiny pill in the message footer reads "served via Lovable AI" so the user knows their account didn't actually break. (No design change beyond an existing-style chip.)
 
-### Out of scope (saved for Phase 2)
+### 6. Verification
 
-- Dedicated `/research` page and history library
-- Morning auto-brief / scheduled research
-- Living-thread auto-refresh diffs (we save the thread now; the diff engine is Phase 2)
-- "Research everyone on tomorrow's calendar" batch command
-- Shareable public report links
+- Force-fail OpenAI by temporarily setting `OPENAI_API_KEY=invalid` in a curl test against `/functions/v1/chat`; confirm the response still streams via the Gemini fallback.
+- Inspect edge logs for `[failover]` lines confirming the path taken.
+- Confirm tool calls still execute end-to-end through the Lovable gateway.
 
-### Files touched
+## Out of scope
 
-- **New:** `supabase/functions/research/index.ts`
-- **New:** `src/components/chat/ResearchCard.tsx`
-- **New:** migration for `research_reports` + `research_sources`
-- **Edit (additive):** `supabase/functions/chat/index.ts` — register `run_research` tool + intent hint
-- **Edit (additive):** `supabase/functions/_shared/integrations/research.ts` — add Perplexity Sonar route
-- **Edit (additive):** `src/components/chat/ChatMessageList.tsx` — render new artifact type
-- **Connector:** link Perplexity via `standard_connectors--connect`
+- No changes to `personal_research`, embeddings paths, or post-turn memory extraction (separate follow-up; same pattern can be reused).
+- No new secrets — `LOVABLE_API_KEY` is already configured.
+- No UI redesign — only the small failover chip.
 
-### Why this is the right Phase 1
+## Files touched
 
-It ships the core moat (personal-context fusion + persistent research) inside one screen the user already uses, with zero UI risk, in the smallest possible surface area. Everything in Phase 2 (page, morning brief, diffs) plugs into the same `research_reports` table without rework.
+- `supabase/functions/chat/index.ts` — registry → chains, new `callModelWithFallback`, replace tool-loop fetch block, emit `model_failover` SSE event.
+- `src/services/chatService.ts` + `src/hooks/useChatStream.ts` — parse `model_failover` event onto the message.
+- `src/components/chat/MessageBubble.tsx` — render small "served via {provider}" chip when present.

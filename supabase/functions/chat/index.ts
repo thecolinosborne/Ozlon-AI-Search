@@ -92,6 +92,165 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
 const DEFAULT_MODEL = 'gpt-5.4';
 
 // ============================================================================
+// MODEL FAILOVER CHAIN
+// Auto-rotates through providers when one fails (quota/auth/exhausted retries).
+// Chat must never lapse because a single key/provider is degraded.
+// ============================================================================
+
+type FailoverReason = 'transient' | 'quota' | 'auth' | 'bad_request' | 'unknown' | 'no_key';
+
+interface ChainEntry {
+  label: string;          // e.g. "openai-direct:gpt-5.4"
+  endpoint: string;
+  apiKeyEnvVar: string;
+  model: string;          // model id sent in request body
+  provider: 'openai' | 'lovable';
+}
+
+const LOVABLE_GATEWAY = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+
+function chainFor(modelName: string): ChainEntry[] {
+  // Normalize: registry stores resolved names like 'gpt-5.4', 'gpt-5-2025-08-07', etc.
+  // Map to a Lovable-gateway-compatible primary if available.
+  const m = modelName.toLowerCase();
+  let primaryGateway: string | null = null;
+  if (m.startsWith('gpt-5.4')) primaryGateway = 'openai/gpt-5.4';
+  else if (m.startsWith('gpt-5-mini')) primaryGateway = 'openai/gpt-5-mini';
+  else if (m.startsWith('gpt-5')) primaryGateway = 'openai/gpt-5';
+  else if (m.startsWith('gpt-4.1')) primaryGateway = 'openai/gpt-5-mini'; // closest gateway peer
+
+  const chain: ChainEntry[] = [
+    {
+      label: `openai-direct:${modelName}`,
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      apiKeyEnvVar: 'OPENAI_API_KEY',
+      model: modelName,
+      provider: 'openai',
+    },
+  ];
+  if (primaryGateway) {
+    chain.push({
+      label: `lovable:${primaryGateway}`,
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: primaryGateway,
+      provider: 'lovable',
+    });
+  }
+  // Universal terminal fallbacks — keep chat alive on any single-provider outage.
+  chain.push(
+    {
+      label: 'lovable:openai/gpt-5',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'openai/gpt-5',
+      provider: 'lovable',
+    },
+    {
+      label: 'lovable:google/gemini-3-flash-preview',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'google/gemini-3-flash-preview',
+      provider: 'lovable',
+    },
+    {
+      label: 'lovable:google/gemini-2.5-flash',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'google/gemini-2.5-flash',
+      provider: 'lovable',
+    },
+  );
+  // De-dupe by label (in case primary already matches a terminal fallback).
+  const seen = new Set<string>();
+  return chain.filter((c) => (seen.has(c.label) ? false : (seen.add(c.label), true)));
+}
+
+function classifyHttpError(status: number, body: string): FailoverReason {
+  const b = (body || '').toLowerCase();
+  if (status === 400) return 'bad_request';
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 402) return 'quota';
+  if (status === 429) {
+    if (b.includes('insufficient_quota') || b.includes('exceeded_quota') || b.includes('billing')) return 'quota';
+    return 'transient';
+  }
+  if (status === 502 || status === 503 || status === 504) return 'transient';
+  return 'unknown';
+}
+
+interface FailoverResult {
+  response: Response;
+  used: ChainEntry;
+  failoverFrom?: string;
+  failoverReason?: FailoverReason;
+}
+
+/**
+ * Attempt a chat-completions call against an ordered chain of providers.
+ * Per entry: up to 3 retries on transient errors. On quota/auth/exhausted →
+ * advance to next entry. Throws only if the entire chain fails.
+ */
+async function callModelWithFallback(
+  chain: ChainEntry[],
+  payloadFor: (entry: ChainEntry) => Record<string, unknown>,
+): Promise<FailoverResult> {
+  let lastErr = '';
+  let lastStatus = 0;
+  const primaryLabel = chain[0]?.label;
+  let advancedFrom: string | undefined;
+  let advancedReason: FailoverReason | undefined;
+
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i];
+    const key = Deno.env.get(entry.apiKeyEnvVar);
+    if (!key) {
+      console.warn(`[failover] ${entry.label}: missing ${entry.apiKeyEnvVar}, advancing`);
+      if (i === 0) { advancedFrom = entry.label; advancedReason = 'no_key'; }
+      continue;
+    }
+    let attempt = 0;
+    while (attempt < 3) {
+      const resp = await fetch(entry.endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadFor(entry)),
+      });
+      if (resp.ok) {
+        if (i > 0) {
+          console.log(`[failover] succeeded via ${entry.label} (from=${advancedFrom || primaryLabel} reason=${advancedReason})`);
+        }
+        return {
+          response: resp,
+          used: entry,
+          failoverFrom: i > 0 ? (advancedFrom || primaryLabel) : undefined,
+          failoverReason: i > 0 ? advancedReason : undefined,
+        };
+      }
+      lastStatus = resp.status;
+      lastErr = await resp.text().catch(() => '');
+      const reason = classifyHttpError(resp.status, lastErr);
+      if (reason === 'bad_request') {
+        // Our payload — don't fail over, surface immediately.
+        throw new Error(`AI bad_request (${entry.label}): ${lastErr.slice(0, 300)}`);
+      }
+      if (reason === 'transient' && attempt < 2) {
+        const delay = 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+        console.warn(`[failover] ${entry.label} transient ${resp.status}, retry in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        attempt++;
+        continue;
+      }
+      // quota / auth / exhausted-retries → advance to next entry
+      console.warn(`[failover] ${entry.label} ${reason} (status=${resp.status}), advancing. body=${lastErr.slice(0, 200)}`);
+      if (i === 0 || !advancedFrom) { advancedFrom = entry.label; advancedReason = reason; }
+      break;
+    }
+  }
+  throw new Error(`AI service exhausted all fallbacks. last=${lastStatus} ${lastErr.slice(0, 300)}`);
+}
+
+// ============================================================================
 // NATIVE CONNECTION DISCOVERY
 // All Google services route through native edge functions; we discover which
 // services are available by inspecting integration_connections.
@@ -8030,34 +8189,33 @@ async function runToolLoop(
       );
     }
 
-    // Retry transient upstream failures (503/502/504/429) with exponential backoff.
-    let response: Response | null = null;
-    let lastErrText = '';
-    const TRANSIENT = new Set([429, 502, 503, 504]);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      response = await fetch(modelConfig.apiEndpoint, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: modelConfig.name,
+    // Failover-aware call: rotates through OpenAI direct → Lovable AI gateway
+    // (gpt-5.4 → gpt-5 → gemini) until one provider succeeds.
+    let response: Response;
+    let usedEntry: ChainEntry;
+    try {
+      const result = await callModelWithFallback(
+        chainFor(modelConfig.name),
+        (entry) => ({
+          model: entry.model,
           messages: openAIMessages,
           max_completion_tokens: modelConfig.maxTokens,
           tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
           tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
-      });
-      if (response.ok) break;
-      lastErrText = await response.text();
-      if (!TRANSIENT.has(response.status) || attempt === 2) {
-        console.error(`OpenAI error in tool loop: ${response.status}`, lastErrText);
-        throw new Error(`AI service error: ${response.status}`);
+      );
+      response = result.response;
+      usedEntry = result.used;
+      if (result.failoverFrom) {
+        (globalThis as Record<string, unknown>).__lastFailover = {
+          from: result.failoverFrom,
+          to: usedEntry.label,
+          reason: result.failoverReason,
+        };
       }
-      const delay = 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
-      console.warn(`Transient ${response.status} from upstream, retrying in ${delay}ms (attempt ${attempt + 1}/3)`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-    if (!response || !response.ok) {
-      throw new Error(`AI service error: ${response?.status ?? 'unknown'}`);
+    } catch (e) {
+      console.error('Tool-loop failover exhausted:', e);
+      throw e instanceof Error ? e : new Error(String(e));
     }
 
     const data = await response.json();
@@ -9714,11 +9872,18 @@ Execute these in order. Be decisive — the user has already been shown this pla
                   .maybeSingle();
                 if (row?.api_key_secret_name?.startsWith('inline:')) source = 'your_key';
               }
+              const lastFailover = (globalThis as Record<string, unknown>).__lastFailover as
+                | { from: string; to: string; reason: string } | undefined;
               await writer.write(encoder.encode(`event: provider_used\ndata: ${JSON.stringify({
                 model: usedModel,
                 source,
                 platform: inferPlatformFromModel(usedModel),
+                failover: lastFailover || null,
               })}\n\n`));
+              if (lastFailover) {
+                await writer.write(encoder.encode(`event: model_failover\ndata: ${JSON.stringify(lastFailover)}\n\n`));
+                (globalThis as Record<string, unknown>).__lastFailover = undefined;
+              }
             } catch { /* best-effort */ }
 
             // Persist investigation payloads as artifacts (one per web_investigate call).
@@ -9856,23 +10021,54 @@ Execute these in order. Be decisive — the user has already been shown this pla
       stream: true,
     };
 
-    const response = await fetch(streamEndpoint, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${streamApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestPayload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Upstream API error:', response.status, errorText);
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
-          status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    let response: Response;
+    let streamFailover: { from: string; to: string; reason: FailoverReason } | null = null;
+    let streamUsedModel = modelConfig.name;
+    if (providerSource === 'your_key') {
+      // User's own key (StoneSocket) — respect their explicit provider choice, no failover.
+      response = await fetch(streamEndpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${streamApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestPayload),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Upstream API error (own key):', response.status, errorText);
+        if (response.status === 429) {
+          return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
+            status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    } else {
+      try {
+        const result = await callModelWithFallback(
+          chainFor(modelConfig.name),
+          (entry) => ({
+            model: entry.model,
+            messages: openAIMessages,
+            max_completion_tokens: modelConfig.maxTokens,
+            stream: true,
+          }),
+        );
+        response = result.response;
+        streamUsedModel = result.used.model;
+        if (result.failoverFrom && result.failoverReason) {
+          streamFailover = {
+            from: result.failoverFrom,
+            to: result.used.label,
+            reason: result.failoverReason,
+          };
+        }
+      } catch (e) {
+        console.error('Streaming failover exhausted:', e);
+        return new Response(JSON.stringify({ error: 'AI service error', details: String(e) }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     // Wrap upstream stream so we can prepend infinity-debug and append provider_used.
@@ -9900,10 +10096,14 @@ Execute these in order. Be decisive — the user has already been shown this pla
     };
     const encoder = new TextEncoder();
     const providerEvent = `event: provider_used\ndata: ${JSON.stringify({
-      model: modelConfig.name,
+      model: streamUsedModel,
       source: providerSource,
-      platform: inferPlatformFromModel(modelConfig.name),
+      platform: inferPlatformFromModel(streamUsedModel),
+      failover: streamFailover,
     })}\n\n`;
+    const failoverEvent = streamFailover
+      ? `event: model_failover\ndata: ${JSON.stringify(streamFailover)}\n\n`
+      : null;
     (async () => {
       try {
         if (infinityDebug) {
@@ -9913,6 +10113,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
         await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
         // Emit provider_used up-front so the UI can attribute even if the user closes early.
         await writer.write(encoder.encode(providerEvent));
+        if (failoverEvent) await writer.write(encoder.encode(failoverEvent));
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();
