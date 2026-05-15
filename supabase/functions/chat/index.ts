@@ -8253,8 +8253,10 @@ async function runToolLoop(
     let response: Response;
     let usedEntry: ChainEntry;
     try {
-      const result = await callModelWithFallback(
-        chainFor(modelConfig.name),
+      const result = await callViaGauntletThenFallback(
+        modelConfig.name,
+        openAIMessages,
+        toolsForRequest,
         (entry) => ({
           model: entry.model,
           messages: openAIMessages,
@@ -8265,7 +8267,17 @@ async function runToolLoop(
       );
       response = result.response;
       usedEntry = result.used;
-      if (result.failoverFrom) {
+      if (result.gauntlet) {
+        (globalThis as Record<string, unknown>).__lastFailover = {
+          from: 'auto',
+          to: usedEntry.label,
+          reason: result.gauntlet.reason,
+          via: 'gauntlet',
+          stone: result.gauntlet.stone,
+          model: result.gauntlet.model,
+          fallback_used: result.gauntlet.fallback_used,
+        };
+      } else if (result.failoverFrom) {
         (globalThis as Record<string, unknown>).__lastFailover = {
           from: result.failoverFrom,
           to: usedEntry.label,
