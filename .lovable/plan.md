@@ -1,83 +1,68 @@
-## Problem
+## What's there today
 
-The chat tool loop in `supabase/functions/chat/index.ts` calls OpenAI directly via `MODEL_REGISTRY` (line 57–90) with a single endpoint and a single API key. When OpenAI returns `429 insufficient_quota` (or any non-transient error), there is no fallback — the function throws "AI service error" and the user sees a dead chat.
+You actually have **two** routing layers — and chat is using the dumber one.
 
-Today's behavior:
-- Retries 429/502/503/504 three times against the **same** model (line 8033–8061).
-- No provider switch. No model switch. Hard fail on `insufficient_quota` because OpenAI returns 429 with a body that means "you're out of money," not "slow down" — retrying never helps.
-- The Lovable AI Gateway (`LOVABLE_API_KEY`) is already configured and used elsewhere in the same file (line 8450), but the main tool loop ignores it.
+**Layer 1 — Static failover chain (what chat uses now)**
+`supabase/functions/chat/index.ts` → `chainFor(modelName)` + `callModelWithFallback`.
+This is what we built last turn. It just walks: OpenAI direct → Lovable Gateway (GPT-5.4) → Lovable Gateway (GPT-5) → Gemini 3 Flash → Gemini 2.5 Flash. Order is fixed. No awareness of what the message actually needs.
+
+**Layer 2 — Gauntlet Router (the real orchestrator, already built, not wired into chat)**
+- `supabase/functions/gauntlet-router/index.ts` — scores models per request and picks the "best stone."
+- `supabase/functions/_shared/gauntlet-call.ts` — classifies each message (modality, complexity, latency, cost, context size) and submits to the router.
+- `supabase/functions/_shared/model-registry.ts` `callWithFallback()` — has a "GAUNTLET SHIM" that routes through the router by default.
+- Already used by `signals-create`. **Not** used by the main `chat` tool loop.
+- Honors a per-user budget mode (`speed | balanced | quality`) from the Brain page.
+
+So the orchestrator exists, picks across OpenAI / Gemini / Anthropic / Higgsfield / Lovable, and logs to `gauntlet_routing_log`. The chat function just isn't asking it.
 
 ## Goal
 
-Chat should **never lapse** because one provider/key is degraded. The tool loop must auto-rotate through a priority-ordered list of providers/models until one succeeds, while preserving tool-calling behavior.
+Make the chat tool loop go through Gauntlet so the model is picked **per message** (Gemini for cheap/short, GPT-5.4 for hard reasoning, etc.), with the static failover chain as the safety net underneath.
 
 ## Plan
 
-### 1. Define a failover chain (`MODEL_REGISTRY` upgrade)
+### 1. Route chat through Gauntlet first
 
-Replace the single `ModelConfig` per id with an ordered `fallbacks: ModelConfig[]` array. Each entry carries: endpoint, key env var, model name, supports_tools.
+In `supabase/functions/chat/index.ts`, both call sites (lines ~8197 and ~10048):
+- Call `gauntletCall({ agent: "chat", messages, tools, tool_choice, routing_mode, authHeader })`.
+- Pass the user's routing mode (already on `globalThis.__currentRoutingMode`, set on Brain page).
+- On success → use that response. Emit `provider_used` SSE with `{ stone, model, fallback_used }` so the UI can show "served via Gemini 3 Flash via Gauntlet".
+- On failure (router 5xx, no stones available, classification miss) → fall through to existing `callModelWithFallback(chainFor(modelName), …)`. No regression: the Phase 1 failover chain stays as the last line of defense.
 
-Default chain for `gpt-5.4` (priority order — try top-down):
+### 2. Tool-calling parity check
 
+Gauntlet already forwards `tools` and `tool_choice` (`gauntlet-call.ts` lines 132–140). Verify in `gauntlet-router/index.ts` that the chosen stone supports tools — if not, the router should either skip it or strip tools for chitchat. Add a `requires_tools: true` hint in the `needs` payload from chat so the router never picks a tools-incapable stone for a tool-loop turn.
+
+### 3. Surface attribution to the UI
+
+Reuse the existing `RoutingChip` component (`src/components/chat/RoutingChip.tsx`). Extend the `provider_used` SSE event payload to include:
 ```
-1. openai-direct     → api.openai.com         OPENAI_API_KEY      gpt-5.4
-2. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     openai/gpt-5.4
-3. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     openai/gpt-5
-4. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     google/gemini-3-flash-preview
-5. lovable-gateway   → ai.gateway.lovable.dev LOVABLE_API_KEY     google/gemini-2.5-flash
+{ stone, model, fallback_used, reason, mode }
 ```
+Frontend (`useChatStream.ts`, `ChatService.ts`) already parses custom SSE events — just thread the new fields onto the message and render in the chip.
 
-Same chain reused for `gpt-5`, `gpt-5-mini`, `gpt-4.1` with their own top entries. All chains terminate in the Gemini fallback so chat is alive as long as **either** OpenAI billing or Lovable AI works.
+### 4. Logging & observability
 
-### 2. Classify errors (don't retry the unretryable)
+`gauntletCall` already writes to `gauntlet_routing_log`. Add one log line in chat: `[chat] route → ${stone}/${model} via gauntlet (mode=${routingMode})` so edge logs make the routing decision obvious.
 
-Introduce `classifyError(status, bodyText)`:
-- `transient` → 502/503/504, plain 429 without "insufficient_quota". Retry on **same** entry with backoff (existing logic).
-- `quota` → 429 with `insufficient_quota`/`exceeded_quota`, or 402. Skip remaining attempts on this entry; advance to next chain entry immediately.
-- `auth` → 401/403, or missing API key. Advance to next entry.
-- `bad_request` → 400. Don't fail over (it's our payload). Throw.
-- `unknown` → other 5xx. One retry on same entry, then advance.
+### 5. Verification
 
-### 3. New helper: `callModelWithFallback(chain, body, signal)`
-
-Wrap the existing fetch+retry block (line 8033–8061) into a function that:
-1. Iterates `chain` in priority order.
-2. For each entry: resolve API key, build endpoint-appropriate `model` field, attempt up to 3 retries on transient errors.
-3. On `quota`/`auth`/exhausted retries → log `[failover] model=X reason=Y → trying next` and continue.
-4. On success → return `{ response, modelUsed, attempts, failoverPath }`.
-5. If the entire chain fails → throw with the last error and a structured summary.
-
-Telemetry is logged so we can confirm failovers happened in edge logs.
-
-### 4. Wire it into the tool loop
-
-Replace lines 8033–8061 in `supabase/functions/chat/index.ts` with `callModelWithFallback(chainFor(modelId), { messages, tools, tool_choice, max_completion_tokens })`. Tool-calling payload stays identical — both OpenAI and the Lovable gateway accept the same OpenAI-compatible `tools`/`tool_choice` schema, so Gemini-via-gateway also gets tools.
-
-### 5. Surface attribution to the UI (small, additive)
-
-When the chosen entry isn't the primary, append a structured SSE event before `[DONE]`:
-
-```
-event: model_failover
-data: { from: "gpt-5.4@openai", to: "openai/gpt-5.4@lovable", reason: "quota" }
-```
-
-The frontend already handles custom SSE events (`research_artifact`). A tiny pill in the message footer reads "served via Lovable AI" so the user knows their account didn't actually break. (No design change beyond an existing-style chip.)
-
-### 6. Verification
-
-- Force-fail OpenAI by temporarily setting `OPENAI_API_KEY=invalid` in a curl test against `/functions/v1/chat`; confirm the response still streams via the Gemini fallback.
-- Inspect edge logs for `[failover]` lines confirming the path taken.
-- Confirm tool calls still execute end-to-end through the Lovable gateway.
+- Send a one-line greeting → expect router to pick a cheap Gemini Flash (low complexity / fast latency).
+- Send a long technical reasoning prompt → expect GPT-5.4 or Gemini 2.5 Pro.
+- Force `OPENAI_API_KEY=invalid` → router still serves via Lovable/Gemini stones; if router itself is down, Phase 1 chain takes over.
+- Toggle Brain page mode to `speed` → confirm router picks cheaper stone for the same prompt.
 
 ## Out of scope
 
-- No changes to `personal_research`, embeddings paths, or post-turn memory extraction (separate follow-up; same pattern can be reused).
-- No new secrets — `LOVABLE_API_KEY` is already configured.
-- No UI redesign — only the small failover chip.
+- No registry/scoring changes inside `gauntlet-router` — it already scores by capability + cost + latency.
+- No new providers, no new secrets.
+- No UI redesign — only the existing `RoutingChip` gets richer data.
+- `personal_research`, embeddings, post-turn memory: same pattern can be applied later.
 
 ## Files touched
 
-- `supabase/functions/chat/index.ts` — registry → chains, new `callModelWithFallback`, replace tool-loop fetch block, emit `model_failover` SSE event.
-- `src/services/chatService.ts` + `src/hooks/useChatStream.ts` — parse `model_failover` event onto the message.
-- `src/components/chat/MessageBubble.tsx` — render small "served via {provider}" chip when present.
+- `supabase/functions/chat/index.ts` — wrap both `callModelWithFallback` sites in a `gauntletCall` → fallback try/catch; emit richer `provider_used` SSE.
+- `supabase/functions/_shared/gauntlet-call.ts` — pass `requires_tools` through to router.
+- `supabase/functions/gauntlet-router/index.ts` — respect `requires_tools` when scoring stones.
+- `src/hooks/useChatStream.ts` + `src/services/chatService.ts` — parse extended `provider_used` payload.
+- `src/components/chat/RoutingChip.tsx` — render stone + model + mode.

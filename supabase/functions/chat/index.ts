@@ -250,6 +250,65 @@ async function callModelWithFallback(
   throw new Error(`AI service exhausted all fallbacks. last=${lastStatus} ${lastErr.slice(0, 300)}`);
 }
 
+/**
+ * Try the Gauntlet Router first (per-message model selection across
+ * OpenAI / Gemini / Anthropic / Lovable). On any failure, fall through
+ * to the static failover chain so chat never goes dark.
+ */
+async function callViaGauntletThenFallback(
+  modelName: string,
+  openAIMessages: unknown[],
+  toolsForRequest: unknown[],
+  payloadFor: (entry: ChainEntry) => Record<string, unknown>,
+): Promise<FailoverResult & { gauntlet?: { stone: string; model: string; reason: string; fallback_used: boolean } }> {
+  const disabled = Deno.env.get('USE_GAUNTLET') === '0';
+  if (!disabled) {
+    try {
+      const { gauntletCall } = await import('../_shared/gauntlet-call.ts');
+      const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      const routingMode = (globalThis as Record<string, unknown>).__currentRoutingMode as
+        | 'speed' | 'balanced' | 'quality' | undefined;
+      const result = await gauntletCall({
+        agent: 'chat' as never,
+        messages: openAIMessages as never,
+        tools: toolsForRequest.length > 0 ? (toolsForRequest as never) : undefined,
+        tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
+        authHeader,
+        routing_mode: routingMode,
+      });
+      if (result.ok && result.data) {
+        const data: any = result.data;
+        const stone = (data?.stone) || result.modelUsed?.split('/')?.[0] || 'gauntlet';
+        const model = data?.model || result.modelUsed || modelName;
+        const reason = data?.reason || 'gauntlet pick';
+        console.log(`[chat] route → ${stone}/${model} via gauntlet (mode=${routingMode || 'auto'})`);
+        // Wrap result.data.result (the upstream {choices, usage, model} payload) in a Response
+        const upstream = data.result ?? data;
+        const fakeResp = new Response(JSON.stringify(upstream), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const usedEntry: ChainEntry = {
+          label: `gauntlet:${stone}/${model}`,
+          endpoint: 'gauntlet-router',
+          apiKeyEnvVar: '-',
+          model,
+          provider: stone === 'openai' ? 'openai' : 'lovable',
+        };
+        return {
+          response: fakeResp,
+          used: usedEntry,
+          gauntlet: { stone, model, reason, fallback_used: !!data.fallback_used },
+        };
+      }
+      console.warn(`[chat] gauntlet did not return usable result, falling back: ${result.errorText || 'no data'}`);
+    } catch (e) {
+      console.warn('[chat] gauntlet threw, falling back to static chain:', e instanceof Error ? e.message : e);
+    }
+  }
+  return await callModelWithFallback(chainFor(modelName), payloadFor);
+}
+
 // ============================================================================
 // NATIVE CONNECTION DISCOVERY
 // All Google services route through native edge functions; we discover which
@@ -8194,8 +8253,10 @@ async function runToolLoop(
     let response: Response;
     let usedEntry: ChainEntry;
     try {
-      const result = await callModelWithFallback(
-        chainFor(modelConfig.name),
+      const result = await callViaGauntletThenFallback(
+        modelConfig.name,
+        openAIMessages,
+        toolsForRequest,
         (entry) => ({
           model: entry.model,
           messages: openAIMessages,
@@ -8206,7 +8267,17 @@ async function runToolLoop(
       );
       response = result.response;
       usedEntry = result.used;
-      if (result.failoverFrom) {
+      if (result.gauntlet) {
+        (globalThis as Record<string, unknown>).__lastFailover = {
+          from: 'auto',
+          to: usedEntry.label,
+          reason: result.gauntlet.reason,
+          via: 'gauntlet',
+          stone: result.gauntlet.stone,
+          model: result.gauntlet.model,
+          fallback_used: result.gauntlet.fallback_used,
+        };
+      } else if (result.failoverFrom) {
         (globalThis as Record<string, unknown>).__lastFailover = {
           from: result.failoverFrom,
           to: usedEntry.label,
