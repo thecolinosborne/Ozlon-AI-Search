@@ -92,6 +92,165 @@ const MODEL_REGISTRY: Record<string, ModelConfig> = {
 const DEFAULT_MODEL = 'gpt-5.4';
 
 // ============================================================================
+// MODEL FAILOVER CHAIN
+// Auto-rotates through providers when one fails (quota/auth/exhausted retries).
+// Chat must never lapse because a single key/provider is degraded.
+// ============================================================================
+
+type FailoverReason = 'transient' | 'quota' | 'auth' | 'bad_request' | 'unknown' | 'no_key';
+
+interface ChainEntry {
+  label: string;          // e.g. "openai-direct:gpt-5.4"
+  endpoint: string;
+  apiKeyEnvVar: string;
+  model: string;          // model id sent in request body
+  provider: 'openai' | 'lovable';
+}
+
+const LOVABLE_GATEWAY = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+
+function chainFor(modelName: string): ChainEntry[] {
+  // Normalize: registry stores resolved names like 'gpt-5.4', 'gpt-5-2025-08-07', etc.
+  // Map to a Lovable-gateway-compatible primary if available.
+  const m = modelName.toLowerCase();
+  let primaryGateway: string | null = null;
+  if (m.startsWith('gpt-5.4')) primaryGateway = 'openai/gpt-5.4';
+  else if (m.startsWith('gpt-5-mini')) primaryGateway = 'openai/gpt-5-mini';
+  else if (m.startsWith('gpt-5')) primaryGateway = 'openai/gpt-5';
+  else if (m.startsWith('gpt-4.1')) primaryGateway = 'openai/gpt-5-mini'; // closest gateway peer
+
+  const chain: ChainEntry[] = [
+    {
+      label: `openai-direct:${modelName}`,
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      apiKeyEnvVar: 'OPENAI_API_KEY',
+      model: modelName,
+      provider: 'openai',
+    },
+  ];
+  if (primaryGateway) {
+    chain.push({
+      label: `lovable:${primaryGateway}`,
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: primaryGateway,
+      provider: 'lovable',
+    });
+  }
+  // Universal terminal fallbacks — keep chat alive on any single-provider outage.
+  chain.push(
+    {
+      label: 'lovable:openai/gpt-5',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'openai/gpt-5',
+      provider: 'lovable',
+    },
+    {
+      label: 'lovable:google/gemini-3-flash-preview',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'google/gemini-3-flash-preview',
+      provider: 'lovable',
+    },
+    {
+      label: 'lovable:google/gemini-2.5-flash',
+      endpoint: LOVABLE_GATEWAY,
+      apiKeyEnvVar: 'LOVABLE_API_KEY',
+      model: 'google/gemini-2.5-flash',
+      provider: 'lovable',
+    },
+  );
+  // De-dupe by label (in case primary already matches a terminal fallback).
+  const seen = new Set<string>();
+  return chain.filter((c) => (seen.has(c.label) ? false : (seen.add(c.label), true)));
+}
+
+function classifyHttpError(status: number, body: string): FailoverReason {
+  const b = (body || '').toLowerCase();
+  if (status === 400) return 'bad_request';
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 402) return 'quota';
+  if (status === 429) {
+    if (b.includes('insufficient_quota') || b.includes('exceeded_quota') || b.includes('billing')) return 'quota';
+    return 'transient';
+  }
+  if (status === 502 || status === 503 || status === 504) return 'transient';
+  return 'unknown';
+}
+
+interface FailoverResult {
+  response: Response;
+  used: ChainEntry;
+  failoverFrom?: string;
+  failoverReason?: FailoverReason;
+}
+
+/**
+ * Attempt a chat-completions call against an ordered chain of providers.
+ * Per entry: up to 3 retries on transient errors. On quota/auth/exhausted →
+ * advance to next entry. Throws only if the entire chain fails.
+ */
+async function callModelWithFallback(
+  chain: ChainEntry[],
+  payloadFor: (entry: ChainEntry) => Record<string, unknown>,
+): Promise<FailoverResult> {
+  let lastErr = '';
+  let lastStatus = 0;
+  const primaryLabel = chain[0]?.label;
+  let advancedFrom: string | undefined;
+  let advancedReason: FailoverReason | undefined;
+
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i];
+    const key = Deno.env.get(entry.apiKeyEnvVar);
+    if (!key) {
+      console.warn(`[failover] ${entry.label}: missing ${entry.apiKeyEnvVar}, advancing`);
+      if (i === 0) { advancedFrom = entry.label; advancedReason = 'no_key'; }
+      continue;
+    }
+    let attempt = 0;
+    while (attempt < 3) {
+      const resp = await fetch(entry.endpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadFor(entry)),
+      });
+      if (resp.ok) {
+        if (i > 0) {
+          console.log(`[failover] succeeded via ${entry.label} (from=${advancedFrom || primaryLabel} reason=${advancedReason})`);
+        }
+        return {
+          response: resp,
+          used: entry,
+          failoverFrom: i > 0 ? (advancedFrom || primaryLabel) : undefined,
+          failoverReason: i > 0 ? advancedReason : undefined,
+        };
+      }
+      lastStatus = resp.status;
+      lastErr = await resp.text().catch(() => '');
+      const reason = classifyHttpError(resp.status, lastErr);
+      if (reason === 'bad_request') {
+        // Our payload — don't fail over, surface immediately.
+        throw new Error(`AI bad_request (${entry.label}): ${lastErr.slice(0, 300)}`);
+      }
+      if (reason === 'transient' && attempt < 2) {
+        const delay = 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+        console.warn(`[failover] ${entry.label} transient ${resp.status}, retry in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        attempt++;
+        continue;
+      }
+      // quota / auth / exhausted-retries → advance to next entry
+      console.warn(`[failover] ${entry.label} ${reason} (status=${resp.status}), advancing. body=${lastErr.slice(0, 200)}`);
+      if (i === 0 || !advancedFrom) { advancedFrom = entry.label; advancedReason = reason; }
+      break;
+    }
+  }
+  throw new Error(`AI service exhausted all fallbacks. last=${lastStatus} ${lastErr.slice(0, 300)}`);
+}
+
+// ============================================================================
 // NATIVE CONNECTION DISCOVERY
 // All Google services route through native edge functions; we discover which
 // services are available by inspecting integration_connections.
