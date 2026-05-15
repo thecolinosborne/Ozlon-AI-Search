@@ -10014,23 +10014,54 @@ Execute these in order. Be decisive — the user has already been shown this pla
       stream: true,
     };
 
-    const response = await fetch(streamEndpoint, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${streamApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestPayload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Upstream API error:', response.status, errorText);
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
-          status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    let response: Response;
+    let streamFailover: { from: string; to: string; reason: FailoverReason } | null = null;
+    let streamUsedModel = modelConfig.name;
+    if (providerSource === 'your_key') {
+      // User's own key (StoneSocket) — respect their explicit provider choice, no failover.
+      response = await fetch(streamEndpoint, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${streamApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestPayload),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Upstream API error (own key):', response.status, errorText);
+        if (response.status === 429) {
+          return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
+            status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify({ error: 'AI service error', details: errorText }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    } else {
+      try {
+        const result = await callModelWithFallback(
+          chainFor(modelConfig.name),
+          (entry) => ({
+            model: entry.model,
+            messages: openAIMessages,
+            max_completion_tokens: modelConfig.maxTokens,
+            stream: true,
+          }),
+        );
+        response = result.response;
+        streamUsedModel = result.used.model;
+        if (result.failoverFrom && result.failoverReason) {
+          streamFailover = {
+            from: result.failoverFrom,
+            to: result.used.label,
+            reason: result.failoverReason,
+          };
+        }
+      } catch (e) {
+        console.error('Streaming failover exhausted:', e);
+        return new Response(JSON.stringify({ error: 'AI service error', details: String(e) }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     // Wrap upstream stream so we can prepend infinity-debug and append provider_used.
