@@ -10089,10 +10089,14 @@ Execute these in order. Be decisive — the user has already been shown this pla
     };
     const encoder = new TextEncoder();
     const providerEvent = `event: provider_used\ndata: ${JSON.stringify({
-      model: modelConfig.name,
+      model: streamUsedModel,
       source: providerSource,
-      platform: inferPlatformFromModel(modelConfig.name),
+      platform: inferPlatformFromModel(streamUsedModel),
+      failover: streamFailover,
     })}\n\n`;
+    const failoverEvent = streamFailover
+      ? `event: model_failover\ndata: ${JSON.stringify(streamFailover)}\n\n`
+      : null;
     (async () => {
       try {
         if (infinityDebug) {
@@ -10102,6 +10106,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
         await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
         // Emit provider_used up-front so the UI can attribute even if the user closes early.
         await writer.write(encoder.encode(providerEvent));
+        if (failoverEvent) await writer.write(encoder.encode(failoverEvent));
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();
