@@ -8189,34 +8189,33 @@ async function runToolLoop(
       );
     }
 
-    // Retry transient upstream failures (503/502/504/429) with exponential backoff.
-    let response: Response | null = null;
-    let lastErrText = '';
-    const TRANSIENT = new Set([429, 502, 503, 504]);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      response = await fetch(modelConfig.apiEndpoint, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: modelConfig.name,
+    // Failover-aware call: rotates through OpenAI direct → Lovable AI gateway
+    // (gpt-5.4 → gpt-5 → gemini) until one provider succeeds.
+    let response: Response;
+    let usedEntry: ChainEntry;
+    try {
+      const result = await callModelWithFallback(
+        chainFor(modelConfig.name),
+        (entry) => ({
+          model: entry.model,
           messages: openAIMessages,
           max_completion_tokens: modelConfig.maxTokens,
           tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
           tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
-      });
-      if (response.ok) break;
-      lastErrText = await response.text();
-      if (!TRANSIENT.has(response.status) || attempt === 2) {
-        console.error(`OpenAI error in tool loop: ${response.status}`, lastErrText);
-        throw new Error(`AI service error: ${response.status}`);
+      );
+      response = result.response;
+      usedEntry = result.used;
+      if (result.failoverFrom) {
+        (globalThis as Record<string, unknown>).__lastFailover = {
+          from: result.failoverFrom,
+          to: usedEntry.label,
+          reason: result.failoverReason,
+        };
       }
-      const delay = 400 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
-      console.warn(`Transient ${response.status} from upstream, retrying in ${delay}ms (attempt ${attempt + 1}/3)`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-    if (!response || !response.ok) {
-      throw new Error(`AI service error: ${response?.status ?? 'unknown'}`);
+    } catch (e) {
+      console.error('Tool-loop failover exhausted:', e);
+      throw e instanceof Error ? e : new Error(String(e));
     }
 
     const data = await response.json();
