@@ -9872,11 +9872,18 @@ Execute these in order. Be decisive — the user has already been shown this pla
                   .maybeSingle();
                 if (row?.api_key_secret_name?.startsWith('inline:')) source = 'your_key';
               }
+              const lastFailover = (globalThis as Record<string, unknown>).__lastFailover as
+                | { from: string; to: string; reason: string } | undefined;
               await writer.write(encoder.encode(`event: provider_used\ndata: ${JSON.stringify({
                 model: usedModel,
                 source,
                 platform: inferPlatformFromModel(usedModel),
+                failover: lastFailover || null,
               })}\n\n`));
+              if (lastFailover) {
+                await writer.write(encoder.encode(`event: model_failover\ndata: ${JSON.stringify(lastFailover)}\n\n`));
+                (globalThis as Record<string, unknown>).__lastFailover = undefined;
+              }
             } catch { /* best-effort */ }
 
             // Persist investigation payloads as artifacts (one per web_investigate call).
