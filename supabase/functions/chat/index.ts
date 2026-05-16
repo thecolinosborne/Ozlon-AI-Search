@@ -8260,7 +8260,7 @@ async function runToolLoop(
         (entry) => ({
           model: entry.model,
           messages: openAIMessages,
-          max_completion_tokens: modelConfig.maxTokens,
+          max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
           tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
           tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
@@ -9767,6 +9767,35 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       })),
     ];
 
+    // ── LONG-FORM ENGINE (layer 1 + 5) ────────────────────────────────────
+    // Detect teleprompter / speech / essay / blog requests in the last user
+    // message. When detected, inject a mode-specific system addendum and bump
+    // the token budget so the model can actually deliver the target length.
+    // Falls back silently to normal chat for short replies.
+    let longFormBudget: number | null = null;
+    let longFormMeta: { kind: string; target_words: number; target_minutes?: number; wpm: number } | null = null;
+    try {
+      const { detectLongForm, tokenBudgetFor } = await import("./_longform/detect.ts");
+      const { buildLongFormPrompt } = await import("./_longform/prompt.ts");
+      const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
+      const brief = lastUser ? detectLongForm(lastUser.content || '') : null;
+      if (brief) {
+        const addendum = buildLongFormPrompt(brief);
+        // Insert addendum as a second system message right after the global prompt
+        openAIMessages.splice(1, 0, { role: 'system', content: addendum });
+        longFormBudget = tokenBudgetFor(brief.target_words);
+        longFormMeta = {
+          kind: brief.kind,
+          target_words: brief.target_words,
+          target_minutes: brief.target_minutes,
+          wpm: brief.wpm,
+        };
+        console.log(`[LongForm] kind=${brief.kind} target=${brief.target_words}w budget=${longFormBudget}t source=${brief.source}`);
+      }
+    } catch (e) {
+      console.warn('[LongForm] detection failed (continuing as normal chat):', e);
+    }
+
     console.log('Chat request:', {
       model: modelConfig.name,
       intent: intent || 'general',
@@ -10088,7 +10117,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
     const requestPayload: Record<string, unknown> = {
       model: modelConfig.name,
       messages: openAIMessages,
-      max_completion_tokens: modelConfig.maxTokens,
+      max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
       stream: true,
     };
 
@@ -10121,7 +10150,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
           (entry) => ({
             model: entry.model,
             messages: openAIMessages,
-            max_completion_tokens: modelConfig.maxTokens,
+            max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
             stream: true,
           }),
         );
@@ -10185,6 +10214,9 @@ Execute these in order. Be decisive — the user has already been shown this pla
         // Emit provider_used up-front so the UI can attribute even if the user closes early.
         await writer.write(encoder.encode(providerEvent));
         if (failoverEvent) await writer.write(encoder.encode(failoverEvent));
+        if (longFormMeta) {
+          await writer.write(encoder.encode(`event: longform\ndata: ${JSON.stringify(longFormMeta)}\n\n`));
+        }
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();

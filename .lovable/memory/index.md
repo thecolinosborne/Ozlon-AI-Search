@@ -48,6 +48,7 @@
 - [Error reporting](mem://chat/error-reporting-policy) — Handlers return detailed structured errors, no swallowing
 - [List-confirm-act](mem://interaction/list-confirm-act-protocol) — Ask for explicit user confirmation before destructive actions
 - [Response architecture](mem://chat/response-architecture) — 5-question backbone + 3 shells (Execution / Advisory / Default), omit-by-default, single confidence register
+- [Long-form engine](mem://chat/long-form-engine) — Detects teleprompter/speech/essay requests, injects length-contract prompt + bumps token budget (16k→48k tiered). Overrides brevity rules so 15-min teleprompter actually delivers ~2,250 words.
 
 ### Voice Input & Output
 - [Whisper STT](mem://voice/whisper-transcription-integration) — Supabase Edge Function to Whisper API
