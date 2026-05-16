@@ -8,6 +8,7 @@ import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
 import { InvestigationCard } from "./InvestigationCard";
 import { ResearchCard } from "./ResearchCard";
+import { TripPlanArtifact } from "@/components/trip/TripPlanArtifact";
 
 const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
   if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
