@@ -217,6 +217,33 @@ export function useChatStream({
         if (isDev) console.warn("[useChatStream] saveMessage failed:", err);
       });
 
+      // ── Trip-planner side channel: fire in parallel when query looks travel-y ──
+      if (looksLikeTripQuery(text)) {
+        (async () => {
+          try {
+            const { supabase } = await import("@/integrations/supabase/client");
+            const { data, error } = await supabase.functions.invoke("plan-budget-trip", {
+              body: { query: text },
+            });
+            if (error || !data?.trip_option_id) return;
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, tripOptionId: data.trip_option_id } : m,
+              ),
+            );
+            // Keep across persistence
+            metadataOverlayRef.current.set(assistantId, {
+              ...(metadataOverlayRef.current.get(assistantId) || {}),
+              tripOptionId: data.trip_option_id,
+            } as any);
+            setMetadataOverlayVersion((v) => v + 1);
+          } catch (e) {
+            if (isDev) console.warn("[useChatStream] trip planner failed:", e);
+          }
+        })();
+      }
+
       if (!mountedRef.current) return;
 
       // ── Phase: streaming ─────────────────────────────────────────────
