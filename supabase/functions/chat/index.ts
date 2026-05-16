@@ -8260,7 +8260,7 @@ async function runToolLoop(
         (entry) => ({
           model: entry.model,
           messages: openAIMessages,
-          max_completion_tokens: modelConfig.maxTokens,
+          max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
           tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
           tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
