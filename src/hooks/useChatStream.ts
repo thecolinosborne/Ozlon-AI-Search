@@ -17,7 +17,18 @@ export type ChatMessage = {
   liveSteps?: LiveStep[];
   artifactId?: string;
   researchReportId?: string;
+  tripOptionId?: string;
 };
+
+// Lightweight intent detector for budget trip planning.
+const TRIP_KEYWORDS = /\b(trip|travel|vacation|getaway|weekend|fly|flight|flights|hotel|hotels|airbnb|visit|plan(ning)?\s+(a|my)?\s*(trip|travel|vacation|getaway))\b/i;
+const DEST_HINTS = /\b(to|in|at|near)\s+[A-Z][a-zA-Z]+/;
+function looksLikeTripQuery(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (!TRIP_KEYWORDS.test(lower)) return false;
+  // Heuristic: must look like a request, not a passing reference.
+  return /\b(plan|find|book|cheap|budget|under|\$\d|how much|going|want to)\b/i.test(lower) || DEST_HINTS.test(text);
+}
 
 /**
  * Explicit lifecycle phases for a single chat request.
