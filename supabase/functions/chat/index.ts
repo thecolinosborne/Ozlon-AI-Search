@@ -10214,6 +10214,9 @@ Execute these in order. Be decisive — the user has already been shown this pla
         // Emit provider_used up-front so the UI can attribute even if the user closes early.
         await writer.write(encoder.encode(providerEvent));
         if (failoverEvent) await writer.write(encoder.encode(failoverEvent));
+        if (longFormMeta) {
+          await writer.write(encoder.encode(`event: longform\ndata: ${JSON.stringify(longFormMeta)}\n\n`));
+        }
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();
