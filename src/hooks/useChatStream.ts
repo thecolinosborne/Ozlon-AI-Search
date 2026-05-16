@@ -17,7 +17,18 @@ export type ChatMessage = {
   liveSteps?: LiveStep[];
   artifactId?: string;
   researchReportId?: string;
+  tripOptionId?: string;
 };
+
+// Lightweight intent detector for budget trip planning.
+const TRIP_KEYWORDS = /\b(trip|travel|vacation|getaway|weekend|fly|flight|flights|hotel|hotels|airbnb|visit|plan(ning)?\s+(a|my)?\s*(trip|travel|vacation|getaway))\b/i;
+const DEST_HINTS = /\b(to|in|at|near)\s+[A-Z][a-zA-Z]+/;
+function looksLikeTripQuery(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (!TRIP_KEYWORDS.test(lower)) return false;
+  // Heuristic: must look like a request, not a passing reference.
+  return /\b(plan|find|book|cheap|budget|under|\$\d|how much|going|want to)\b/i.test(lower) || DEST_HINTS.test(text);
+}
 
 /**
  * Explicit lifecycle phases for a single chat request.
@@ -117,7 +128,7 @@ export function useChatStream({
 
   // Keep ephemeral chip metadata (provider/toolsUsed/orchestration/artifactId) alive
   // after a message is persisted, since persistence only stores {id, role, content}.
-  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId">>>(new Map());
+  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId" | "tripOptionId">>>(new Map());
   const [metadataOverlayVersion, setMetadataOverlayVersion] = useState(0);
 
   const persistAssistantMessage = useCallback(
@@ -205,6 +216,33 @@ export function useChatStream({
       saveMessage(userMessage).catch((err) => {
         if (isDev) console.warn("[useChatStream] saveMessage failed:", err);
       });
+
+      // ── Trip-planner side channel: fire in parallel when query looks travel-y ──
+      if (looksLikeTripQuery(text)) {
+        (async () => {
+          try {
+            const { supabase } = await import("@/integrations/supabase/client");
+            const { data, error } = await supabase.functions.invoke("plan-budget-trip", {
+              body: { query: text },
+            });
+            if (error || !data?.trip_option_id) return;
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, tripOptionId: data.trip_option_id } : m,
+              ),
+            );
+            // Keep across persistence
+            metadataOverlayRef.current.set(assistantId, {
+              ...(metadataOverlayRef.current.get(assistantId) || {}),
+              tripOptionId: data.trip_option_id,
+            } as any);
+            setMetadataOverlayVersion((v) => v + 1);
+          } catch (e) {
+            if (isDev) console.warn("[useChatStream] trip planner failed:", e);
+          }
+        })();
+      }
 
       if (!mountedRef.current) return;
 

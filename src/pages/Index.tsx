@@ -75,7 +75,8 @@ const Index = () => {
       const meta = m.metadata as Record<string, unknown> | null | undefined;
       const artifactId = typeof meta?.artifact_id === "string" ? meta.artifact_id : undefined;
       const researchReportId = typeof meta?.research_report_id === "string" ? meta.research_report_id : undefined;
-      return { id: m.id, role: m.role, content: m.content, artifactId, researchReportId };
+      const tripOptionId = typeof meta?.trip_option_id === "string" ? meta.trip_option_id : undefined;
+      return { id: m.id, role: m.role, content: m.content, artifactId, researchReportId, tripOptionId };
     }),
     [sessionMessages]
   );
@@ -117,6 +118,7 @@ const Index = () => {
           orchestration: m.orchestration ?? overlay.orchestration,
           artifactId: m.artifactId ?? overlay.artifactId,
           researchReportId: m.researchReportId ?? overlay.researchReportId,
+          tripOptionId: m.tripOptionId ?? overlay.tripOptionId,
         };
       });
     }
