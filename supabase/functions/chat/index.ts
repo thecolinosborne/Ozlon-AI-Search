@@ -10246,6 +10246,9 @@ Execute these in order. Be decisive — the user has already been shown this pla
         if (longFormMeta) {
           await writer.write(encoder.encode(`event: longform\ndata: ${JSON.stringify(longFormMeta)}\n\n`));
         }
+        if (formatMeta) {
+          await writer.write(encoder.encode(`event: formatting\ndata: ${JSON.stringify(formatMeta)}\n\n`));
+        }
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();
