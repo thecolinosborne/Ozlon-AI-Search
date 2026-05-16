@@ -128,7 +128,7 @@ export function useChatStream({
 
   // Keep ephemeral chip metadata (provider/toolsUsed/orchestration/artifactId) alive
   // after a message is persisted, since persistence only stores {id, role, content}.
-  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId">>>(new Map());
+  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId" | "tripOptionId">>>(new Map());
   const [metadataOverlayVersion, setMetadataOverlayVersion] = useState(0);
 
   const persistAssistantMessage = useCallback(
