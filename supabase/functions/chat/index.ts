@@ -10117,7 +10117,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
     const requestPayload: Record<string, unknown> = {
       model: modelConfig.name,
       messages: openAIMessages,
-      max_completion_tokens: modelConfig.maxTokens,
+      max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
       stream: true,
     };
 
