@@ -9811,6 +9811,35 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
     const actionKeywords = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'write to', 'message', 'notify', 'add contact', 'add deal', 'make a', 'set up', 'file a', 'open an issue', 'open a ticket', 'list contacts', 'list pipelines', 'list opportunities', 'list workflows', 'list campaigns', 'list calendars', 'add tag', 'remove tag', 'show my contacts', 'show my pipeline', 'show my deals', 'ghl', 'gohighlevel', 'high level', 'create a doc', 'create a sheet', 'create a spreadsheet', 'new spreadsheet', 'new doc', 'new document', 'create a presentation', 'new presentation', 'new slide', 'read sheet', 'append', 'add rows', 'create task', 'list tasks', 'clickup', 'invoice', 'invoices', 'orders', 'transactions', 'payments', 'forms', 'submissions', 'funnels', 'funnel', 'custom fields', 'custom values', 'team members', 'users', 'tags', 'delete contact', 'add note', 'add task', 'list notes', 'contact notes', 'contact tasks', 'cancel appointment', 'trigger workflow', 'run workflow', 'free slots', 'availability', 'conversations', 'message thread', 'search contacts', 'update contact', 'update opportunity', 'move deal', 'move stage', 'clean', 'clean up', 'clean out', 'filter', 'trash', 'delete email', 'remove email', 'mark as read', 'label', 'archive', 'organize inbox', 'sort email', 'pull my email', 'get my email', 'check email', 'find email', 'gsc', 'search console', 'seo report', 'seo analysis', 'keyword performance', 'top pages', 'top queries', 'ranking', 'search performance', 'compare snapshot', 'save snapshot', 'search google for', 'who ranks for', 'am i ranking', 'pull my gsc', 'pull search console', 'show my seo', 'seo snapshot', 'page performance', 'keyword research', 'remember this', 'always do', 'from now on', 'never do', 'i prefer', 'my preference', 'remember that', 'research', 'investigate', 'deep dive', 'look into', 'find out about', 'what\'s the latest on', 'analyze the market', 'competitor analysis', 'market research', 'track this', 'add to my tasks', 'queue up', 'work task', 'new task'];
     const isActionRequest = actionKeywords.some(k => userText.includes(k));
 
+    // ── FORMATTING ENGINE 2026 (router + mode-scoped card) ─────────────────
+    // Classify this turn into exactly one FormatMode and inject ONE addendum
+    // system message so the model gets a single, consistent formatting card
+    // instead of the three overlapping rule blocks competing in the global
+    // system prompt. LONGFORM is handled by _longform/prompt.ts above.
+    let formatMeta: { mode: string; reason: string } | null = null;
+    try {
+      const { routeFormat } = await import("./_format/router.ts");
+      const { getFormatCard } = await import("./_format/cards.ts");
+      const willUseTools = (isActionRequest || enableTools) && availableTools.length > 0;
+      const route = routeFormat({
+        userText: lastUserMsg?.content || '',
+        intent: intent || null,
+        isLongForm: !!longFormMeta,
+        willUseTools,
+      });
+      formatMeta = { mode: route.mode, reason: route.reason };
+      const card = getFormatCard(route.mode as any);
+      if (card) {
+        // Insert AFTER the longform addendum (if any) so the card sits last
+        // and takes precedence over the legacy formatting blocks.
+        const insertAt = longFormMeta ? 2 : 1;
+        openAIMessages.splice(insertAt, 0, { role: 'system', content: card });
+      }
+      console.log(`[Format] mode=${route.mode} reason=${route.reason}`);
+    } catch (e) {
+      console.warn('[Format] router failed (continuing with global prompt):', e);
+    }
+
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
     if ((isActionRequest || enableTools) && availableTools.length > 0) {
       console.log('Using tool loop (non-streaming) for action request');
