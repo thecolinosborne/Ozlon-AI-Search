@@ -1,191 +1,138 @@
-# Budget Trip Planner — v4 UX: "All the travel apps had a baby with AI"
+## What's broken today
 
-Got it. The feel should be: open the chat, ask one sentence, and what comes back has the **price intelligence of Hopper**, the **photo-craft of Airbnb**, the **flight clarity of Google Flights**, the **map awareness of Kayak**, the **itinerary spine of TripIt**, and the **event sense of Resy/Eventbrite** — but everything is generated, pulled, and re-pulled live from chat. No separate page. No forms. You just talk.
+Ask Ozlon for "a 15-minute teleprompter" and you get ~400 clipped words with H2 headings and bullets. Three root causes in `supabase/functions/chat/index.ts`:
 
-## The "stolen from the best" map
+1. **No length contract.** The prompt has CONVERSATIONAL and DOCUMENT modes — nothing for spoken-word or long-form. The model has no idea 15 min ≈ 2,250 words.
+2. **Brevity rules leak everywhere.** "≤3 sentence paragraphs," "match the energy of the question," and the `mem://design/voice-and-vocabulary` 14-word rule force a clipped voice even when you want flowing prose.
+3. **Wrong skeleton.** DOCUMENT MODE forces Title + Executive Summary + Recommendations — a teleprompter reader would read those out loud.
 
-| Travel app | What we steal | Where it shows up |
-|---|---|---|
-| **Hopper** | Price prediction, "watch / wait / buy", color-coded calendar, fare drop alerts | `PriceTrendBadge`, `BestDaysStrip`, watchlist toast |
-| **Google Flights** | Price grid, duration bar, stops/airline filter chips, "best" vs "cheapest" tabs | `FlightRow`, `FlightTabs` |
-| **Airbnb** | Full-bleed photo carousel, host/neighborhood story, map pin, wishlist heart | `StayCard`, `StayDetailSheet` |
-| **Kayak** | Hacker fares, mixed-mode (flight+stay bundle), map view of stays | `BundleSavings`, `StayMapSheet` |
-| **TripIt** | Day-by-day spine, confirmation numbers, timezone-aware times | `ItineraryDays` (on save) |
-| **Booking.com** | "Only 2 left", "free cancellation", trust chips | `TrustChips` on every card |
-| **Resy / Eventbrite** | What's-on-this-weekend, ticket tier, sold-out tags | `EventCard` |
-| **Apple Wallet** | Hero number, glanceable, one card per trip | `TripPlanCard` shell |
-| **iMessage** | Tapback-style refinements, no keyboard needed | `RefineChipsRow` |
-| **iOS Photos** | Scroll-snap full-bleed carousel, page dots | `TripPhotoCarousel` |
-| **iOS Mail** | Undo toast (no confirm dialogs) | `UndoToast` |
-| **Apple Health** | Drag slider with haptic ticks, color zones | `BudgetAdjuster` |
-| **Apple Stocks** | Sparkline + delta + arrow | `PriceSparkline` |
-
-## What the chat actually returns
-
-### The Trip Plan Card (one message → one Wallet-style card)
-
-```text
-┌─────────────────────────────────────┐
-│ Chicago · Fri Mar 7 – Sun Mar 9     │  glanceable header
-│                                     │
-│      $847                           │  hero number
-│      ↓ $42 vs typical · falling     │  Hopper-style trend
-│                                     │
-│ ●●○  flights · stay · things        │  streaming dots
-├─────────────────────────────────────┤
-│ ✈  AA 1423  ORD 6:40a → 8:10a       │  Google-Flights row
-│    1h 30m · nonstop · $218 ↓        │
-│    [photos] [seat map] [book →]     │
-├─────────────────────────────────────┤
-│ 🏨 Sophy Hyde Park       $189/nt   │  Airbnb-style
-│    [▮▮▮▮ photo carousel ▮▮▮▮]      │
-│    ★4.7 · Hyde Park · free cancel  │
-├─────────────────────────────────────┤
-│ 🎟  This weekend in Chicago         │
-│    Bulls vs Lakers · Sat 7p · $58  │
-│    Second City · Fri 8p · $32      │
-├─────────────────────────────────────┤
-│ [Cheaper] [Nicer] [+night] [Save]   │  iMessage tapbacks
-└─────────────────────────────────────┘
-```
-
-Streaming: dots fill left-to-right as `search-flights`, `search-hotels`, `search-places` return. Card never blocks.
-
-### The chat-as-database angle
-
-Everything the user has ever asked, saved, or watched is queryable in chat itself:
-
-- "what trips did I look at last month?" → renders `trip_history_artifact` (list of cards from `trip_searches` + `saved_trip_plans`)
-- "which one was the cheapest?" → re-ranks the same in-memory set, no new API call
-- "show me only the ones under $1k that are still falling" → filter, render
-- "compare Chicago and Austin" → `trip_comparison_artifact` (side-by-side table, no re-query)
-- "what did I actually spend last time I went to Miami?" → joins `trip_actuals` if present, else "I don't have receipts for that trip yet"
-- "alert me if Chicago drops below $700" → `set_trip_watch` tool, confirmation chip in line
-
-The chat is the only surface. No `/trips` page, no dashboard. The orchestrator decides whether a question is a **new search** (call tools) or a **lookup** (read from `trip_searches` / `saved_trip_plans` / `trip_watchlist` / `trip_actuals` directly).
-
-### Bottom sheets, not pages
-
-Tap a hotel → bottom drawer slides up: full carousel + Mapbox tile + reviews snippet + 3 deep links (Booking / Airbnb / Hotels.com). Swipe down to dismiss. Stays in the chat thread.
-
-Tap a flight → drawer with seat map link, baggage fee row, fare history sparkline, refundable badge, "book on AA" deep link.
-
-Tap an event → drawer with venue map, ticket tiers, "add to itinerary".
-
-### Refine = no keyboard
-
-Below every plan, horizontal scroll of one-tap chips. Tapping fires `refine_trip_plan` patch and re-streams just the affected pillar. Undo toast appears for 4s — no confirm modals.
-
-Chips adapt to context:
-- Over budget → `[Cheaper stay]` `[Skip car]` `[Shorter trip]`
-- Under budget → `[Nicer hotel]` `[+1 night]` `[Add experience]`
-- Weather bad → `[Push 1 week]` `[Indoor things]`
-- Sold-out event → `[Find similar]`
-
-### Budget Adjuster (Apple Health slider)
-
-```text
-$500 ─────●──────────── $1500
-              ↑ $847
-```
-
-Drag the dot, plan re-ranks live. Color shifts green → amber → red. Haptic tick every $50 (Capacitor Haptics, web no-op). Same pattern for date nudge (±2 days) and trip-length pills (1n / 2n / 3n).
-
-### Best-Days Strip (Hopper)
-
-For flexible-dates trips, render a horizontal calendar strip color-coded by price:
-
-```text
-[Fri  $218] [Sat  $189] [Sun  $312] [Mon  $145 ↓]
-   green       green       amber        green
-```
-
-Tap a day → re-runs that pillar only.
-
-### Trust chips
-
-Every card carries 2–4 inline chips with universally-readable signals: `Free cancel` · `Only 2 left` · `Refundable` · `1 bag incl.` · `★4.7 (892)` · `Falling 7d` · `Below avg`. Booking-style social proof without the spam.
-
-## Streaming + state model
-
-```text
-user: "weekend in Chicago under $700"
-        │
-        ▼
-plan-budget-trip
-        │
-        ├──► emit trip_plan_skeleton  (card appears, 3 empty pillars)
-        │
-        ├──► search-flights ──► emit trip_plan_patch (flight pillar fills)
-        ├──► search-hotels  ──► emit trip_plan_patch (stays carousel fills)
-        ├──► search-places  ──► emit trip_plan_patch (events fill)
-        │
-        └──► emit trip_plan_ready  (total + chips + adjuster activate)
-```
-
-Same SSE channel as today's chat artifacts. No new transport.
-
-## What gets built (UI-only delta on top of v3 backend)
-
-| Component | Inspiration |
-|---|---|
-| `TripPlanCard` | Apple Wallet pass shell |
-| `TripPhotoCarousel` | iOS Photos, Airbnb |
-| `TripDetailSheet` | iOS sheet, Airbnb listing |
-| `FlightRow` + `FlightTabs` | Google Flights |
-| `StayCard` + `StayMapSheet` | Airbnb + Kayak map |
-| `EventCard` | Resy / Eventbrite |
-| `PriceTrendBadge` + `PriceSparkline` | Hopper + Stocks |
-| `BestDaysStrip` | Hopper calendar |
-| `TrustChips` | Booking.com |
-| `BundleSavings` | Kayak hacker fares |
-| `BudgetAdjuster` | Apple Health |
-| `RefineChipsRow` | iMessage tapbacks |
-| `UndoToast` | iOS Mail |
-| `TripSkeleton` | Apple Music streaming fill |
-| `TripHistoryArtifact` | renders `trip_searches`/`saved_trip_plans` from chat |
-| `TripComparisonArtifact` | side-by-side from in-memory set |
-| `ItineraryDays` (on save) | TripIt day spine |
-
-All render inline in `ChatMessageList.tsx` via existing `trip_plan_artifact` SSE channel.
-
-## Interaction rules
-
-- Single composer. Voice mic stays the largest control. Chips + slider cover 90% of follow-ups so the keyboard rarely opens.
-- No modal confirms. Undo toast everywhere.
-- No spinners. Skeleton fill.
-- No navigation. Sheets only.
-- Tap targets ≥ 44pt. Bottom 88pt reserved for thumb actions.
-- Haptics on price change, save, cap-breach.
-- Animations 200–300ms ease-out, respect reduced-motion.
-- Dark mode native.
-
-## Empty state teaches
-
-First open with no trips, the chat shows 3 tappable example bubbles (iOS keyboard-suggestion pattern):
-
-```text
-"Weekend in Chicago under $700"
-"Cheap beach trip in March"
-"Surprise me — $1000, anywhere warm"
-```
-
-## What I'd build first (smallest slice that reads as "all of them combined")
-
-1. `TripPlanCard` shell + streaming skeleton
-2. `FlightRow` (Google Flights) + `StayCard` with `TripPhotoCarousel` (Airbnb)
-3. `EventCard` (Resy)
-4. `PriceTrendBadge` + `BestDaysStrip` (Hopper)
-5. `TripDetailSheet` (bottom drawer for any row)
-6. `RefineChipsRow` + `UndoToast`
-7. `TrustChips` everywhere
-
-That's v4.0. v4.1 adds `BudgetAdjuster` + haptics + `BundleSavings`. v4.2 adds `TripHistoryArtifact` + `TripComparisonArtifact` (chat-as-database lookups) + `ItineraryDays` on save.
-
-## Out of scope
-
-Booking/payment. New routes or pages. Native iOS shipping. Loyalty math beyond chip display. Currencies other than USD.
+Token cap isn't the issue (`gpt-5.4` = 16,384, plenty for 2.5k words). The model is stopping early because the *prompt* tells it to.
 
 ---
 
-Approve and I'll build v4.0 on top of v3's backend plan. Or pick a subset.
+## The 2026 fix — a Long-Form Engine, not just a new prompt mode
+
+Instead of stapling one more mode onto a wall-of-text system prompt, build a small **Long-Form Engine** that runs alongside the existing chat loop. Five layers, all server-side, no UI rewrite.
+
+### Layer 1 — Intent + spec extraction (the "brief")
+
+Before the main generation call, a fast pre-pass (`gemini-3-flash-preview`, ~300ms, structured output via `Output.object`) turns the user's request into a typed `LongFormBrief`:
+
+```ts
+{
+  kind: 'teleprompter' | 'speech' | 'voiceover' | 'podcast' | 'sermon' |
+        'keynote' | 'essay' | 'article' | 'blog' | 'story' | 'chapter' |
+        'newsletter' | 'sales_letter' | 'social_thread',
+  target_words: number,          // derived from duration/pages/explicit count
+  target_minutes?: number,
+  wpm: 150 | 180 | 220,          // spoken / podcast / read silently
+  audience: string,
+  voice: 'jarvis' | 'storyteller' | 'expert' | 'hype' | 'plain' | 'user_clone',
+  tone_adjectives: string[],
+  reading_level: 'grade-7' | 'grade-10' | 'pro',
+  structure: 'continuous' | 'scene-paragraphs' | 'chaptered',
+  must_include: string[],        // names, facts, hooks, CTAs
+  must_avoid: string[],          // jargon, clichés, banned words
+  breath_cues: boolean,          // [pause] [beat] inline
+  cta?: string,
+  format: 'prose' | 'script' | 'screenplay' | 'two-column-vo'
+}
+```
+
+If the user under-specified ("write me a teleprompter"), the brief is filled with smart defaults AND the response opens with one inline italic line: `*Assuming ~15 min · conversational · grade-8 · no CTA. Reply with tweaks and I'll regenerate.*` — no blocking question, no roundtrip.
+
+### Layer 2 — Outline-first generation (only when target_words > 400)
+
+For anything long, the engine first emits a private outline (3–12 beats, each with a target word budget that sums to `target_words`) and then drafts section by section. This single change is the biggest quality lever in 2026 long-form work — models stay coherent across thousands of tokens when they have a budget per beat instead of one open-ended ask.
+
+Outline lives in a hidden `<plan>` block stripped before sending to the client. Each beat is drafted in a loop with the previous beat's last 2 sentences as continuity context.
+
+### Layer 3 — Self-verifying length + voice loop
+
+After draft, a cheap verifier pass (`gpt-5.4-nano` or `gemini-3-flash-lite`) checks:
+- **Length** within 90–110% of `target_words`.
+- **Voice** matches `tone_adjectives` (1–5 score).
+- **Forbidden patterns**: no headings if `format=prose`, no bullets unless requested, no AI-tells ("In conclusion," "Let's dive in," "It's important to note"), no banned words.
+- **Hook strength**: first 50 words score (1–5).
+- **Ending lands**: last sentence is a closing line, not a mid-thought.
+
+If any check fails, one repair pass is fired with a surgical patch instruction ("expand beats 4 and 7 by ~180 words each, in the same voice, no new claims"). Max 1 repair to bound latency and cost.
+
+### Layer 4 — Voice cloning from your own writing
+
+You already store wisdom + writing samples (`wisdom_memories`, conversation history). Add a `voice_profile` retrieval step: when `voice='user_clone'` or the user says "in my voice," pull the top-K most stylistically representative snippets (cosine over pgvector) and inject them as few-shot exemplars in the drafter's system message. This is what makes 2026 long-form not feel like generic GPT — it sounds like you.
+
+### Layer 5 — Token + model selection per length
+
+| Target words | Model | max_completion_tokens | Pass count |
+|---|---|---|---|
+| ≤ 400 | current default | 16,384 | 1 (single shot) |
+| 400 – 1,500 | `gpt-5.4` | 24,000 | outline + draft |
+| 1,500 – 4,000 | `gpt-5.4` | 32,000 | outline + per-beat draft |
+| > 4,000 | `gpt-5.4-pro` or `gpt-5.5` | 48,000 | outline + per-beat + stitch |
+
+Bumped caps apply only to long-form calls — `MODEL_REGISTRY` defaults stay untouched. If the chosen model rejects the cap, fall back to the next tier.
+
+---
+
+## Output contract by `kind`
+
+| Kind | Layout | Cadence | Cues | Closing |
+|---|---|---|---|---|
+| teleprompter / speech | Scene-paragraphs, 3–6 sentences, blank lines between | Spoken rhythm, contractions, varied length | `[pause]` `[beat]` optional | Strong landing line + `*~2,240 words · ~15 min @ 150 wpm*` |
+| voiceover / podcast | Two-column allowed (`VO:` / `SFX:`) | Conversational, fewer subordinate clauses | Allowed | Same word-count footer |
+| essay / article / blog | Continuous prose, optional H2 only for true sections | Reading rhythm, longer sentences ok | None | `*~1,180 words · ~6 min read*` |
+| sales_letter | Hook → problem → mechanism → proof → CTA | Punchy, second person | None | Single CTA line |
+| story / chapter | Scene breaks (`***`), dialogue formatted | Narrative voice | None | Cliffhanger or resolution per brief |
+| newsletter | Subject line + preheader + body | User's voice clone preferred | None | Sign-off block |
+
+The 14-word-sentence rule from `mem://design/voice-and-vocabulary` is **explicitly scoped to CONVERSATIONAL replies only.** Memory file gets updated in the same pass.
+
+---
+
+## Streaming UX (small, additive)
+
+The frontend already streams. Two small additive touches in `MessageBubble.tsx` when a long-form response is detected (server tags the message with `meta.longform = { kind, target_words, actual_words }`):
+
+- A subtle live counter under the orb while streaming: `420 / 2,250 words · 1:30 elapsed`. Disappears on completion.
+- A small chip row under the finished message: `▸ Continue` · `▸ Tighter (-20%)` · `▸ Longer (+30%)` · `▸ Different voice` · `▸ Send to Google Doc`. Each sends a pre-formed prompt — no new UI surface, just a `QuickActions`-style row using existing styling. Hidden if `kind` is unset.
+
+Optional and gated behind `meta.longform`. Zero impact on normal chat.
+
+---
+
+## Files touched
+
+| File | Change |
+|---|---|
+| `supabase/functions/chat/_longform/brief.ts` (new) | Brief extractor — structured output via `Output.object`. |
+| `supabase/functions/chat/_longform/outline.ts` (new) | Outline planner with per-beat word budgets. |
+| `supabase/functions/chat/_longform/drafter.ts` (new) | Per-beat drafting loop with continuity context. |
+| `supabase/functions/chat/_longform/verify.ts` (new) | Length / voice / forbidden-pattern checks + one repair pass. |
+| `supabase/functions/chat/_longform/voice.ts` (new) | Pull user voice exemplars from `wisdom_memories` via pgvector. |
+| `supabase/functions/chat/index.ts` | Detect long-form intent → route through engine → attach `meta.longform` to stream. Dynamic `max_completion_tokens` per tier. ~80 lines added, no existing logic removed. |
+| `src/components/chat/MessageBubble.tsx` | Render live word counter + chip row when `meta.longform` present. Both behind a feature flag. |
+| `src/types/index.ts` | Add `longform` field to `Message.meta`. |
+| `mem://design/voice-and-vocabulary` | Scope 14-word rule to conversational mode. |
+| `mem://chat/long-form-engine` (new) | Document the brief schema, model tiers, and output contract. |
+
+No new tables. No migrations. No new edge functions. Existing chat path untouched for short replies.
+
+---
+
+## What you'll feel
+
+- **"15-min teleprompter on agency moats"** → 2,250 ± 100 words, scene-paragraphs, your voice (if you opt in), optional `[pause]` cues, ends with a real closing line and the word-count footer.
+- **"1,200-word LinkedIn post in my voice"** → 1,150–1,250 words, no headings, contractions on, sounds like your prior posts, ready to paste.
+- **"5-min keynote opener, hype tone"** → ~750 words, punchy rhythm, strong hook in first 50 words, clean handoff line.
+- **Short questions** → identical to today. The engine never fires.
+
+---
+
+## Three open choices for you
+
+1. **Voice cloning depth** — Phase 1 (light: 3 exemplars from recent writing) or Phase 2 (a trained `voice_profile` per user with explicit accept/reject feedback after each draft)?
+2. **Verifier model** — `gpt-5.4-nano` (best quality, ~$ per check) or `gemini-3-flash-lite` (cheapest, slightly noisier)?
+3. **Chip row** — ship with the 5 chips above, or start with just `Continue` and `Tighter/Longer` and add the rest after you've used it a week?
+
+Pick any/all and I'll start with Layer 1 + 2 + 5 (brief + outline + token tiers) since those alone close ~70% of the quality gap, then add Layers 3 and 4 next pass.
