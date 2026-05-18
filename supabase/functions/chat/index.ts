@@ -7532,6 +7532,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'update_work_task': '_always_',
     'bulk_update_work_tasks': '_always_',
     'upload_youtube_video': '_always_',
+    'analyze_youtube_channel': '_always_',
     'higgsfield_generate_image': '_always_',
     'higgsfield_generate_video': '_always_',
     'higgsfield_get_job_status': '_always_',
