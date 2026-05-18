@@ -18,6 +18,7 @@ export type ChatMessage = {
   artifactId?: string;
   researchReportId?: string;
   tripOptionId?: string;
+  formatMode?: FormatMode;
 };
 
 // Lightweight intent detector for budget trip planning.
