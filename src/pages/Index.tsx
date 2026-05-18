@@ -119,6 +119,7 @@ const Index = () => {
           artifactId: m.artifactId ?? overlay.artifactId,
           researchReportId: m.researchReportId ?? overlay.researchReportId,
           tripOptionId: m.tripOptionId ?? overlay.tripOptionId,
+          formatMode: m.formatMode ?? overlay.formatMode,
         };
       });
     }
