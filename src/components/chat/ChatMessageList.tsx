@@ -353,6 +353,7 @@ const MessageItem = memo(MessageItemInner, (prev, next) => {
   if (prev.message !== next.message) return false;
   if (prev.isLoading !== next.isLoading) return false;
   if (prev.onRegenerate !== next.onRegenerate) return false;
+  if (prev.onReformat !== next.onReformat) return false;
   if (prev.playMessage !== next.playMessage) return false;
   // Playing/loading state matters only if it concerns this message or one of its blocks.
   const id = next.message.id;
