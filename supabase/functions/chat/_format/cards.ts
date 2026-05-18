@@ -99,6 +99,7 @@ Rules:
 - USE \`---\` horizontal rules between major phases (intro → analysis → recommendation).
 - End with Recommendations or Next Steps + one italic closing line.
 - Substance over length — every section earns its place.
+- When writing this to a Google Doc, prefer \`docs_apply_styled_document\` (structured payload) over raw \`docs_apply_markdown\` — it renders the full Apple Memo theme in one call.
 ${VISUAL_GRAMMAR}
 `.trim(),
 };
