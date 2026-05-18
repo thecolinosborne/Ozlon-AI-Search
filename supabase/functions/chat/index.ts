@@ -7952,6 +7952,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'update_work_task': 'Updating work task',
   'bulk_update_work_tasks': 'Updating work tasks',
   'upload_youtube_video': 'Uploading to YouTube',
+  'analyze_youtube_channel': 'Analyzing YouTube channel',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
