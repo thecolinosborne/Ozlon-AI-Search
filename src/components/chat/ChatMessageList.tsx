@@ -4,11 +4,13 @@ import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRigh
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
+import type { FormatMode } from "@/services/chatService";
 import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
 import { InvestigationCard } from "./InvestigationCard";
 import { ResearchCard } from "./ResearchCard";
 import { TripPlanArtifact } from "@/components/trip/TripPlanArtifact";
+import { ReformatChip } from "./ReformatChip";
 
 const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
   if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
