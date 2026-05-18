@@ -1012,6 +1012,69 @@ export type Database = {
           },
         ]
       }
+      formatting_telemetry: {
+        Row: {
+          created_at: string
+          id: string
+          longform_kind: string | null
+          longform_target_words: number | null
+          mode: string
+          output_chars: number | null
+          path: string
+          router_reason: string | null
+          session_id: string | null
+          user_id: string | null
+          user_text_len: number | null
+          verifier_issues: Json | null
+          verifier_latency_ms: number | null
+          verifier_model: string | null
+          verifier_ok: boolean | null
+          verifier_op_mode: string | null
+          verifier_repaired: boolean | null
+          verifier_skipped: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          longform_kind?: string | null
+          longform_target_words?: number | null
+          mode: string
+          output_chars?: number | null
+          path?: string
+          router_reason?: string | null
+          session_id?: string | null
+          user_id?: string | null
+          user_text_len?: number | null
+          verifier_issues?: Json | null
+          verifier_latency_ms?: number | null
+          verifier_model?: string | null
+          verifier_ok?: boolean | null
+          verifier_op_mode?: string | null
+          verifier_repaired?: boolean | null
+          verifier_skipped?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          longform_kind?: string | null
+          longform_target_words?: number | null
+          mode?: string
+          output_chars?: number | null
+          path?: string
+          router_reason?: string | null
+          session_id?: string | null
+          user_id?: string | null
+          user_text_len?: number | null
+          verifier_issues?: Json | null
+          verifier_latency_ms?: number | null
+          verifier_model?: string | null
+          verifier_ok?: boolean | null
+          verifier_op_mode?: string | null
+          verifier_repaired?: boolean | null
+          verifier_skipped?: string | null
+        }
+        Relationships: []
+      }
       gauntlet_routing_log: {
         Row: {
           chosen_model: string | null
