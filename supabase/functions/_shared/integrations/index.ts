@@ -22,10 +22,12 @@ import { goHighLevelIntegration } from "./gohighlevel.ts";
 import { communicationsIntegration, communicationsDigestIntegration } from "./communications.ts";
 import { researchIntegration } from "./research.ts";
 import { higgsfieldIntegration } from "./higgsfield.ts";
+import { viralCreativeIntegration } from "./viral-creative.ts";
 
 export const INTEGRATIONS: IntegrationManifest[] = [
   researchIntegration,
   higgsfieldIntegration,
+  viralCreativeIntegration,
   googleDocsIntegration,
   googleSheetsIntegration,
   googleCalendarIntegration,
