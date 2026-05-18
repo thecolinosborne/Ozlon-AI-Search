@@ -445,6 +445,7 @@ export function useChatStream({
               orchestration: inflightAssistant?.orchestration,
               artifactId: inflightAssistant?.artifactId,
               researchReportId: inflightAssistant?.researchReportId,
+              formatMode: inflightAssistant?.formatMode,
             }
           : null;
 
@@ -468,12 +469,14 @@ export function useChatStream({
               orchestration: finalAssistantMessage.orchestration,
               artifactId: finalAssistantMessage.artifactId,
               researchReportId: finalAssistantMessage.researchReportId,
+              formatMode: finalAssistantMessage.formatMode,
             };
-            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId || overlay.researchReportId;
+            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId || overlay.researchReportId || overlay.formatMode;
             if (hasAny) {
               metadataOverlayRef.current.set(assistantId, overlay);
               setMetadataOverlayVersion((v) => v + 1);
             }
+
 
             // Pass artifactId / researchReportId through finalize/save metadata so it persists to DB
             const persistedMeta: Record<string, unknown> = {};
