@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent, FormatMode } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
 export type LiveStep = {
