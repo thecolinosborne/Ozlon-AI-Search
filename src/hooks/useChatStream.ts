@@ -562,6 +562,24 @@ export function useChatStream({
     };
   }, [failStaleTasks]);
 
+  // Reformat the prior assistant turn in a different FormatMode by re-sending
+  // the user message that immediately preceded it, with a server-side override.
+  const reformatAs = useCallback(
+    async (assistantMessageId: string, mode: FormatMode) => {
+      const idx = persistedMessages.findIndex(
+        (m) => m.id === assistantMessageId && m.role === "assistant"
+      );
+      if (idx <= 0) return;
+      let userMsg: ChatMessage | null = null;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (persistedMessages[i].role === "user") { userMsg = persistedMessages[i]; break; }
+      }
+      if (!userMsg?.content) return;
+      await sendMessage(userMsg.content, undefined, mode);
+    },
+    [persistedMessages, sendMessage]
+  );
+
   // Touch the version so consumers re-render when overlay updates.
   void metadataOverlayVersion;
   return {
@@ -570,7 +588,9 @@ export function useChatStream({
     isLoading,
     inflightMessages,
     sendMessage,
+    reformatAs,
     abortStream,
     metadataOverlay: metadataOverlayRef.current,
   };
 }
+
