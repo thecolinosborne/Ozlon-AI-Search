@@ -454,7 +454,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
             indentFirstLine: pt(THEME.quoteIndent),
             spaceAbove: pt(6),
             spaceBelow: pt(6),
-            borderLeft: { color: rgb(THEME.grayLight).color, width: pt(1.5), padding: pt(8), dashStyle: "SOLID" },
+            borderLeft: { color: rgb(THEME.grayLight), width: pt(1.5), padding: pt(8), dashStyle: "SOLID" },
           },
           fields: "indentStart,indentFirstLine,spaceAbove,spaceBelow,borderLeft",
         },
