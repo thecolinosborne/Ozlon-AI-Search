@@ -162,6 +162,13 @@ export interface ResearchArtifactEvent {
   confidence: number;
 }
 
+export type FormatMode = 'ATOMIC' | 'CHAT' | 'BRIEF' | 'EXECUTION' | 'DOCUMENT' | 'LONGFORM';
+
+export interface FormattingEvent {
+  mode: FormatMode;
+  reason: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -173,6 +180,8 @@ export interface StreamChatOptions {
   userSettings?: UserSettings;
   sessionId?: string;
   assistantMessageId?: string;
+  /** Force a specific formatting mode (overrides server-side router). */
+  formatOverride?: FormatMode;
   signal?: AbortSignal;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
@@ -183,9 +192,11 @@ export interface StreamChatOptions {
   onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
   onInvestigationArtifact?: (data: InvestigationArtifactEvent) => void;
   onResearchArtifact?: (data: ResearchArtifactEvent) => void;
+  onFormatting?: (data: FormattingEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
+
 
 /**
  * Stream chat responses from the AI backend
