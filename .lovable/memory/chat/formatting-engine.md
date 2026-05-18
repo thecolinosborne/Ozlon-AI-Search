@@ -56,4 +56,7 @@ Wired in both the streaming path and the tool-loop path in `supabase/functions/c
 ## Rollout state
 - Phase 1 (router + cards + visual grammar): SHIPPED
 - Phase 2 (verifier): SHIPPED in shadow mode by default. Flip `FORMAT_VERIFIER_MODE=active` to enable repair.
-- Phase 3 (telemetry table + tuning): pending — currently logs only via console + SSE.
+- Phase 3 (telemetry): SHIPPED. Every turn writes a row to `public.formatting_telemetry` (router decision always, verifier outcome when it ran). Disable with `FORMAT_TELEMETRY_DISABLED=1`. Sink: `_format/telemetry.ts`. Tuning queries:
+  - mode distribution (last 7d): `select mode, count(*) from formatting_telemetry where created_at > now() - interval '7 days' group by mode order by 2 desc;`
+  - verifier failure rate by mode: `select mode, avg((verifier_ok=false)::int) as fail_rate, avg(verifier_latency_ms) as avg_ms from formatting_telemetry where verifier_ok is not null and created_at > now() - interval '7 days' group by mode;`
+  - top issues: `select jsonb_array_elements_text(verifier_issues) as issue, count(*) from formatting_telemetry where verifier_ok=false group by 1 order by 2 desc limit 20;`
