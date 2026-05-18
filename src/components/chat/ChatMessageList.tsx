@@ -378,6 +378,7 @@ export const ChatMessageList = ({
   playingMessageId,
   loadingAudioId,
   onRegenerate,
+  onReformat,
   isLoading,
 }: ChatMessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -397,6 +398,7 @@ export const ChatMessageList = ({
             playingMessageId={playingMessageId}
             loadingAudioId={loadingAudioId}
             onRegenerate={onRegenerate}
+            onReformat={onReformat}
             isLoading={isLoading}
           />
         ))}
