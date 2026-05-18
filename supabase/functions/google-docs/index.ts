@@ -454,7 +454,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
             indentFirstLine: pt(THEME.quoteIndent),
             spaceAbove: pt(6),
             spaceBelow: pt(6),
-            borderLeft: { color: rgb(THEME.grayLight).color, width: pt(1.5), padding: pt(8), dashStyle: "SOLID" },
+            borderLeft: { color: rgb(THEME.grayLight), width: pt(1.5), padding: pt(8), dashStyle: "SOLID" },
           },
           fields: "indentStart,indentFirstLine,spaceAbove,spaceBelow,borderLeft",
         },
@@ -473,7 +473,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
           paragraphStyle: {
             spaceAbove: pt(12),
             spaceBelow: pt(12),
-            borderBottom: { color: rgb({ red: 0.85, green: 0.85, blue: 0.85 }).color, width: pt(0.75), padding: pt(0), dashStyle: "SOLID" },
+            borderBottom: { color: rgb({ red: 0.85, green: 0.85, blue: 0.85 }), width: pt(0.75), padding: pt(0), dashStyle: "SOLID" },
           },
           fields: "spaceAbove,spaceBelow,borderBottom",
         },
@@ -487,7 +487,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
             indentFirstLine: pt(12),
             spaceAbove: pt(6),
             spaceBelow: pt(6),
-            shading: { backgroundColor: rgb(THEME.codeBlockBg).color },
+            shading: { backgroundColor: rgb(THEME.codeBlockBg) },
           },
           fields: "indentStart,indentFirstLine,spaceAbove,spaceBelow,shading",
         },
@@ -635,7 +635,6 @@ function fillTableRequests(tableEl: AnyJson, data: string[][], cols: number): Do
     const tableStart = tableEl.startIndex as number;
     out.push({
       updateTableCellStyle: {
-        tableStartLocation: { index: tableStart },
         tableRange: {
           tableCellLocation: { tableStartLocation: { index: tableStart }, rowIndex: 0, columnIndex: 0 },
           rowSpan: 1,
@@ -652,7 +651,6 @@ function fillTableRequests(tableEl: AnyJson, data: string[][], cols: number): Do
     if (rows.length > 1) {
       out.push({
         updateTableCellStyle: {
-          tableStartLocation: { index: tableStart },
           tableRange: {
             tableCellLocation: { tableStartLocation: { index: tableStart }, rowIndex: 1, columnIndex: 0 },
             rowSpan: rows.length - 1,
