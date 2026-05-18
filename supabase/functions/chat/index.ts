@@ -10075,6 +10075,45 @@ Execute these in order. Be decisive — the user has already been shown this pla
               console.warn('[research_artifact] emit error:', e);
             }
 
+            // Phase 2 — Formatting verifier on tool-loop output too.
+            try {
+              const { getVerifierConfig, shouldVerify, verifyFormat } = await import("./_format/verify.ts");
+              const vcfg = getVerifierConfig();
+              const finalText = result.content || '';
+              if (formatMeta && shouldVerify(vcfg, formatMeta.mode as any, finalText)) {
+                const apiKey = Deno.env.get('LOVABLE_API_KEY');
+                if (apiKey) {
+                  const vResult = await verifyFormat({
+                    text: finalText,
+                    mode: formatMeta.mode as any,
+                    targetWords: longFormMeta?.target_words,
+                    apiKey,
+                    model: vcfg.model,
+                    repair: vcfg.opMode === 'active',
+                  });
+                  console.log(`[FormatVerify/tools] mode=${formatMeta.mode} op=${vcfg.opMode} ok=${vResult.ok} issues=${vResult.issues.length} ms=${vResult.latencyMs}${vResult.skipped ? ` skipped=${vResult.skipped}` : ''}`);
+                  await writer.write(encoder.encode(`event: formatting_verify\ndata: ${JSON.stringify({
+                    mode: formatMeta.mode,
+                    op_mode: vcfg.opMode,
+                    ok: vResult.ok,
+                    issues: vResult.issues,
+                    latency_ms: vResult.latencyMs,
+                    model: vResult.model,
+                    skipped: vResult.skipped,
+                    repaired: !!vResult.repairedText,
+                  })}\n\n`));
+                  if (vResult.repairedText && vcfg.opMode === 'active') {
+                    await writer.write(encoder.encode(`event: message_replacement\ndata: ${JSON.stringify({
+                      mode: formatMeta.mode,
+                      text: vResult.repairedText,
+                    })}\n\n`));
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('[FormatVerify/tools] verifier error (non-fatal):', (e as Error).message);
+            }
+
             // Emit orchestration trace before DONE so the client can attach it to the message
             await writer.write(encoder.encode(`event: orchestration_trace\ndata: ${JSON.stringify(orchestrationTrace)}\n\n`));
             await writer.write(encoder.encode('data: [DONE]\n\n'));
