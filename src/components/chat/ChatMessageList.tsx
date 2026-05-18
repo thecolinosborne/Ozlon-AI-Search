@@ -84,6 +84,7 @@ interface ChatMessageListProps {
   playingMessageId: string | null;
   loadingAudioId: string | null;
   onRegenerate?: (messageId: string) => void;
+  onReformat?: (messageId: string, mode: FormatMode) => void;
   isLoading?: boolean;
 }
 
