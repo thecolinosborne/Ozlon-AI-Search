@@ -171,7 +171,7 @@ export function useChatStream({
   }, [inflightMessages, isPersistedMessage, persistedMessages, safeSetInflight]);
 
   const sendMessage = useCallback(
-    async (text: string, intent?: string) => {
+    async (text: string, intent?: string, formatOverride?: FormatMode) => {
       if (!text.trim() || isLoading) return;
 
       if (isDev && phaseRef.current !== "idle") {
