@@ -6499,6 +6499,50 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ YouTube Public Channel / Competitor Analysis ============
+      case 'analyze_youtube_channel': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+
+          const a = args as Record<string, unknown>;
+          const target = String(a.target || '').trim();
+          if (!target) return { success: false, result: 'target required (channel handle, URL, or ID).' };
+          const mode = String(a.mode || 'latest');
+          const max = Math.min(Number(a.max) || 25, 50);
+          const compareWith = Array.isArray(a.compareWith) ? (a.compareWith as string[]) : [];
+
+          const call = async (action: string, params: Record<string, unknown>) => {
+            const res = await fetch(`${supabaseUrl}/functions/v1/youtube`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${serviceRoleKey}`,
+                'Content-Type': 'application/json',
+                'x-user-id': userId,
+              },
+              body: JSON.stringify({ action, params }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data?.error) throw new Error(String(data.error));
+            return data;
+          };
+
+          if (mode === 'compare') {
+            const targets = [target, ...compareWith].filter(Boolean);
+            const data = await call('compare_channels', { targets, sample: Math.min(max, 15) });
+            return { success: true, result: JSON.stringify(data).slice(0, 8000) };
+          }
+
+          const data = await call('analyze_public_channel', { target, mode, max });
+          return { success: true, result: JSON.stringify(data).slice(0, 8000) };
+        } catch (e) {
+          console.error('[analyze_youtube_channel] Error:', e);
+          return { success: false, result: `YouTube analysis error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
