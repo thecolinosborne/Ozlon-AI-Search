@@ -213,6 +213,7 @@ export async function streamChat({
   userSettings,
   sessionId,
   assistantMessageId,
+  formatOverride,
   signal,
   onDelta,
   onToolCall,
@@ -223,6 +224,7 @@ export async function streamChat({
   onOrchestrationTrace,
   onInvestigationArtifact,
   onResearchArtifact,
+  onFormatting,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -237,6 +239,7 @@ export async function streamChat({
       onError(msg);
       return;
     }
+
 
     let userJwt: string | null = null;
     try {
