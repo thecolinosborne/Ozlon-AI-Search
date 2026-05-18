@@ -3877,6 +3877,36 @@ export type Database = {
           },
         ]
       }
+      youtube_competitor_cache: {
+        Row: {
+          channel_id: string | null
+          created_at: string
+          fetched_at: string
+          handle: string
+          id: string
+          payload: Json
+          source: string
+        }
+        Insert: {
+          channel_id?: string | null
+          created_at?: string
+          fetched_at?: string
+          handle: string
+          id?: string
+          payload: Json
+          source?: string
+        }
+        Update: {
+          channel_id?: string | null
+          created_at?: string
+          fetched_at?: string
+          handle?: string
+          id?: string
+          payload?: Json
+          source?: string
+        }
+        Relationships: []
+      }
       youtube_videos: {
         Row: {
           channel_id: string
