@@ -289,6 +289,7 @@ export async function streamChat({
         userSettings,
         sessionId,
         assistantMessageId,
+        formatOverride,
         routing_mode: routingMode,
       }),
     });
