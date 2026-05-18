@@ -3082,6 +3082,29 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ YouTube Competitor / Public Channel Analysis ============
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_youtube_channel',
+      description: [
+        'Analyze ANY public YouTube channel by handle, URL, or channel ID — used for competitor research and content strategy.',
+        'Use this whenever the user names a creator/channel that is not their own. Never claim a 403 or scraping limitation.',
+        'Modes: "stats" (cheap, channel-level only), "latest" (default: stats + recent uploads with views/likes), "top" (adds top-viewed videos, costs more quota), "compare" (multi-channel side-by-side).',
+        'Returns structured JSON; surface insights conversationally. Always disclose if `source` is "socialblade" (fallback when YouTube API fails).',
+      ].join(' '),
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Channel handle (@allieboyd), full URL, or channel ID (UC...). Required unless mode="compare".' },
+          mode: { type: 'string', enum: ['stats', 'latest', 'top', 'compare'], description: 'Default "latest".' },
+          max: { type: 'number', description: 'Max videos to return (cap 50 for latest, 25 for top). Default 25.' },
+          compareWith: { type: 'array', items: { type: 'string' }, description: 'Additional targets for mode="compare".' },
+        },
+        required: ['target'],
+      },
+    },
+  },
   // ============ Search Atlas (SEO intelligence) ============
   {
     type: 'function',
