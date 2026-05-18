@@ -4,11 +4,13 @@ import { Loader2, Volume2, VolumeX, Check, AlertCircle, ChevronDown, ChevronRigh
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, LiveStep } from "@/hooks/useChatStream";
+import type { FormatMode } from "@/services/chatService";
 import { RoutingChip } from "./RoutingChip";
 import { KnowledgeChip } from "./KnowledgeChip";
 import { InvestigationCard } from "./InvestigationCard";
 import { ResearchCard } from "./ResearchCard";
 import { TripPlanArtifact } from "@/components/trip/TripPlanArtifact";
+import { ReformatChip } from "./ReformatChip";
 
 const StepIcon = ({ status }: { status: LiveStep["status"] }) => {
   if (status === "done") return <Check className="w-3 h-3 text-emerald-500" />;
@@ -82,6 +84,7 @@ interface ChatMessageListProps {
   playingMessageId: string | null;
   loadingAudioId: string | null;
   onRegenerate?: (messageId: string) => void;
+  onReformat?: (messageId: string, mode: FormatMode) => void;
   isLoading?: boolean;
 }
 
@@ -139,6 +142,7 @@ interface MessageItemProps {
   playingMessageId: string | null;
   loadingAudioId: string | null;
   onRegenerate?: (messageId: string) => void;
+  onReformat?: (messageId: string, mode: FormatMode) => void;
   isLoading?: boolean;
 }
 
@@ -148,6 +152,7 @@ const MessageItemInner = ({
   playingMessageId,
   loadingAudioId,
   onRegenerate,
+  onReformat,
   isLoading,
 }: MessageItemProps) => {
   const markdownContent = useMemo(
@@ -330,6 +335,13 @@ const MessageItemInner = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </ActionIconButton>
           )}
+          {onReformat && (
+            <ReformatChip
+              current={message.formatMode}
+              disabled={isLoading}
+              onSelect={(mode) => onReformat(message.id, mode)}
+            />
+          )}
         </div>
       )}
     </div>
@@ -341,6 +353,7 @@ const MessageItem = memo(MessageItemInner, (prev, next) => {
   if (prev.message !== next.message) return false;
   if (prev.isLoading !== next.isLoading) return false;
   if (prev.onRegenerate !== next.onRegenerate) return false;
+  if (prev.onReformat !== next.onReformat) return false;
   if (prev.playMessage !== next.playMessage) return false;
   // Playing/loading state matters only if it concerns this message or one of its blocks.
   const id = next.message.id;
@@ -365,6 +378,7 @@ export const ChatMessageList = ({
   playingMessageId,
   loadingAudioId,
   onRegenerate,
+  onReformat,
   isLoading,
 }: ChatMessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -384,6 +398,7 @@ export const ChatMessageList = ({
             playingMessageId={playingMessageId}
             loadingAudioId={loadingAudioId}
             onRegenerate={onRegenerate}
+            onReformat={onReformat}
             isLoading={isLoading}
           />
         ))}
