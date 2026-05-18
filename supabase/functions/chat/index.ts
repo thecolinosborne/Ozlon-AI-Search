@@ -9821,24 +9821,39 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       const { routeFormat } = await import("./_format/router.ts");
       const { getFormatCard } = await import("./_format/cards.ts");
       const willUseTools = (isActionRequest || enableTools) && availableTools.length > 0;
-      const route = routeFormat({
-        userText: lastUserMsg?.content || '',
-        intent: intent || null,
-        isLongForm: !!longFormMeta,
-        willUseTools,
-      });
-      formatMeta = { mode: route.mode, reason: route.reason };
-      const card = getFormatCard(route.mode as any);
+      // Client may force a specific mode (e.g. "Reformat as" chip). Accept only
+      // the six known modes; otherwise fall back to the router.
+      const VALID_MODES = new Set(['ATOMIC','CHAT','BRIEF','EXECUTION','DOCUMENT','LONGFORM']);
+      const rawOverride = typeof body.formatOverride === 'string' ? body.formatOverride.toUpperCase() : null;
+      const override = rawOverride && VALID_MODES.has(rawOverride) ? rawOverride : null;
+      let routeMode: string;
+      let routeReason: string;
+      if (override) {
+        routeMode = override;
+        routeReason = 'user-override';
+      } else {
+        const route = routeFormat({
+          userText: lastUserMsg?.content || '',
+          intent: intent || null,
+          isLongForm: !!longFormMeta,
+          willUseTools,
+        });
+        routeMode = route.mode;
+        routeReason = route.reason;
+      }
+      formatMeta = { mode: routeMode, reason: routeReason };
+      const card = getFormatCard(routeMode as any);
       if (card) {
         // Insert AFTER the longform addendum (if any) so the card sits last
         // and takes precedence over the legacy formatting blocks.
         const insertAt = longFormMeta ? 2 : 1;
         openAIMessages.splice(insertAt, 0, { role: 'system', content: card });
       }
-      console.log(`[Format] mode=${route.mode} reason=${route.reason}`);
+      console.log(`[Format] mode=${routeMode} reason=${routeReason}${override ? ' (override)' : ''}`);
     } catch (e) {
       console.warn('[Format] router failed (continuing with global prompt):', e);
     }
+
 
     // If this looks like an action request and we have tools, use the tool loop (non-streaming)
     if ((isActionRequest || enableTools) && availableTools.length > 0) {
