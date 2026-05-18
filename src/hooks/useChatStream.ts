@@ -271,6 +271,7 @@ export function useChatStream({
           enableTools: true,
           sessionId: sessionId ?? undefined,
           assistantMessageId: assistantId,
+          formatOverride,
           signal,
           onToolCall: (toolName, toolArgs) => {
             if (!isCurrentRequest()) return;
