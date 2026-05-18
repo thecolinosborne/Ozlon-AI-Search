@@ -1369,6 +1369,95 @@ serve(async (req) => {
       });
     }
 
+    // ============================================================
+    // PUBLIC-CHANNEL ANALYSIS (competitor insights, no OAuth needed)
+    // ============================================================
+    if (
+      action === "resolve_channel" ||
+      action === "get_channel_stats" ||
+      action === "list_channel_uploads" ||
+      action === "get_top_videos" ||
+      action === "compare_channels" ||
+      action === "analyze_public_channel"
+    ) {
+      const apiKey = await resolvePublicApiKey(adminClient, userId);
+
+      if (action === "resolve_channel") {
+        const out = await resolveChannel(apiKey, String(params.target || params.handle || params.url || params.channelId || ""));
+        return jsonOk(out);
+      }
+
+      if (action === "get_channel_stats") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const stats = await getChannelStats(apiKey, id);
+        return jsonOk(stats);
+      }
+
+      if (action === "list_channel_uploads") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const max = Math.min(Number(params.max) || 25, 50);
+        const uploads = await listChannelUploads(apiKey, id, max);
+        return jsonOk({ channelId: id, uploads });
+      }
+
+      if (action === "get_top_videos") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const max = Math.min(Number(params.max) || 10, 25);
+        const top = await getTopVideos(apiKey, id, max);
+        return jsonOk({ channelId: id, topVideos: top });
+      }
+
+      if (action === "compare_channels") {
+        const targets: string[] = Array.isArray(params.targets) ? params.targets : [];
+        const sample = Math.min(Number(params.sample) || 10, 25);
+        const results = await Promise.all(
+          targets.map(async (t) => {
+            try {
+              const resolved = await resolveChannel(apiKey, t);
+              const [stats, uploads] = await Promise.all([
+                getChannelStats(apiKey, resolved.channelId),
+                listChannelUploads(apiKey, resolved.channelId, sample),
+              ]);
+              return { target: t, ...stats, recentUploads: uploads };
+            } catch (e) {
+              return { target: t, error: e instanceof Error ? e.message : String(e) };
+            }
+          }),
+        );
+        return jsonOk({ channels: results });
+      }
+
+      // Full one-shot for the chat tool
+      if (action === "analyze_public_channel") {
+        const target = String(params.target || "");
+        const mode = String(params.mode || "latest"); // stats | latest | top
+        const max = Math.min(Number(params.max) || 25, 50);
+        if (!target) throw new Error("target required");
+
+        try {
+          const resolved = await resolveChannel(apiKey, target);
+          const stats = await getChannelStats(apiKey, resolved.channelId);
+          const payload: AnyJson = { source: "youtube_api", target, ...stats };
+          if (mode === "latest" || mode === "top") {
+            payload.uploads = await listChannelUploads(apiKey, resolved.channelId, max);
+          }
+          if (mode === "top") {
+            payload.topVideos = await getTopVideos(apiKey, resolved.channelId, Math.min(max, 25));
+          }
+          await cacheCompetitor(adminClient, target, resolved.channelId, payload, "youtube_api");
+          return jsonOk(payload);
+        } catch (apiErr) {
+          // Fallback to SocialBlade via Firecrawl
+          const sb = await socialBladeFallback(adminClient, target);
+          if (sb) return jsonOk(sb);
+          throw apiErr;
+        }
+      }
+    }
+
     throw new Error(`Unsupported action: ${action}`);
   } catch (error) {
     let message = "Unknown error";
