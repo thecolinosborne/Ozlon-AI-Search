@@ -59,18 +59,81 @@ export const googleDocsIntegration: IntegrationManifest = {
     },
     {
       name: "docs_apply_markdown",
-      description: "Apply a markdown body to a Google Doc, with optional full-replace.",
+      description: "Render markdown into a Google Doc with the Apple Memo theme. Supports H1/H2/H3, #### eyebrow labels, **bold**, *italic*, ~~strike~~, `code`, [links](url), > blockquotes, fenced ``` code blocks, --- horizontal rules, nested bullet/numbered lists, and GFM tables. Use replaceAll:true to wipe the doc first. For real deliverables (briefs, reports, memos), prefer docs_apply_styled_document.",
       action: "apply_markdown",
       schema: {
         type: "object",
         properties: {
           documentId: { type: "string" },
-          markdown: { type: "string" },
-          replaceAll: { type: "boolean" },
+          markdown: { type: "string", description: "Full markdown body. Tables, blockquotes, code blocks, horizontal rules and links are all supported." },
+          replaceAll: { type: "boolean", description: "If true, wipe existing content first. Default false (append)." },
         },
         required: ["documentId", "markdown"],
       },
       mapArgs: (a) => ({ documentId: a.documentId, markdown: a.markdown, replaceAll: a.replaceAll }),
+    },
+    {
+      name: "docs_apply_styled_document",
+      description: "Render a fully themed Apple Memo document in one call. Use this for any real deliverable (brief, report, memo, plan, SOP, proposal). Takes a structured payload (title, subtitle, metadata, executive summary, sections with optional tables/callouts, recommendations, closing line) and renders the complete formatted doc with proper title block, eyebrows, hairline rules between phases, and a closing italic.",
+      action: "apply_styled_document",
+      schema: {
+        type: "object",
+        properties: {
+          documentId: { type: "string" },
+          replaceAll: { type: "boolean", description: "Wipe existing content first. Default true." },
+          title: { type: "string" },
+          subtitle: { type: "string", description: "One-line italic framing under the title." },
+          meta: {
+            type: "object",
+            description: "Metadata row rendered as 'Date · For · Purpose'.",
+            properties: {
+              date: { type: "string" },
+              for: { type: "string" },
+              purpose: { type: "string" },
+            },
+          },
+          executiveSummary: { type: "string", description: "3-4 sentence TL;DR rendered as the first section." },
+          sections: {
+            type: "array",
+            description: "Ordered body sections. Each gets an optional eyebrow label, an H2 heading, optional markdown body, optional table, and optional pull-quote callout. Sections are separated by hairline rules.",
+            items: {
+              type: "object",
+              properties: {
+                eyebrow: { type: "string", description: "Small-caps label above the heading, e.g. 'OVERVIEW', 'KEY FINDINGS'." },
+                heading: { type: "string" },
+                body: { type: "string", description: "Markdown body for the section." },
+                table: {
+                  type: "object",
+                  properties: {
+                    headers: { type: "array", items: { type: "string" } },
+                    rows: { type: "array", items: { type: "array", items: { type: "string" } } },
+                  },
+                },
+                callout: { type: "string", description: "Single pull-quote rendered as an italic blockquote." },
+              },
+              required: ["heading"],
+            },
+          },
+          recommendations: {
+            type: "array",
+            items: { type: "string" },
+            description: "Numbered action list at the end of the doc.",
+          },
+          closing: { type: "string", description: "Single italic closing line." },
+        },
+        required: ["documentId", "title"],
+      },
+      mapArgs: (a) => ({
+        documentId: a.documentId,
+        replaceAll: a.replaceAll,
+        title: a.title,
+        subtitle: a.subtitle,
+        meta: a.meta,
+        executiveSummary: a.executiveSummary,
+        sections: a.sections,
+        recommendations: a.recommendations,
+        closing: a.closing,
+      }),
     },
     {
       name: "docs_format_as_report",
