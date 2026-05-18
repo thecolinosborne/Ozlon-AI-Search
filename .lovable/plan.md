@@ -1,82 +1,119 @@
 ## Goal
 
-Let the assistant analyze **any public** YouTube channel (e.g. Allie Bloyd, Jasper Aiken) — not just the user's own — so it can produce competitive content strategy without scraping youtube.com directly.
+Stop the AI from producing flat, ugly Google Docs. Land every doc on a **Minimal Apple Memo** look: one sans family, hierarchy from weight + size + whitespace, no color, real title block, page setup, and full markdown support (tables, blockquotes, horizontal rules, code blocks, nested lists, clickable links).
 
-## What exists today
+Two surfaces:
+1. **apply_markdown** — rebuilt to handle the full markdown set and auto-theme the doc.
+2. **apply_styled_document** — new tool that takes a structured payload (title, subtitle, metadata, sections, tables, recommendations) and renders the full themed memo in one batchUpdate.
 
-- `supabase/functions/youtube/index.ts` already holds a YouTube Data API v3 client (`ytFetch`, key validation, OAuth + API-key paths).
-- All current actions target the **signed-in user's own** channel: `sync_channels`, `sync_videos`, `upload_video`, etc. No public-channel/handle lookup.
-- `chat/index.ts` exposes a YouTube context-pack reader and an `upload_youtube_video` tool — but no "analyze competitor" tool.
-- `FIRECRAWL_API_KEY` is connected and used elsewhere (event research). Good for the fallback.
-- A workspace `YOUTUBE_API_KEY` secret already exists for several users via the api-key integration; we'll reuse the same key resolution path. If no per-user key, fall back to a project-level `YOUTUBE_API_KEY` env var.
+All work is in `supabase/functions/google-docs/index.ts` and the manifest at `supabase/functions/_shared/integrations/google-docs.ts`. No DB, no UI, no new secrets.
 
-## Build plan
+---
 
-### 1. Extend `supabase/functions/youtube/index.ts` with public-channel actions
+## Aesthetic spec — "Apple Memo"
 
-All read-only, API-key based, no OAuth required. Quota-cheap (`channels` = 1u, `playlistItems` = 1u, `videos` = 1u per batch of 50).
+| Element | Rule |
+|---|---|
+| Body font | Inter (fallback Helvetica Neue, then Arial) |
+| Body size / leading | 11pt, line spacing 1.35, 8pt space below paragraph |
+| Title (H1) | 28pt, weight 700, 24pt space below, no color |
+| Subtitle | 13pt italic, color #6B6B6B, 4pt space below |
+| Metadata row | 10pt, color #6B6B6B, 16pt space below |
+| H2 | 18pt, weight 600, 20pt space above, 6pt space below |
+| Eyebrow (`#### LABEL`) | 9pt, weight 600, letter-spaced caps via UPPERCASE text, color #8A8A8A, 4pt below |
+| H3 | 13pt, weight 600, 12pt above, 4pt below |
+| Body | inherits |
+| Blockquote | 11pt italic, left indent 18pt, 1pt left border via empty bordered paragraph |
+| Code span | Roboto Mono 10pt, bg #F2F2F2 |
+| Code block | Roboto Mono 10pt, bg #F7F7F7, left indent 12pt |
+| Horizontal rule (`---`) | Empty paragraph with bottom border, 12pt above + below |
+| Table | Header row bold + bg #F5F5F5, 0.5pt border #E5E5E5, 6pt cell padding |
+| Bullets | DISC → CIRCLE → SQUARE, 18pt indent per level |
+| Numbered | DECIMAL → ALPHA → ROMAN |
+| Page setup | A4-ish: top/bottom 72pt, left/right 90pt margins |
+| Closing line | Auto-detect last italic line → 10pt color #8A8A8A |
 
-- `resolve_channel({ handle?, channelId?, url? })` → normalize @handle / /channel/UC... / /c/Name / youtube.com URL to a canonical `channelId` via `search.list?type=channel` (fallback) and `channels.list`.
-- `get_channel_stats({ channelId })` → title, subscribers, totalViews, videoCount, uploads playlist ID, country, publishedAt, thumbnails.
-- `list_channel_uploads({ channelId, max=50, order="date" })` → walk `playlistItems` on the uploads playlist, then batch `videos.list` (part=snippet,statistics,contentDetails) for views/likes/comments/duration.
-- `get_top_videos({ channelId, max=25 })` → `search.list?channelId&order=viewCount` then hydrate via `videos.list`. (Costs 100u — gated behind explicit user ask.)
-- `compare_channels({ channelIds: [] })` → parallel `get_channel_stats` + light upload sample, return a normalized comparison object.
+No color accents beyond grays. Hierarchy is type + space.
 
-Auth: accept service-role + `x-user-id` (so chat can call it server-to-server, matching existing pattern). Key resolution order: user's stored api_key connection → `Deno.env.get("YOUTUBE_API_KEY")` project secret → 400 with actionable message.
+---
 
-### 2. Register a chat tool `analyze_youtube_channel`
+## Work breakdown
 
-In `supabase/functions/chat/index.ts`, alongside `upload_youtube_video`:
+### 1. New theme module (in same file, top of file)
+- `APPLE_MEMO_THEME` constant — all numbers above in one object so it's easy to tweak.
+- `applyDocumentTheme(token, documentId, endIndex)` — sets page margins (`updateDocumentStyle`), applies base font + leading across the whole body, retunes the named styles (HEADING_1..3, NORMAL_TEXT) via `updateParagraphStyle` so future inserts inherit them.
 
+### 2. Rebuilt markdown renderer (`buildMarkdownRequests` v2)
+New token types supported:
+- `####` eyebrow → uppercase + small caps style
+- `>` blockquote → italic + left indent
+- ` ``` ` fenced code block → mono, gray bg, indent
+- `---` / `***` → bordered empty paragraph (horizontal rule)
+- `| a | b |` GFM tables → real Docs `insertTable` + per-cell text + header styling
+- `[label](url)` → text with `link` style
+- Nested bullets (indent-aware, 2/4 spaces or tab)
+- Inline `~~strike~~` → strikethrough
+- Preserve existing `**bold**`, `*italic*`, `` `code` ``
+
+Renderer returns `{ requests, endIndex }` like today but emits paragraph styles per the theme (not just `namedStyleType`). Implementation note: tables must be inserted with `insertTable` first, then cell content via cell-anchored `insertText` — we walk the freshly-fetched doc to get cell indices, OR insert tables one-at-a-time at end-of-body, refetch, and continue (simpler, more reliable).
+
+### 3. Retheme `format_as_report`
+- Becomes a thin wrapper: calls `applyDocumentTheme` + promotes the first non-empty paragraph to title + (if a second non-empty paragraph exists and is short/italic) styles it as subtitle.
+- Drops the current Arial-11 / line-spacing 115 defaults in favor of the new theme.
+
+### 4. New action: `apply_styled_document`
+Input schema:
+```ts
+{
+  documentId: string,
+  replaceAll?: boolean,        // default true
+  title: string,
+  subtitle?: string,
+  meta?: { date?: string, for?: string, purpose?: string },
+  executiveSummary?: string,   // rendered as first section
+  sections: Array<{
+    eyebrow?: string,          // small caps label above heading
+    heading: string,           // H2
+    body?: string,             // markdown — uses renderer v2
+    table?: { headers: string[], rows: string[][] },
+    callout?: string,          // blockquote
+  }>,
+  recommendations?: string[],  // numbered list at end
+  closing?: string,            // italic gray closing line
+}
 ```
-analyze_youtube_channel({
-  target: string,                     // @handle, channelId, or full URL
-  mode: "stats" | "latest" | "top" | "compare",
-  max?: number,                       // default 25, cap 50
-  compareWith?: string[]              // additional targets for mode=compare
-})
-```
+Flow: wipe doc → `applyDocumentTheme` → insert title block → insert metadata row → for each section: eyebrow + H2 + body + optional table + optional callout → recommendations → closing → optional horizontal rules between phases.
 
-Behavior:
-- Resolves each target → channelId.
-- Calls the matching youtube action(s) via internal `supabase.functions.invoke('youtube', ...)` with service-role + `x-user-id`.
-- Returns a compact JSON the model can summarize: `{ channel, subscribers, videos, uploads:[…], topVideos:[…], growth?:{…} }`.
-- On any 4xx from the YouTube API (quota / key missing / channel not found), call the SocialBlade fallback (step 3) and tag `source: "socialblade"`.
+### 5. Manifest update (`_shared/integrations/google-docs.ts`)
+Add one tool entry:
+- `docs_apply_styled_document` → action `apply_styled_document`, full JSON schema above, description that nudges the AI to use this for any real deliverable (brief, report, memo, SOP) while keeping `docs_apply_markdown` for ad-hoc writes.
 
-### 3. SocialBlade-via-Firecrawl fallback
+Tighten description on `docs_apply_markdown` to mention the new supported features (tables, quotes, rules, code blocks, links) so the AI uses them.
 
-New helper in the youtube edge function: `fallback_socialblade({ handle })`.
+### 6. Prompt nudge (one-line edit)
+In `supabase/functions/chat/_format/cards.ts` DOCUMENT card, add a single bullet under the existing skeleton: *"When writing to Google Docs, prefer `docs_apply_styled_document` (structured) over raw `docs_apply_markdown`."* — so existing skills that render to Docs route through the new tool.
 
-- Firecrawl `scrape` of `https://socialblade.com/youtube/c/{handle}` (and `/user/`, `/channel/` variants) with `formats: [{ type: 'json', schema }]` so Firecrawl's LLM extraction returns: `{ subscribers, totalViews, uploads, monthlyGrowth, rank, grade, last30dViews, last30dSubs }`.
-- Cache result for 6h in a new lightweight table `youtube_competitor_cache` (channel_handle, payload jsonb, fetched_at) to avoid burning Firecrawl credits on repeat questions.
-- Surface results with explicit `source: "socialblade"` so the assistant cites the fallback in its reply.
+### 7. Verification
+- Deploy `google-docs` + `chat`.
+- Curl `apply_markdown` with a sample containing every token (heading, quote, table, code block, rule, link, nested list).
+- Curl `apply_styled_document` with a realistic brief payload.
+- Open both docs in the user's Drive and visually confirm.
 
-### 4. Persistence (small)
+---
 
-Migration: `youtube_competitor_cache (id, handle text unique, channel_id text, payload jsonb, source text, fetched_at timestamptz default now())`. RLS off (service-role only writes; chat reads via edge function only — no client access).
+## Files touched
 
-### 5. Memory + prompt nudges
+- `supabase/functions/google-docs/index.ts` — theme module, renderer v2, retuned `format_as_report`, new `apply_styled_document` action.
+- `supabase/functions/_shared/integrations/google-docs.ts` — new manifest entry + tightened descriptions.
+- `supabase/functions/chat/_format/cards.ts` — one-line nudge in DOCUMENT card.
 
-- Add a memory note at `mem://integrations/youtube-competitor-insights` describing when the tool fires (any time the user names another creator/channel), and the source-tagging convention.
-- Tiny addition to the chat system prompt: "When the user asks about a public YouTube channel that isn't theirs, call `analyze_youtube_channel` — never claim a 403 / scraping limitation."
+## Out of scope
 
-## Technical notes
+- No new edge functions, no migrations, no UI changes.
+- Not touching how skills generate markdown — they keep emitting markdown; the renderer just gets much better.
+- No image insertion (Docs API requires hosted URLs — separate ticket if you want it).
+- No multi-column layouts or charts.
 
-- Quota budget: the default `analyze_youtube_channel({mode:"latest"})` costs ~3 units per channel (channels.list + playlistItems.list + videos.list batch). `mode:"top"` adds 100 for the search call — only run when asked.
-- Re-use existing `ytFetch` error mapping so quota / key errors propagate as structured messages the chat can act on (triggers the SocialBlade fallback automatically).
-- No frontend changes required — this lights up in the existing chat surface immediately. The Integrations Hub YouTube card already documents the API key flow, so no UI work needed for setup.
+## Risk / rollback
 
-## Out of scope (call out, don't build)
-
-- Per-user OAuth for private analytics (watch time, retention, demographics). Deferred until requested.
-- Historical growth charts beyond what SocialBlade returns in a single scrape.
-- Any UI for competitor dashboards — assistant returns analysis inline in chat.
-
-## Acceptance check
-
-After implementation, asking the assistant *"compare Allie Bloyd and Jasper Aiken's YouTube channels and tell me what content is working for each"* should:
-1. Resolve both handles.
-2. Pull stats + latest 25 uploads for each (YouTube Data API).
-3. Optionally pull top videos (asks user before spending the 100u).
-4. Fall back to SocialBlade if quota fails, with the source disclosed.
-5. Produce a strategic readout — no 403, no "I can't access YouTube".
+Pure additive on the manifest side. The renderer rewrite changes output of `apply_markdown` — if a regression appears, revert `google-docs/index.ts` only; manifest and prompt edits are harmless on their own.
