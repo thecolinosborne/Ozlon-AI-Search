@@ -3082,6 +3082,29 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ YouTube Competitor / Public Channel Analysis ============
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_youtube_channel',
+      description: [
+        'Analyze ANY public YouTube channel by handle, URL, or channel ID — used for competitor research and content strategy.',
+        'Use this whenever the user names a creator/channel that is not their own. Never claim a 403 or scraping limitation.',
+        'Modes: "stats" (cheap, channel-level only), "latest" (default: stats + recent uploads with views/likes), "top" (adds top-viewed videos, costs more quota), "compare" (multi-channel side-by-side).',
+        'Returns structured JSON; surface insights conversationally. Always disclose if `source` is "socialblade" (fallback when YouTube API fails).',
+      ].join(' '),
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Channel handle (@allieboyd), full URL, or channel ID (UC...). Required unless mode="compare".' },
+          mode: { type: 'string', enum: ['stats', 'latest', 'top', 'compare'], description: 'Default "latest".' },
+          max: { type: 'number', description: 'Max videos to return (cap 50 for latest, 25 for top). Default 25.' },
+          compareWith: { type: 'array', items: { type: 'string' }, description: 'Additional targets for mode="compare".' },
+        },
+        required: ['target'],
+      },
+    },
+  },
   // ============ Search Atlas (SEO intelligence) ============
   {
     type: 'function',
@@ -6476,6 +6499,50 @@ ${pageContents.slice(0, 12000)}`;
         }
       }
 
+      // ============ YouTube Public Channel / Competitor Analysis ============
+      case 'analyze_youtube_channel': {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const userId = (args as Record<string, unknown>).__user_id as string;
+          if (!userId) return { success: false, result: 'User not authenticated.' };
+
+          const a = args as Record<string, unknown>;
+          const target = String(a.target || '').trim();
+          if (!target) return { success: false, result: 'target required (channel handle, URL, or ID).' };
+          const mode = String(a.mode || 'latest');
+          const max = Math.min(Number(a.max) || 25, 50);
+          const compareWith = Array.isArray(a.compareWith) ? (a.compareWith as string[]) : [];
+
+          const call = async (action: string, params: Record<string, unknown>) => {
+            const res = await fetch(`${supabaseUrl}/functions/v1/youtube`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${serviceRoleKey}`,
+                'Content-Type': 'application/json',
+                'x-user-id': userId,
+              },
+              body: JSON.stringify({ action, params }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data?.error) throw new Error(String(data.error));
+            return data;
+          };
+
+          if (mode === 'compare') {
+            const targets = [target, ...compareWith].filter(Boolean);
+            const data = await call('compare_channels', { targets, sample: Math.min(max, 15) });
+            return { success: true, result: JSON.stringify(data).slice(0, 8000) };
+          }
+
+          const data = await call('analyze_public_channel', { target, mode, max });
+          return { success: true, result: JSON.stringify(data).slice(0, 8000) };
+        } catch (e) {
+          console.error('[analyze_youtube_channel] Error:', e);
+          return { success: false, result: `YouTube analysis error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
       default:
         return { success: false, result: `Unknown tool: ${toolName}` };
     }
@@ -7168,6 +7235,7 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'edit_image', domain: 'creative' },
   { prefix: 'generate_video', domain: 'creative' },
   { prefix: 'upload_youtube_video', domain: 'creative' },
+  { prefix: 'analyze_youtube_channel', domain: 'research' },
   { prefix: 'save_memory', domain: 'memory' },
   { prefix: 'search_wisdom_memories', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
@@ -7464,6 +7532,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'update_work_task': '_always_',
     'bulk_update_work_tasks': '_always_',
     'upload_youtube_video': '_always_',
+    'analyze_youtube_channel': '_always_',
     'higgsfield_generate_image': '_always_',
     'higgsfield_generate_video': '_always_',
     'higgsfield_get_job_status': '_always_',
@@ -7883,6 +7952,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'update_work_task': 'Updating work task',
   'bulk_update_work_tasks': 'Updating work tasks',
   'upload_youtube_video': 'Uploading to YouTube',
+  'analyze_youtube_channel': 'Analyzing YouTube channel',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
@@ -8319,7 +8389,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -9596,6 +9666,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
         productivity: ['calendar_', 'sheets_', 'docs_', 'drive_', 'create_work_task'],
         creative: ['higgsfield_', 'descript_', 'upload_youtube_video', 'video_'],
         seo: ['gsc_', 'analytics_', 'web_search_google'],
+        research: ['analyze_youtube_channel', 'deep_research', 'scrape_events'],
         finance: ['plaid_'],
         memory: ['save_memory', 'search_wisdom_memories', 'add_standing_order', 'add_goal'],
       };

@@ -206,6 +206,263 @@ function jsonOk(body: unknown) {
   });
 }
 
+// ============================================================
+// Public-channel helpers (competitor analysis, no OAuth)
+// ============================================================
+
+async function resolvePublicApiKey(adminClient: any, userId: string): Promise<string> {
+  try {
+    const { data: conn } = await adminClient
+      .from("integration_connections")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("provider", "youtube")
+      .eq("auth_type", "api_key")
+      .maybeSingle();
+    if (conn?.id) {
+      const k = await getStoredApiKey(adminClient, conn.id, userId);
+      if (k) return k;
+    }
+  } catch { /* fall through */ }
+
+  const env = Deno.env.get("YOUTUBE_API_KEY");
+  if (env && env.trim().length > 0) return env.trim();
+
+  throw new Error(
+    "No YouTube API key available. Add a key under Integrations → YouTube, or set the YOUTUBE_API_KEY project secret.",
+  );
+}
+
+function parseTarget(target: string): { handle?: string; channelId?: string; rawQuery?: string } {
+  const t = (target || "").trim();
+  if (!t) return {};
+  const idMatch = t.match(/UC[0-9A-Za-z_-]{20,}/);
+  if (idMatch) return { channelId: idMatch[0] };
+  const handleMatch = t.match(/@([A-Za-z0-9_.\-]+)/);
+  if (handleMatch) return { handle: handleMatch[1] };
+  const slugMatch = t.match(/youtube\.com\/(?:c|user)\/([^/?#]+)/i);
+  if (slugMatch) return { rawQuery: decodeURIComponent(slugMatch[1]) };
+  return { rawQuery: t };
+}
+
+async function resolveChannel(apiKey: string, target: string): Promise<{ channelId: string; handle?: string; title?: string }> {
+  const parsed = parseTarget(target);
+  if (parsed.channelId) return { channelId: parsed.channelId };
+  if (parsed.handle) {
+    const data = await ytFetch(`/channels?part=id,snippet&forHandle=@${encodeURIComponent(parsed.handle)}`, apiKey);
+    const items = (data as AnyJson).items as AnyJson[] | undefined;
+    if (items && items.length > 0) {
+      const ch = items[0] as AnyJson;
+      const sn = (ch.snippet || {}) as AnyJson;
+      return { channelId: String(ch.id), handle: parsed.handle, title: String(sn.title || "") };
+    }
+  }
+  const q = parsed.rawQuery || parsed.handle || target;
+  const search = await ytFetch(
+    `/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(q)}`,
+    apiKey,
+  );
+  const items = (search as AnyJson).items as AnyJson[] | undefined;
+  if (!items || items.length === 0) throw new Error(`Channel not found: ${target}`);
+  const first = items[0] as AnyJson;
+  const snippet = (first.snippet || {}) as AnyJson;
+  const id = ((first.id || {}) as AnyJson).channelId;
+  if (!id) throw new Error(`Could not resolve channel id for: ${target}`);
+  return { channelId: String(id), title: String(snippet.title || ""), handle: parsed.handle };
+}
+
+async function getChannelStats(apiKey: string, channelId: string): Promise<AnyJson> {
+  const data = await ytFetch(
+    `/channels?part=snippet,statistics,contentDetails,brandingSettings&id=${encodeURIComponent(channelId)}`,
+    apiKey,
+  );
+  const items = (data as AnyJson).items as AnyJson[] | undefined;
+  if (!items || items.length === 0) throw new Error("Channel not found");
+  const ch = items[0] as AnyJson;
+  const sn = (ch.snippet || {}) as AnyJson;
+  const st = (ch.statistics || {}) as AnyJson;
+  const cd = (ch.contentDetails || {}) as AnyJson;
+  const uploadsPlaylistId = ((cd.relatedPlaylists || {}) as AnyJson).uploads;
+  const thumbs = (sn.thumbnails || {}) as AnyJson;
+  return {
+    channelId,
+    title: sn.title,
+    description: sn.description,
+    customUrl: sn.customUrl,
+    publishedAt: sn.publishedAt,
+    country: sn.country,
+    thumbnail: (thumbs.high as AnyJson)?.url || (thumbs.default as AnyJson)?.url,
+    subscribers: Number(st.subscriberCount || 0),
+    totalViews: Number(st.viewCount || 0),
+    videoCount: Number(st.videoCount || 0),
+    uploadsPlaylistId,
+  };
+}
+
+async function hydrateVideos(apiKey: string, videoIds: string[]): Promise<AnyJson[]> {
+  if (videoIds.length === 0) return [];
+  const out: AnyJson[] = [];
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const batch = videoIds.slice(i, i + 50);
+    const data = await ytFetch(
+      `/videos?part=snippet,statistics,contentDetails&id=${batch.join(",")}`,
+      apiKey,
+    );
+    const items = (data as AnyJson).items as AnyJson[] | undefined;
+    for (const v of items || []) {
+      const sn = (v.snippet || {}) as AnyJson;
+      const st = (v.statistics || {}) as AnyJson;
+      const cd = (v.contentDetails || {}) as AnyJson;
+      const thumbs = (sn.thumbnails || {}) as AnyJson;
+      out.push({
+        videoId: v.id,
+        url: `https://www.youtube.com/watch?v=${v.id}`,
+        title: sn.title,
+        publishedAt: sn.publishedAt,
+        duration: cd.duration,
+        views: Number(st.viewCount || 0),
+        likes: Number(st.likeCount || 0),
+        comments: Number(st.commentCount || 0),
+        thumbnail: (thumbs.high as AnyJson)?.url,
+      });
+    }
+  }
+  return out;
+}
+
+async function listChannelUploads(apiKey: string, channelId: string, max: number): Promise<AnyJson[]> {
+  const stats = await getChannelStats(apiKey, channelId);
+  const playlistId = String(stats.uploadsPlaylistId || "");
+  if (!playlistId) return [];
+
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+  while (ids.length < max) {
+    const path = `/playlistItems?part=contentDetails&maxResults=${Math.min(50, max - ids.length)}&playlistId=${encodeURIComponent(playlistId)}${pageToken ? `&pageToken=${pageToken}` : ""}`;
+    const page = await ytFetch(path, apiKey);
+    const items = (page as AnyJson).items as AnyJson[] | undefined;
+    if (!items || items.length === 0) break;
+    for (const it of items) {
+      const vid = ((it.contentDetails || {}) as AnyJson).videoId;
+      if (vid) ids.push(String(vid));
+    }
+    pageToken = (page as AnyJson).nextPageToken as string | undefined;
+    if (!pageToken) break;
+  }
+  return hydrateVideos(apiKey, ids);
+}
+
+async function getTopVideos(apiKey: string, channelId: string, max: number): Promise<AnyJson[]> {
+  const search = await ytFetch(
+    `/search?part=id&type=video&order=viewCount&maxResults=${max}&channelId=${encodeURIComponent(channelId)}`,
+    apiKey,
+  );
+  const items = (search as AnyJson).items as AnyJson[] | undefined;
+  const ids = (items || [])
+    .map((it) => ((it.id || {}) as AnyJson).videoId)
+    .filter(Boolean)
+    .map(String);
+  return hydrateVideos(apiKey, ids);
+}
+
+async function cacheCompetitor(
+  adminClient: any,
+  handle: string,
+  channelId: string | null,
+  payload: AnyJson,
+  source: string,
+): Promise<void> {
+  try {
+    await adminClient.from("youtube_competitor_cache").upsert(
+      { handle, channel_id: channelId, payload, source, fetched_at: new Date().toISOString() },
+      { onConflict: "handle,source" },
+    );
+  } catch (e) {
+    console.warn("[youtube/cache] upsert failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+async function readCompetitorCache(
+  adminClient: any,
+  handle: string,
+  source: string,
+  maxAgeHours = 6,
+): Promise<AnyJson | null> {
+  try {
+    const { data } = await adminClient
+      .from("youtube_competitor_cache")
+      .select("payload, fetched_at")
+      .ilike("handle", handle)
+      .eq("source", source)
+      .maybeSingle();
+    if (!data) return null;
+    const ageMs = Date.now() - new Date(data.fetched_at).getTime();
+    if (ageMs > maxAgeHours * 3600 * 1000) return null;
+    return data.payload as AnyJson;
+  } catch {
+    return null;
+  }
+}
+
+async function socialBladeFallback(adminClient: any, target: string): Promise<AnyJson | null> {
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!firecrawlKey) return null;
+
+  const cleaned = target.replace(/^@/, "").replace(/^https?:\/\/[^/]+\//, "").split(/[/?#]/)[0];
+  const cached = await readCompetitorCache(adminClient, cleaned, "socialblade");
+  if (cached) return { ...cached, source: "socialblade", cached: true };
+
+  const urls = [
+    `https://socialblade.com/youtube/c/${encodeURIComponent(cleaned)}`,
+    `https://socialblade.com/youtube/user/${encodeURIComponent(cleaned)}`,
+    `https://socialblade.com/youtube/@${encodeURIComponent(cleaned)}`,
+  ];
+
+  const schema = {
+    type: "object",
+    properties: {
+      channelName: { type: "string" },
+      subscribers: { type: "string" },
+      totalViews: { type: "string" },
+      uploads: { type: "string" },
+      grade: { type: "string" },
+      rank: { type: "string" },
+      last30dSubs: { type: "string" },
+      last30dViews: { type: "string" },
+      monthlyEarningsRange: { type: "string" },
+    },
+  };
+
+  for (const url of urls) {
+    try {
+      const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${firecrawlKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url,
+          onlyMainContent: true,
+          formats: [{ type: "json", schema }, "markdown"],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) continue;
+      const extracted = (data?.data?.json || data?.json) as AnyJson | undefined;
+      if (!extracted || Object.keys(extracted).length === 0) continue;
+      const payload: AnyJson = { source: "socialblade", target, sourceUrl: url, ...extracted };
+      await cacheCompetitor(adminClient, cleaned, null, payload, "socialblade");
+      return payload;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -1367,6 +1624,95 @@ serve(async (req) => {
         url: `https://www.youtube.com/watch?v=${videoId}`,
         warnings,
       });
+    }
+
+    // ============================================================
+    // PUBLIC-CHANNEL ANALYSIS (competitor insights, no OAuth needed)
+    // ============================================================
+    if (
+      action === "resolve_channel" ||
+      action === "get_channel_stats" ||
+      action === "list_channel_uploads" ||
+      action === "get_top_videos" ||
+      action === "compare_channels" ||
+      action === "analyze_public_channel"
+    ) {
+      const apiKey = await resolvePublicApiKey(adminClient, userId);
+
+      if (action === "resolve_channel") {
+        const out = await resolveChannel(apiKey, String(params.target || params.handle || params.url || params.channelId || ""));
+        return jsonOk(out);
+      }
+
+      if (action === "get_channel_stats") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const stats = await getChannelStats(apiKey, id);
+        return jsonOk(stats);
+      }
+
+      if (action === "list_channel_uploads") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const max = Math.min(Number(params.max) || 25, 50);
+        const uploads = await listChannelUploads(apiKey, id, max);
+        return jsonOk({ channelId: id, uploads });
+      }
+
+      if (action === "get_top_videos") {
+        const id = String(params.channelId || "");
+        if (!id) throw new Error("channelId required");
+        const max = Math.min(Number(params.max) || 10, 25);
+        const top = await getTopVideos(apiKey, id, max);
+        return jsonOk({ channelId: id, topVideos: top });
+      }
+
+      if (action === "compare_channels") {
+        const targets: string[] = Array.isArray(params.targets) ? params.targets : [];
+        const sample = Math.min(Number(params.sample) || 10, 25);
+        const results = await Promise.all(
+          targets.map(async (t) => {
+            try {
+              const resolved = await resolveChannel(apiKey, t);
+              const [stats, uploads] = await Promise.all([
+                getChannelStats(apiKey, resolved.channelId),
+                listChannelUploads(apiKey, resolved.channelId, sample),
+              ]);
+              return { target: t, ...stats, recentUploads: uploads };
+            } catch (e) {
+              return { target: t, error: e instanceof Error ? e.message : String(e) };
+            }
+          }),
+        );
+        return jsonOk({ channels: results });
+      }
+
+      // Full one-shot for the chat tool
+      if (action === "analyze_public_channel") {
+        const target = String(params.target || "");
+        const mode = String(params.mode || "latest"); // stats | latest | top
+        const max = Math.min(Number(params.max) || 25, 50);
+        if (!target) throw new Error("target required");
+
+        try {
+          const resolved = await resolveChannel(apiKey, target);
+          const stats = await getChannelStats(apiKey, resolved.channelId);
+          const payload: AnyJson = { source: "youtube_api", target, ...stats };
+          if (mode === "latest" || mode === "top") {
+            payload.uploads = await listChannelUploads(apiKey, resolved.channelId, max);
+          }
+          if (mode === "top") {
+            payload.topVideos = await getTopVideos(apiKey, resolved.channelId, Math.min(max, 25));
+          }
+          await cacheCompetitor(adminClient, target, resolved.channelId, payload, "youtube_api");
+          return jsonOk(payload);
+        } catch (apiErr) {
+          // Fallback to SocialBlade via Firecrawl
+          const sb = await socialBladeFallback(adminClient, target);
+          if (sb) return jsonOk(sb);
+          throw apiErr;
+        }
+      }
     }
 
     throw new Error(`Unsupported action: ${action}`);
