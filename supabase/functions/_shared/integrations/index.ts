@@ -27,6 +27,7 @@ import { viralCreativeIntegration } from "./viral-creative.ts";
 export const INTEGRATIONS: IntegrationManifest[] = [
   researchIntegration,
   higgsfieldIntegration,
+  viralCreativeIntegration,
   googleDocsIntegration,
   googleSheetsIntegration,
   googleCalendarIntegration,
