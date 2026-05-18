@@ -635,7 +635,6 @@ function fillTableRequests(tableEl: AnyJson, data: string[][], cols: number): Do
     const tableStart = tableEl.startIndex as number;
     out.push({
       updateTableCellStyle: {
-        tableStartLocation: { index: tableStart },
         tableRange: {
           tableCellLocation: { tableStartLocation: { index: tableStart }, rowIndex: 0, columnIndex: 0 },
           rowSpan: 1,
