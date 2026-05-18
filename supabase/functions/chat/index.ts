@@ -9666,6 +9666,7 @@ For all GHL actions (create custom field, list contacts, create opportunity, etc
         productivity: ['calendar_', 'sheets_', 'docs_', 'drive_', 'create_work_task'],
         creative: ['higgsfield_', 'descript_', 'upload_youtube_video', 'video_'],
         seo: ['gsc_', 'analytics_', 'web_search_google'],
+        research: ['analyze_youtube_channel', 'deep_research', 'scrape_events'],
         finance: ['plaid_'],
         memory: ['save_memory', 'search_wisdom_memories', 'add_standing_order', 'add_goal'],
       };
