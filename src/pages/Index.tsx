@@ -378,7 +378,7 @@ const Index = () => {
           {hasInteracted && (
             <ChatMessageList messages={renderedMessages} playMessage={playMessage}
               playingMessageId={playingMessageId} loadingAudioId={loadingAudioId}
-              onRegenerate={handleRegenerate} isLoading={isLoading} />
+              onRegenerate={handleRegenerate} onReformat={reformatAs} isLoading={isLoading} />
           )}
 
           {hasInteracted && (
