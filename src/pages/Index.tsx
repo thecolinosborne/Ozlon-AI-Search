@@ -83,7 +83,7 @@ const Index = () => {
 
   // Hooks
   const { playingMessageId, loadingAudioId, playMessage } = useVoicePlayback();
-  const { input, setInput, isLoading, inflightMessages, sendMessage, abortStream, metadataOverlay } = useChatStream({
+  const { input, setInput, isLoading, inflightMessages, sendMessage, reformatAs, abortStream, metadataOverlay } = useChatStream({
     persistedMessages, systemName, userSettings, autoPlayEnabled,
     saveMessage, finalizeMessage, playMessage,
   });
@@ -119,6 +119,7 @@ const Index = () => {
           artifactId: m.artifactId ?? overlay.artifactId,
           researchReportId: m.researchReportId ?? overlay.researchReportId,
           tripOptionId: m.tripOptionId ?? overlay.tripOptionId,
+          formatMode: m.formatMode ?? overlay.formatMode,
         };
       });
     }

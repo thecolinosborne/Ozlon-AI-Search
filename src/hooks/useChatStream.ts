@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent } from "@/services/chatService";
+import { streamChat, UserSettings, TaskUpdate, ProviderUsedEvent, ToolUsedInfo, OrchestrationTraceEvent, FormatMode } from "@/services/chatService";
 import { useTaskActivityStore } from "@/stores/useTaskActivityStore";
 
 export type LiveStep = {
@@ -18,6 +18,7 @@ export type ChatMessage = {
   artifactId?: string;
   researchReportId?: string;
   tripOptionId?: string;
+  formatMode?: FormatMode;
 };
 
 // Lightweight intent detector for budget trip planning.
@@ -128,7 +129,7 @@ export function useChatStream({
 
   // Keep ephemeral chip metadata (provider/toolsUsed/orchestration/artifactId) alive
   // after a message is persisted, since persistence only stores {id, role, content}.
-  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId" | "tripOptionId">>>(new Map());
+  const metadataOverlayRef = useRef<Map<string, Pick<ChatMessage, "provider" | "toolsUsed" | "orchestration" | "artifactId" | "researchReportId" | "tripOptionId" | "formatMode">>>(new Map());
   const [metadataOverlayVersion, setMetadataOverlayVersion] = useState(0);
 
   const persistAssistantMessage = useCallback(
@@ -170,7 +171,7 @@ export function useChatStream({
   }, [inflightMessages, isPersistedMessage, persistedMessages, safeSetInflight]);
 
   const sendMessage = useCallback(
-    async (text: string, intent?: string) => {
+    async (text: string, intent?: string, formatOverride?: FormatMode) => {
       if (!text.trim() || isLoading) return;
 
       if (isDev && phaseRef.current !== "idle") {
@@ -270,6 +271,7 @@ export function useChatStream({
           enableTools: true,
           sessionId: sessionId ?? undefined,
           assistantMessageId: assistantId,
+          formatOverride,
           signal,
           onToolCall: (toolName, toolArgs) => {
             if (!isCurrentRequest()) return;
@@ -375,6 +377,14 @@ export function useChatStream({
               )
             );
           },
+          onFormatting: (info) => {
+            if (!isCurrentRequest()) return;
+            safeSetInflight((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, formatMode: info.mode } : m
+              )
+            );
+          },
           onDone: () => {
             if (!isCurrentRequest()) return;
             outcome = "success";
@@ -435,6 +445,7 @@ export function useChatStream({
               orchestration: inflightAssistant?.orchestration,
               artifactId: inflightAssistant?.artifactId,
               researchReportId: inflightAssistant?.researchReportId,
+              formatMode: inflightAssistant?.formatMode,
             }
           : null;
 
@@ -458,12 +469,14 @@ export function useChatStream({
               orchestration: finalAssistantMessage.orchestration,
               artifactId: finalAssistantMessage.artifactId,
               researchReportId: finalAssistantMessage.researchReportId,
+              formatMode: finalAssistantMessage.formatMode,
             };
-            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId || overlay.researchReportId;
+            const hasAny = overlay.provider || (overlay.toolsUsed && overlay.toolsUsed.length > 0) || overlay.orchestration || overlay.artifactId || overlay.researchReportId || overlay.formatMode;
             if (hasAny) {
               metadataOverlayRef.current.set(assistantId, overlay);
               setMetadataOverlayVersion((v) => v + 1);
             }
+
 
             // Pass artifactId / researchReportId through finalize/save metadata so it persists to DB
             const persistedMeta: Record<string, unknown> = {};
@@ -549,6 +562,24 @@ export function useChatStream({
     };
   }, [failStaleTasks]);
 
+  // Reformat the prior assistant turn in a different FormatMode by re-sending
+  // the user message that immediately preceded it, with a server-side override.
+  const reformatAs = useCallback(
+    async (assistantMessageId: string, mode: FormatMode) => {
+      const idx = persistedMessages.findIndex(
+        (m) => m.id === assistantMessageId && m.role === "assistant"
+      );
+      if (idx <= 0) return;
+      let userMsg: ChatMessage | null = null;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (persistedMessages[i].role === "user") { userMsg = persistedMessages[i]; break; }
+      }
+      if (!userMsg?.content) return;
+      await sendMessage(userMsg.content, undefined, mode);
+    },
+    [persistedMessages, sendMessage]
+  );
+
   // Touch the version so consumers re-render when overlay updates.
   void metadataOverlayVersion;
   return {
@@ -557,7 +588,9 @@ export function useChatStream({
     isLoading,
     inflightMessages,
     sendMessage,
+    reformatAs,
     abortStream,
     metadataOverlay: metadataOverlayRef.current,
   };
 }
+

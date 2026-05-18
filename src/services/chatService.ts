@@ -162,6 +162,13 @@ export interface ResearchArtifactEvent {
   confidence: number;
 }
 
+export type FormatMode = 'ATOMIC' | 'CHAT' | 'BRIEF' | 'EXECUTION' | 'DOCUMENT' | 'LONGFORM';
+
+export interface FormattingEvent {
+  mode: FormatMode;
+  reason: string;
+}
+
 export interface StreamChatOptions {
   messages: Message[];
   intent?: string;
@@ -173,6 +180,8 @@ export interface StreamChatOptions {
   userSettings?: UserSettings;
   sessionId?: string;
   assistantMessageId?: string;
+  /** Force a specific formatting mode (overrides server-side router). */
+  formatOverride?: FormatMode;
   signal?: AbortSignal;
   onDelta: (content: string) => void;
   onToolCall?: (toolName: string, toolArgs: Record<string, unknown>) => void;
@@ -183,9 +192,11 @@ export interface StreamChatOptions {
   onOrchestrationTrace?: (data: OrchestrationTraceEvent) => void;
   onInvestigationArtifact?: (data: InvestigationArtifactEvent) => void;
   onResearchArtifact?: (data: ResearchArtifactEvent) => void;
+  onFormatting?: (data: FormattingEvent) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
+
 
 /**
  * Stream chat responses from the AI backend
@@ -202,6 +213,7 @@ export async function streamChat({
   userSettings,
   sessionId,
   assistantMessageId,
+  formatOverride,
   signal,
   onDelta,
   onToolCall,
@@ -212,6 +224,7 @@ export async function streamChat({
   onOrchestrationTrace,
   onInvestigationArtifact,
   onResearchArtifact,
+  onFormatting,
   onDone,
   onError,
 }: StreamChatOptions): Promise<void> {
@@ -226,6 +239,7 @@ export async function streamChat({
       onError(msg);
       return;
     }
+
 
     let userJwt: string | null = null;
     try {
@@ -275,6 +289,7 @@ export async function streamChat({
         userSettings,
         sessionId,
         assistantMessageId,
+        formatOverride,
         routing_mode: routingMode,
       }),
     });
@@ -369,6 +384,12 @@ export async function streamChat({
           // Handle research_artifact events (personal_research report id)
           if (currentEventType === 'research_artifact' && onResearchArtifact) {
             onResearchArtifact(parsed as ResearchArtifactEvent);
+            currentEventType = 'message';
+            continue;
+          }
+          // Handle formatting events (which FormatMode the engine picked)
+          if (currentEventType === 'formatting' && onFormatting) {
+            onFormatting(parsed as FormattingEvent);
             currentEventType = 'message';
             continue;
           }
