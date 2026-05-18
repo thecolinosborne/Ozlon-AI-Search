@@ -1353,7 +1353,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'create_google_doc',
-      description: 'Create a new Google Doc with a title and optional content.',
+      description: 'Create a new empty Google Doc with a title. This creates an EMPTY doc — you MUST chain docs_apply_styled_document (preferred) or docs_apply_markdown in the same turn to fill it. Never end a turn after create_google_doc without populating the body.',
       parameters: {
         type: 'object',
         properties: {
