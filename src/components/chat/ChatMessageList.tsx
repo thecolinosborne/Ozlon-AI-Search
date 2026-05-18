@@ -142,6 +142,7 @@ interface MessageItemProps {
   playingMessageId: string | null;
   loadingAudioId: string | null;
   onRegenerate?: (messageId: string) => void;
+  onReformat?: (messageId: string, mode: FormatMode) => void;
   isLoading?: boolean;
 }
 
@@ -151,6 +152,7 @@ const MessageItemInner = ({
   playingMessageId,
   loadingAudioId,
   onRegenerate,
+  onReformat,
   isLoading,
 }: MessageItemProps) => {
   const markdownContent = useMemo(
