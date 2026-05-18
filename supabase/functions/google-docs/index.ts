@@ -651,7 +651,6 @@ function fillTableRequests(tableEl: AnyJson, data: string[][], cols: number): Do
     if (rows.length > 1) {
       out.push({
         updateTableCellStyle: {
-          tableStartLocation: { index: tableStart },
           tableRange: {
             tableCellLocation: { tableStartLocation: { index: tableStart }, rowIndex: 1, columnIndex: 0 },
             rowSpan: rows.length - 1,
