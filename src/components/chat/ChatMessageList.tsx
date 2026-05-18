@@ -335,6 +335,13 @@ const MessageItemInner = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </ActionIconButton>
           )}
+          {onReformat && (
+            <ReformatChip
+              current={message.formatMode}
+              disabled={isLoading}
+              onSelect={(mode) => onReformat(message.id, mode)}
+            />
+          )}
         </div>
       )}
     </div>
