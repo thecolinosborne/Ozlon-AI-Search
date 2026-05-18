@@ -387,6 +387,12 @@ export async function streamChat({
             currentEventType = 'message';
             continue;
           }
+          // Handle formatting events (which FormatMode the engine picked)
+          if (currentEventType === 'formatting' && onFormatting) {
+            onFormatting(parsed as FormattingEvent);
+            currentEventType = 'message';
+            continue;
+          }
           currentEventType = 'message';
 
           const choice = parsed.choices?.[0];
