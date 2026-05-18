@@ -10252,11 +10252,70 @@ Execute these in order. Be decisive — the user has already been shown this pla
         if (formatMeta) {
           await writer.write(encoder.encode(`event: formatting\ndata: ${JSON.stringify(formatMeta)}\n\n`));
         }
+
+        // Phase 2 verifier: accumulate streamed content so we can post-check.
+        let assistantBuf = "";
+        const sseDecoder = new TextDecoder();
+        let sseTail = "";
         const reader = response.body!.getReader();
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           await writer.write(value);
+          // Best-effort parse of content deltas for verifier input.
+          try {
+            const chunk = sseTail + sseDecoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+            sseTail = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const payload = line.slice(6).trim();
+              if (!payload || payload === '[DONE]') continue;
+              try {
+                const j = JSON.parse(payload);
+                const delta = j?.choices?.[0]?.delta?.content;
+                if (typeof delta === 'string') assistantBuf += delta;
+              } catch { /* non-JSON SSE line */ }
+            }
+          } catch { /* parsing is best-effort */ }
+        }
+
+        // Phase 2 — Formatting verifier (shadow by default, active when env flips).
+        try {
+          const { getVerifierConfig, shouldVerify, verifyFormat } = await import("./_format/verify.ts");
+          const vcfg = getVerifierConfig();
+          if (formatMeta && shouldVerify(vcfg, formatMeta.mode as any, assistantBuf)) {
+            const apiKey = Deno.env.get('LOVABLE_API_KEY');
+            if (apiKey) {
+              const vResult = await verifyFormat({
+                text: assistantBuf,
+                mode: formatMeta.mode as any,
+                targetWords: longFormMeta?.target_words,
+                apiKey,
+                model: vcfg.model,
+                repair: vcfg.opMode === 'active',
+              });
+              console.log(`[FormatVerify] mode=${formatMeta.mode} op=${vcfg.opMode} ok=${vResult.ok} issues=${vResult.issues.length} ms=${vResult.latencyMs} model=${vResult.model}${vResult.skipped ? ` skipped=${vResult.skipped}` : ''}`);
+              await writer.write(encoder.encode(`event: formatting_verify\ndata: ${JSON.stringify({
+                mode: formatMeta.mode,
+                op_mode: vcfg.opMode,
+                ok: vResult.ok,
+                issues: vResult.issues,
+                latency_ms: vResult.latencyMs,
+                model: vResult.model,
+                skipped: vResult.skipped,
+                repaired: !!vResult.repairedText,
+              })}\n\n`));
+              if (vResult.repairedText && vcfg.opMode === 'active') {
+                await writer.write(encoder.encode(`event: message_replacement\ndata: ${JSON.stringify({
+                  mode: formatMeta.mode,
+                  text: vResult.repairedText,
+                })}\n\n`));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[FormatVerify] verifier error (non-fatal):', (e as Error).message);
         }
       } finally {
         await writer.close();
