@@ -487,7 +487,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
             indentFirstLine: pt(12),
             spaceAbove: pt(6),
             spaceBelow: pt(6),
-            shading: { backgroundColor: rgb(THEME.codeBlockBg).color },
+            shading: { backgroundColor: rgb(THEME.codeBlockBg).color?.rgbColor ? { rgbColor: rgb(THEME.codeBlockBg).color.rgbColor } : { rgbColor: THEME.codeBlockBg } },
           },
           fields: "indentStart,indentFirstLine,spaceAbove,spaceBelow,shading",
         },
