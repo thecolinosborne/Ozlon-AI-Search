@@ -473,7 +473,7 @@ function renderNonTableBlocks(blocks: Block[], startIndex: number): RenderedSegm
           paragraphStyle: {
             spaceAbove: pt(12),
             spaceBelow: pt(12),
-            borderBottom: { color: rgb({ red: 0.85, green: 0.85, blue: 0.85 }).color, width: pt(0.75), padding: pt(0), dashStyle: "SOLID" },
+            borderBottom: { color: rgb({ red: 0.85, green: 0.85, blue: 0.85 }), width: pt(0.75), padding: pt(0), dashStyle: "SOLID" },
           },
           fields: "spaceAbove,spaceBelow,borderBottom",
         },
