@@ -10348,6 +10348,8 @@ Execute these in order. Be decisive — the user has already been shown this pla
         }
 
         // Phase 2 — Formatting verifier (shadow by default, active when env flips).
+        // Phase 3 — Always record telemetry (router decision + verifier outcome).
+        let streamVerifyResult: { ok: boolean; issues: string[]; latencyMs: number; model: string; skipped?: string; repaired?: boolean; opMode?: string } | null = null;
         try {
           const { getVerifierConfig, shouldVerify, verifyFormat } = await import("./_format/verify.ts");
           const vcfg = getVerifierConfig();
@@ -10362,6 +10364,7 @@ Execute these in order. Be decisive — the user has already been shown this pla
                 model: vcfg.model,
                 repair: vcfg.opMode === 'active',
               });
+              streamVerifyResult = { ok: vResult.ok, issues: vResult.issues, latencyMs: vResult.latencyMs, model: vResult.model, skipped: vResult.skipped, repaired: !!vResult.repairedText, opMode: vcfg.opMode };
               console.log(`[FormatVerify] mode=${formatMeta.mode} op=${vcfg.opMode} ok=${vResult.ok} issues=${vResult.issues.length} ms=${vResult.latencyMs} model=${vResult.model}${vResult.skipped ? ` skipped=${vResult.skipped}` : ''}`);
               await writer.write(encoder.encode(`event: formatting_verify\ndata: ${JSON.stringify({
                 mode: formatMeta.mode,
@@ -10384,6 +10387,31 @@ Execute these in order. Be decisive — the user has already been shown this pla
         } catch (e) {
           console.warn('[FormatVerify] verifier error (non-fatal):', (e as Error).message);
         }
+        // Phase 3 telemetry — fire-and-forget.
+        try {
+          if (formatMeta) {
+            const { recordFormattingTelemetry } = await import("./_format/telemetry.ts");
+            recordFormattingTelemetry({
+              user_id: wisdomUserId,
+              session_id: (body.sessionId as string) || null,
+              mode: formatMeta.mode,
+              router_reason: formatMeta.reason,
+              path: 'stream',
+              user_text_len: (lastUserMsg?.content || '').length,
+              output_chars: assistantBuf.length,
+              verifier_op_mode: streamVerifyResult?.opMode ?? null,
+              verifier_ok: streamVerifyResult?.ok ?? null,
+              verifier_issues: streamVerifyResult?.issues ?? null,
+              verifier_latency_ms: streamVerifyResult?.latencyMs ?? null,
+              verifier_model: streamVerifyResult?.model ?? null,
+              verifier_skipped: streamVerifyResult?.skipped ?? null,
+              verifier_repaired: streamVerifyResult?.repaired ?? null,
+              longform_kind: longFormMeta?.kind ?? null,
+              longform_target_words: longFormMeta?.target_words ?? null,
+            });
+          }
+        } catch { /* ignore */ }
+
       } finally {
         await writer.close();
       }
