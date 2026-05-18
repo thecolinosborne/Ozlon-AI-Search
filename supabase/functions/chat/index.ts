@@ -7235,6 +7235,7 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'edit_image', domain: 'creative' },
   { prefix: 'generate_video', domain: 'creative' },
   { prefix: 'upload_youtube_video', domain: 'creative' },
+  { prefix: 'analyze_youtube_channel', domain: 'research' },
   { prefix: 'save_memory', domain: 'memory' },
   { prefix: 'search_wisdom_memories', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
