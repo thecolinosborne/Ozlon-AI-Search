@@ -3445,6 +3445,12 @@ async function executeToolCall(
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }[] },
 ): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> }> {
   try {
+    // Set per-turn active GHL location so callGHL can auto-inject it into every
+    // request body / query string. Scalable guardrail: any new ghl_* handler
+    // benefits automatically, even if the author forgets to thread locationId.
+    if (toolName.startsWith('ghl_') && ghlCreds?.locationId) {
+      __currentGHLLocationId = ghlCreds.locationId;
+    }
     // ---- multi_action: parallel fan-out ----
     if (toolName === 'multi_action') {
       const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
