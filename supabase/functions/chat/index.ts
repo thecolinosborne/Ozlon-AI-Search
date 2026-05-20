@@ -1580,14 +1580,14 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_book_appointment',
-      description: 'Book an appointment on a GoHighLevel calendar for a contact.',
+      description: 'Book an appointment on a GoHighLevel calendar for a contact. start_time and end_time MUST be ISO-8601 with timezone offset (e.g. 2026-05-20T16:00:00-04:00). Never send raw epoch milliseconds.',
       parameters: {
         type: 'object',
         properties: {
           calendar_id: { type: 'string', description: 'Calendar ID' },
           contact_id: { type: 'string', description: 'Contact ID' },
-          start_time: { type: 'string', description: 'Start time ISO 8601' },
-          end_time: { type: 'string', description: 'End time ISO 8601' },
+          start_time: { type: 'string', description: 'Start time, ISO-8601 with timezone offset (e.g. 2026-05-20T16:00:00-04:00)' },
+          end_time: { type: 'string', description: 'End time, ISO-8601 with timezone offset (e.g. 2026-05-20T17:00:00-04:00)' },
           title: { type: 'string', description: 'Appointment title (optional)' },
         },
         required: ['calendar_id', 'contact_id', 'start_time', 'end_time'],
@@ -3796,16 +3796,24 @@ async function executeToolCall(
       }
 
       case 'ghl_book_appointment': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured for the active sub-account.' };
+        const toIso = (v: unknown): string => {
+          if (typeof v === 'number') return new Date(v).toISOString();
+          if (typeof v === 'string' && /^\d{10,}$/.test(v.trim())) return new Date(Number(v)).toISOString();
+          return String(v);
+        };
         const apptData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
           calendarId: args.calendar_id,
           contactId: args.contact_id,
-          startTime: args.start_time,
-          endTime: args.end_time,
+          startTime: toIso(args.start_time),
+          endTime: toIso(args.end_time),
         };
         if (args.title) apptData.title = args.title;
         const res = await callGHL('/calendars/events/appointments', 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL appointment error: ${res.error || res.message}` };
-        return { success: true, result: `Appointment booked: ${args.start_time} to ${args.end_time} (ID: ${res.id})` };
+        return { success: true, result: `Appointment booked: ${apptData.startTime} to ${apptData.endTime} (ID: ${res.id})` };
       }
 
       case 'ghl_add_tags': {
@@ -3892,9 +3900,15 @@ async function executeToolCall(
       }
 
       case 'ghl_get_free_slots': {
-        const startDate = (args.start_date as string) || new Date().toISOString().split('T')[0];
-        const endDate = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?startDate=${startDate}&endDate=${endDate}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, { slots?: string[] }>;
+        const startDateStr = (args.start_date as string) || new Date().toISOString().split('T')[0];
+        const endDateStr = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+        // GHL expects epoch milliseconds, not date strings
+        const startMs = /^\d+$/.test(startDateStr) ? Number(startDateStr) : new Date(`${startDateStr}T00:00:00.000Z`).getTime();
+        const endMs = /^\d+$/.test(endDateStr) ? Number(endDateStr) : new Date(`${endDateStr}T23:59:59.999Z`).getTime();
+        const tz = (args.timezone as string) || '';
+        const qs = new URLSearchParams({ startDate: String(startMs), endDate: String(endMs) });
+        if (tz) qs.set('timezone', tz);
+        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?${qs.toString()}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, { slots?: string[] }>;
         const allSlots: string[] = [];
         for (const [date, info] of Object.entries(data)) {
           if (info?.slots?.length) { allSlots.push(`${date}: ${info.slots.join(', ')}`); }
@@ -4495,15 +4509,23 @@ async function executeToolCall(
         return { success: true, result: `Courses imported.` };
       }
       case 'ghl_create_appointment': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured for the active sub-account.' };
+        const toIso = (v: unknown): string => {
+          if (typeof v === 'number') return new Date(v).toISOString();
+          if (typeof v === 'string' && /^\d{10,}$/.test(v.trim())) return new Date(Number(v)).toISOString();
+          return String(v);
+        };
         const apptData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
           calendarId: args.calendar_id,
           contactId: args.contact_id,
-          startTime: args.start_time,
+          startTime: toIso(args.start_time),
         };
-        if (args.end_time) apptData.endTime = args.end_time;
+        if (args.end_time) apptData.endTime = toIso(args.end_time);
         if (args.title) apptData.title = args.title;
-        const res = await callGHL(`/calendars/events/appointments`, 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string };
-        if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        const res = await callGHL(`/calendars/events/appointments`, 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string; message?: string };
+        if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
         return { success: true, result: `Appointment created (ID: ${res.id || 'created'}).` };
       }
 
