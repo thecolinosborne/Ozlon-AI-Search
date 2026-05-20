@@ -3796,16 +3796,24 @@ async function executeToolCall(
       }
 
       case 'ghl_book_appointment': {
+        const GHL_LOCATION_ID = (ghlCreds?.locationId || '');
+        if (!GHL_LOCATION_ID) return { success: false, result: 'GoHighLevel location ID not configured for the active sub-account.' };
+        const toIso = (v: unknown): string => {
+          if (typeof v === 'number') return new Date(v).toISOString();
+          if (typeof v === 'string' && /^\d{10,}$/.test(v.trim())) return new Date(Number(v)).toISOString();
+          return String(v);
+        };
         const apptData: Record<string, unknown> = {
+          locationId: GHL_LOCATION_ID,
           calendarId: args.calendar_id,
           contactId: args.contact_id,
-          startTime: args.start_time,
-          endTime: args.end_time,
+          startTime: toIso(args.start_time),
+          endTime: toIso(args.end_time),
         };
         if (args.title) apptData.title = args.title;
         const res = await callGHL('/calendars/events/appointments', 'POST', apptData, ghlCreds?.apiKey) as { id?: string; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL appointment error: ${res.error || res.message}` };
-        return { success: true, result: `Appointment booked: ${args.start_time} to ${args.end_time} (ID: ${res.id})` };
+        return { success: true, result: `Appointment booked: ${apptData.startTime} to ${apptData.endTime} (ID: ${res.id})` };
       }
 
       case 'ghl_add_tags': {
