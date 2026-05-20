@@ -1580,14 +1580,14 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_book_appointment',
-      description: 'Book an appointment on a GoHighLevel calendar for a contact.',
+      description: 'Book an appointment on a GoHighLevel calendar for a contact. start_time and end_time MUST be ISO-8601 with timezone offset (e.g. 2026-05-20T16:00:00-04:00). Never send raw epoch milliseconds.',
       parameters: {
         type: 'object',
         properties: {
           calendar_id: { type: 'string', description: 'Calendar ID' },
           contact_id: { type: 'string', description: 'Contact ID' },
-          start_time: { type: 'string', description: 'Start time ISO 8601' },
-          end_time: { type: 'string', description: 'End time ISO 8601' },
+          start_time: { type: 'string', description: 'Start time, ISO-8601 with timezone offset (e.g. 2026-05-20T16:00:00-04:00)' },
+          end_time: { type: 'string', description: 'End time, ISO-8601 with timezone offset (e.g. 2026-05-20T17:00:00-04:00)' },
           title: { type: 'string', description: 'Appointment title (optional)' },
         },
         required: ['calendar_id', 'contact_id', 'start_time', 'end_time'],
