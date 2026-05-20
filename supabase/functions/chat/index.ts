@@ -898,9 +898,46 @@ The following is REAL data pulled from the user's connected accounts. Use this d
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 
+// Per-turn active GHL location, set by executeToolCall before any ghl_* runs.
+// callGHL auto-injects this into request bodies / query strings when missing,
+// so individual handlers never have to remember to thread locationId through.
+// This is the scalable guardrail — add a new ghl handler, locationId is handled.
+let __currentGHLLocationId: string | undefined;
+
+function __injectGHLLocation(path: string, method: string, body: unknown): { path: string; body: unknown } {
+  const loc = __currentGHLLocationId;
+  if (!loc) return { path, body };
+  const upper = method.toUpperCase();
+
+  // 1) Auto-inject into JSON object bodies on writes if not already present.
+  if (body && typeof body === 'object' && !Array.isArray(body) && (upper === 'POST' || upper === 'PUT' || upper === 'PATCH')) {
+    const b = body as Record<string, unknown>;
+    const hasLoc = 'locationId' in b || 'altId' in b || 'location_id' in b;
+    if (!hasLoc) body = { ...b, locationId: loc };
+  }
+
+  // 2) Auto-inject into query string on reads/deletes when missing AND the path
+  //    isn't a single-resource lookup (e.g. /contacts/{id}). GHL list/search
+  //    endpoints universally require locationId or altId.
+  if (upper === 'GET' || upper === 'DELETE') {
+    const [pathOnly, qs = ''] = path.split('?');
+    const hasLocInQs = /(?:^|&)(?:locationId|altId|location_id)=/.test(qs);
+    const segments = pathOnly.split('/').filter(Boolean);
+    const lastSeg = segments[segments.length - 1] || '';
+    const looksLikeResourceById = segments.length >= 2 && /^[a-zA-Z0-9_-]{8,}$/.test(lastSeg) && !/^[a-z-]+$/.test(lastSeg);
+    if (!hasLocInQs && !looksLikeResourceById) {
+      const sep = qs ? '&' : '';
+      path = `${pathOnly}?${qs}${sep}locationId=${encodeURIComponent(loc)}`;
+    }
+  }
+
+  return { path, body };
+}
+
 async function callGHL(path: string, method = 'GET', body?: unknown, ghlApiKey?: string): Promise<unknown> {
   // No env fallback — caller must pass a per-user key resolved from integration_connections.
   if (!ghlApiKey) throw new Error('GoHighLevel not connected. Add your API key in Integrations → Go High Level.');
+  ({ path, body } = __injectGHLLocation(path, method, body));
   const res = await fetch(`${GHL_BASE_URL}${path}`, {
     method,
     headers: {
@@ -3408,6 +3445,12 @@ async function executeToolCall(
   ghlCreds?: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string; scopes?: string[]; location_name?: string; disabled?: boolean; last_verified_at?: string }[] },
 ): Promise<{ success: boolean; result: string; structured?: Record<string, unknown> }> {
   try {
+    // Set per-turn active GHL location so callGHL can auto-inject it into every
+    // request body / query string. Scalable guardrail: any new ghl_* handler
+    // benefits automatically, even if the author forgets to thread locationId.
+    if (toolName.startsWith('ghl_') && ghlCreds?.locationId) {
+      __currentGHLLocationId = ghlCreds.locationId;
+    }
     // ---- multi_action: parallel fan-out ----
     if (toolName === 'multi_action') {
       const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
