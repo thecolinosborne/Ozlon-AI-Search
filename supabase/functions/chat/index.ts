@@ -3900,9 +3900,15 @@ async function executeToolCall(
       }
 
       case 'ghl_get_free_slots': {
-        const startDate = (args.start_date as string) || new Date().toISOString().split('T')[0];
-        const endDate = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?startDate=${startDate}&endDate=${endDate}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, { slots?: string[] }>;
+        const startDateStr = (args.start_date as string) || new Date().toISOString().split('T')[0];
+        const endDateStr = (args.end_date as string) || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+        // GHL expects epoch milliseconds, not date strings
+        const startMs = /^\d+$/.test(startDateStr) ? Number(startDateStr) : new Date(`${startDateStr}T00:00:00.000Z`).getTime();
+        const endMs = /^\d+$/.test(endDateStr) ? Number(endDateStr) : new Date(`${endDateStr}T23:59:59.999Z`).getTime();
+        const tz = (args.timezone as string) || '';
+        const qs = new URLSearchParams({ startDate: String(startMs), endDate: String(endMs) });
+        if (tz) qs.set('timezone', tz);
+        const data = await callGHL(`/calendars/${args.calendar_id}/free-slots?${qs.toString()}`, 'GET', undefined, ghlCreds?.apiKey) as Record<string, { slots?: string[] }>;
         const allSlots: string[] = [];
         for (const [date, info] of Object.entries(data)) {
           if (info?.slots?.length) { allSlots.push(`${date}: ${info.slots.join(', ')}`); }
