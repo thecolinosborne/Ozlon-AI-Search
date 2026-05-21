@@ -8363,6 +8363,46 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // ---- Per-turn tool-result cache ----
+  // Read-only tools called twice with identical args inside ONE chat turn
+  // return the first cached result. Kills duplicate Gmail/GA4/GSC/Drive
+  // round-trips when the model fans out (e.g. "list emails" twice in a row).
+  // Cache is scoped to this runToolLoop call only — no cross-turn leakage.
+  const READ_ONLY_PREFIXES = [
+    'list_', 'get_', 'search_', 'read_', 'fetch_',
+    'ga4_', 'gsc_', 'drive_list', 'drive_get', 'drive_storage',
+    'docs_list', 'docs_get',
+    'sheets_list', 'sheets_get', 'sheets_read',
+    'calendar_list', 'calendar_get', 'calendar_freebusy', 'calendar_find_',
+    'ghl_list_', 'ghl_get_', 'ghl_search_',
+    'clickup_list', 'list_clickup_', 'get_clickup_', 'search_clickup_',
+  ];
+  const READ_ONLY_EXACT = new Set<string>([
+    'web_search', 'web_scrape', 'web_map', 'web_search_google',
+    'analyze_content', 'analyze_youtube_channel',
+  ]);
+  const isCacheable = (name: string): boolean => {
+    if (READ_ONLY_EXACT.has(name)) return true;
+    return READ_ONLY_PREFIXES.some((p) => name.startsWith(p));
+  };
+  const toolCache = new Map<string, { success: boolean; result: string; structured?: Record<string, unknown> }>();
+  const cacheKey = (name: string, args: Record<string, unknown>): string => {
+    try {
+      // Stable key: sort args keys so {a:1,b:2} === {b:2,a:1}.
+      const sorted = Object.keys(args).sort().reduce<Record<string, unknown>>((acc, k) => {
+        if (k.startsWith('__')) return acc; // skip injected fields like __user_id
+        acc[k] = args[k];
+        return acc;
+      }, {});
+      return `${name}:${JSON.stringify(sorted)}`;
+    } catch {
+      return `${name}:<unhashable>`;
+    }
+  };
+  (globalThis as Record<string, unknown>).__toolCache = toolCache;
+  (globalThis as Record<string, unknown>).__toolCacheKey = cacheKey;
+  (globalThis as Record<string, unknown>).__toolCacheable = isCacheable;
+
   // Wall-clock budget for the whole tool loop. Edge functions are killed
   // at ~250-400s; if the model keeps drilling (email → drive → doc) we'd
   // run out of time and the stream dies with no response. At 150s we force
