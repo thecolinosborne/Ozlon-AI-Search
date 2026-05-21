@@ -42,20 +42,47 @@ serve(async (req) => {
 
       case "list_properties": {
         const accountId = String((params as AnyJson).accountId || "");
-        const filter = accountId ? `parent:accounts/${accountId}` : "";
+        // When no accountId is provided, GA Admin's /properties endpoint rejects with
+        // "filter required". Fall back to accountSummaries.list — the official discovery
+        // flow that returns every account + its properties in one call.
+        if (!accountId) {
+          const data = await gFetch(token, `${ADMIN_BASE}/accountSummaries?pageSize=200`);
+          const summaries = (data?.accountSummaries as Array<AnyJson>) || [];
+          const flat = summaries.map((s) => ({
+            accountId: String(s.account || "").replace(/^accounts\//, ""),
+            accountDisplayName: s.displayName,
+            properties: ((s.propertySummaries as Array<AnyJson>) || []).map((p) => ({
+              id: String(p.property || "").replace(/^properties\//, ""),
+              property: p.property, // full "properties/<id>" form for direct use
+              displayName: p.displayName,
+              propertyType: p.propertyType,
+            })),
+          }));
+          return jsonOk({ success: true, accountSummaries: flat });
+        }
         const qs = new URLSearchParams();
-        if (filter) qs.set("filter", filter);
+        qs.set("filter", `parent:accounts/${accountId}`);
         qs.set("pageSize", "200");
         const data = await gFetch(token, `${ADMIN_BASE}/properties?${qs.toString()}`);
         return jsonOk({ success: true, ...data });
       }
 
       case "run_report": {
-        const propertyId = String((params as AnyJson).propertyId || "");
+        let propertyId = String((params as AnyJson).propertyId || "").trim();
         if (!propertyId) return jsonErr("propertyId is required");
+        // Strip "properties/" prefix if model included it.
+        propertyId = propertyId.replace(/^properties\//, "");
+        // Guard: GA Data API requires a numeric property ID. Reject names like "Ozlon"
+        // up-front with a structured, actionable error instead of a 400 from Google.
+        if (!/^\d+$/.test(propertyId)) {
+          return jsonErr(
+            `Invalid propertyId "${propertyId}". A numeric GA4 Property ID is required (e.g. "123456789"). Call ga4_list_properties first to discover valid IDs.`,
+            400,
+          );
+        }
         const reportBody = (params as AnyJson).report as AnyJson;
         if (!reportBody) return jsonErr("report object is required (dimensions, metrics, dateRanges)");
-        const data = await gFetch(token, `${DATA_BASE}/properties/${encodeURIComponent(propertyId)}:runReport`, {
+        const data = await gFetch(token, `${DATA_BASE}/properties/${propertyId}:runReport`, {
           method: "POST",
           body: JSON.stringify(reportBody),
         });

@@ -25,12 +25,12 @@ export const googleAnalyticsIntegration: IntegrationManifest = {
     {
       name: "ga4_run_report",
       description:
-        "Run a GA4 standard report. Provide propertyId, date range, dimensions and metrics.",
+        "Run a GA4 standard report. REQUIRES a NUMERIC propertyId (e.g. \"123456789\") — never a property name or display label. If you don't know the numeric ID, call ga4_list_properties FIRST and use the `id` field from its response. Then provide date range, dimensions and metrics.",
       action: "run_report",
       schema: {
         type: "object",
         properties: {
-          propertyId: { type: "string", description: "GA4 property ID (no 'properties/' prefix)" },
+          propertyId: { type: "string", pattern: "^\\d+$", description: "NUMERIC GA4 property ID only (e.g. \"123456789\"). No 'properties/' prefix, no display name. Call ga4_list_properties to discover it." },
           startDate: { type: "string", description: "YYYY-MM-DD or relative like '7daysAgo'" },
           endDate: { type: "string", description: "YYYY-MM-DD or 'today'" },
           dimensions: { type: "array", items: { type: "string" } },
