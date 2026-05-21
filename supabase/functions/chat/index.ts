@@ -7384,8 +7384,67 @@ export function getRegistryHealth() {
     legacyDropped: _droppedTools,
     live: _quarantineSummary.live,
     quarantined: _quarantineSummary.quarantined,
+    drift: _registryDriftReport,
   };
 }
+
+// ============================================================================
+// REGISTRY DRIFT CHECK (boot-time, runs once)
+// Asserts every ACTION_TOOLS entry has a matching `case 'name':` in
+// executeToolCall. Catches the "added a tool def but forgot the handler"
+// failure mode that previously surfaced as silent "Unknown tool" errors.
+// Result is logged once and surfaced via getRegistryHealth().drift.
+// ============================================================================
+let _registryDriftReport: { missingCases: string[]; orphanCases: string[] } = {
+  missingCases: [],
+  orphanCases: [],
+};
+function runRegistryDriftCheck(): void {
+  try {
+    const src = executeToolCall.toString();
+    const caseNames = new Set<string>();
+    const caseRe = /case\s+['"]([a-zA-Z0-9_]+)['"]\s*:/g;
+    let m: RegExpExecArray | null;
+    while ((m = caseRe.exec(src)) !== null) caseNames.add(m[1]);
+
+    // Tools dispatched through the manifest registry / multi_action / load_skill
+    // do NOT need a switch case. Whitelist them so they don't show as drift.
+    const NON_LEGACY = new Set<string>([
+      'multi_action',
+      'load_skill',
+      'web_investigate',
+      'personal_research',
+    ]);
+
+    const declaredNames = new Set<string>(
+      ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
+    );
+
+    const missingCases: string[] = [];
+    for (const name of declaredNames) {
+      if (NON_LEGACY.has(name)) continue;
+      if (!caseNames.has(name)) missingCases.push(name);
+    }
+    const orphanCases: string[] = [];
+    for (const name of caseNames) {
+      if (!declaredNames.has(name) && !NON_LEGACY.has(name)) orphanCases.push(name);
+    }
+    _registryDriftReport = { missingCases, orphanCases };
+    if (missingCases.length === 0 && orphanCases.length === 0) {
+      console.log(`[registry-drift] OK — ${declaredNames.size} tools, ${caseNames.size} cases, no drift`);
+    } else {
+      if (missingCases.length > 0) {
+        console.error(`[registry-drift] ${missingCases.length} tools declared without a handler: ${missingCases.join(', ')}`);
+      }
+      if (orphanCases.length > 0) {
+        console.warn(`[registry-drift] ${orphanCases.length} orphan cases (handler exists but tool not declared): ${orphanCases.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[registry-drift] check failed:', e instanceof Error ? e.message : String(e));
+  }
+}
+runRegistryDriftCheck();
 
 // ============================================================================
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
