@@ -8446,8 +8446,8 @@ async function runToolLoop(
           // path which still honors longFormBudget. Using modelConfig.maxTokens
           // here fixes the ReferenceError that crashed the entire tool loop.
           max_completion_tokens: modelConfig.maxTokens,
-          tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
-          tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
+          tools: !forcedSynthesis && toolsForRequest.length > 0 ? toolsForRequest : undefined,
+          tool_choice: !forcedSynthesis && toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
       );
       response = result.response;
