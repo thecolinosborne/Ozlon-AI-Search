@@ -3143,6 +3143,29 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Universal content analyzer ============
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_content',
+      description: [
+        'Universal "analyze this" tool. Fetches a resource (email, Google Doc, Sheet range, Drive file, or public URL),',
+        'extracts clean text, and returns BOTH the raw text and a concise AI-generated analysis covering: summary, key points, action items, risks.',
+        'Use whenever the user asks to "analyze", "summarize", "extract takeaways", "what does this say", or "pull action items" from a single resource.',
+      ].join(' '),
+      parameters: {
+        type: 'object',
+        properties: {
+          source_type: { type: 'string', enum: ['email', 'doc', 'sheet', 'drive', 'url'], description: 'The resource kind.' },
+          id: { type: 'string', description: 'Email message ID, Doc documentId, Spreadsheet ID, or Drive file ID. Omit for url.' },
+          range: { type: 'string', description: 'For sheet only, e.g. "Sheet1!A1:D50".' },
+          url: { type: 'string', description: 'For source_type=url only.' },
+          focus: { type: 'string', description: 'Optional: what to focus the analysis on (e.g. "action items only").' },
+        },
+        required: ['source_type'],
+      },
+    },
+  },
   // ============ Search Atlas (SEO intelligence) ============
   {
     type: 'function',
