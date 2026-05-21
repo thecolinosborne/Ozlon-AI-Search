@@ -9,7 +9,7 @@ export const higgsfieldIntegration: IntegrationManifest = {
   id: "higgsfield",
   displayName: "Higgsfield AI",
   edgeFunction: "higgsfield",
-  envelope: "nested",
+  envelope: "flat",
   tools: [
     {
       name: "higgsfield_generate_image",
