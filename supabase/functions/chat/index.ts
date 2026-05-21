@@ -8629,11 +8629,25 @@ async function runToolLoop(
 
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
-      // Extract a short summary from the AI's final response for the task bubble
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '', toolsUsed, investigations, researchReports };
+    const finalContent = (msg.content || '').trim();
+    if (!finalContent) {
+      // Model returned no tool_calls AND no text. Surface a useful fallback
+      // instead of an invisible empty bubble — list what we DID gather so the
+      // user has something to act on.
+      console.warn('[ToolLoop] Empty final content. toolsUsed=', toolsUsed.join(','));
+      const used = toolsUsed.length
+        ? `I gathered data via: ${[...new Set(toolsUsed)].join(', ')}.`
+        : 'I could not retrieve data this turn.';
+      return {
+        role: 'assistant',
+        content: `${used} The model returned an empty response — likely a token or time limit. Try asking again, ideally narrowed to one question.`,
+        toolsUsed, investigations, researchReports,
+      };
+    }
+    return { role: 'assistant', content: finalContent, toolsUsed, investigations, researchReports };
   }
 
   return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations, researchReports };
