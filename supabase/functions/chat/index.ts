@@ -8755,7 +8755,16 @@ async function runToolLoop(
               (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = true;
             }
             if (!result) {
-              result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+              // Per-turn cache hit for read-only tools
+              const cacheable = isCacheable(tc.function.name);
+              const ck = cacheable ? cacheKey(tc.function.name, args) : '';
+              if (cacheable && toolCache.has(ck)) {
+                result = toolCache.get(ck)!;
+                console.log(`[tool-cache] HIT ${tc.function.name}`);
+              } else {
+                result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+                if (cacheable && result.success) toolCache.set(ck, result);
+              }
               // Echo target sub-account on successful GHL writes so the user sees it.
               if (isGhlWrite && result.success && ghlCreds?.subAccounts) {
                 const sub = ghlCreds.subAccounts.find((s) => s.id === ghlCreds.locationId);
