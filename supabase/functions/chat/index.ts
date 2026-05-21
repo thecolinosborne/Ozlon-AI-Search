@@ -7409,12 +7409,17 @@ function runRegistryDriftCheck(): void {
 
     // Tools dispatched through the manifest registry / multi_action / load_skill
     // do NOT need a switch case. Whitelist them so they don't show as drift.
+    // (NATIVE_GOOGLE_ROUTES keys + manifest-dispatched prefixes are added below.)
     const NON_LEGACY = new Set<string>([
       'multi_action',
       'load_skill',
       'web_investigate',
       'personal_research',
+      ...Object.keys(NATIVE_GOOGLE_ROUTES),
     ]);
+    // Prefixes routed via dispatchTool (manifest registry) before the switch.
+    const MANIFEST_PREFIXES = ['gmail_', 'ghl_', 'clickup_', 'list_clickup_', 'get_clickup_', 'create_clickup_', 'update_clickup_', 'delete_clickup_', 'set_clickup_', 'search_clickup_', 'move_clickup_', 'add_clickup_', 'remove_clickup_', 'start_clickup_', 'stop_clickup_'];
+    const isManifestRouted = (name: string): boolean => MANIFEST_PREFIXES.some((p) => name.startsWith(p));
 
     const declaredNames = new Set<string>(
       ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
