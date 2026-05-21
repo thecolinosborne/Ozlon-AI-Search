@@ -3678,20 +3678,35 @@ async function executeToolCall(
       case 'get_email': {
         try {
           const data = await callNativeEdge('google-gmail', 'get_message', { id: args.message_id, format: 'full' });
-          const full = data.message as { payload?: { headers?: { name: string; value: string }[]; parts?: { mimeType?: string; body?: { data?: string } }[]; body?: { data?: string } }; snippet?: string; labelIds?: string[] };
-          const headers = full?.payload?.headers || [];
+          const full = data.message as { payload?: any; snippet?: string; labelIds?: string[] };
+          const headers = (full?.payload?.headers || []) as { name: string; value: string }[];
           const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
           const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
           const date = headers.find(h => h.name === 'Date')?.value || '';
           const to = headers.find(h => h.name === 'To')?.value || '';
-          let bodyText = '';
-          const bodyData = full?.payload?.body?.data || full?.payload?.parts?.find(p => p.mimeType === 'text/plain')?.body?.data;
-          if (bodyData) {
-            try { bodyText = atob(bodyData.replace(/-/g, '+').replace(/_/g, '/')); } catch { bodyText = full?.snippet || ''; }
-          } else {
-            bodyText = full?.snippet || '';
+          const decode = (d?: string) => { try { return d ? atob(d.replace(/-/g, '+').replace(/_/g, '/')) : ''; } catch { return ''; } };
+          // Recursively walk MIME tree — Gmail nests text/plain inside multipart/alternative inside multipart/mixed.
+          let plain = '', html = '';
+          const walk = (p: any) => {
+            if (!p) return;
+            const mt = (p.mimeType || '').toLowerCase();
+            if (mt === 'text/plain' && p.body?.data && !plain) plain = decode(p.body.data);
+            else if (mt === 'text/html' && p.body?.data && !html) html = decode(p.body.data);
+            (p.parts || []).forEach(walk);
+          };
+          walk(full?.payload);
+          let bodyText = plain;
+          if (!bodyText && html) {
+            bodyText = html
+              .replace(/<style[\s\S]*?<\/style>/gi, '')
+              .replace(/<script[\s\S]*?<\/script>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+              .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
           }
-          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 2000)}` };
+          if (!bodyText) bodyText = full?.snippet || '(no body content)';
+          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 12000)}` };
         } catch (e) { return { success: false, result: `Failed to get email: ${(e as Error).message}` }; }
       }
 
