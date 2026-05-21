@@ -3785,6 +3785,7 @@ async function executeToolCall(
         }
       }
 
+      case 'trash_email': {
         try {
           await callNativeEdge('google-gmail', 'trash_message', { id: args.message_id });
           return { success: true, result: `Email ${args.message_id} moved to trash.` };
