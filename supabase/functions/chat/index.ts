@@ -3352,7 +3352,33 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
   slides_get_thumbnail: { fn: 'google-slides', action: 'get_thumbnail', mapArgs: (a) => ({ presentationId: a.presentationId, pageObjectId: a.pageObjectId, mimeType: a.mimeType, thumbnailSize: a.thumbnailSize }) },
   // GSC
   gsc_list_sites: { fn: 'google-search-console', action: 'list_sites' },
-  gsc_query: { fn: 'google-search-console', action: 'search_analytics', mapArgs: (a) => ({ siteUrl: a.site_url, startDate: a.start_date, endDate: a.end_date, dimensions: a.dimensions, rowLimit: a.row_limit }) },
+  gsc_query: {
+    fn: 'google-search-console',
+    action: 'search_analytics',
+    // Receiver expects { siteUrl, request: { startDate, endDate, dimensions, rowLimit, ... } }.
+    // Flat dispatch caused "request object is required" errors. Wrap analytics fields.
+    mapArgs: (a) => {
+      const dimensions = typeof a.dimensions === 'string'
+        ? a.dimensions.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : (Array.isArray(a.dimensions) ? a.dimensions : ['query']);
+      const request: Record<string, unknown> = {
+        startDate: a.start_date,
+        endDate: a.end_date,
+        dimensions,
+        rowLimit: typeof a.row_limit === 'number' ? a.row_limit : 100,
+      };
+      if (a.filters) {
+        try {
+          const parsed = typeof a.filters === 'string' ? JSON.parse(a.filters) : a.filters;
+          if (Array.isArray(parsed) && parsed.length) {
+            request.dimensionFilterGroups = [{ filters: parsed }];
+          }
+        } catch { /* ignore bad filter JSON */ }
+      }
+      if (a.aggregation_type) request.aggregationType = a.aggregation_type;
+      return { siteUrl: a.site_url, request };
+    },
+  },
 };
 
 async function tryNativeGoogleCall(
@@ -8396,7 +8422,12 @@ async function runToolLoop(
         (entry) => ({
           model: entry.model,
           messages: openAIMessages,
-          max_completion_tokens: longFormBudget ?? modelConfig.maxTokens,
+          // NOTE: longFormBudget lives in the streaming serve() scope (line ~9912)
+          // and is not visible here inside runToolLoop. Tool-loop iterations don't
+          // need long-form headroom — final composition happens in the streaming
+          // path which still honors longFormBudget. Using modelConfig.maxTokens
+          // here fixes the ReferenceError that crashed the entire tool loop.
+          max_completion_tokens: modelConfig.maxTokens,
           tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
           tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
