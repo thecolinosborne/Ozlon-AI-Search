@@ -7384,8 +7384,72 @@ export function getRegistryHealth() {
     legacyDropped: _droppedTools,
     live: _quarantineSummary.live,
     quarantined: _quarantineSummary.quarantined,
+    drift: _registryDriftReport,
   };
 }
+
+// ============================================================================
+// REGISTRY DRIFT CHECK (boot-time, runs once)
+// Asserts every ACTION_TOOLS entry has a matching `case 'name':` in
+// executeToolCall. Catches the "added a tool def but forgot the handler"
+// failure mode that previously surfaced as silent "Unknown tool" errors.
+// Result is logged once and surfaced via getRegistryHealth().drift.
+// ============================================================================
+let _registryDriftReport: { missingCases: string[]; orphanCases: string[] } = {
+  missingCases: [],
+  orphanCases: [],
+};
+function runRegistryDriftCheck(): void {
+  try {
+    const src = executeToolCall.toString();
+    const caseNames = new Set<string>();
+    const caseRe = /case\s+['"]([a-zA-Z0-9_]+)['"]\s*:/g;
+    let m: RegExpExecArray | null;
+    while ((m = caseRe.exec(src)) !== null) caseNames.add(m[1]);
+
+    // Tools dispatched through the manifest registry / multi_action / load_skill
+    // do NOT need a switch case. Whitelist them so they don't show as drift.
+    // (NATIVE_GOOGLE_ROUTES keys + manifest-dispatched prefixes are added below.)
+    const NON_LEGACY = new Set<string>([
+      'multi_action',
+      'load_skill',
+      'web_investigate',
+      'personal_research',
+      ...Object.keys(NATIVE_GOOGLE_ROUTES),
+    ]);
+    // Prefixes routed via dispatchTool (manifest registry) before the switch.
+    const MANIFEST_PREFIXES = ['gmail_', 'ghl_', 'clickup_', 'list_clickup_', 'get_clickup_', 'create_clickup_', 'update_clickup_', 'delete_clickup_', 'set_clickup_', 'search_clickup_', 'move_clickup_', 'add_clickup_', 'remove_clickup_', 'start_clickup_', 'stop_clickup_'];
+    const isManifestRouted = (name: string): boolean => MANIFEST_PREFIXES.some((p) => name.startsWith(p));
+
+    const declaredNames = new Set<string>(
+      ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
+    );
+
+    const missingCases: string[] = [];
+    for (const name of declaredNames) {
+      if (NON_LEGACY.has(name) || isManifestRouted(name)) continue;
+      if (!caseNames.has(name)) missingCases.push(name);
+    }
+    const orphanCases: string[] = [];
+    for (const name of caseNames) {
+      if (!declaredNames.has(name) && !NON_LEGACY.has(name) && !isManifestRouted(name)) orphanCases.push(name);
+    }
+    _registryDriftReport = { missingCases, orphanCases };
+    if (missingCases.length === 0 && orphanCases.length === 0) {
+      console.log(`[registry-drift] OK — ${declaredNames.size} tools, ${caseNames.size} cases, no drift`);
+    } else {
+      if (missingCases.length > 0) {
+        console.error(`[registry-drift] ${missingCases.length} tools declared without a handler: ${missingCases.join(', ')}`);
+      }
+      if (orphanCases.length > 0) {
+        console.warn(`[registry-drift] ${orphanCases.length} orphan cases (handler exists but tool not declared): ${orphanCases.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[registry-drift] check failed:', e instanceof Error ? e.message : String(e));
+  }
+}
+runRegistryDriftCheck();
 
 // ============================================================================
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
@@ -8304,6 +8368,46 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // ---- Per-turn tool-result cache ----
+  // Read-only tools called twice with identical args inside ONE chat turn
+  // return the first cached result. Kills duplicate Gmail/GA4/GSC/Drive
+  // round-trips when the model fans out (e.g. "list emails" twice in a row).
+  // Cache is scoped to this runToolLoop call only — no cross-turn leakage.
+  const READ_ONLY_PREFIXES = [
+    'list_', 'get_', 'search_', 'read_', 'fetch_',
+    'ga4_', 'gsc_', 'drive_list', 'drive_get', 'drive_storage',
+    'docs_list', 'docs_get',
+    'sheets_list', 'sheets_get', 'sheets_read',
+    'calendar_list', 'calendar_get', 'calendar_freebusy', 'calendar_find_',
+    'ghl_list_', 'ghl_get_', 'ghl_search_',
+    'clickup_list', 'list_clickup_', 'get_clickup_', 'search_clickup_',
+  ];
+  const READ_ONLY_EXACT = new Set<string>([
+    'web_search', 'web_scrape', 'web_map', 'web_search_google',
+    'analyze_content', 'analyze_youtube_channel',
+  ]);
+  const isCacheable = (name: string): boolean => {
+    if (READ_ONLY_EXACT.has(name)) return true;
+    return READ_ONLY_PREFIXES.some((p) => name.startsWith(p));
+  };
+  const toolCache = new Map<string, { success: boolean; result: string; structured?: Record<string, unknown> }>();
+  const cacheKey = (name: string, args: Record<string, unknown>): string => {
+    try {
+      // Stable key: sort args keys so {a:1,b:2} === {b:2,a:1}.
+      const sorted = Object.keys(args).sort().reduce<Record<string, unknown>>((acc, k) => {
+        if (k.startsWith('__')) return acc; // skip injected fields like __user_id
+        acc[k] = args[k];
+        return acc;
+      }, {});
+      return `${name}:${JSON.stringify(sorted)}`;
+    } catch {
+      return `${name}:<unhashable>`;
+    }
+  };
+  (globalThis as Record<string, unknown>).__toolCache = toolCache;
+  (globalThis as Record<string, unknown>).__toolCacheKey = cacheKey;
+  (globalThis as Record<string, unknown>).__toolCacheable = isCacheable;
+
   // Wall-clock budget for the whole tool loop. Edge functions are killed
   // at ~250-400s; if the model keeps drilling (email → drive → doc) we'd
   // run out of time and the stream dies with no response. At 150s we force
@@ -8656,7 +8760,16 @@ async function runToolLoop(
               (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = true;
             }
             if (!result) {
-              result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+              // Per-turn cache hit for read-only tools
+              const cacheable = isCacheable(tc.function.name);
+              const ck = cacheable ? cacheKey(tc.function.name, args) : '';
+              if (cacheable && toolCache.has(ck)) {
+                result = toolCache.get(ck)!;
+                console.log(`[tool-cache] HIT ${tc.function.name}`);
+              } else {
+                result = await executeToolCall(tc.function.name, args, connMap, userMessage, aliasMap, ghlCreds);
+                if (cacheable && result.success) toolCache.set(ck, result);
+              }
               // Echo target sub-account on successful GHL writes so the user sees it.
               if (isGhlWrite && result.success && ghlCreds?.subAccounts) {
                 const sub = ghlCreds.subAccounts.find((s) => s.id === ghlCreds.locationId);
