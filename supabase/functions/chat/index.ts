@@ -8211,9 +8211,27 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // Wall-clock budget for the whole tool loop. Edge functions are killed
+  // at ~250-400s; if the model keeps drilling (email → drive → doc) we'd
+  // run out of time and the stream dies with no response. At 150s we force
+  // a final synthesis call with tools disabled so the user ALWAYS gets
+  // text back from whatever data was already gathered.
+  const loopStartedAt = Date.now();
+  const TOOL_LOOP_BUDGET_MS = 150_000;
+  let forcedSynthesis = false;
+
   while (iteration < maxIterations) {
     iteration++;
     console.log(`Tool loop iteration ${iteration}`);
+
+    if (!forcedSynthesis && (Date.now() - loopStartedAt) > TOOL_LOOP_BUDGET_MS) {
+      console.warn(`[ToolLoop] Budget exceeded at iter ${iteration} (${Date.now() - loopStartedAt}ms). Forcing synthesis.`);
+      forcedSynthesis = true;
+      openAIMessages.push({
+        role: 'system',
+        content: 'TIME BUDGET REACHED. Do NOT call any more tools. Synthesize a final answer NOW from the tool results already gathered above. If data is incomplete, say what you have and what is missing.',
+      });
+    }
 
     // OpenAI hard limit: 128 tools per request. Tier-based ranker.
     const MAX_TOOLS = 128;
