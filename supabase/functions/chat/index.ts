@@ -8211,9 +8211,27 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // Wall-clock budget for the whole tool loop. Edge functions are killed
+  // at ~250-400s; if the model keeps drilling (email → drive → doc) we'd
+  // run out of time and the stream dies with no response. At 150s we force
+  // a final synthesis call with tools disabled so the user ALWAYS gets
+  // text back from whatever data was already gathered.
+  const loopStartedAt = Date.now();
+  const TOOL_LOOP_BUDGET_MS = 150_000;
+  let forcedSynthesis = false;
+
   while (iteration < maxIterations) {
     iteration++;
     console.log(`Tool loop iteration ${iteration}`);
+
+    if (!forcedSynthesis && (Date.now() - loopStartedAt) > TOOL_LOOP_BUDGET_MS) {
+      console.warn(`[ToolLoop] Budget exceeded at iter ${iteration} (${Date.now() - loopStartedAt}ms). Forcing synthesis.`);
+      forcedSynthesis = true;
+      openAIMessages.push({
+        role: 'system',
+        content: 'TIME BUDGET REACHED. Do NOT call any more tools. Synthesize a final answer NOW from the tool results already gathered above. If data is incomplete, say what you have and what is missing.',
+      });
+    }
 
     // OpenAI hard limit: 128 tools per request. Tier-based ranker.
     const MAX_TOOLS = 128;
@@ -8428,8 +8446,8 @@ async function runToolLoop(
           // path which still honors longFormBudget. Using modelConfig.maxTokens
           // here fixes the ReferenceError that crashed the entire tool loop.
           max_completion_tokens: modelConfig.maxTokens,
-          tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
-          tool_choice: toolsForRequest.length > 0 ? 'auto' : undefined,
+          tools: !forcedSynthesis && toolsForRequest.length > 0 ? toolsForRequest : undefined,
+          tool_choice: !forcedSynthesis && toolsForRequest.length > 0 ? 'auto' : undefined,
         }),
       );
       response = result.response;
@@ -8611,11 +8629,25 @@ async function runToolLoop(
 
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
-      // Extract a short summary from the AI's final response for the task bubble
       const summary = (msg.content || '').substring(0, 200);
       await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary });
     }
-    return { role: 'assistant', content: msg.content || '', toolsUsed, investigations, researchReports };
+    const finalContent = (msg.content || '').trim();
+    if (!finalContent) {
+      // Model returned no tool_calls AND no text. Surface a useful fallback
+      // instead of an invisible empty bubble — list what we DID gather so the
+      // user has something to act on.
+      console.warn('[ToolLoop] Empty final content. toolsUsed=', toolsUsed.join(','));
+      const used = toolsUsed.length
+        ? `I gathered data via: ${[...new Set(toolsUsed)].join(', ')}.`
+        : 'I could not retrieve data this turn.';
+      return {
+        role: 'assistant',
+        content: `${used} The model returned an empty response — likely a token or time limit. Try asking again, ideally narrowed to one question.`,
+        toolsUsed, investigations, researchReports,
+      };
+    }
+    return { role: 'assistant', content: finalContent, toolsUsed, investigations, researchReports };
   }
 
   return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations, researchReports };
