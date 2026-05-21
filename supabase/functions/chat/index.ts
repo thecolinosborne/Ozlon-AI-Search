@@ -3685,29 +3685,8 @@ async function executeToolCall(
           const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
           const date = headers.find(h => h.name === 'Date')?.value || '';
           const to = headers.find(h => h.name === 'To')?.value || '';
-          const decode = (d?: string) => { try { return d ? atob(d.replace(/-/g, '+').replace(/_/g, '/')) : ''; } catch { return ''; } };
-          // Recursively walk MIME tree — Gmail nests text/plain inside multipart/alternative inside multipart/mixed.
-          let plain = '', html = '';
-          const walk = (p: any) => {
-            if (!p) return;
-            const mt = (p.mimeType || '').toLowerCase();
-            if (mt === 'text/plain' && p.body?.data && !plain) plain = decode(p.body.data);
-            else if (mt === 'text/html' && p.body?.data && !html) html = decode(p.body.data);
-            (p.parts || []).forEach(walk);
-          };
-          walk(full?.payload);
-          let bodyText = plain;
-          if (!bodyText && html) {
-            bodyText = html
-              .replace(/<style[\s\S]*?<\/style>/gi, '')
-              .replace(/<script[\s\S]*?<\/script>/gi, '')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-              .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-          }
-          if (!bodyText) bodyText = full?.snippet || '(no body content)';
-          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 12000)}` };
+          const bodyText = extractEmailBody(full?.payload) || full?.snippet || '(no body content)';
+          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${clip(bodyText, 12000)}` };
         } catch (e) { return { success: false, result: `Failed to get email: ${(e as Error).message}` }; }
       }
 
