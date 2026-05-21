@@ -7427,12 +7427,12 @@ function runRegistryDriftCheck(): void {
 
     const missingCases: string[] = [];
     for (const name of declaredNames) {
-      if (NON_LEGACY.has(name)) continue;
+      if (NON_LEGACY.has(name) || isManifestRouted(name)) continue;
       if (!caseNames.has(name)) missingCases.push(name);
     }
     const orphanCases: string[] = [];
     for (const name of caseNames) {
-      if (!declaredNames.has(name) && !NON_LEGACY.has(name)) orphanCases.push(name);
+      if (!declaredNames.has(name) && !NON_LEGACY.has(name) && !isManifestRouted(name)) orphanCases.push(name);
     }
     _registryDriftReport = { missingCases, orphanCases };
     if (missingCases.length === 0 && orphanCases.length === 0) {
