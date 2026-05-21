@@ -15,6 +15,7 @@ import { GHL_TOOL_SCOPES as GHL_TOOL_REQUIRED_SCOPES } from "../_shared/integrat
 import { buildSignalEnvelope, pickAccountByPriority } from "../_shared/signals/builder.ts";
 import { renderForChatPrompt } from "../_shared/signals/render.ts";
 import type { Entity } from "../_shared/signals/entities.ts";
+import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
@@ -3142,6 +3143,29 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Universal content analyzer ============
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_content',
+      description: [
+        'Universal "analyze this" tool. Fetches a resource (email, Google Doc, Sheet range, Drive file, or public URL),',
+        'extracts clean text, and returns BOTH the raw text and a concise AI-generated analysis covering: summary, key points, action items, risks.',
+        'Use whenever the user asks to "analyze", "summarize", "extract takeaways", "what does this say", or "pull action items" from a single resource.',
+      ].join(' '),
+      parameters: {
+        type: 'object',
+        properties: {
+          source_type: { type: 'string', enum: ['email', 'doc', 'sheet', 'drive', 'url'], description: 'The resource kind.' },
+          id: { type: 'string', description: 'Email message ID, Doc documentId, Spreadsheet ID, or Drive file ID. Omit for url.' },
+          range: { type: 'string', description: 'For sheet only, e.g. "Sheet1!A1:D50".' },
+          url: { type: 'string', description: 'For source_type=url only.' },
+          focus: { type: 'string', description: 'Optional: what to focus the analysis on (e.g. "action items only").' },
+        },
+        required: ['source_type'],
+      },
+    },
+  },
   // ============ Search Atlas (SEO intelligence) ============
   {
     type: 'function',
@@ -3684,30 +3708,81 @@ async function executeToolCall(
           const subject = headers.find(h => h.name === 'Subject')?.value || '(no subject)';
           const date = headers.find(h => h.name === 'Date')?.value || '';
           const to = headers.find(h => h.name === 'To')?.value || '';
-          const decode = (d?: string) => { try { return d ? atob(d.replace(/-/g, '+').replace(/_/g, '/')) : ''; } catch { return ''; } };
-          // Recursively walk MIME tree — Gmail nests text/plain inside multipart/alternative inside multipart/mixed.
-          let plain = '', html = '';
-          const walk = (p: any) => {
-            if (!p) return;
-            const mt = (p.mimeType || '').toLowerCase();
-            if (mt === 'text/plain' && p.body?.data && !plain) plain = decode(p.body.data);
-            else if (mt === 'text/html' && p.body?.data && !html) html = decode(p.body.data);
-            (p.parts || []).forEach(walk);
-          };
-          walk(full?.payload);
-          let bodyText = plain;
-          if (!bodyText && html) {
-            bodyText = html
-              .replace(/<style[\s\S]*?<\/style>/gi, '')
-              .replace(/<script[\s\S]*?<\/script>/gi, '')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-              .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-          }
-          if (!bodyText) bodyText = full?.snippet || '(no body content)';
-          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${bodyText.substring(0, 12000)}` };
+          const bodyText = extractEmailBody(full?.payload) || full?.snippet || '(no body content)';
+          return { success: true, result: `From: ${from}\nTo: ${to}\nSubject: ${subject}\nDate: ${date}\nLabels: ${(full?.labelIds || []).join(', ')}\n\n${clip(bodyText, 12000)}` };
         } catch (e) { return { success: false, result: `Failed to get email: ${(e as Error).message}` }; }
+      }
+
+      case 'analyze_content': {
+        const srcType = String(args.source_type || '');
+        const focus = String(args.focus || '');
+        try {
+          // 1) Fetch + extract clean text from the chosen source.
+          let text = '';
+          let label = '';
+          if (srcType === 'email') {
+            const r = await callNativeEdge('google-gmail', 'get_message', { id: args.id, format: 'full' });
+            const m = r.message as any;
+            const hdrs = (m?.payload?.headers || []) as { name: string; value: string }[];
+            const subj = hdrs.find(h => h.name === 'Subject')?.value || '(no subject)';
+            const from = hdrs.find(h => h.name === 'From')?.value || '';
+            label = `Email "${subj}" from ${from}`;
+            text = extractEmailBody(m?.payload) || m?.snippet || '';
+          } else if (srcType === 'doc') {
+            const r = await callNativeEdge('google-docs', 'get_document', { documentId: args.id });
+            label = `Google Doc "${(r.document as any)?.title || args.id}"`;
+            text = extractDocsText(r.document as any);
+          } else if (srcType === 'sheet') {
+            const r = await callNativeEdge('google-sheets', 'read_range', { spreadsheetId: args.id, range: args.range });
+            label = `Sheet ${args.id} range ${args.range}`;
+            text = extractSheetGrid((r as any).values || (r as any).data?.values);
+          } else if (srcType === 'drive') {
+            const r = await callNativeEdge('google-drive', 'get_file', { id: args.id });
+            label = `Drive file "${(r as any)?.file?.name || args.id}"`;
+            text = JSON.stringify(r, null, 2);
+          } else if (srcType === 'url') {
+            const u = String(args.url || '');
+            if (!u) return { success: false, result: 'url is required when source_type=url' };
+            const resp = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0 OzlonAnalyzer/1.0' } });
+            const html = await resp.text();
+            label = `URL ${u}`;
+            text = stripHtml(html);
+          } else {
+            return { success: false, result: `Unknown source_type: ${srcType}` };
+          }
+
+          if (!text || text.length < 20) {
+            return { success: false, result: `Could not extract readable content from ${label}.` };
+          }
+          const clipped = clip(text, 18000);
+
+          // 2) Run a focused analysis pass via Lovable AI Gateway (Gemini Flash — cheap + fast).
+          let analysis = '';
+          try {
+            const aiResp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'google/gemini-2.5-flash',
+                messages: [
+                  { role: 'system', content: 'You analyze documents for a busy founder. Be concise, structured, no fluff, no emojis.' },
+                  { role: 'user', content: `Source: ${label}\n${focus ? `Focus: ${focus}\n` : ''}\nContent:\n"""\n${clipped}\n"""\n\nReturn markdown sections: ## Summary (2-3 sentences) / ## Key Points (bullets) / ## Action Items (bullets, each starts with a verb) / ## Risks or Open Questions.` },
+                ],
+              }),
+            });
+            const aj = await aiResp.json();
+            analysis = String(aj?.choices?.[0]?.message?.content || '').trim();
+          } catch (e) {
+            analysis = `(analysis pass failed: ${(e as Error).message} — raw extract follows)`;
+          }
+
+          return {
+            success: true,
+            result: `# Analysis of ${label}\n\n${analysis || '(no analysis returned)'}\n\n---\n### Extracted text (${text.length.toLocaleString()} chars${text.length > 18000 ? ', clipped to 18k' : ''})\n${clipped}`,
+          };
+        } catch (e) {
+          return { success: false, result: `analyze_content failed for ${srcType}: ${(e as Error).message}` };
+        }
       }
 
       case 'trash_email': {
@@ -7343,6 +7418,7 @@ const NAME_PREFIX_DOMAIN: { prefix: string; domain: string }[] = [
   { prefix: 'generate_video', domain: 'creative' },
   { prefix: 'upload_youtube_video', domain: 'creative' },
   { prefix: 'analyze_youtube_channel', domain: 'research' },
+  { prefix: 'analyze_content', domain: 'research' },
   { prefix: 'save_memory', domain: 'memory' },
   { prefix: 'search_wisdom_memories', domain: 'memory' },
   { prefix: 'add_standing_order', domain: 'memory' },
@@ -7640,6 +7716,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'bulk_update_work_tasks': '_always_',
     'upload_youtube_video': '_always_',
     'analyze_youtube_channel': '_always_',
+    'analyze_content': '_always_',
     'higgsfield_generate_image': '_always_',
     'higgsfield_generate_video': '_always_',
     'higgsfield_get_job_status': '_always_',
@@ -8060,6 +8137,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'bulk_update_work_tasks': 'Updating work tasks',
   'upload_youtube_video': 'Uploading to YouTube',
   'analyze_youtube_channel': 'Analyzing YouTube channel',
+  'analyze_content': 'Analyzing content',
 };
 
 function inferTaskTitle(toolNames: string[]): string {
