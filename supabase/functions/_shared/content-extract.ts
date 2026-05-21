@@ -33,7 +33,8 @@ export function stripHtml(html: string): string {
 
 interface MimePart {
   mimeType?: string;
-  body?: { data?: string };
+  body?: { data?: string; attachmentId?: string; size?: number };
+  filename?: string;
   parts?: MimePart[];
 }
 
