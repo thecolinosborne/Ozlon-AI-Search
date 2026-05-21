@@ -3713,7 +3713,78 @@ async function executeToolCall(
         } catch (e) { return { success: false, result: `Failed to get email: ${(e as Error).message}` }; }
       }
 
-      case 'trash_email': {
+      case 'analyze_content': {
+        const srcType = String(args.source_type || '');
+        const focus = String(args.focus || '');
+        try {
+          // 1) Fetch + extract clean text from the chosen source.
+          let text = '';
+          let label = '';
+          if (srcType === 'email') {
+            const r = await callNativeEdge('google-gmail', 'get_message', { id: args.id, format: 'full' });
+            const m = r.message as any;
+            const hdrs = (m?.payload?.headers || []) as { name: string; value: string }[];
+            const subj = hdrs.find(h => h.name === 'Subject')?.value || '(no subject)';
+            const from = hdrs.find(h => h.name === 'From')?.value || '';
+            label = `Email "${subj}" from ${from}`;
+            text = extractEmailBody(m?.payload) || m?.snippet || '';
+          } else if (srcType === 'doc') {
+            const r = await callNativeEdge('google-docs', 'get_document', { documentId: args.id });
+            label = `Google Doc "${(r.document as any)?.title || args.id}"`;
+            text = extractDocsText(r.document as any);
+          } else if (srcType === 'sheet') {
+            const r = await callNativeEdge('google-sheets', 'read_range', { spreadsheetId: args.id, range: args.range });
+            label = `Sheet ${args.id} range ${args.range}`;
+            text = extractSheetGrid((r as any).values || (r as any).data?.values);
+          } else if (srcType === 'drive') {
+            const r = await callNativeEdge('google-drive', 'get_file', { id: args.id });
+            label = `Drive file "${(r as any)?.file?.name || args.id}"`;
+            text = JSON.stringify(r, null, 2);
+          } else if (srcType === 'url') {
+            const u = String(args.url || '');
+            if (!u) return { success: false, result: 'url is required when source_type=url' };
+            const resp = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0 OzlonAnalyzer/1.0' } });
+            const html = await resp.text();
+            label = `URL ${u}`;
+            text = stripHtml(html);
+          } else {
+            return { success: false, result: `Unknown source_type: ${srcType}` };
+          }
+
+          if (!text || text.length < 20) {
+            return { success: false, result: `Could not extract readable content from ${label}.` };
+          }
+          const clipped = clip(text, 18000);
+
+          // 2) Run a focused analysis pass via Lovable AI Gateway (Gemini Flash — cheap + fast).
+          let analysis = '';
+          try {
+            const aiResp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'google/gemini-2.5-flash',
+                messages: [
+                  { role: 'system', content: 'You analyze documents for a busy founder. Be concise, structured, no fluff, no emojis.' },
+                  { role: 'user', content: `Source: ${label}\n${focus ? `Focus: ${focus}\n` : ''}\nContent:\n"""\n${clipped}\n"""\n\nReturn markdown sections: ## Summary (2-3 sentences) / ## Key Points (bullets) / ## Action Items (bullets, each starts with a verb) / ## Risks or Open Questions.` },
+                ],
+              }),
+            });
+            const aj = await aiResp.json();
+            analysis = String(aj?.choices?.[0]?.message?.content || '').trim();
+          } catch (e) {
+            analysis = `(analysis pass failed: ${(e as Error).message} — raw extract follows)`;
+          }
+
+          return {
+            success: true,
+            result: `# Analysis of ${label}\n\n${analysis || '(no analysis returned)'}\n\n---\n### Extracted text (${text.length.toLocaleString()} chars${text.length > 18000 ? ', clipped to 18k' : ''})\n${clipped}`,
+          };
+        } catch (e) {
+          return { success: false, result: `analyze_content failed for ${srcType}: ${(e as Error).message}` };
+        }
+      }
+
         try {
           await callNativeEdge('google-gmail', 'trash_message', { id: args.message_id });
           return { success: true, result: `Email ${args.message_id} moved to trash.` };
