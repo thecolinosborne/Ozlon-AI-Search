@@ -1,0 +1,15 @@
+{
+  "slug": "social-youtube",
+  "name": "Social: YouTube",
+  "version": "1.0.0",
+  "description": "Writes YouTube titles, descriptions, chapters, end-screen CTAs, and Shorts copy. Title under 60 chars with keyword + curiosity gap. Description front-loads value in first 150 chars. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["youtube", "yt title", "yt description", "youtube short", "yt chapters", "video description"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Long-form title: ≤60 chars. Primary keyword early + curiosity or specificity. No clickbait that the video can't pay off.\n- Description: First 150 chars are the hook (above-fold in search). Then expanded summary, timestamps, links, CTAs.\n- Chapters: timestamps every 30–90 sec, ≤45 char labels, first chapter starts at 00:00.\n- End-screen CTA: single ask (subscribe OR watch next).\n- Shorts: ≤60 sec, hook-in-2-sec, vertical script with on-screen text. Title ≤40 chars.\n\nFlow:\n1. Recall brief + YT outcome winners + corrections.\n2. Clarify format (long-form package / Shorts / chapters only) if missing.\n3. Long-form: 3 title variants + 1 description + chapter outline. Shorts: 2 script variants.\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return labeled sections.\n6. `save_memory(pattern, salience=0.6)` with channel='youtube'.\n\nForbidden: clickbait titles the video can't deliver, ALL-CAPS titles, missing 00:00 chapter, more than one end-screen ask."
+}

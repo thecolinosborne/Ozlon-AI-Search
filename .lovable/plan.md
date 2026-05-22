@@ -1,123 +1,61 @@
-# Marketing Pack v2 — Expand + go sentient
+# Why you don't see the skills
 
-Same playbook the PM pack just got, applied to marketing. Bring the existing 11 skills into the learning loop, add 5 new sub-skills to cover the gaps, and let the orchestrator detect its own mistakes.
+The Skills page reads from the `skills` table in the backend. Your DB currently only has 4 skills (`ab-test-setup`, two `higgsfield-ad-director`, `marketing-studio-director`). All the PM and marketing skill files we wrote live in `public/sample-skills/` but were never seeded into the catalog, so they don't appear in Browse.
 
-## Today vs. after this
+On top of that, only one generic `social-post` skill exists — there's no per-channel coverage.
 
-| Today | After |
-|---|---|
-| 11 skills, orchestrator routes only | 16 skills, orchestrator routes + learns |
-| `save_memory(pattern)` after each route | Adds `correction` + `outcome` memories, surfaces lessons |
-| No self-correction | Detects "no/wrong/actually/undo" on the next turn and writes a high-salience correction |
-| Sub-skills don't share what they learn | Approved principles bind back via `add_skill_prerequisites` / `update_skill` |
-| Brand context is a single brief | Brand context becomes a living memory — voice, ICP, forbidden words, winning angles evolve |
+# What I'll do
 
-## What "sentient" means here (concretely)
+## 1. Seed the catalog (one migration)
 
-Same three-layer loop already shipped for PM, pointed at marketing:
+Insert every file in `public/sample-skills/` into `skills` as `source='builtin'`, `trust_tier=1`, `visibility='public'`. After this you'll see them all under Browse and can Install per skill.
 
-```text
-1. ACT       marketing sub-skill runs
-2. RECORD    save_memory(pattern|context|preference|outcome|correction)
-3. OBSERVE   skill-observer → reflection_notes
-4. CLUSTER   skill-reviewer (weekly) → proposed_principles
-5. APPROVE   ProposalInbox → cross_cutting_principles
-6. BIND      add_skill_prerequisites / update_skill → sub-skill enforces lesson next run
-```
+Skills to seed (30 existing files):
+- **PM pack** (5): pm-orchestrator, pm-breakdown, pm-prioritize, pm-assign, pm-roadmap
+- **Marketing pack** (15): marketing-orchestrator, copywriting, ad-creative, email-sequence, cold-email, customer-research, product-marketing-context, brand-voice-guardian, content-calendar, social-post, landing-page-builder, competitor-watch, page-cro, ai-seo, seo-audit, analytics-tracking
+- **Higgsfield pack** (9): orchestrator + 8 sub-skills
 
-Two new feedback signals unique to marketing:
+## 2. Add channel-specific social skills
 
-- **Outcome memory** — when the user pastes a result back ("this ad got 4.2% CTR", "this email got 38% open"), the orchestrator writes an `outcome` memory tying the winning angle/hook/framework to the result. Future runs of `ad-creative` / `copywriting` / `email-sequence` recall winners before generating.
-- **Correction detector** — on the NEXT user turn after any marketing skill ran, if the user says "rewrite this", "not the voice", "you used [forbidden word]", or edits the output, write a `correction` memory with salience 0.9.
+Replace the single generic `social-post` with a router + channel experts. New files in `public/sample-skills/`:
 
-After ~10 corrections the reviewer clusters them ("you always tone down hype words", "you always cut Oxford commas", "your ICP rejects 'busy professionals'") and binds them as prerequisites on the right sub-skill. Next time, the rule is enforced silently.
+- `social-x.skill.json` — X/Twitter posts + threads (≤280, hook rules, no hashtag spam)
+- `social-linkedin.skill.json` — Long-form posts, carousels, newsletter intros (1300–2200 chars, mobile fold)
+- `social-instagram.skill.json` — Captions, Reels scripts, carousel scripts (125-char fold, hashtag strategy)
+- `social-facebook.skill.json` — Feed posts, group posts, Reels copy (community-tone)
+- `social-tiktok.skill.json` — Short-form video scripts, hook-in-3-seconds, on-screen text, captions
+- `social-youtube.skill.json` — Long-form titles, descriptions, chapters, end-screen CTAs + Shorts variant
+- `social-threads.skill.json` — Conversational threads, ≤500 chars per post
+- `social-pinterest.skill.json` — Pin titles, descriptions, board ideas, keyword-led
+- `social-router.skill.json` — Picks the right channel skill based on keywords, runs multi-channel fan-out when asked ("post this everywhere")
 
-## New sub-skills (5, to close real gaps)
+Keep existing `social-post.skill.json` as a thin alias that delegates to `social-router` so installed users don't break.
 
-```text
-public/sample-skills/
-├── marketing-orchestrator.skill.json        UPGRADE — add learning + outcome routing
-├── brand-voice-guardian.skill.json          NEW — enforces voice/forbidden words on every output
-├── content-calendar.skill.json              NEW — multi-week content planning, hands off to PM pack
-├── social-post.skill.json                   NEW — short-form posts (X, LinkedIn, IG captions, threads)
-├── landing-page-builder.skill.json          NEW — full LP outline + sections (hands copy to copywriting)
-└── competitor-watch.skill.json              NEW — periodic firecrawl of named competitors, diff report
-```
+Each channel skill follows the same pattern already shipped:
+- Recall brief + outcomes + corrections from `wisdom_memories`
+- Channel-specific limits / hook patterns / forbidden behavior
+- Run through `brand-voice-guardian` before returning
+- Record `pattern` memory on success, `correction` on next-turn pushback
 
-Existing 11 stay; each gets one minor patch: call `search_wisdom_memories` for `outcome` + `correction` before generating, and respect any prerequisite the reviewer has bound.
+## 3. Update orchestrators
 
-## Orchestrator upgrade (no code, just instructions)
+- `marketing-orchestrator.skill.json` v1.3.0 — route social intent to `social-router` instead of `social-post`. Bumps routing table to 23 sub-skills.
+- `social-router` knows the 8 channel skills and the multi-channel fan-out flow (generates per-channel variants in one turn, each respecting its own rules).
 
-`marketing-orchestrator.skill.json` v1.2.0 adds:
+## 4. Memory doc
 
-1. **Outcome recall** — before routing, search `outcome` memories matching the channel/angle. Inject top-2 winners as context to the sub-skill.
-2. **Correction detector** — same pattern shipped in `pm-orchestrator`. Triggers on the next user turn after a marketing sub-skill ran.
-3. **Brand-voice gate** — every output-producing skill (`copywriting`, `ad-creative`, `email-sequence`, `cold-email`, `social-post`, `landing-page-builder`) routes through `brand-voice-guardian` for a final pass before returning to the user. Guardian is a fast read-only check that flags forbidden words and voice drift. If it flags, sub-skill rewrites once.
-4. **Routing decision table** updated to include the 5 new skills:
+Update `.lovable/memory/features/marketing-pack-orchestration.md` to reflect the new social sub-pack and routing.
 
-| Intent signal | Hand off to |
-|---|---|
-| Short post, tweet, thread, LinkedIn post, IG caption | social-post |
-| Plan content for next N weeks, editorial calendar | content-calendar |
-| Full landing page (structure + copy) | landing-page-builder |
-| Watch a competitor, what changed on their site, their pricing/messaging | competitor-watch |
-| Voice check, "does this sound like us", forbidden words audit | brand-voice-guardian |
-| (all existing rows unchanged) | (same handoffs) |
+# Technical notes
 
-## Brand-voice guardian — how it works
+- Migration uses `insert ... on conflict (slug) do update` so re-runs are safe and any future edits to the JSON files can be re-seeded.
+- `manifest` column gets the full JSON body; `name`, `description`, `version`, `slug` are extracted for list rendering.
+- No schema changes, no edge functions, no UI changes. Skills page already renders whatever's in the `skills` table.
+- After migration runs you'll go to **Skills → Browse** and see ~38 skills. Install the social ones you want.
 
-Standalone skill. Reads `marketing.product_context.brief.v1` + every `correction` memory tagged `voice` + the user's forbidden-words list (a `context` memory). For any input text:
+# What you'll do after
 
-1. Score voice match (1–10) using the brief.
-2. List forbidden-word hits with positions.
-3. List drift hits (passive voice, hype, jargon if brief says no).
-4. Return the score + a one-line "rewrite this clause" suggestion per hit.
-
-Called automatically by output-producing skills as their last step. User never has to invoke it directly, but they can ("does this sound like us?").
-
-## Content calendar — bridges to PM pack
-
-Takes a theme + horizon ("3 months of weekly LinkedIn"), produces a sequenced plan, then hands off to `pm-breakdown` to actually drop tasks into ClickUp. Reuses the rate-limit-safe loop. Closes the gap between "plan content" and "do the work".
-
-## Competitor watch — light, on-demand
-
-User says "watch acme.com". Stored as a `context` memory. On explicit re-ask ("what changed at acme?"), runs `firecrawl_scrape` against tracked URLs, diffs against the previous snapshot (stored in memory metadata), returns a short delta report. No background jobs, no new tables.
-
-## Scalability — same answers as PM pack
-
-| Pressure | How it stays scalable |
-|---|---|
-| 16 → 50 skills | Compact 1-line index in `registry.ts` keeps prompt cost flat. Full instructions loaded only on `load_skill`. |
-| Outcome memories grow huge | Existing `wisdom_memories` dedup + `recurrence_count` decay. Reviewer compresses recurring outcomes into principles. |
-| Voice rules conflict | `proposed_principles.status='superseded'` already handles replacement. |
-| Multi-brand users | All memory is `user_id`-scoped; multi-brand = namespaced keys (`marketing.<brand>.context`). Phase 2 if needed. |
-
-## Migration — 3 small steps, all shippable
-
-1. **Patch the orchestrator + existing 11** — author `marketing-orchestrator.skill.json` v1.2.0 with the correction detector, outcome recall, and guardian gate. Add one line to each existing skill telling it to recall `outcome` + `correction` before generating, and to route through guardian.
-2. **Author the 5 new skill JSONs** — `brand-voice-guardian`, `content-calendar`, `social-post`, `landing-page-builder`, `competitor-watch`. Same shape as existing skills, existing tools only.
-3. **Update memory** — patch `mem://features/marketing-pack-orchestration.md` and `mem://index.md` to point at v2 + the learning loop.
-
-No new tables, no new edge functions, no UI changes. All five new skills install from Skills page → Browse like the existing 11.
-
-## What you actually get
-
-- Every marketing output goes through a voice-and-forbidden-word check automatically.
-- The system remembers what worked ("hook X got 4.2% CTR") and reuses it.
-- Correct the AI once on voice — it doesn't make that mistake again on any sub-skill.
-- Plan 3 months of LinkedIn → tasks drop into ClickUp through the PM pack.
-- Ask "what changed at competitor.com" → fresh diff against last snapshot.
-
-## Out of scope
-
-- No new tables / functions / migrations.
-- No UI changes — Skills page already handles install/toggle.
-- No background competitor scanning (on-demand only — clean phase 2).
-- No multi-brand namespacing yet (single-brand memory works; namespace if/when you onboard a second brand).
-
-## Open choice
-
-1. **Drop-in JSON** (recommended) — patch 11 files + add 5 new ones under `public/sample-skills/`. You import the new 5 from Skills page; the existing 11 auto-update on next install/refresh.
-2. **Auto-install the new 5** — same files plus seed `skill_install` rows so they're active immediately for your account.
-
-Say **"1"**, **"2"**, or **"go"** (defaults to 1).
+1. Open `/skills`
+2. Under **Browse**, install: `social-router` + the channels you actually use (recommend all 8 for full coverage)
+3. Make sure `marketing-orchestrator` is installed and enabled
+4. Try: "write me an X thread and a LinkedIn post about [topic]" — the router fans out to both channel skills, each enforces its own rules, both pass brand-voice gate.

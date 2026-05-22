@@ -1,0 +1,15 @@
+{
+  "slug": "social-pinterest",
+  "name": "Social: Pinterest",
+  "version": "1.0.0",
+  "description": "Writes Pinterest pin titles, descriptions, and board ideas. Keyword-led (Pinterest is a search engine), benefit-driven, ≤100 char titles, ≤500 char descriptions. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["pinterest", "pin", "pin title", "pin description", "pinterest board"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Pinterest is a search engine, not a feed. Lead with keywords users actually search.\n- Pin title: ≤100 chars, keyword + benefit, no clickbait.\n- Description: ≤500 chars, natural-language keywords, single CTA.\n- Board: name + 5-sentence description + 5–8 keyword tags.\n\nFlow:\n1. Recall brief + Pinterest outcome winners + corrections.\n2. Ask for target keyword(s) if not given. One question max.\n3. For pins: 3 title variants + 1 description. For boards: 1 name + description + tags.\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return labeled.\n6. `save_memory(pattern, salience=0.6)` with channel='pinterest'.\n\nForbidden: clickbait titles, keyword stuffing past natural reading, missing CTA, emoji-stuffing."
+}

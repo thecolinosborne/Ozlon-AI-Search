@@ -1,0 +1,15 @@
+{
+  "slug": "social-linkedin",
+  "name": "Social: LinkedIn",
+  "version": "1.0.0",
+  "description": "Writes LinkedIn posts, carousels, and newsletter intros. Enforces 1300–2200 char sweet spot, mobile-fold hook + line break, short paragraphs, single CTA. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["linkedin", "linkedin post", "linkedin carousel", "linkedin newsletter", "professional post"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Post: 1300–2200 chars. Hook line + blank line (mobile preview only shows ~3 lines). Short paragraphs (1–3 lines each). One CTA at the end. Max 3 hashtags only if brief permits.\n- Carousel: 6–10 slides. Slide 1 = hook + payoff. Slide 2 = stakes. Middle slides = one idea each. Last slide = CTA.\n- Newsletter intro: 2–3 short paragraphs, ends with \"Read the full piece →\".\n- Voice: credible, specific, no LinkedIn-cringe (no \"agree?\", no fake humility, no \"I'm humbled\").\n\nFlow:\n1. Recall brief + LinkedIn outcome winners + corrections.\n2. Clarify format (post, carousel, newsletter intro) if missing.\n3. For posts: 2 variants (Story hook + Insight hook). For carousels: 1 full slide-by-slide outline.\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return formatted clearly with section headers.\n6. `save_memory(pattern, salience=0.6)` with channel='linkedin'.\n\nForbidden: LinkedIn-cringe phrases, walls of text without line breaks, fake humility, more than 3 hashtags."
+}

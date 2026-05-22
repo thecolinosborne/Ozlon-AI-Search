@@ -1,0 +1,15 @@
+{
+  "slug": "social-x",
+  "name": "Social: X / Twitter",
+  "version": "1.0.0",
+  "description": "Writes X (Twitter) posts and threads. Enforces 280-char limit per tweet, hook in first 7 words, thread payoff structure. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["tweet", "twitter", "x post", "x thread", "thread"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Single post: ≤280 chars, hook in first 7 words, no hashtag spam (max 1 if brief permits).\n- Thread: 5–9 tweets. Tweet 1 = hook + payoff promise. Each tweet stands alone. Last tweet = single CTA. Number tweets only if user asks.\n- Voice: punchy, conversational, contrarian when earned. No corporate-speak.\n\nFlow:\n1. Recall brief + X-specific outcome winners + corrections.\n2. Clarify intent only if missing (single tweet, thread, or quote-tweet reply).\n3. Generate 3 variants by default with different hook patterns (Contrarian / Story / Stat).\n4. Self-apply brand-voice-guardian checks. If unsure → `load_skill('brand-voice-guardian')` and rewrite flagged spans.\n5. Return compact V1/V2/V3 format. For threads use:\n   ```\n   V1 — Contrarian thread\n   1/ <hook tweet>\n   2/ <...>\n   ```\n6. `save_memory(pattern, salience=0.6)` with channel='x'.\n\nForbidden: emojis (unless brief allows), hashtag spam, vague CTAs, tweets over 280 chars."
+}
