@@ -8801,7 +8801,51 @@ async function runToolLoop(
     return { role: 'assistant', content: finalContent, toolsUsed, investigations, researchReports };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations, researchReports };
+  // Max iterations reached — instead of dead-ending the user with a generic
+  // "simpler request" message, do ONE final tools-disabled synthesis call so
+  // the user always gets a real answer (or a precise partial-result summary)
+  // from whatever data the loop already gathered.
+  try {
+    console.warn(`[ToolLoop] Max iterations (${maxIterations}) reached. Forcing final synthesis from gathered data.`);
+    if (onTaskUpdate && taskCreated) {
+      await onTaskUpdate({ taskId, title: '', step: 'Synthesizing answer', status: 'in_progress' });
+    }
+    openAIMessages.push({
+      role: 'system',
+      content:
+        'STEP BUDGET REACHED. Do NOT call any more tools. Produce the final answer NOW using only the tool results already gathered above. ' +
+        'If you have enough to answer (e.g. an email body, document text, attachment summary), give the user a direct, well-structured answer. ' +
+        'If the data is incomplete, return: (1) what you DID find, (2) what is missing, (3) the single next action the user can take. ' +
+        'Never reply with a generic "try a simpler request" message.',
+    });
+    const synth = await callViaGauntletThenFallback(
+      modelConfig.name,
+      openAIMessages,
+      [],
+      (entry) => ({
+        model: entry.model,
+        messages: openAIMessages,
+        max_completion_tokens: modelConfig.maxTokens,
+      }),
+    );
+    const synthData = await synth.response.json();
+    const synthContent = String(synthData?.choices?.[0]?.message?.content || '').trim();
+    if (synthContent) {
+      if (onTaskUpdate && taskCreated) {
+        await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary: synthContent.substring(0, 200) });
+      }
+      return { role: 'assistant', content: synthContent, toolsUsed, investigations, researchReports };
+    }
+  } catch (e) {
+    console.error('[ToolLoop] Forced synthesis failed:', e);
+  }
+
+  const usedList = toolsUsed.length ? [...new Set(toolsUsed)].join(', ') : 'no tools';
+  return {
+    role: 'assistant',
+    content: `I gathered data via: ${usedList}, but ran out of steps before producing a final answer. Try narrowing the request to one specific question (e.g. "summarize the body of Ben Tamburello's latest email" or "open the Google Doc linked in his last email and summarize it").`,
+    toolsUsed, investigations, researchReports,
+  };
 }
 
 // ============================================================================
