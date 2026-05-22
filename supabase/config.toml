@@ -105,3 +105,5 @@ verify_jwt = false
 [functions.skill-observer]
 verify_jwt = true
 
+[functions.seed-skills-catalog]
+verify_jwt = false

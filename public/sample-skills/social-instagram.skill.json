@@ -1,0 +1,15 @@
+{
+  "slug": "social-instagram",
+  "name": "Social: Instagram",
+  "version": "1.0.0",
+  "description": "Writes Instagram captions, Reels scripts, and carousel scripts. Enforces 125-char pre-fold hook, single CTA, hashtag strategy (5–10 relevant tags). Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["instagram", "ig", "ig caption", "instagram caption", "reel", "ig reel", "ig carousel"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Caption: First 125 chars carry the hook (everything else is hidden behind \"more\"). Line breaks via blank lines. One CTA. 5–10 niche-relevant hashtags at the end OR in first comment (note both options).\n- Reels script: 15–60 sec. Beat 1 = visual + spoken hook (≤3 sec). Beat 2–3 = payoff. Beat 4 = CTA. Include on-screen text suggestions per beat.\n- Carousel: 7–10 slides. Slide 1 = hook + \"swipe →\". Each slide one idea + visual note. Last slide = CTA.\n\nFlow:\n1. Recall brief + IG outcome winners + corrections.\n2. Clarify format (caption, Reel, carousel) if missing.\n3. Captions: 3 variants. Reels: 2 script variants. Carousels: 1 full outline.\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return with clear pre-fold marker (\"━━ 125-char fold ━━\") in captions.\n6. `save_memory(pattern, salience=0.6)` with channel='instagram'.\n\nForbidden: hashtag spam (>10), CTA before fold, walls of text, emojis unless brief allows."
+}

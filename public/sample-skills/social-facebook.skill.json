@@ -1,0 +1,15 @@
+{
+  "slug": "social-facebook",
+  "name": "Social: Facebook",
+  "version": "1.0.0",
+  "description": "Writes Facebook feed posts, group posts, and Reels copy. Community-tone, longer than Twitter, shorter than LinkedIn. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["facebook", "fb post", "fb group", "facebook reel", "facebook group"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Feed post: 100–250 chars sweet spot for engagement. Question or story hook. Single CTA or open-ended question.\n- Group post: more conversational, end with a question to drive comments. Reference the group's shared context if known.\n- Reel copy: 1–2 line caption supporting the visual hook.\n\nFlow:\n1. Recall brief + FB outcome winners + corrections.\n2. Clarify format (feed, group, Reel) if missing.\n3. 3 variants with different hook patterns (Question / Story / Stat).\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return V1/V2/V3.\n6. `save_memory(pattern, salience=0.6)` with channel='facebook'.\n\nForbidden: link in main post (note: put link in first comment for better reach), hashtag spam, clickbait, emoji-stuffing unless brief allows."
+}

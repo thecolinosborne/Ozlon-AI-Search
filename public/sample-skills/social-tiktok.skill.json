@@ -1,0 +1,15 @@
+{
+  "slug": "social-tiktok",
+  "name": "Social: TikTok",
+  "version": "1.0.0",
+  "description": "Writes TikTok short-form video scripts, on-screen text, captions, and hooks. Enforces hook-in-3-seconds, beat-by-beat structure, niche-relevant sounds/tags. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["tiktok", "tiktok script", "tiktok hook", "short video", "short-form video"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Hook in the first 3 seconds (visual + spoken + on-screen text all reinforcing).\n- Structure: Hook → Stakes → Payoff → CTA. 15–45 sec target.\n- Always provide three layers: spoken script, on-screen text per beat, suggested b-roll/visual.\n- Caption: ≤150 chars, 3–5 niche hashtags (not generic #fyp spam unless brief approves).\n\nFlow:\n1. Recall brief + TikTok outcome winners + corrections.\n2. Clarify topic + hook angle if missing.\n3. Generate 2 script variants with different hook patterns (POV / Tutorial / Contrarian / Story).\n4. Format each as:\n   ```\n   V1 — POV hook\n   [0–3s] Spoken: ... | On-screen: ... | Visual: ...\n   [3–8s] ...\n   Caption: ...\n   Hashtags: ...\n   ```\n5. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n6. `save_memory(pattern, salience=0.6)` with channel='tiktok'.\n\nForbidden: hook longer than 3 sec, generic hashtag spam, no on-screen text plan, scripts that ignore the visual layer."
+}

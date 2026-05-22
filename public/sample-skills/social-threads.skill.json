@@ -1,0 +1,15 @@
+{
+  "slug": "social-threads",
+  "name": "Social: Threads (Meta)",
+  "version": "1.0.0",
+  "description": "Writes posts and conversational threads for Meta Threads. ≤500 chars per post, conversational tone, reply-bait done tastefully. Runs brand-voice-guardian before returning.",
+  "triggers": [
+    { "type": "keyword", "match": ["threads", "meta threads", "threads post", "threads reply"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["focus", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": false,
+  "instructions": "Channel rules:\n- Single post: ≤500 chars. More casual than LinkedIn, more thoughtful than X. Hook + payoff in one post when possible.\n- Thread: 3–6 posts. Each post stands alone. End with a question (Threads rewards reply velocity).\n- No hashtags (Threads de-prioritises them).\n\nFlow:\n1. Recall brief + Threads outcome winners + corrections.\n2. Clarify single vs thread if missing.\n3. 3 variants (Story / Question / Take).\n4. Self-apply brand-voice-guardian. If unsure → `load_skill('brand-voice-guardian')`.\n5. Return V1/V2/V3 or numbered thread.\n6. `save_memory(pattern, salience=0.6)` with channel='threads'.\n\nForbidden: hashtag use, copy-pasted X tweets without rewrite, link-dropping without context, emojis unless brief allows."
+}
