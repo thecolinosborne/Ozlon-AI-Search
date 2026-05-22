@@ -1,0 +1,16 @@
+{
+  "slug": "pm-prioritize",
+  "name": "PM Prioritize",
+  "version": "1.0.0",
+  "description": "Ranks open tasks using the right framework for the job — RICE for backlogs, Eisenhower for daily ops, MoSCoW for scoping, WSJF for queues. Picks framework from saved preferences, explains every ranking in one line.",
+  "triggers": [
+    { "type": "keyword", "match": ["prioritize", "rank tasks", "what should i work on", "what's most important", "priorities", "top priority", "most urgent"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "save_memory", "search_clickup_tasks", "list_clickup_tasks"],
+  "tools_optional": ["list_clickup_lists", "set_clickup_priority"],
+  "memory_domains": ["pm.user_overrides", "pm.team_context", "pm.corrections"],
+  "modes_allowed": ["focus", "planning", "reactive"],
+  "side_effect": "read",
+  "requires_confirmation": true,
+  "instructions": "You rank work. You never silently reorder ClickUp — you propose a ranking and the user confirms before any write.\n\nStep 1 — Recall. `search_wisdom_memories` for \"preferred prioritization framework\", `memory_type=\"preference\"`. If found, use it. If not, infer from the ask:\n- \"What should I do today\" → Eisenhower (urgent × important).\n- \"Rank the backlog\" → RICE (Reach × Impact × Confidence ÷ Effort).\n- \"Scope this project\" → MoSCoW (Must/Should/Could/Won't).\n- \"Which queue item first\" → WSJF ((business value + time crit + risk reduction) ÷ size).\n\nAsk once: \"Using <framework>. Say 'switch to X' to change. Save as default? (y/n)\". On 'y' → `save_memory(preference, salience=0.9)`.\n\nStep 2 — Pull tasks. Use `search_clickup_tasks` or `list_clickup_tasks` scoped to the list the user mentioned, or the default list from memory. Cap at 30 — if more, ask which list/space.\n\nStep 3 — Score. For each task, compute the framework's value. Use what's available (priority field, due date, tags, description). When data is missing, mark it `?` and skip the factor — do not invent numbers.\n\nStep 4 — Output. A short ranked list. One line per task: `1. <title> — <score/quadrant> — <one-clause why>`. Max 10. Then offer:\n- \"Want me to push these priorities to ClickUp?\" (uses `set_clickup_priority` if confirmed)\n- \"Want a different framework?\"\n\nStep 5 — Hygiene flags. Call out any task with no owner, no due date, or no acceptance criteria. One line: \"3 tasks missing owners — want me to assign?\" Hand off to `pm-assign` on yes.\n\nStep 6 — Record. `save_memory(pattern, salience=0.6)`: \"Prioritized <N> tasks in <list> using <framework>.\"\n\nFramework cheat sheet (consult silently, never lecture):\n- RICE: Reach (users/period) × Impact (3=massive, 2=high, 1=med, 0.5=low, 0.25=min) × Confidence (%) ÷ Effort (person-weeks).\n- Eisenhower: Q1 do now (urgent+important), Q2 schedule (important not urgent), Q3 delegate (urgent not important), Q4 drop.\n- MoSCoW: Must = launch-blocker. Should = important not vital. Could = nice-to-have. Won't = explicitly out.\n- WSJF: higher = sooner. Tie-break by smallest size."
+}
