@@ -7395,61 +7395,19 @@ export function getRegistryHealth() {
 // failure mode that previously surfaced as silent "Unknown tool" errors.
 // Result is logged once and surfaced via getRegistryHealth().drift.
 // ============================================================================
+// Drift check lifted into ./loop/registryDriftCheck.ts (step 1 of the chat/index.ts split).
+// Behavior is unchanged: same logged output, same _registryDriftReport surface.
+import { checkRegistryDrift } from "./loop/registryDriftCheck.ts";
+
 let _registryDriftReport: { missingCases: string[]; orphanCases: string[] } = {
   missingCases: [],
   orphanCases: [],
 };
-function runRegistryDriftCheck(): void {
-  try {
-    const src = executeToolCall.toString();
-    const caseNames = new Set<string>();
-    const caseRe = /case\s+['"]([a-zA-Z0-9_]+)['"]\s*:/g;
-    let m: RegExpExecArray | null;
-    while ((m = caseRe.exec(src)) !== null) caseNames.add(m[1]);
-
-    // Tools dispatched through the manifest registry / multi_action / load_skill
-    // do NOT need a switch case. Whitelist them so they don't show as drift.
-    // (NATIVE_GOOGLE_ROUTES keys + manifest-dispatched prefixes are added below.)
-    const NON_LEGACY = new Set<string>([
-      'multi_action',
-      'load_skill',
-      'web_investigate',
-      'personal_research',
-      ...Object.keys(NATIVE_GOOGLE_ROUTES),
-    ]);
-    // Prefixes routed via dispatchTool (manifest registry) before the switch.
-    const MANIFEST_PREFIXES = ['gmail_', 'ghl_', 'clickup_', 'list_clickup_', 'get_clickup_', 'create_clickup_', 'update_clickup_', 'delete_clickup_', 'set_clickup_', 'search_clickup_', 'move_clickup_', 'add_clickup_', 'remove_clickup_', 'start_clickup_', 'stop_clickup_'];
-    const isManifestRouted = (name: string): boolean => MANIFEST_PREFIXES.some((p) => name.startsWith(p));
-
-    const declaredNames = new Set<string>(
-      ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
-    );
-
-    const missingCases: string[] = [];
-    for (const name of declaredNames) {
-      if (NON_LEGACY.has(name) || isManifestRouted(name)) continue;
-      if (!caseNames.has(name)) missingCases.push(name);
-    }
-    const orphanCases: string[] = [];
-    for (const name of caseNames) {
-      if (!declaredNames.has(name) && !NON_LEGACY.has(name) && !isManifestRouted(name)) orphanCases.push(name);
-    }
-    _registryDriftReport = { missingCases, orphanCases };
-    if (missingCases.length === 0 && orphanCases.length === 0) {
-      console.log(`[registry-drift] OK — ${declaredNames.size} tools, ${caseNames.size} cases, no drift`);
-    } else {
-      if (missingCases.length > 0) {
-        console.error(`[registry-drift] ${missingCases.length} tools declared without a handler: ${missingCases.join(', ')}`);
-      }
-      if (orphanCases.length > 0) {
-        console.warn(`[registry-drift] ${orphanCases.length} orphan cases (handler exists but tool not declared): ${orphanCases.join(', ')}`);
-      }
-    }
-  } catch (e) {
-    console.warn('[registry-drift] check failed:', e instanceof Error ? e.message : String(e));
-  }
-}
-runRegistryDriftCheck();
+_registryDriftReport = checkRegistryDrift({
+  executeToolCallSource: executeToolCall.toString(),
+  declaredToolNames: ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
+  nativeGoogleRouteKeys: Object.keys(NATIVE_GOOGLE_ROUTES),
+});
 
 // ============================================================================
 // DETERMINE WHICH TOOLS ARE AVAILABLE BASED ON CONNECTIONS
