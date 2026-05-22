@@ -48,19 +48,85 @@ export async function dispatchTool(
     ? { action: route.action, params: merged }
     : { action: route.action, ...merged };
 
+  // Retry-with-backoff on Deno edge-runtime per-function rate limits.
+  // Error shape: thrown error or response body containing
+  // "Rate limit exceeded for function. Retry after Xms."
+  const MAX_RATELIMIT_RETRIES = 3;
+  const MAX_RATELIMIT_WAIT_MS = 65_000;
+  const parseRetryMs = (s: string): number | null => {
+    const m = s.match(/Retry after\s+(\d+)\s*ms/i);
+    return m ? Math.min(parseInt(m[1], 10), MAX_RATELIMIT_WAIT_MS) : null;
+  };
+
+  let attempt = 0;
+  let res: Response;
+  while (true) {
+    try {
+      res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
+        method: "POST",
+        headers: {
+          "Authorization": authHeader,
+          "apikey": anonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const waitMs = parseRetryMs(msg);
+      if (waitMs !== null && attempt < MAX_RATELIMIT_RETRIES) {
+        attempt++;
+        const sleep = waitMs + Math.floor(Math.random() * 500);
+        console.warn(`[dispatcher] ${toolName} rate-limited, retry ${attempt}/${MAX_RATELIMIT_RETRIES} in ${sleep}ms`);
+        await new Promise((r) => setTimeout(r, sleep));
+        continue;
+      }
+      console.warn(`[dispatcher] ${toolName} threw: ${msg}`);
+      return { success: false, routed: true, result: `Tool ${toolName} error: ${msg}` };
+    }
+    if (res.status === 429 && attempt < MAX_RATELIMIT_RETRIES) {
+      const retryAfter = res.headers.get("retry-after");
+      const waitMs = retryAfter
+        ? Math.min(parseInt(retryAfter, 10) * 1000, MAX_RATELIMIT_WAIT_MS)
+        : 2000 * (attempt + 1);
+      attempt++;
+      console.warn(`[dispatcher] ${toolName} HTTP 429, retry ${attempt}/${MAX_RATELIMIT_RETRIES} in ${waitMs}ms`);
+      await new Promise((r) => setTimeout(r, waitMs + Math.floor(Math.random() * 500)));
+      continue;
+    }
+    break;
+  }
+
   try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
-      method: "POST",
-      headers: {
-        "Authorization": authHeader,
-        "apikey": anonKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
     const text = await res.text();
     let data: Record<string, unknown> = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+
+    // Some runtimes deliver rate-limit messages as a 200 body or non-JSON text.
+    // Detect + retry once with the suggested delay.
+    const rateLimitMs = typeof data?.raw === "string" ? parseRetryMs(data.raw as string)
+      : typeof (data as Record<string, unknown>)?.error === "string" ? parseRetryMs((data as Record<string, unknown>).error as string)
+      : null;
+    if (rateLimitMs !== null && attempt < MAX_RATELIMIT_RETRIES) {
+      attempt++;
+      console.warn(`[dispatcher] ${toolName} rate-limited (body), retry ${attempt}/${MAX_RATELIMIT_RETRIES} in ${rateLimitMs}ms`);
+      await new Promise((r) => setTimeout(r, rateLimitMs + Math.floor(Math.random() * 500)));
+      // Re-issue the request inline (single retry path).
+      try {
+        res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
+          method: "POST",
+          headers: { "Authorization": authHeader, "apikey": anonKey, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const t2 = await res.text();
+        data = {};
+        try { data = t2 ? JSON.parse(t2) : {}; } catch { data = { raw: t2 }; }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { success: false, routed: true, result: `Tool ${toolName} error after retry: ${msg}` };
+      }
+    }
+
 
     if (!res.ok || data?.success === false) {
       const rawErr = data?.error;
