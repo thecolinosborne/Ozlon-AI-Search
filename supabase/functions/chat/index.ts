@@ -8252,6 +8252,15 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // ---- Per-turn Gmail read tracker (anti-loop guard) ----
+  // The model frequently re-queries Gmail with slight variations
+  // (different `q` strings, same message_id) until it burns the whole tool
+  // budget. We track repeats and inject a hard "stop searching, synthesize
+  // now" reminder once we've clearly accumulated enough email material.
+  const gmailReadCounts = { list: 0, get: 0 };
+  const gmailFetchedMessageIds = new Set<string>();
+  let gmailLoopWarningInjected = false;
+
   // ---- Per-turn tool-result cache ----
   // Read-only tools called twice with identical args inside ONE chat turn
   // return the first cached result. Kills duplicate Gmail/GA4/GSC/Drive
@@ -8714,6 +8723,43 @@ async function runToolLoop(
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
 
+      // ─── Gmail anti-loop guard ───────────────────────────────────────
+      // Track how many email read tools have been called this turn and
+      // whether we've already fetched the same message id more than once.
+      // If the model is clearly looping, inject a hard "stop searching,
+      // synthesize now" reminder ONCE so it stops burning the tool budget.
+      for (let i = 0; i < msg.tool_calls.length; i++) {
+        const name = (msg.tool_calls[i] as { function: { name: string } }).function.name;
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse((msg.tool_calls[i] as { function: { arguments: string } }).function.arguments || '{}'); } catch { /* ignore */ }
+        if (name === 'list_emails' || name === 'list_email_ids') {
+          gmailReadCounts.list++;
+        } else if (name === 'get_email') {
+          gmailReadCounts.get++;
+          const mid = typeof parsed.message_id === 'string' ? parsed.message_id : '';
+          if (mid) gmailFetchedMessageIds.add(mid);
+        }
+      }
+      const totalGmailReads = gmailReadCounts.list + gmailReadCounts.get;
+      const gmailLooping =
+        (gmailReadCounts.list >= 3) ||
+        (gmailReadCounts.get >= 3 && gmailFetchedMessageIds.size <= 1) ||
+        (totalGmailReads >= 5 && gmailFetchedMessageIds.size <= 2);
+      if (gmailLooping && !gmailLoopWarningInjected) {
+        gmailLoopWarningInjected = true;
+        console.warn(`[ToolLoopGuard] Gmail loop detected (list=${gmailReadCounts.list} get=${gmailReadCounts.get} ids=${gmailFetchedMessageIds.size}). Injecting stop-search reminder.`);
+        openAIMessages.push({
+          role: 'system',
+          content:
+            'STOP SEARCHING GMAIL. You have already fetched the relevant email content above. ' +
+            'Do NOT call list_emails, list_email_ids, or get_email again with new query variations. ' +
+            'If the useful content is in the email body, summarize it NOW from the tool results above. ' +
+            'If the content lives in a linked Google Doc, call the docs tool (e.g. get_google_doc / analyze_content with source_type=doc) ONCE using the doc ID/URL already visible in the email body. ' +
+            'If it lives in an attachment, call gmail_analyze_attachment ONCE. ' +
+            'Otherwise produce the final answer now using only the data already gathered.',
+        });
+      }
+
       // GUARD: if user just approved an action and assistant only called task-tracking tools,
       // inject a system reminder to actually execute the action on next iteration.
       const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
@@ -8755,7 +8801,51 @@ async function runToolLoop(
     return { role: 'assistant', content: finalContent, toolsUsed, investigations, researchReports };
   }
 
-  return { role: 'assistant', content: 'I tried to complete the action but hit the maximum number of steps. Please try again with a simpler request.', toolsUsed, investigations, researchReports };
+  // Max iterations reached — instead of dead-ending the user with a generic
+  // "simpler request" message, do ONE final tools-disabled synthesis call so
+  // the user always gets a real answer (or a precise partial-result summary)
+  // from whatever data the loop already gathered.
+  try {
+    console.warn(`[ToolLoop] Max iterations (${maxIterations}) reached. Forcing final synthesis from gathered data.`);
+    if (onTaskUpdate && taskCreated) {
+      await onTaskUpdate({ taskId, title: '', step: 'Synthesizing answer', status: 'in_progress' });
+    }
+    openAIMessages.push({
+      role: 'system',
+      content:
+        'STEP BUDGET REACHED. Do NOT call any more tools. Produce the final answer NOW using only the tool results already gathered above. ' +
+        'If you have enough to answer (e.g. an email body, document text, attachment summary), give the user a direct, well-structured answer. ' +
+        'If the data is incomplete, return: (1) what you DID find, (2) what is missing, (3) the single next action the user can take. ' +
+        'Never reply with a generic "try a simpler request" message.',
+    });
+    const synth = await callViaGauntletThenFallback(
+      modelConfig.name,
+      openAIMessages,
+      [],
+      (entry) => ({
+        model: entry.model,
+        messages: openAIMessages,
+        max_completion_tokens: modelConfig.maxTokens,
+      }),
+    );
+    const synthData = await synth.response.json();
+    const synthContent = String(synthData?.choices?.[0]?.message?.content || '').trim();
+    if (synthContent) {
+      if (onTaskUpdate && taskCreated) {
+        await onTaskUpdate({ taskId, title: '', step: 'Complete', status: 'done', summary: synthContent.substring(0, 200) });
+      }
+      return { role: 'assistant', content: synthContent, toolsUsed, investigations, researchReports };
+    }
+  } catch (e) {
+    console.error('[ToolLoop] Forced synthesis failed:', e);
+  }
+
+  const usedList = toolsUsed.length ? [...new Set(toolsUsed)].join(', ') : 'no tools';
+  return {
+    role: 'assistant',
+    content: `I gathered data via: ${usedList}, but ran out of steps before producing a final answer. Try narrowing the request to one specific question (e.g. "summarize the body of Ben Tamburello's latest email" or "open the Google Doc linked in his last email and summarize it").`,
+    toolsUsed, investigations, researchReports,
+  };
 }
 
 // ============================================================================
