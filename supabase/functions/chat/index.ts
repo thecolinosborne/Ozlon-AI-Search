@@ -10566,19 +10566,51 @@ Execute these in order. Be decisive — the user has already been shown this pla
               console.log('[Planner] skipped (chitchat fast-path)');
             }
 
-            const result = await runToolLoop(
-              modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
-              async (event) => {
-                try {
-                  await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
-                } catch { /* stream closed */ }
-              },
-              userText,
-              aliasMap,
-              wisdomUserId,
-              { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
-              mergedIntents,
-            );
+            // ── EMAIL RECIPE SHORTCUT ──────────────────────────────────────
+            // Deterministic path for common email queries. If it matches, we
+            // skip the free tool loop entirely. Anti-loop guards in runToolLoop
+            // still protect everything else.
+            const lastAssistantMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'assistant');
+            let result: Awaited<ReturnType<typeof runToolLoop>> | null = null;
+            try {
+              const recipeResult = await tryEmailRecipe(
+                userText,
+                lastAssistantMsg?.content,
+                modelConfig,
+                openAIMessages,
+                connMap,
+                aliasMap,
+                { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
+                async (event) => {
+                  try {
+                    await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
+                  } catch { /* stream closed */ }
+                },
+              );
+              if (recipeResult) {
+                console.log('[EmailRecipe] handled — skipping runToolLoop');
+                result = recipeResult as Awaited<ReturnType<typeof runToolLoop>>;
+              }
+            } catch (e) {
+              console.warn('[EmailRecipe] threw, falling through to tool loop:', (e as Error).message);
+            }
+
+            if (!result) {
+              result = await runToolLoop(
+                modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
+                async (event) => {
+                  try {
+                    await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
+                  } catch { /* stream closed */ }
+                },
+                userText,
+                aliasMap,
+                wisdomUserId,
+                { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
+                mergedIntents,
+              );
+            }
+
 
             // Mark the planner task complete once the executor returns.
             if (planTaskId) {
