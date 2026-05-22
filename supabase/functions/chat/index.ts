@@ -8229,6 +8229,216 @@ function planToServiceIntents(plan: AgenticPlan): string[] {
   return [...out];
 }
 
+// ============================================================================
+// EMAIL INTENT RECIPES — deterministic shortcuts for common email queries.
+// Sits in front of runToolLoop. If the user's message clearly matches one of
+// the recipes, we execute a fixed tool sequence (max 4 steps) and synthesize
+// the answer ourselves instead of handing the request to the free tool loop
+// (which has been known to loop on list_email_ids / get_email).
+// Anti-loop guards, time budgets, and forced-synthesis fallback in
+// runToolLoop remain in place for all non-matching requests.
+// ============================================================================
+
+type EmailRecipeIntent = 'email_summarize' | 'email_scan_notes' | 'none';
+
+interface EmailRecipeClassification {
+  intent: EmailRecipeIntent;
+  gmail_query: string;
+  confidence: number;
+}
+
+async function classifyEmailIntent(
+  userMessage: string,
+  lastAssistant: string | undefined,
+): Promise<EmailRecipeClassification | null> {
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!lovableKey) return null;
+  const trimmed = (userMessage || '').trim();
+  if (trimmed.length < 4 || trimmed.length > 600) return null;
+
+  // Cheap keyword pre-filter — skip the LLM call entirely if no email words.
+  const hay = trimmed.toLowerCase();
+  const EMAIL_WORDS = ['email', 'inbox', 'gmail', 'message from', 'note', 'notes', 'wrote', 'sent me'];
+  if (!EMAIL_WORDS.some((w) => hay.includes(w))) return null;
+
+  const system = `You classify a user request into ONE email-handling intent.
+Return STRICT JSON: {"intent":"email_summarize"|"email_scan_notes"|"none","gmail_query":"<gmail search string>","confidence":0..1}.
+
+Intents:
+- email_summarize: user wants the gist of an email from a person or about a topic.
+  Examples: "summarize the last email from John", "what did Sarah say in her email".
+- email_scan_notes: user wants notes/meeting notes/Gemini notes/transcripts inside an email
+  (often a Google Doc linked in the email).
+  Examples: "scan the Gemini notes in Ben's email", "summarize the meeting notes from yesterday's email".
+- none: anything else (composing, deleting, listing many, ambiguous, multi-step plans).
+
+gmail_query: build a Gmail search string. Use from:<name>, subject:<word>, or keywords.
+Strip filler. Example: "Ben Tamburello Gemini" -> "from:tamburello OR (Ben Tamburello)".
+Default to "" only when intent=none.
+
+confidence: 0.9+ only when the request is unambiguous and matches one intent.`;
+
+  const userPrompt = lastAssistant
+    ? `Previous assistant turn (context):\n${lastAssistant.slice(0, 400)}\n\nUser request:\n${trimmed}`
+    : `User request:\n${trimmed}`;
+
+  try {
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${lovableKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const raw = String(json?.choices?.[0]?.message?.content || '').trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<EmailRecipeClassification>;
+    const intent = parsed.intent as EmailRecipeIntent;
+    if (intent !== 'email_summarize' && intent !== 'email_scan_notes') return null;
+    const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+    if (confidence < 0.8) return null;
+    const gmail_query = String(parsed.gmail_query || '').trim();
+    if (!gmail_query) return null;
+    return { intent, gmail_query, confidence };
+  } catch (e) {
+    console.warn('[EmailRecipe] classifier failed:', (e as Error).message);
+    return null;
+  }
+}
+
+// Extract first Google Doc ID from text. Matches docs.google.com/document/d/<ID>.
+function extractGoogleDocId(text: string): string | null {
+  const m = text.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]{20,})/);
+  return m ? m[1] : null;
+}
+
+function buildRecipeResult(
+  content: string,
+  toolsUsed: string[],
+): { role: string; content: string; toolsUsed: string[]; investigations: never[]; researchReports: never[] } {
+  return { role: 'assistant', content, toolsUsed, investigations: [], researchReports: [] };
+}
+
+async function tryEmailRecipe(
+  userMessage: string,
+  lastAssistant: string | undefined,
+  modelConfig: ModelConfig,
+  baseMessages: { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }[],
+  connMap: MultiConnMap,
+  aliasMap: AliasEntry[] | undefined,
+  ghlCreds: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] } | undefined,
+  onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
+): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: never[]; researchReports: never[] } | null> {
+  const cls = await classifyEmailIntent(userMessage, lastAssistant);
+  if (!cls) return null;
+
+  console.log(`[EmailRecipe] match intent=${cls.intent} q="${cls.gmail_query}" conf=${cls.confidence}`);
+  const taskId = crypto.randomUUID();
+  const toolsUsed: string[] = [];
+  const transcript: string[] = [];
+
+  const emit = async (step: string, status: 'in_progress' | 'done' | 'error' = 'in_progress') => {
+    if (!onTaskUpdate) return;
+    try {
+      await onTaskUpdate({
+        taskId,
+        title: cls.intent === 'email_scan_notes' ? 'Scanning notes' : 'Summarizing email',
+        step,
+        status,
+      } as TaskUpdateEvent);
+    } catch { /* stream closed */ }
+  };
+
+  // Step 1: list_email_ids
+  await emit('Searching inbox');
+  const listRes = await executeToolCall('list_email_ids', { query: cls.gmail_query, max_results: 5 }, connMap, userMessage, aliasMap, ghlCreds);
+  toolsUsed.push('list_email_ids');
+  if (!listRes.success) {
+    return buildRecipeResult(`I searched your inbox for \`${cls.gmail_query}\` but the search failed: ${listRes.result}. Try reconnecting Gmail in Integrations, or rephrase the request.`, toolsUsed);
+  }
+  let ids: string[] = [];
+  try { ids = (JSON.parse(listRes.result) as { ids?: string[] }).ids || []; } catch { /* */ }
+  if (ids.length === 0) {
+    return buildRecipeResult(`I couldn't find any email matching \`${cls.gmail_query}\`. Try a different name, subject, or date range.`, toolsUsed);
+  }
+  transcript.push(`Inbox search for "${cls.gmail_query}": ${ids.length} match(es).`);
+
+  // Step 2: get_email (top result)
+  await emit('Reading email');
+  const getRes = await executeToolCall('get_email', { message_id: ids[0] }, connMap, userMessage, aliasMap, ghlCreds);
+  toolsUsed.push('get_email');
+  if (!getRes.success) {
+    return buildRecipeResult(`Found the email but couldn't read it: ${getRes.result}.`, toolsUsed);
+  }
+  const emailBody = getRes.result;
+  transcript.push(`Email content:\n${emailBody}`);
+
+  // Step 3 (notes only): if a Google Doc is linked, fetch + analyze it.
+  if (cls.intent === 'email_scan_notes') {
+    const docId = extractGoogleDocId(emailBody);
+    if (docId) {
+      await emit('Reading linked Google Doc');
+      const docRes = await executeToolCall(
+        'analyze_content',
+        { source_type: 'doc', id: docId, focus: 'meeting notes, decisions, action items' },
+        connMap, userMessage, aliasMap, ghlCreds,
+      );
+      toolsUsed.push('analyze_content');
+      if (docRes.success) {
+        transcript.push(`Linked Google Doc analysis:\n${docRes.result}`);
+      } else {
+        transcript.push(`Tried to read linked Google Doc ${docId} but failed: ${docRes.result}`);
+      }
+    }
+  }
+
+  // Final synthesis — one tools-disabled call against gathered material.
+  await emit('Summarizing');
+  const synthesisMessages = [
+    ...baseMessages,
+    {
+      role: 'system',
+      content:
+        `You are answering the user's email request using ONLY the material below. ` +
+        `Do not invent facts. If the material is incomplete, say what's missing and what action the user can take next. ` +
+        `Be concise: short summary, then key points, then any action items. No emojis.`,
+    },
+    { role: 'system', content: `Gathered material:\n\n${transcript.join('\n\n---\n\n').slice(0, 24000)}` },
+  ];
+
+  let finalText = '';
+  try {
+    const { response, used } = await callViaGauntletThenFallback(
+      modelConfig.name,
+      synthesisMessages,
+      [],
+      (entry) => ({
+        model: entry.model,
+        messages: synthesisMessages,
+      }),
+    );
+    const data = await response.json();
+    finalText = String(data?.choices?.[0]?.message?.content || '').trim();
+    console.log(`[EmailRecipe] synthesis via ${used.label}, ${finalText.length} chars`);
+  } catch (e) {
+    console.warn('[EmailRecipe] synthesis failed:', (e as Error).message);
+  }
+
+  if (!finalText) {
+    finalText = `Here's what I found:\n\n${transcript.join('\n\n').slice(0, 4000)}`;
+  }
+
+  await emit('Done', 'done');
+  return buildRecipeResult(finalText, toolsUsed);
+}
+
 async function runToolLoop(
   modelConfig: ModelConfig,
   apiKey: string,
@@ -10356,19 +10566,51 @@ Execute these in order. Be decisive — the user has already been shown this pla
               console.log('[Planner] skipped (chitchat fast-path)');
             }
 
-            const result = await runToolLoop(
-              modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
-              async (event) => {
-                try {
-                  await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
-                } catch { /* stream closed */ }
-              },
-              userText,
-              aliasMap,
-              wisdomUserId,
-              { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
-              mergedIntents,
-            );
+            // ── EMAIL RECIPE SHORTCUT ──────────────────────────────────────
+            // Deterministic path for common email queries. If it matches, we
+            // skip the free tool loop entirely. Anti-loop guards in runToolLoop
+            // still protect everything else.
+            const lastAssistantMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'assistant');
+            let result: Awaited<ReturnType<typeof runToolLoop>> | null = null;
+            try {
+              const recipeResult = await tryEmailRecipe(
+                userText,
+                lastAssistantMsg?.content,
+                modelConfig,
+                openAIMessages,
+                connMap,
+                aliasMap,
+                { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
+                async (event) => {
+                  try {
+                    await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
+                  } catch { /* stream closed */ }
+                },
+              );
+              if (recipeResult) {
+                console.log('[EmailRecipe] handled — skipping runToolLoop');
+                result = recipeResult as Awaited<ReturnType<typeof runToolLoop>>;
+              }
+            } catch (e) {
+              console.warn('[EmailRecipe] threw, falling through to tool loop:', (e as Error).message);
+            }
+
+            if (!result) {
+              result = await runToolLoop(
+                modelConfig, apiKey, openAIMessages, availableTools, connMap, 10,
+                async (event) => {
+                  try {
+                    await writer.write(encoder.encode(`event: task_update\ndata: ${JSON.stringify(event)}\n\n`));
+                  } catch { /* stream closed */ }
+                },
+                userText,
+                aliasMap,
+                wisdomUserId,
+                { apiKey: GHL_API_KEY_RESOLVED, locationId: GHL_LOCATION_ID_RESOLVED, subAccounts: GHL_SUB_ACCOUNTS_RESOLVED },
+                mergedIntents,
+              );
+            }
+
 
             // Mark the planner task complete once the executor returns.
             if (planTaskId) {
