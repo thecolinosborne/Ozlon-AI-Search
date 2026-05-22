@@ -18,6 +18,13 @@ export function stripHtml(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    // Preserve link URLs: <a href="X">text</a> → text (X)
+    .replace(/<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
+      const t = String(text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const h = String(href).trim();
+      if (!h || h.startsWith("mailto:") || h.startsWith("#")) return t;
+      return t && t !== h ? `${t} (${h})` : h;
+    })
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
