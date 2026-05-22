@@ -8252,6 +8252,15 @@ async function runToolLoop(
   // Reset per-turn GHL guardrail flag (avoid leaking across requests on warm instances).
   (globalThis as Record<string, unknown>).__ghlSwitchedThisTurn = false;
 
+  // ---- Per-turn Gmail read tracker (anti-loop guard) ----
+  // The model frequently re-queries Gmail with slight variations
+  // (different `q` strings, same message_id) until it burns the whole tool
+  // budget. We track repeats and inject a hard "stop searching, synthesize
+  // now" reminder once we've clearly accumulated enough email material.
+  const gmailReadCounts = { list: 0, get: 0 };
+  const gmailFetchedMessageIds = new Set<string>();
+  let gmailLoopWarningInjected = false;
+
   // ---- Per-turn tool-result cache ----
   // Read-only tools called twice with identical args inside ONE chat turn
   // return the first cached result. Kills duplicate Gmail/GA4/GSC/Drive
