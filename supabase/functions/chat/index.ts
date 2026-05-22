@@ -8352,6 +8352,23 @@ function extractGoogleDocId(text: string): string | null {
   return m ? m[1] : null;
 }
 
+// Catch Gemini / Meet notes / NotebookLM / Docs links so we can surface them
+// even when analyze_content can't open them directly.
+function extractNotesLinks(text: string): string[] {
+  const out = new Set<string>();
+  const patterns = [
+    /https?:\/\/docs\.google\.com\/document\/d\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/gemini\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/notebooklm\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/meet\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+  ];
+  for (const re of patterns) {
+    const found = text.match(re);
+    if (found) for (const u of found) out.add(u.replace(/[).,]+$/, ''));
+  }
+  return Array.from(out);
+}
+
 function buildRecipeResult(
   content: string,
   toolsUsed: string[],
@@ -8518,9 +8535,17 @@ async function tryRecipe(
       }
     }
 
-    // Skip the analyze_content doc step if no doc ID was found
+    // Skip the analyze_content doc step if no doc ID was found, but surface any
+    // related notes link (Gemini, Meet notes, NotebookLM) so synthesis can show it.
     if (step.tool === 'analyze_content' && (args as any).id === '') {
-      transcript.push(`No Google Doc link found in the email — skipping doc analysis.`);
+      const links = extractNotesLinks(lastEmailBody);
+      if (links.length) {
+        transcript.push(
+          `No Google Doc was directly embedded, but the email contains the following notes link(s) which likely hold the full content. Present them to the user as the source and offer to open or further analyze:\n${links.map((u) => `- ${u}`).join('\n')}`,
+        );
+      } else {
+        transcript.push(`No Google Doc or Gemini/Meet notes link found in the email — only the email's own body is available.`);
+      }
       continue;
     }
 
