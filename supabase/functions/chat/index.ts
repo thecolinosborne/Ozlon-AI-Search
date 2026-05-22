@@ -8338,7 +8338,7 @@ RULES:
     ];
     if (!VALID.includes(intent)) return null;
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
-    if (confidence < 0.85) return null;
+    if (confidence < 0.75) return null;
     const params = (parsed.params && typeof parsed.params === 'object') ? parsed.params as Record<string,string> : {};
     return { intent, params, confidence, plan: String(parsed.plan || '') };
   } catch (e) {
