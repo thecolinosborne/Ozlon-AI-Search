@@ -18,6 +18,13 @@ export function stripHtml(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    // Preserve link URLs: <a href="X">text</a> → text (X)
+    .replace(/<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
+      const t = String(text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const h = String(href).trim();
+      if (!h || h.startsWith("mailto:") || h.startsWith("#")) return t;
+      return t && t !== h ? `${t} (${h})` : h;
+    })
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -51,7 +58,39 @@ export function extractEmailBody(payload: MimePart | undefined | null): string {
     (p.parts || []).forEach(walk);
   };
   walk(payload);
-  if (plain) return plain.trim();
+
+  // Harvest URLs from the HTML version so notification emails (Gemini,
+  // Calendar, Meet, NotebookLM, etc.) don't lose their primary action link
+  // when we fall back to the plain-text part.
+  const harvestHrefs = (raw: string): string[] => {
+    if (!raw) return [];
+    const out = new Set<string>();
+    const re = /href\s*=\s*["']([^"']+)["']/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      const h = m[1].trim();
+      if (!h || h.startsWith("mailto:") || h.startsWith("#")) continue;
+      // Prioritize notes / doc / meeting links — surface those first.
+      out.add(h);
+    }
+    return Array.from(out);
+  };
+
+  if (plain) {
+    const hrefs = harvestHrefs(html);
+    const missing = hrefs.filter((u) => !plain.includes(u));
+    if (missing.length) {
+      const top = missing
+        .filter((u) => /docs\.google\.com|gemini\.google\.com|notebooklm\.google\.com|meet\.google\.com|calendar\.google\.com|drive\.google\.com/i.test(u))
+        .slice(0, 5);
+      const rest = missing.filter((u) => !top.includes(u)).slice(0, 5);
+      const all = [...top, ...rest];
+      if (all.length) {
+        return `${plain.trim()}\n\n[Links found in HTML body]\n${all.map((u) => `- ${u}`).join("\n")}`;
+      }
+    }
+    return plain.trim();
+  }
   if (html) return stripHtml(html);
   return "";
 }

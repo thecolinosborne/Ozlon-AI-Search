@@ -8338,7 +8338,7 @@ RULES:
     ];
     if (!VALID.includes(intent)) return null;
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
-    if (confidence < 0.85) return null;
+    if (confidence < 0.75) return null;
     const params = (parsed.params && typeof parsed.params === 'object') ? parsed.params as Record<string,string> : {};
     return { intent, params, confidence, plan: String(parsed.plan || '') };
   } catch (e) {
@@ -8590,9 +8590,19 @@ async function tryRecipe(
     {
       role: 'system',
       content:
-        `You are answering the user's request using ONLY the material below. ` +
-        `Do not invent facts. If the material is incomplete, say what's missing and what action the user can take next. ` +
-        `Be concise: short summary, then key points, then any action items. No emojis.`,
+        `You are answering the user's request using ONLY the material below. Never invent facts. ` +
+        `If material is incomplete, state precisely what is missing and the single next action the user can take.\n\n` +
+        `FORMAT (markdown, no emojis, calm Jarvis tone, short sentences ≤14 words):\n` +
+        `### <one-line headline>\n` +
+        `One short paragraph (2 sentences max) framing what was found.\n\n` +
+        `**Key points**\n` +
+        `- bullet\n- bullet\n- bullet  (3–6 max, each ≤18 words)\n\n` +
+        `**Action items** (only if any)\n` +
+        `- verb-first action\n\n` +
+        `**Links** (only if URLs appear in the material)\n` +
+        `- [Descriptive label](URL)\n\n` +
+        `Rules: render all URLs from the material as proper markdown links. Use relative time ("yesterday", "2 days ago"). ` +
+        `Omit any section that has no content. No preamble, no sign-off, no apologies.`,
     },
     { role: 'system', content: `Gathered material:\n\n${transcript.join('\n\n---\n\n').slice(0, 24000)}` },
   ];
