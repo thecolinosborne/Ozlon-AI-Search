@@ -8575,9 +8575,20 @@ async function runToolLoop(
         taskCreated = true;
       }
 
-      // Execute all tool calls in parallel with task updates
-      const toolResults = await Promise.all(
-        msg.tool_calls.map(async (tc: { id: string; function: { name: string; arguments: string } }) => {
+      // Execute tool calls with bounded concurrency to avoid per-edge-function
+      // rate limits (e.g. Deno edge runtime caps individual functions at ~60/min).
+      // 4 parallel keeps latency low without nuking burst-sensitive integrations.
+      const TOOL_LOOP_CONCURRENCY = 4;
+      const toolResults: Array<{ role: 'tool'; tool_call_id: string; name: string; content: string }> = new Array(msg.tool_calls.length);
+      let _toolCursor = 0;
+      const _toolWorkers = Array.from(
+        { length: Math.min(TOOL_LOOP_CONCURRENCY, msg.tool_calls.length) },
+        async () => {
+          while (true) {
+            const _idx = _toolCursor++;
+            if (_idx >= msg.tool_calls.length) return;
+            const tc = msg.tool_calls[_idx] as { id: string; function: { name: string; arguments: string } };
+            toolResults[_idx] = await (async (tc: { id: string; function: { name: string; arguments: string } }) => {
           let args: Record<string, unknown>;
           try {
             args = JSON.parse(tc.function.arguments);
