@@ -8352,6 +8352,23 @@ function extractGoogleDocId(text: string): string | null {
   return m ? m[1] : null;
 }
 
+// Catch Gemini / Meet notes / NotebookLM / Docs links so we can surface them
+// even when analyze_content can't open them directly.
+function extractNotesLinks(text: string): string[] {
+  const out = new Set<string>();
+  const patterns = [
+    /https?:\/\/docs\.google\.com\/document\/d\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/gemini\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/notebooklm\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+    /https?:\/\/meet\.google\.com\/[a-zA-Z0-9_\-\/?=&%.#]+/g,
+  ];
+  for (const re of patterns) {
+    const found = text.match(re);
+    if (found) for (const u of found) out.add(u.replace(/[).,]+$/, ''));
+  }
+  return Array.from(out);
+}
+
 function buildRecipeResult(
   content: string,
   toolsUsed: string[],
