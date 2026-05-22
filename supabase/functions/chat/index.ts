@@ -8704,8 +8704,12 @@ async function runToolLoop(
             name: tc.function.name,
             content: JSON.stringify(result),
           };
-        })
+            })(tc);
+          }
+        },
       );
+      await Promise.all(_toolWorkers);
+
 
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
