@@ -81,6 +81,7 @@
 - [Stabilization policy](mem://architecture/stabilization-policy) — No broad refactors, isolated lifecycle fixes only
 - [Removed features](mem://features/removed-tasks-and-video-studio) — Tasks, Video Studio, Facebook Ads, Maton removed permanently
 - [Signal envelope](mem://architecture/signal-envelope) — 5-bucket signal model + 8-level priority hierarchy. Pure builder, sliced renderers, trie-cached entities. Generalizes per-integration account binding.
+- [PM skill pack](mem://features/pm-skill-pack) — pm-orchestrator + prioritize/breakdown/assign/roadmap. Self-improves via correction memories + skill-reviewer loop. Tools all pre-existing, no schema changes.
 
 ### Integrations Hub & Services
 - [Hub visual identity](mem://integrations/hub-visual-identity) — Vercel/Stripe aesthetic for modular integration cards
