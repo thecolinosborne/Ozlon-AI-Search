@@ -102,6 +102,32 @@ export async function dispatchTool(
     let data: Record<string, unknown> = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
 
+    // Some runtimes deliver rate-limit messages as a 200 body or non-JSON text.
+    // Detect + retry once with the suggested delay.
+    const rateLimitMs = typeof data?.raw === "string" ? parseRetryMs(data.raw as string)
+      : typeof (data as Record<string, unknown>)?.error === "string" ? parseRetryMs((data as Record<string, unknown>).error as string)
+      : null;
+    if (rateLimitMs !== null && attempt < MAX_RATELIMIT_RETRIES) {
+      attempt++;
+      console.warn(`[dispatcher] ${toolName} rate-limited (body), retry ${attempt}/${MAX_RATELIMIT_RETRIES} in ${rateLimitMs}ms`);
+      await new Promise((r) => setTimeout(r, rateLimitMs + Math.floor(Math.random() * 500)));
+      // Re-issue the request inline (single retry path).
+      try {
+        res = await fetch(`${supabaseUrl}/functions/v1/${route.edgeFunction}`, {
+          method: "POST",
+          headers: { "Authorization": authHeader, "apikey": anonKey, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const t2 = await res.text();
+        data = {};
+        try { data = t2 ? JSON.parse(t2) : {}; } catch { data = { raw: t2 }; }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { success: false, routed: true, result: `Tool ${toolName} error after retry: ${msg}` };
+      }
+    }
+
+
     if (!res.ok || data?.success === false) {
       const rawErr = data?.error;
       let errMsg: string;
