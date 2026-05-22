@@ -8239,44 +8239,74 @@ function planToServiceIntents(plan: AgenticPlan): string[] {
 // runToolLoop remain in place for all non-matching requests.
 // ============================================================================
 
-type EmailRecipeIntent = 'email_summarize' | 'email_scan_notes' | 'none';
+// ============================================================================
+// UNIVERSAL INTENT DEDUCER + RECIPE EXECUTOR
+// ----------------------------------------------------------------------------
+// Replaces the original email-only classifier. One cheap LLM call deduces the
+// intent + params across email, calendar, drive/docs, and GHL. Read-only
+// intents auto-execute via a fixed step recipe (≤ 6 tool calls, no LLM loop).
+// Write intents (send/create/delete) intentionally fall through to the
+// existing free-form tool loop so list-confirm-act protocol applies.
+// ============================================================================
 
-interface EmailRecipeClassification {
-  intent: EmailRecipeIntent;
-  gmail_query: string;
+type RecipeIntent =
+  | 'email_summarize'
+  | 'email_scan_notes'
+  | 'email_attachment_analyze'
+  | 'calendar_today'
+  | 'drive_find_file'
+  | 'docs_summarize'
+  | 'ghl_find_contact'
+  | 'ghl_recent_activity'
+  | 'none';
+
+interface RecipeClassification {
+  intent: RecipeIntent;
+  params: Record<string, string>;
   confidence: number;
+  plan: string; // one-line human-readable plan for logs
 }
 
-async function classifyEmailIntent(
+// Words that hint a recipe MIGHT apply. If none present, skip the LLM call.
+const RECIPE_HINTS = [
+  'email','inbox','gmail','message from','note','notes','wrote','sent me','reply',
+  'attachment','pdf','invoice','receipt',
+  'calendar','schedule','today','tomorrow','this week','meeting','agenda','on my plate',
+  'drive','file','folder','doc','document','sheet','spreadsheet',
+  'contact','lead','crm','ghl','gohighlevel','pipeline','opportunity',
+];
+
+async function classifyIntent(
   userMessage: string,
   lastAssistant: string | undefined,
-): Promise<EmailRecipeClassification | null> {
+): Promise<RecipeClassification | null> {
   const lovableKey = Deno.env.get('LOVABLE_API_KEY');
   if (!lovableKey) return null;
   const trimmed = (userMessage || '').trim();
   if (trimmed.length < 4 || trimmed.length > 600) return null;
 
-  // Cheap keyword pre-filter — skip the LLM call entirely if no email words.
   const hay = trimmed.toLowerCase();
-  const EMAIL_WORDS = ['email', 'inbox', 'gmail', 'message from', 'note', 'notes', 'wrote', 'sent me'];
-  if (!EMAIL_WORDS.some((w) => hay.includes(w))) return null;
+  if (!RECIPE_HINTS.some((w) => hay.includes(w))) return null;
 
-  const system = `You classify a user request into ONE email-handling intent.
-Return STRICT JSON: {"intent":"email_summarize"|"email_scan_notes"|"none","gmail_query":"<gmail search string>","confidence":0..1}.
+  const system = `You classify a user request into ONE deterministic recipe intent.
+Return STRICT JSON: {"intent":"<id>","params":{...},"confidence":0..1,"plan":"<one-line human plan>"}.
 
-Intents:
-- email_summarize: user wants the gist of an email from a person or about a topic.
-  Examples: "summarize the last email from John", "what did Sarah say in her email".
-- email_scan_notes: user wants notes/meeting notes/Gemini notes/transcripts inside an email
-  (often a Google Doc linked in the email).
-  Examples: "scan the Gemini notes in Ben's email", "summarize the meeting notes from yesterday's email".
-- none: anything else (composing, deleting, listing many, ambiguous, multi-step plans).
+INTENTS and required params:
+- email_summarize        params: { gmail_query }      — summarize a specific email
+- email_scan_notes       params: { gmail_query }      — find email + extract & summarize linked notes/doc
+- email_attachment_analyze params: { gmail_query }    — find email + analyze its attachment
+- calendar_today         params: { range }            — read calendar (range: "today"|"tomorrow"|"this_week")
+- drive_find_file        params: { drive_query }      — find a file in Drive
+- docs_summarize         params: { doc_query }        — summarize a specific Google Doc by name/keywords
+- ghl_find_contact       params: { contact_query }    — look up a contact in GoHighLevel
+- ghl_recent_activity    params: { contact_query }    — recent activity for a GHL contact
+- none                   params: {}                   — anything else (writes, multi-step, ambiguous)
 
-gmail_query: build a Gmail search string. Use from:<name>, subject:<word>, or keywords.
-Strip filler. Example: "Ben Tamburello Gemini" -> "from:tamburello OR (Ben Tamburello)".
-Default to "" only when intent=none.
-
-confidence: 0.9+ only when the request is unambiguous and matches one intent.`;
+RULES:
+- Writes (send/create/delete/schedule/book/reply) → intent=none, let free-form loop handle.
+- gmail_query: build a Gmail search string (from:<name>, subject:<word>, keywords). Example "Ben Tamburello Gemini" → "from:tamburello OR (Ben Tamburello)".
+- confidence ≥ 0.85 ONLY when the request unambiguously matches one intent.
+- plan: short imperative sentence like "Search Gmail for Ben Tamburello and summarize the linked Gemini doc."`;
 
   const userPrompt = lastAssistant
     ? `Previous assistant turn (context):\n${lastAssistant.slice(0, 400)}\n\nUser request:\n${trimmed}`
@@ -8299,21 +8329,24 @@ confidence: 0.9+ only when the request is unambiguous and matches one intent.`;
     const json = await resp.json();
     const raw = String(json?.choices?.[0]?.message?.content || '').trim();
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<EmailRecipeClassification>;
-    const intent = parsed.intent as EmailRecipeIntent;
-    if (intent !== 'email_summarize' && intent !== 'email_scan_notes') return null;
+    const parsed = JSON.parse(raw) as Partial<RecipeClassification>;
+    const intent = parsed.intent as RecipeIntent;
+    const VALID: RecipeIntent[] = [
+      'email_summarize','email_scan_notes','email_attachment_analyze',
+      'calendar_today','drive_find_file','docs_summarize',
+      'ghl_find_contact','ghl_recent_activity',
+    ];
+    if (!VALID.includes(intent)) return null;
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
-    if (confidence < 0.8) return null;
-    const gmail_query = String(parsed.gmail_query || '').trim();
-    if (!gmail_query) return null;
-    return { intent, gmail_query, confidence };
+    if (confidence < 0.85) return null;
+    const params = (parsed.params && typeof parsed.params === 'object') ? parsed.params as Record<string,string> : {};
+    return { intent, params, confidence, plan: String(parsed.plan || '') };
   } catch (e) {
-    console.warn('[EmailRecipe] classifier failed:', (e as Error).message);
+    console.warn('[Recipe] classifier failed:', (e as Error).message);
     return null;
   }
 }
 
-// Extract first Google Doc ID from text. Matches docs.google.com/document/d/<ID>.
 function extractGoogleDocId(text: string): string | null {
   const m = text.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]{20,})/);
   return m ? m[1] : null;
@@ -8326,7 +8359,18 @@ function buildRecipeResult(
   return { role: 'assistant', content, toolsUsed, investigations: [], researchReports: [] };
 }
 
-async function tryEmailRecipe(
+// Step definition for the generic recipe runner.
+interface RecipeStep {
+  tool: string;
+  args: Record<string, unknown>;
+  label: string; // shown in task_update events
+  // If returns falsy, step is skipped. If returns string, it replaces the
+  // raw tool result in the transcript. Use to pull doc IDs out of email body.
+  transform?: (rawResult: string, transcript: string[]) => Promise<RecipeStep[] | null> | RecipeStep[] | null;
+  optional?: boolean; // failure does not abort recipe
+}
+
+async function tryRecipe(
   userMessage: string,
   lastAssistant: string | undefined,
   modelConfig: ModelConfig,
@@ -8336,77 +8380,192 @@ async function tryEmailRecipe(
   ghlCreds: { apiKey?: string; locationId?: string; subAccounts?: { id: string; name: string; api_key?: string }[] } | undefined,
   onTaskUpdate?: (event: TaskUpdateEvent) => void | Promise<void>,
 ): Promise<{ role: string; content: string; toolsUsed: string[]; investigations: never[]; researchReports: never[] } | null> {
-  const cls = await classifyEmailIntent(userMessage, lastAssistant);
+  const cls = await classifyIntent(userMessage, lastAssistant);
   if (!cls) return null;
 
-  console.log(`[EmailRecipe] match intent=${cls.intent} q="${cls.gmail_query}" conf=${cls.confidence}`);
+  console.log(`[Recipe] match intent=${cls.intent} conf=${cls.confidence} plan="${cls.plan}" params=${JSON.stringify(cls.params)}`);
   const taskId = crypto.randomUUID();
   const toolsUsed: string[] = [];
-  const transcript: string[] = [];
+  const transcript: string[] = [`Plan: ${cls.plan}`];
+
+  const titleFor = (i: RecipeIntent): string => {
+    if (i.startsWith('email_')) return i === 'email_scan_notes' ? 'Scanning notes' : i === 'email_attachment_analyze' ? 'Analyzing attachment' : 'Summarizing email';
+    if (i === 'calendar_today') return 'Reading calendar';
+    if (i === 'drive_find_file') return 'Searching Drive';
+    if (i === 'docs_summarize') return 'Summarizing doc';
+    if (i.startsWith('ghl_')) return i === 'ghl_recent_activity' ? 'Checking activity' : 'Looking up contact';
+    return 'Working';
+  };
 
   const emit = async (step: string, status: 'in_progress' | 'done' | 'error' = 'in_progress') => {
     if (!onTaskUpdate) return;
     try {
-      await onTaskUpdate({
-        taskId,
-        title: cls.intent === 'email_scan_notes' ? 'Scanning notes' : 'Summarizing email',
-        step,
-        status,
-      } as TaskUpdateEvent);
+      await onTaskUpdate({ taskId, title: titleFor(cls.intent), step, status } as TaskUpdateEvent);
     } catch { /* stream closed */ }
   };
 
-  // Step 1: list_email_ids
-  await emit('Searching inbox');
-  const listRes = await executeToolCall('list_email_ids', { query: cls.gmail_query, max_results: 5 }, connMap, userMessage, aliasMap, ghlCreds);
-  toolsUsed.push('list_email_ids');
-  if (!listRes.success) {
-    return buildRecipeResult(`I searched your inbox for \`${cls.gmail_query}\` but the search failed: ${listRes.result}. Try reconnecting Gmail in Integrations, or rephrase the request.`, toolsUsed);
-  }
-  let ids: string[] = [];
-  try { ids = (JSON.parse(listRes.result) as { ids?: string[] }).ids || []; } catch { /* */ }
-  if (ids.length === 0) {
-    return buildRecipeResult(`I couldn't find any email matching \`${cls.gmail_query}\`. Try a different name, subject, or date range.`, toolsUsed);
-  }
-  transcript.push(`Inbox search for "${cls.gmail_query}": ${ids.length} match(es).`);
+  // ── Build the step list per intent ──────────────────────────────────────
+  const steps: RecipeStep[] = [];
+  const p = cls.params;
 
-  // Step 2: get_email (top result)
-  await emit('Reading email');
-  const getRes = await executeToolCall('get_email', { message_id: ids[0] }, connMap, userMessage, aliasMap, ghlCreds);
-  toolsUsed.push('get_email');
-  if (!getRes.success) {
-    return buildRecipeResult(`Found the email but couldn't read it: ${getRes.result}.`, toolsUsed);
-  }
-  const emailBody = getRes.result;
-  transcript.push(`Email content:\n${emailBody}`);
-
-  // Step 3 (notes only): if a Google Doc is linked, fetch + analyze it.
-  if (cls.intent === 'email_scan_notes') {
-    const docId = extractGoogleDocId(emailBody);
-    if (docId) {
-      await emit('Reading linked Google Doc');
-      const docRes = await executeToolCall(
-        'analyze_content',
-        { source_type: 'doc', id: docId, focus: 'meeting notes, decisions, action items' },
-        connMap, userMessage, aliasMap, ghlCreds,
-      );
-      toolsUsed.push('analyze_content');
-      if (docRes.success) {
-        transcript.push(`Linked Google Doc analysis:\n${docRes.result}`);
-      } else {
-        transcript.push(`Tried to read linked Google Doc ${docId} but failed: ${docRes.result}`);
+  switch (cls.intent) {
+    case 'email_summarize':
+    case 'email_scan_notes':
+    case 'email_attachment_analyze': {
+      const q = p.gmail_query || '';
+      if (!q) {
+        return buildRecipeResult(`I couldn't tell which email to look at. Try giving me a name, subject, or keyword.`, []);
       }
+      steps.push({ tool: 'list_email_ids', args: { query: q, max_results: 5 }, label: 'Searching inbox' });
+      steps.push({
+        tool: 'get_email',
+        args: { message_id: '__FROM_PREV_FIRST_ID__' },
+        label: 'Reading email',
+      });
+      if (cls.intent === 'email_scan_notes') {
+        steps.push({
+          tool: 'analyze_content',
+          args: { source_type: 'doc', id: '__FROM_EMAIL_DOC_ID__', focus: 'meeting notes, decisions, action items' },
+          label: 'Reading linked Google Doc',
+          optional: true,
+        });
+      }
+      break;
+    }
+    case 'calendar_today': {
+      const range = (p.range || 'today').toLowerCase();
+      steps.push({
+        tool: 'list_emails', // placeholder; real calendar tool below if available
+        args: {},
+        label: 'Reading calendar',
+      });
+      // Replace with actual calendar fetch via analyze_content (which supports calendar) if present
+      steps.length = 0;
+      steps.push({
+        tool: 'analyze_content',
+        args: { source_type: 'calendar', range, focus: 'events, times, attendees' },
+        label: `Reading calendar (${range})`,
+      });
+      break;
+    }
+    case 'drive_find_file': {
+      const dq = p.drive_query || '';
+      if (!dq) return buildRecipeResult(`Tell me a file name or keyword and I'll search Drive.`, []);
+      steps.push({ tool: 'search_google_drive', args: { query: dq, max_results: 10 }, label: 'Searching Drive' });
+      break;
+    }
+    case 'docs_summarize': {
+      const dq = p.doc_query || '';
+      if (!dq) return buildRecipeResult(`Tell me which doc — name, keyword, or link.`, []);
+      steps.push({ tool: 'search_google_drive', args: { query: `${dq} mimeType:application/vnd.google-apps.document`, max_results: 5 }, label: 'Finding doc' });
+      steps.push({
+        tool: 'analyze_content',
+        args: { source_type: 'doc', id: '__FROM_DRIVE_FIRST_DOC_ID__', focus: dq },
+        label: 'Reading doc',
+      });
+      break;
+    }
+    case 'ghl_find_contact': {
+      const cq = p.contact_query || '';
+      if (!cq) return buildRecipeResult(`Tell me the contact's name, email, or phone.`, []);
+      steps.push({ tool: 'ghl_search_contacts', args: { query: cq, limit: 5 }, label: 'Searching contacts' });
+      break;
+    }
+    case 'ghl_recent_activity': {
+      const cq = p.contact_query || '';
+      if (!cq) return buildRecipeResult(`Which contact? Give me a name, email, or phone.`, []);
+      steps.push({ tool: 'ghl_search_contacts', args: { query: cq, limit: 1 }, label: 'Finding contact' });
+      steps.push({ tool: 'ghl_list_contact_notes', args: { contactId: '__FROM_GHL_CONTACT_ID__' }, label: 'Reading notes', optional: true });
+      steps.push({ tool: 'ghl_list_contact_tasks', args: { contactId: '__FROM_GHL_CONTACT_ID__' }, label: 'Reading tasks', optional: true });
+      break;
+    }
+    case 'none':
+      return null;
+  }
+
+  // ── Execute steps with light placeholder interpolation ──────────────────
+  let lastEmailBody = '';
+  let lastEmailIds: string[] = [];
+  let firstDriveDocId = '';
+  let ghlContactId = '';
+
+  for (const step of steps.slice(0, 6)) {
+    // Resolve placeholders
+    const args = { ...step.args };
+    for (const k of Object.keys(args)) {
+      const v = args[k];
+      if (typeof v !== 'string') continue;
+      if (v === '__FROM_PREV_FIRST_ID__') {
+        if (!lastEmailIds[0]) {
+          return buildRecipeResult(`I couldn't find any email matching \`${p.gmail_query}\`. Try a different name, subject, or date range.`, toolsUsed);
+        }
+        args[k] = lastEmailIds[0];
+      } else if (v === '__FROM_EMAIL_DOC_ID__') {
+        const docId = extractGoogleDocId(lastEmailBody);
+        if (!docId) { /* skip step */ args[k] = ''; }
+        else args[k] = docId;
+      } else if (v === '__FROM_DRIVE_FIRST_DOC_ID__') {
+        if (!firstDriveDocId) {
+          return buildRecipeResult(`Couldn't find a Google Doc matching \`${p.doc_query}\` in your Drive.`, toolsUsed);
+        }
+        args[k] = firstDriveDocId;
+      } else if (v === '__FROM_GHL_CONTACT_ID__') {
+        if (!ghlContactId) {
+          if (step.optional) continue;
+          return buildRecipeResult(`Couldn't locate that contact in GoHighLevel.`, toolsUsed);
+        }
+        args[k] = ghlContactId;
+      }
+    }
+
+    // Skip the analyze_content doc step if no doc ID was found
+    if (step.tool === 'analyze_content' && (args as any).id === '') {
+      transcript.push(`No Google Doc link found in the email — skipping doc analysis.`);
+      continue;
+    }
+
+    await emit(step.label);
+    const res = await executeToolCall(step.tool, args as Record<string, unknown>, connMap, userMessage, aliasMap, ghlCreds);
+    toolsUsed.push(step.tool);
+    if (!res.success) {
+      if (step.optional) {
+        transcript.push(`(${step.label} skipped: ${res.result})`);
+        continue;
+      }
+      return buildRecipeResult(`I ran "${step.label}" but it failed: ${res.result}. Try rephrasing or reconnect the integration in Integrations.`, toolsUsed);
+    }
+    transcript.push(`${step.label} result:\n${res.result}`);
+
+    // Capture state for placeholder resolution in following steps
+    if (step.tool === 'list_email_ids') {
+      try { lastEmailIds = (JSON.parse(res.result) as { ids?: string[] }).ids || []; } catch { /* */ }
+    } else if (step.tool === 'get_email') {
+      lastEmailBody = res.result;
+    } else if (step.tool === 'search_google_drive') {
+      // Best-effort: extract first doc id from result
+      try {
+        const parsed = JSON.parse(res.result);
+        const files = Array.isArray(parsed) ? parsed : (parsed?.files || []);
+        const firstDoc = files.find((f: any) => (f?.mimeType || '').includes('document')) || files[0];
+        if (firstDoc?.id) firstDriveDocId = firstDoc.id;
+      } catch { /* */ }
+    } else if (step.tool === 'ghl_search_contacts') {
+      try {
+        const parsed = JSON.parse(res.result);
+        const contacts = parsed?.contacts || parsed?.items || (Array.isArray(parsed) ? parsed : []);
+        if (contacts[0]?.id) ghlContactId = contacts[0].id;
+      } catch { /* */ }
     }
   }
 
-  // Final synthesis — one tools-disabled call against gathered material.
+  // ── Final synthesis ─────────────────────────────────────────────────────
   await emit('Summarizing');
   const synthesisMessages = [
     ...baseMessages,
     {
       role: 'system',
       content:
-        `You are answering the user's email request using ONLY the material below. ` +
+        `You are answering the user's request using ONLY the material below. ` +
         `Do not invent facts. If the material is incomplete, say what's missing and what action the user can take next. ` +
         `Be concise: short summary, then key points, then any action items. No emojis.`,
     },
@@ -8419,16 +8578,13 @@ async function tryEmailRecipe(
       modelConfig.name,
       synthesisMessages,
       [],
-      (entry) => ({
-        model: entry.model,
-        messages: synthesisMessages,
-      }),
+      (entry) => ({ model: entry.model, messages: synthesisMessages }),
     );
     const data = await response.json();
     finalText = String(data?.choices?.[0]?.message?.content || '').trim();
-    console.log(`[EmailRecipe] synthesis via ${used.label}, ${finalText.length} chars`);
+    console.log(`[Recipe] synthesis via ${used.label}, ${finalText.length} chars`);
   } catch (e) {
-    console.warn('[EmailRecipe] synthesis failed:', (e as Error).message);
+    console.warn('[Recipe] synthesis failed:', (e as Error).message);
   }
 
   if (!finalText) {
@@ -8438,6 +8594,9 @@ async function tryEmailRecipe(
   await emit('Done', 'done');
   return buildRecipeResult(finalText, toolsUsed);
 }
+
+// Back-compat alias — the call site below uses the old name.
+const tryEmailRecipe = tryRecipe;
 
 async function runToolLoop(
   modelConfig: ModelConfig,

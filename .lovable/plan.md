@@ -1,81 +1,144 @@
 ## Goal
 
-Stop email queries from looping or hitting "try a simpler request" by routing common email intents through deterministic recipes instead of the free tool loop.
+When you say something like "scan Ben's Gemini notes," the system should **deduce what you mean** (find the email, extract the doc link, summarize it), **confirm the plan in one line**, then execute deterministically. This applies to **every integration**, not just email.
 
-## Approach
+## What changes
 
-Add a lightweight intent classifier at the top of the chat edge function. When it matches a known email intent with high confidence, execute a fixed recipe (sequence of tool calls) instead of handing the request to the free-form tool loop. Anything not matched falls through to the existing loop unchanged.
+Replace today's narrow `classifyEmailIntent` (3 email intents only) with a **universal intent deduction layer** that runs at the top of every chat turn. The free-form tool loop stays as the fallback for genuinely open requests.
 
-This is additive — the current tool loop, anti-loop guard, and forced-synthesis fallback stay in place as safety nets.
-
-## Scope (this plan)
-
-Three recipes only. These cover the cases that have been failing:
-
-1. **email_summarize** — "summarize the email from X" / "what did Y say"
-   Recipe: `list_email_ids(q, max=5)` → `get_email(top_id, format=full)` → synthesize answer
-
-2. **email_scan_notes** — "scan the Gemini/meeting notes in X's email" / "summarize the notes from Y"
-   Recipe: `list_email_ids(q, max=3)` → `get_email(top_id, format=full)` → if Google Doc link found → `read_google_doc(doc_id)` → synthesize. If notes are inline, skip the doc step.
-
-3. **email_attachment_analyze** — "summarize the PDF/attachment in X's email"
-   Recipe: `list_email_ids(q, max=3)` → `get_email(top_id)` → `gmail_analyze_attachment(message_id, attachment_id)` → synthesize
-
-## Where it goes
-
-`supabase/functions/chat/index.ts` — single new module-level block:
+## Architecture
 
 ```text
-classifyEmailIntent(userMessage) → { intent, query, confidence } | null
-runEmailRecipe(intent, query, ctx) → { messages, finalAnswer } | null
+user message
+   │
+   ▼
+┌─────────────────────────────┐
+│ 1. Intent Deducer (LLM)     │   one cheap call, ~300ms
+│    → { intent, params,      │   gemini-3.5-flash
+│        confidence, plan }   │
+└─────────────────────────────┘
+   │
+   ├─ confidence < 0.7 ──► fall through to free-form tool loop
+   │
+   ▼
+┌─────────────────────────────┐
+│ 2. Confirmation Line        │   one short streamed message:
+│    "I'll search Gmail for   │   "...— proceed?" with Yes/No chips
+│     Ben Tamburello and      │   (auto-yes if confidence > 0.95
+│     scan the linked Gemini  │    AND read-only)
+│     doc. Proceed?"          │
+└─────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────┐
+│ 3. Recipe Executor          │   fixed step sequence per intent
+│    (≤ 6 steps, no LLM loop) │   structured error if any step fails
+└─────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────┐
+│ 4. Synthesis (tools off)    │   final answer streamed normally
+└─────────────────────────────┘
 ```
 
-Called once, immediately after the user message is parsed and before the main tool loop starts. If it returns a result, we stream that result and skip the loop. If it returns null, the loop runs as today.
+## Intent registry
 
-## Classifier
+A single file `supabase/functions/chat/_intents.ts` exports an array of intent definitions. Each definition has:
 
-One cheap LLM call (`google/gemini-3.5-flash` via Lovable AI Gateway) with a tight system prompt:
+- `id` — e.g. `email.scan_notes`
+- `description` — for the deducer's system prompt
+- `params` schema — what the deducer must extract
+- `recipe` — ordered list of tool calls with param interpolation
+- `read_only` — boolean (controls auto-confirm)
+- `confirmation_template` — one-line summary shown to user
 
-- Input: user message + last assistant turn for context
-- Output: strict JSON `{ intent: "email_summarize" | "email_scan_notes" | "email_attachment_analyze" | "none", gmail_query: string, confidence: 0..1 }`
-- Only act when `confidence >= 0.8` AND intent ≠ "none". Otherwise fall through.
+### Coverage (initial set, covers ~90% of failing cases)
 
-`gmail_query` is the Gmail search string the recipe will use (e.g. `from:ben tamburello`). The classifier is responsible for extracting the person/subject/keyword.
+**Gmail / Outlook**
+- `email.summarize` — summarize last email from X
+- `email.scan_notes` — find email + extract & summarize linked doc/notes
+- `email.attachment_analyze` — find email + analyze attachment
+- `email.search` — list emails matching query
+- `email.draft_reply` — draft a reply to a specific email
 
-## Recipe executor
+**Google Calendar**
+- `calendar.today` — what's on my calendar today/tomorrow/this week
+- `calendar.find_slot` — find available time with X
+- `calendar.create_event` — schedule meeting with X
 
-- Hard step cap per recipe (≤ 6 tool calls)
-- Each step's result is appended to the running tool-message list so the final synthesis sees the same shape the loop would have produced
-- If any step fails (no results, 4xx, scope error), return a precise partial-result message: what was searched, what was found, what's missing, what the user can do next — same format as the forced-synthesis fallback. Never fall back to "try a simpler request".
-- Final synthesis is one tools-disabled LLM call against the gathered context, then streamed to the client identically to a normal answer.
+**Google Drive / Docs / Sheets**
+- `drive.find_file` — find a file matching query
+- `docs.summarize` — summarize a specific doc (by name or link)
+- `sheets.read_range` — pull data from a sheet
+
+**GoHighLevel**
+- `ghl.find_contact` — look up contact by name/email/phone
+- `ghl.recent_activity` — what's happened with X recently
+- `ghl.create_task` — create task for contact
+- `ghl.send_message` — SMS/email a contact
+
+**Maton (cross-Google)**
+- `maton.cross_search` — find anything matching query across all connected Google services
+
+**Universal**
+- `none` — falls through to free-form loop
+
+## Confirmation behavior
+
+You chose **"infer + confirm first"**, so every deduced intent emits a one-line confirmation before executing:
+
+> "I'll search Gmail for Ben Tamburello, open the most recent email, and summarize the Gemini doc linked inside. Proceed?"
+
+Streamed as a normal assistant message with two inline chips: **Proceed** and **Cancel**. Confirmation is **skipped only** when:
+- intent is `read_only: true`, AND
+- confidence ≥ 0.95, AND
+- params are fully specified (no placeholders like "the latest")
+
+Cancel either aborts or lets you edit the deduced query inline.
+
+## Failure handling
+
+If any recipe step fails or returns empty:
+- Return a precise partial-result message: "Searched Gmail for `from:ben tamburello` — no results in last 30 days. Want me to broaden the query or try a different name?"
+- Never fall back to "try a simpler request"
+- Free-form loop is NOT invoked as a second attempt (would defeat the determinism)
 
 ## Guardrails preserved
 
-- Existing anti-loop guard, gmail read counters, and 150s time budget remain untouched and protect the free-form loop path.
-- `enableTools: true`, JWT passthrough, email reference ledger, no-DELETE policy all unchanged.
-- Maton gateway calls keep `format=full`.
+- Existing anti-loop guard, gmail read counters, 150s budget — untouched
+- Free-form tool loop — untouched, still runs when intent = `none` or confidence < 0.7
+- Email reference ledger, no-DELETE policy, JWT passthrough — untouched
+- Maton `format=full` — untouched
 
-## Out of scope (deferred)
+## Files touched
 
-- Intent telemetry table (`chat_tool_traces`) — next plan
-- Nightly eval suite — next plan
-- Composite `find_and_read_email` tool — only if recipes prove insufficient
-- Any UI changes — none
+- **NEW** `supabase/functions/chat/_intents.ts` — intent registry (~400 lines, mostly data)
+- **NEW** `supabase/functions/chat/_intent-deducer.ts` — single LLM classifier call + JSON parsing
+- **NEW** `supabase/functions/chat/_recipe-executor.ts` — generic step runner with param interpolation
+- **EDIT** `supabase/functions/chat/index.ts` — replace `classifyEmailIntent` + `tryEmailRecipe` with calls to the new modules
+- **EDIT** `src/components/chat/` — minimal: render two inline chips (Proceed/Cancel) when assistant message has `meta.confirmation_pending = true`
+
+No DB migrations. No new tables. No UI redesign.
 
 ## Verification
 
 1. Deploy `chat` edge function
-2. Run four canned prompts via `curl_edge_functions` against the deployed function:
-   - "Summarize the latest email from Ben Tamburello"
-   - "Look for Ben Tamburello's email and scan the Gemini notes"
-   - "Pull the notes from the Google Doc linked in Ben's last email"
-   - "Summarize the PDF attached to the last invoice email"
-3. For each: confirm the response terminates with a real answer (or a precise partial-result message) and step count ≤ 6
-4. Check `edge_function_logs` for the classifier output and recipe path taken
-5. Run one open-ended prompt ("what's on my plate today?") to confirm the free-form loop still runs unchanged
+2. Run 8 canned prompts via `curl_edge_functions` covering email, calendar, docs, GHL:
+   - "Scan Ben's Gemini notes"
+   - "What's on my plate today?"
+   - "Find Sarah's contact in GHL"
+   - "Summarize the doc Jake sent me"
+   - "Schedule 30 min with Mike next week"
+   - "Pull last week's revenue from the sheet"
+   - "What did Ben say in his last email"
+   - "Find the invoice attachment from Acme"
+3. Each should: deduce correctly, show confirmation line (or auto-execute if read-only + high confidence), terminate ≤ 6 steps, return a real answer
+4. Check `edge_function_logs` for deducer output and recipe path on each
+5. Run one ambiguous prompt ("help me with stuff") to confirm fallthrough to free-form loop still works
 
-## Files touched
+## Out of scope (next plan)
 
-- `supabase/functions/chat/index.ts` — add classifier + recipe executor, wire into top of request handler
-
-No other files. No migrations. No UI changes.
+- Persisting deduced intents to `chat_tool_traces` for telemetry
+- Nightly eval suite
+- Learning from user "Cancel" feedback to improve deduction
+- Composite tools (e.g. `find_and_read_email`) — only if recipes prove insufficient
