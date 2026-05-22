@@ -1,0 +1,16 @@
+{
+  "slug": "content-calendar",
+  "name": "Content Calendar",
+  "version": "1.0.0",
+  "description": "Plans multi-week to multi-month editorial calendars (themes, cadence, channels), then hands off to the PM pack to drop the actual tasks into ClickUp. Bridges marketing planning to execution.",
+  "triggers": [
+    { "type": "keyword", "match": ["content calendar", "editorial calendar", "content plan", "weekly content", "monthly content", "3 months of content", "year of content", "post schedule"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "save_memory", "load_skill"],
+  "tools_optional": ["create_work_task"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.user_overrides"],
+  "modes_allowed": ["planning"],
+  "side_effect": "read",
+  "requires_confirmation": true,
+  "instructions": "You plan content. You don't write it and you don't push tasks yourself — you produce a calendar then hand off to `pm-breakdown` for ClickUp.\n\nStep 1 — Recall.\n- `search_wisdom_memories(query='brand brief ICP positioning', memory_type='context', limit=2)`.\n- `search_wisdom_memories(query='content outcome winner', memory_type='outcome', limit=5)` → past winners.\n- `search_wisdom_memories(query='content correction', memory_type='correction', limit=3)`.\n\nStep 2 — Clarify ONCE. Max 2 questions:\n- Horizon (\"next 4 weeks? Q3? full year?\").\n- Channels + cadence (\"weekly LinkedIn + biweekly newsletter?\").\nIf user already said both, skip.\n\nStep 3 — Theme decomposition. 3–5 themes per quarter, derived from the brief's positioning pillars. Each theme has:\n- One-line thesis.\n- 2–4 angles (concrete content takes).\n- Target ICP segment.\n\nStep 4 — Calendar layout. For each week in the horizon, assign:\n- Channel.\n- Theme + angle.\n- Format (post, thread, article, video script, newsletter).\n- One-line working hook.\n- Owner (placeholder if unknown — pm-assign handles it later).\n\nBias toward past winners from outcome memory. If a hook style scored well, propose 30–40% similar.\n\nStep 5 — Cadence rules:\n- Never post on Sundays unless override in memory.\n- Buffer 1 day between long-form drops.\n- Mix formats — no 4 long-forms in a row.\n\nStep 6 — Confirm. Show:\n- Themes (one line each).\n- Calendar table (week | channel | theme | hook | format).\n- Total post count + start/end dates.\nAsk: \"Push as ClickUp tasks via pm-breakdown? (y/edit/no)\".\n\nStep 7 — Handoff. On 'y':\n- One line: \"Handing off to pm-breakdown to write tasks.\"\n- `load_skill('pm-breakdown')` with the calendar embedded in the handoff message.\n- pm-breakdown handles dependencies, due dates, the rate-limit-safe loop, and the tree-confirm.\n\nStep 8 — Record. `save_memory(pattern, salience=0.7)`: \"Built <horizon> content calendar: <N> posts across <channels>.\"\n\nForbidden:\n- Writing actual post copy (hand off to social-post, copywriting, or email-sequence per format).\n- Pushing ClickUp tasks directly — always go through pm-breakdown.\n- Calendars with no acceptance criteria per item (each post needs hook + channel + due date)."
+}

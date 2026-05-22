@@ -1,0 +1,16 @@
+{
+  "slug": "landing-page-builder",
+  "name": "Landing Page Builder",
+  "version": "1.0.0",
+  "description": "Builds full landing page outlines: section-by-section structure + headline + sub + body + CTA. Hands section copy to the copywriting skill for polish, runs final pass through brand-voice-guardian.",
+  "triggers": [
+    { "type": "keyword", "match": ["landing page", "lp", "build a landing page", "full page", "sales page", "product page", "feature page", "pricing page structure"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "load_skill", "save_memory"],
+  "tools_optional": ["create_google_doc", "docs_apply_markdown", "scrape_url"],
+  "memory_domains": ["marketing.product_context", "marketing.outcomes", "marketing.corrections"],
+  "modes_allowed": ["planning", "focus"],
+  "side_effect": "write",
+  "requires_confirmation": true,
+  "instructions": "You design landing pages section by section. Structure first, copy second.\n\nStep 1 — Recall brief + winners + corrections (same pattern as other skills).\n\nNo brief → refuse, route to product-marketing-context.\n\nStep 2 — Clarify ONCE. Max 2 questions:\n- Page goal (\"signup, demo book, paid trial, waitlist?\").\n- Audience temperature (\"cold from ads / warm from blog / existing user?\").\n\nStep 3 — Section recipe (default for warm B2B SaaS; adapt to context):\n\n1. **Hero** — promise + proof element. Headline ≤10 words, sub ≤20 words, primary CTA.\n2. **Logo bar / social proof** — 4–6 logos OR one strong stat.\n3. **Problem agitation** — 3-bullet pain frame, 1 line each.\n4. **Solution overview** — what the product is in one sentence + 3 feature pillars (icon + 2-line each).\n5. **Demo/visual section** — image/video placeholder + 2-line caption.\n6. **How it works** — 3 steps, one line each.\n7. **Outcomes / case study** — 1 customer quote + 3 metric chips.\n8. **Objection handlers** — 4–6 FAQ items.\n9. **Pricing teaser** (if relevant) — one card or \"see pricing\" CTA.\n10. **Final CTA block** — restate the promise, single button.\n\nFor cold paid-traffic LPs: collapse 2+3+4 into a single \"big idea\" block above the fold; skip pricing.\nFor pricing pages: lead with the comparison table; skip 3/4.\n\nStep 4 — Generate the OUTLINE first (section name + one-line purpose + working headline). Confirm with user before writing full copy. Ask: \"Outline good? (y/edit/no)\".\n\nStep 5 — On 'y', generate full copy section by section. For headline-heavy sections (hero, objection handlers, CTA block), call `load_skill('copywriting')` to draft variants. Pick the best, slot in.\n\nStep 6 — Voice gate. Run the full draft through `load_skill('brand-voice-guardian')`. Rewrite flagged spans once.\n\nStep 7 — Output. Markdown doc, one H2 per section, copy underneath. If `create_google_doc` is available, write to a Doc and return the link.\n\nStep 8 — Record.\n- `save_memory(pattern, salience=0.7)`: \"Built LP for <goal> targeting <audience>.\"\n- If user later reports conversion rate: `save_memory(outcome, salience=0.9)`.\n\nForbidden:\n- Writing full copy before the outline is confirmed.\n- Pages with no single primary CTA.\n- Multiple competing CTAs above the fold.\n- Hero copy over 10 words on the headline.\n- Skipping the voice gate."
+}
