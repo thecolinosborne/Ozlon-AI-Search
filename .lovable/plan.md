@@ -1,61 +1,87 @@
-# Why you don't see the skills
+# Revised plan: make email queries reliable across the board
 
-The Skills page reads from the `skills` table in the backend. Your DB currently only has 4 skills (`ab-test-setup`, two `higgsfield-ad-director`, `marketing-studio-director`). All the PM and marketing skill files we wrote live in `public/sample-skills/` but were never seeded into the catalog, so they don't appear in Browse.
+## Goal
+Fix the recurring email-query failure pattern systemically, not just for Ben Tamburello / Gemini notes.
 
-On top of that, only one generic `social-post` skill exists — there's no per-channel coverage.
+## What this will cover
+This work will target the full class of email-reading requests, including:
+- finding a specific person’s email
+- summarizing an email body
+- pulling linked Google Docs content from an email
+- analyzing attachments when the useful content is not in the body
+- returning a useful partial answer instead of the dead-end max-step fallback
 
-# What I'll do
+## What I’ll change
 
-## 1. Seed the catalog (one migration)
+### 1. Add a general anti-loop guard in the chat backend
+Prevent repeated Gmail read cycles from consuming the whole tool budget.
 
-Insert every file in `public/sample-skills/` into `skills` as `source='builtin'`, `trust_tier=1`, `visibility='public'`. After this you'll see them all under Browse and can Install per skill.
+This will detect patterns like:
+- repeated `list_email_ids` calls with near-identical queries
+- repeated `get_email` calls on the same message/thread
+- repeated search → fetch → search loops that are not producing new information
 
-Skills to seed (30 existing files):
-- **PM pack** (5): pm-orchestrator, pm-breakdown, pm-prioritize, pm-assign, pm-roadmap
-- **Marketing pack** (15): marketing-orchestrator, copywriting, ad-creative, email-sequence, cold-email, customer-research, product-marketing-context, brand-voice-guardian, content-calendar, social-post, landing-page-builder, competitor-watch, page-cro, ai-seo, seo-audit, analytics-tracking
-- **Higgsfield pack** (9): orchestrator + 8 sub-skills
+When that happens, the backend will stop re-searching and switch to final synthesis from the material it already has.
 
-## 2. Add channel-specific social skills
+### 2. Add explicit routing for common email intents
+Tighten routing rules so the agent uses the shortest valid path for these email tasks:
+- **Find + summarize email** → search once, fetch once, summarize
+- **Find email + scan notes/doc** → search once, fetch once, then go straight to docs/attachment analysis
+- **Analyze attachment** → use attachment-analysis path instead of bouncing inside Gmail tools
+- **Analyze linked Google Doc** → detect the link/doc ID and move directly into document retrieval
 
-Replace the single generic `social-post` with a router + channel experts. New files in `public/sample-skills/`:
+### 3. Improve termination behavior for all email queries
+If the backend has enough material to answer, it should answer.
 
-- `social-x.skill.json` — X/Twitter posts + threads (≤280, hook rules, no hashtag spam)
-- `social-linkedin.skill.json` — Long-form posts, carousels, newsletter intros (1300–2200 chars, mobile fold)
-- `social-instagram.skill.json` — Captions, Reels scripts, carousel scripts (125-char fold, hashtag strategy)
-- `social-facebook.skill.json` — Feed posts, group posts, Reels copy (community-tone)
-- `social-tiktok.skill.json` — Short-form video scripts, hook-in-3-seconds, on-screen text, captions
-- `social-youtube.skill.json` — Long-form titles, descriptions, chapters, end-screen CTAs + Shorts variant
-- `social-threads.skill.json` — Conversational threads, ≤500 chars per post
-- `social-pinterest.skill.json` — Pin titles, descriptions, board ideas, keyword-led
-- `social-router.skill.json` — Picks the right channel skill based on keywords, runs multi-channel fan-out when asked ("post this everywhere")
+I’ll make the loop terminate earlier when it already has:
+- the relevant message body
+- the relevant attachment metadata/content
+- the linked doc target
 
-Keep existing `social-post.skill.json` as a thin alias that delegates to `social-router` so installed users don't break.
+And if the data is incomplete, it should return:
+- what it found
+- what it could not access
+- the next missing step
 
-Each channel skill follows the same pattern already shipped:
-- Recall brief + outcomes + corrections from `wisdom_memories`
-- Channel-specific limits / hook patterns / forbidden behavior
-- Run through `brand-voice-guardian` before returning
-- Record `pattern` memory on success, `correction` on next-turn pushback
+Instead of the current generic “try again with a simpler request.”
 
-## 3. Update orchestrators
+### 4. Harden email content analysis paths
+Review the Gmail/content-extraction flow so email queries work across:
+- nested MIME emails
+- Gemini notes style emails
+- emails where the useful content is in the snippet/body
+- emails where the useful content is in a linked doc
+- emails where the useful content is in an attachment
 
-- `marketing-orchestrator.skill.json` v1.3.0 — route social intent to `social-router` instead of `social-post`. Bumps routing table to 23 sub-skills.
-- `social-router` knows the 8 channel skills and the multi-channel fan-out flow (generates per-channel variants in one turn, each respecting its own rules).
+### 5. Verify both backend and frontend end-to-end
+I’ll validate both sides:
 
-## 4. Memory doc
+**Backend**
+- chat tool loop termination
+- Gmail read path
+- analysis/doc handoff path
+- final-answer synthesis
 
-Update `.lovable/memory/features/marketing-pack-orchestration.md` to reflect the new social sub-pack and routing.
+**Frontend**
+- streamed response handling
+- task/progress display during email analysis
+- surfaced error/fallback messaging so failures are informative rather than dead ends
 
-# Technical notes
+### 6. Re-test against multiple email-query patterns
+I’ll test more than one scenario so this is not another one-off patch:
+- summarize a person’s email
+- summarize Gemini notes from an email
+- pull notes from an email that links to a Google Doc
+- analyze an email attachment
 
-- Migration uses `insert ... on conflict (slug) do update` so re-runs are safe and any future edits to the JSON files can be re-seeded.
-- `manifest` column gets the full JSON body; `name`, `description`, `version`, `slug` are extracted for list rendering.
-- No schema changes, no edge functions, no UI changes. Skills page already renders whatever's in the `skills` table.
-- After migration runs you'll go to **Skills → Browse** and see ~38 skills. Install the social ones you want.
+## Boundaries
+- No UI redesign
+- No broad architecture rewrite
+- Surgical reliability improvements in the existing email/chat pipeline
 
-# What you'll do after
+## Expected outcome
+After this work, email queries should stop repeatedly burning through the step budget. The system should either:
+1. return the requested answer directly, or
+2. return a precise partial-result explanation based on the real data it already gathered.
 
-1. Open `/skills`
-2. Under **Browse**, install: `social-router` + the channels you actually use (recommend all 8 for full coverage)
-3. Make sure `marketing-orchestrator` is installed and enabled
-4. Try: "write me an X thread and a LinkedIn post about [topic]" — the router fans out to both channel skills, each enforces its own rules, both pass brand-voice gate.
+This is the broader fix for the recurring email issue, not just the Ben Tamburello case.
