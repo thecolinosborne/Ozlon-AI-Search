@@ -8723,6 +8723,43 @@ async function runToolLoop(
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
 
+      // ─── Gmail anti-loop guard ───────────────────────────────────────
+      // Track how many email read tools have been called this turn and
+      // whether we've already fetched the same message id more than once.
+      // If the model is clearly looping, inject a hard "stop searching,
+      // synthesize now" reminder ONCE so it stops burning the tool budget.
+      for (let i = 0; i < msg.tool_calls.length; i++) {
+        const name = (msg.tool_calls[i] as { function: { name: string } }).function.name;
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse((msg.tool_calls[i] as { function: { arguments: string } }).function.arguments || '{}'); } catch { /* ignore */ }
+        if (name === 'list_emails' || name === 'list_email_ids') {
+          gmailReadCounts.list++;
+        } else if (name === 'get_email') {
+          gmailReadCounts.get++;
+          const mid = typeof parsed.message_id === 'string' ? parsed.message_id : '';
+          if (mid) gmailFetchedMessageIds.add(mid);
+        }
+      }
+      const totalGmailReads = gmailReadCounts.list + gmailReadCounts.get;
+      const gmailLooping =
+        (gmailReadCounts.list >= 3) ||
+        (gmailReadCounts.get >= 3 && gmailFetchedMessageIds.size <= 1) ||
+        (totalGmailReads >= 5 && gmailFetchedMessageIds.size <= 2);
+      if (gmailLooping && !gmailLoopWarningInjected) {
+        gmailLoopWarningInjected = true;
+        console.warn(`[ToolLoopGuard] Gmail loop detected (list=${gmailReadCounts.list} get=${gmailReadCounts.get} ids=${gmailFetchedMessageIds.size}). Injecting stop-search reminder.`);
+        openAIMessages.push({
+          role: 'system',
+          content:
+            'STOP SEARCHING GMAIL. You have already fetched the relevant email content above. ' +
+            'Do NOT call list_emails, list_email_ids, or get_email again with new query variations. ' +
+            'If the useful content is in the email body, summarize it NOW from the tool results above. ' +
+            'If the content lives in a linked Google Doc, call the docs tool (e.g. get_google_doc / analyze_content with source_type=doc) ONCE using the doc ID/URL already visible in the email body. ' +
+            'If it lives in an attachment, call gmail_analyze_attachment ONCE. ' +
+            'Otherwise produce the final answer now using only the data already gathered.',
+        });
+      }
+
       // GUARD: if user just approved an action and assistant only called task-tracking tools,
       // inject a system reminder to actually execute the action on next iteration.
       const APPROVAL_RE = /^\s*(yes|yep|yeah|ok|okay|sure|do it|go ahead|approved|confirm|confirmed|send it|trash (them|it)|delete (them|it)|proceed)\s*[.!]?\s*$/i;
