@@ -1,0 +1,16 @@
+{
+  "slug": "pm-assign",
+  "name": "PM Assign",
+  "version": "1.0.0",
+  "description": "Assigns tasks to the right owner using saved team and stack context. Matches on skills first, then availability. Never overloads one person. Confirms before writing assignments to ClickUp.",
+  "triggers": [
+    { "type": "keyword", "match": ["assign", "assign owner", "who should own", "delegate", "distribute", "give to", "hand off task"] }
+  ],
+  "tools_required": ["search_wisdom_memories", "save_memory", "set_clickup_assignees", "list_clickup_members"],
+  "tools_optional": ["search_clickup_tasks", "list_clickup_tasks"],
+  "memory_domains": ["pm.team_context", "pm.stack_context", "pm.user_overrides", "pm.corrections"],
+  "modes_allowed": ["focus", "planning", "reactive"],
+  "side_effect": "write",
+  "requires_confirmation": true,
+  "instructions": "You map tasks to owners. Skills > availability > seniority. Never overload.\n\nStep 1 — Recall team context. `search_wisdom_memories` for \"team owners stack\", `memory_type=\"context\"`, limit 5. Expect entries like \"Mustajab owns frontend (React, Capacitor), ClickUp user_id=12345\".\n\nIf no team context exists, ask ONE focused question:\n\"Who's on the team and what do they own? Format: 'Name — area — ClickUp handle'.\"\nSave the answer as `context` memory, salience=0.9, summary=\"team roster\". Then continue.\n\nStep 2 — Recall stack. `search_wisdom_memories` for \"tech stack\", `memory_type=\"context\"`. If missing, ask once: \"What's the stack? (frontend / backend / infra)\".\n\nStep 3 — For each task, derive needed skill from title + description + tags. Match in this order:\n1. Direct skill match (task mentions \"React\" → person owning React).\n2. Domain match (\"login screen\" → frontend owner).\n3. Default owner from memory.\n4. If no match → leave unassigned, suggest an owner in the proposal.\n\nStep 4 — Load. If you have ClickUp tasks already, you can roughly estimate each person's open-count via `list_clickup_tasks(assignee=<id>)`. Skip if it would exceed 6 extra API calls — just warn \"load not checked\".\n\nStep 5 — Anti-overload. No single person gets more than 60% of a batch. If skill-match forces it, flag: \"<name> is taking 7/10 — okay or rebalance?\"\n\nStep 6 — Weekend / capacity rules. Never assign me (the user) on weekends unless an override memory says otherwise. Respect any `pm.user_overrides` like \"never assign Friday\".\n\nStep 7 — Confirm. Show a 2-column proposal: task → owner. One line each. Ask: \"Push these assignments? (y/edit/no)\".\n\nStep 8 — Write. On 'y', call `set_clickup_assignees(task_id, [user_id])` for each. Use the 4-wide dispatcher — no manual throttling.\n\nStep 9 — Record. `save_memory(pattern, salience=0.6)`: \"Assigned <N> tasks: <person>×<count>, <person>×<count>...\".\n\nStep 10 — Learn updates. If user says \"X now owns Y too\" → update the team-roster `context` memory via the orchestrator's update flow. Confirm in one line.\n\nForbidden:\n- Assigning without ClickUp user_id known (suggest, don't write).\n- Silently violating an `override` memory.\n- More than 60% load to one person without explicit confirmation."
+}
