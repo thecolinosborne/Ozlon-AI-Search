@@ -3642,8 +3642,60 @@ async function executeToolCall(
       if (toolName.startsWith('ghl_') && ghlCreds?.apiKey && ghlCreds?.locationId) {
         extra = { apiKey: ghlCreds.apiKey, locationId: ghlCreds.locationId };
       }
+      if (toolName === 'upload_clickup_task_attachment') {
+        const sourceMessageId = String(args.source_message_id || args.sourceMessageId || '');
+        const sourceAttachmentId = String(args.source_attachment_id || args.sourceAttachmentId || '');
+        const hasInlineData = typeof args.dataBase64 === 'string' && args.dataBase64.trim().length > 0;
+        if (!hasInlineData && sourceMessageId && sourceAttachmentId) {
+          const pulled = await dispatchTool(
+            'gmail_get_attachment',
+            { messageId: sourceMessageId, attachmentId: sourceAttachmentId },
+            authHeader,
+          );
+          if (!pulled.routed || !pulled.success) {
+            return {
+              success: false,
+              result: `Couldn't fetch the Gmail attachment for ClickUp upload: ${pulled.result}`,
+            };
+          }
+          const attachment = (pulled.data as { attachment?: { data?: string } } | undefined)?.attachment;
+          const dataBase64 = typeof attachment?.data === 'string' ? attachment.data : '';
+          if (!dataBase64) {
+            return {
+              success: false,
+              result: 'Gmail returned the attachment lookup, but no downloadable file bytes were present.',
+            };
+          }
+          args = { ...args, dataBase64 };
+        } else if (!hasInlineData) {
+          return {
+            success: false,
+            result: 'upload_clickup_task_attachment requires either dataBase64 or source_message_id + source_attachment_id.',
+          };
+        }
+      }
       const dispatched = await dispatchTool(toolName, args, authHeader, extra);
-      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
+      if (dispatched.routed) {
+        if (
+          dispatched.success &&
+          toolName === 'gmail_get_attachment' &&
+          /clickup|task/i.test(_userMessage || '')
+        ) {
+          const attachment = (dispatched.data as { attachment?: { size?: number } } | undefined)?.attachment;
+          const messageId = String(args.messageId || '');
+          const attachmentId = String(args.attachmentId || '');
+          const sizeBytes = Number(attachment?.size || 0);
+          return {
+            success: true,
+            result:
+              `[gmail] Attachment downloaded for transfer. ` +
+              `messageId=${messageId} attachmentId=${attachmentId} sizeBytes=${sizeBytes}. ` +
+              `For ClickUp, use upload_clickup_task_attachment with source_message_id/source_attachment_id instead of pasting base64.`,
+            structured: dispatched.data as Record<string, unknown> | undefined,
+          };
+        }
+        return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
+      }
     }
 
     // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
