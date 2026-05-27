@@ -8676,28 +8676,62 @@ async function tryRecipe(
   ];
 
   let finalText = '';
-  try {
-    const { response, used } = await callViaGauntletThenFallback(
-      modelConfig.name,
-      synthesisMessages,
-      [],
-      (entry) => ({ model: entry.model, messages: synthesisMessages }),
-    );
-    const data = await response.json();
-    finalText = String(data?.choices?.[0]?.message?.content || '').trim();
-    console.log(`[Recipe] synthesis via ${used.label}, ${finalText.length} chars`);
-  } catch (e) {
-    console.warn('[Recipe] synthesis failed:', (e as Error).message);
+
+  // Robust multi-model synthesis: try gauntlet first, then direct Lovable AI
+  // Gateway with a series of fast fallback models so synthesis never fails.
+  const synthAttempts: Array<() => Promise<string>> = [
+    async () => {
+      const { response, used } = await callViaGauntletThenFallback(
+        modelConfig.name,
+        synthesisMessages,
+        [],
+        (entry) => ({ model: entry.model, messages: synthesisMessages }),
+      );
+      const data = await response.json();
+      const t = String(data?.choices?.[0]?.message?.content || '').trim();
+      if (t) console.log(`[Recipe] synthesis via ${used.label}, ${t.length} chars`);
+      return t;
+    },
+    ...['google/gemini-2.5-flash', 'openai/gpt-5.5-mini', 'google/gemini-2.5-flash-lite', 'openai/gpt-5.5-nano'].map(
+      (model) => async () => {
+        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+        if (!lovableKey) return '';
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 25000);
+        try {
+          const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${lovableKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, messages: synthesisMessages }),
+            signal: ctrl.signal,
+          });
+          if (!resp.ok) return '';
+          const data = await resp.json();
+          const t = String(data?.choices?.[0]?.message?.content || '').trim();
+          if (t) console.log(`[Recipe] synthesis via direct ${model}, ${t.length} chars`);
+          return t;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    ),
+  ];
+
+  for (const attempt of synthAttempts) {
+    try {
+      finalText = await attempt();
+      if (finalText) break;
+    } catch (e) {
+      console.warn('[Recipe] synthesis attempt failed:', (e as Error).message);
+    }
   }
 
   if (!finalText) {
-    // NEVER dump the raw transcript — it contains JSON tool output and looks broken.
-    // Give a clean, honest fallback and let the user retry or rephrase.
-    const toolList = toolsUsed.length ? toolsUsed.map((t) => `\`${t}\``).join(', ') : 'no tools';
-    finalText =
-      `### Couldn't finish that one\n\n` +
-      `I gathered the data (${toolList}) but the summarizer didn't respond in time. ` +
-      `Ask me again in a moment, or narrow the request (e.g. add a sender name, subject, or date range).`;
+    // Deterministic last-resort: build a structured summary directly from the
+    // gathered transcript so the user always gets a real answer, never a
+    // "couldn't finish" message.
+    finalText = buildDeterministicSummary(cls.intent, cls.plan, transcript, p);
+    console.log(`[Recipe] used deterministic fallback summary (${finalText.length} chars)`);
   }
 
   await emit('Done', 'done');
