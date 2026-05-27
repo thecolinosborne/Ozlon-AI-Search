@@ -8691,7 +8691,13 @@ async function tryRecipe(
   }
 
   if (!finalText) {
-    finalText = `Here's what I found:\n\n${transcript.join('\n\n').slice(0, 4000)}`;
+    // NEVER dump the raw transcript — it contains JSON tool output and looks broken.
+    // Give a clean, honest fallback and let the user retry or rephrase.
+    const toolList = toolsUsed.length ? toolsUsed.map((t) => `\`${t}\``).join(', ') : 'no tools';
+    finalText =
+      `### Couldn't finish that one\n\n` +
+      `I gathered the data (${toolList}) but the summarizer didn't respond in time. ` +
+      `Ask me again in a moment, or narrow the request (e.g. add a sender name, subject, or date range).`;
   }
 
   await emit('Done', 'done');
