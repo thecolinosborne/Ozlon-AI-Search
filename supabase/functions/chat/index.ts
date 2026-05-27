@@ -8340,6 +8340,22 @@ async function classifyIntent(
   const hay = trimmed.toLowerCase();
   if (!RECIPE_HINTS.some((w) => hay.includes(w))) return null;
 
+  // Multi-integration / multi-action requests — must use the free-form tool
+  // loop so we can chain Gmail → ClickUp / Drive / GHL / Calendar etc.
+  // Recipes are single-integration shortcuts only.
+  const MULTI_ACTION_MARKERS = [
+    'clickup','click up','task','ticket','jira','asana','linear','notion',
+    'create','add','make','put','log','save to','send to','push to','upload',
+    'then ','and also','also ','plus ',' into ',' in clickup',
+    'slack','message ','dm ','post to',
+    'calendar event','schedule a','book ',
+    'reply','forward','draft',
+  ];
+  if (MULTI_ACTION_MARKERS.some((w) => hay.includes(w))) {
+    console.log('[Recipe] multi-action markers present — deferring to tool loop');
+    return null;
+  }
+
   const system = `You classify a user request into ONE deterministic recipe intent.
 Return STRICT JSON: {"intent":"<id>","params":{...},"confidence":0..1,"plan":"<one-line human plan>"}.
 
