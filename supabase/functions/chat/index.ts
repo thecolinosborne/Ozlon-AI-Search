@@ -3642,8 +3642,60 @@ async function executeToolCall(
       if (toolName.startsWith('ghl_') && ghlCreds?.apiKey && ghlCreds?.locationId) {
         extra = { apiKey: ghlCreds.apiKey, locationId: ghlCreds.locationId };
       }
+      if (toolName === 'upload_clickup_task_attachment') {
+        const sourceMessageId = String(args.source_message_id || args.sourceMessageId || '');
+        const sourceAttachmentId = String(args.source_attachment_id || args.sourceAttachmentId || '');
+        const hasInlineData = typeof args.dataBase64 === 'string' && args.dataBase64.trim().length > 0;
+        if (!hasInlineData && sourceMessageId && sourceAttachmentId) {
+          const pulled = await dispatchTool(
+            'gmail_get_attachment',
+            { messageId: sourceMessageId, attachmentId: sourceAttachmentId },
+            authHeader,
+          );
+          if (!pulled.routed || !pulled.success) {
+            return {
+              success: false,
+              result: `Couldn't fetch the Gmail attachment for ClickUp upload: ${pulled.result}`,
+            };
+          }
+          const attachment = (pulled.data as { attachment?: { data?: string } } | undefined)?.attachment;
+          const dataBase64 = typeof attachment?.data === 'string' ? attachment.data : '';
+          if (!dataBase64) {
+            return {
+              success: false,
+              result: 'Gmail returned the attachment lookup, but no downloadable file bytes were present.',
+            };
+          }
+          args = { ...args, dataBase64 };
+        } else if (!hasInlineData) {
+          return {
+            success: false,
+            result: 'upload_clickup_task_attachment requires either dataBase64 or source_message_id + source_attachment_id.',
+          };
+        }
+      }
       const dispatched = await dispatchTool(toolName, args, authHeader, extra);
-      if (dispatched.routed) return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
+      if (dispatched.routed) {
+        if (
+          dispatched.success &&
+          toolName === 'gmail_get_attachment' &&
+          /clickup|task/i.test(_userMessage || '')
+        ) {
+          const attachment = (dispatched.data as { attachment?: { size?: number } } | undefined)?.attachment;
+          const messageId = String(args.messageId || '');
+          const attachmentId = String(args.attachmentId || '');
+          const sizeBytes = Number(attachment?.size || 0);
+          return {
+            success: true,
+            result:
+              `[gmail] Attachment downloaded for transfer. ` +
+              `messageId=${messageId} attachmentId=${attachmentId} sizeBytes=${sizeBytes}. ` +
+              `For ClickUp, use upload_clickup_task_attachment with source_message_id/source_attachment_id instead of pasting base64.`,
+            structured: dispatched.data as Record<string, unknown> | undefined,
+          };
+        }
+        return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
+      }
     }
 
     // Native Google routes (docs_*, sheets_*, slides_*, drive_*, gmail_*, gsc_*) are
@@ -7230,8 +7282,8 @@ EMAIL ATTACHMENTS → CLICKUP TASKS
 When the user asks to attach a file from an email onto a ClickUp task:
 1. If you don't already know the exact messageId carrying the file, call \`gmail_list_thread_attachments\` with the threadId (or \`gmail_list_attachments\` with a single messageId) to enumerate every downloadable attachment across the thread. The first message in a thread often does NOT carry the file — never assume it does.
 2. Pick the matching attachment (by filename / mimeType / sender).
-3. Call \`gmail_get_attachment\` with that messageId + attachmentId to get the base64 \`data\`.
-4. Call \`upload_clickup_task_attachment\` with \`{ task_id, filename, mimeType, dataBase64: <data from step 3> }\`.
+3. Prefer calling \`upload_clickup_task_attachment\` directly with \`{ task_id, filename, mimeType, source_message_id, source_attachment_id }\`. This keeps binary data out of the AI transcript.
+4. Only call \`gmail_get_attachment\` if another step truly needs the raw bytes. Never paste or shuttle large base64 blobs through normal chat reasoning when a direct transfer path exists.
 5. Confirm the upload to the user with the returned attachment URL. Do NOT fall back to "I left a comment instead" unless the upload itself failed.
 
 You are the intelligence, memory, and action layer of ${osName}.`;
