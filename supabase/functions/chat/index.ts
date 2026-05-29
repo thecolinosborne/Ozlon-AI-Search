@@ -9988,8 +9988,10 @@ serve(async (req) => {
       }
     }
 
-    // Expose userId to tool handlers (used by load_skill, etc.)
+    // Expose userId + sessionId to tool handlers (used by load_skill, recall tools, artifact write-through, etc.)
     (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
+    (globalThis as Record<string, unknown>).__currentSessionId = (body.sessionId as string) || undefined;
+    (globalThis as Record<string, unknown>).__currentAssistantMessageId = (body.assistantMessageId as string) || undefined;
 
     // ================================================================
     // SKILLS PLATFORM — inject compact index of installed skills.
