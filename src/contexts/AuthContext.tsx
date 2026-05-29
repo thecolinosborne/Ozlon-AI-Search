@@ -9,6 +9,25 @@ const STORAGE_KEY = "ozlon_system_name";
 const ONBOARDED_KEY = "ozlon_onboarded";
 const AUTH_INIT_TIMEOUT = 5000; // 5s failsafe
 
+function clearStaleAuthStorage() {
+  try {
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    if (!projectId) return;
+
+    const candidates: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key.startsWith(`sb-${projectId}-auth-token`)) candidates.push(key);
+    }
+    for (const key of candidates) {
+      localStorage.removeItem(key);
+    }
+  } catch (error) {
+    console.warn("Failed to clear stale auth storage", error);
+  }
+}
+
 interface AuthContextType {
   authLoading: boolean;
   session: Session | null;
@@ -222,6 +241,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearAuthState();
         }
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const isStaleRefresh = /refresh token not found|invalid refresh token|refresh_token_not_found/i.test(message);
+        if (isStaleRefresh) {
+          console.warn("Stale refresh token detected during auth init — clearing local auth storage");
+          clearStaleAuthStorage();
+          clearAuthState();
+          return;
+        }
         handleError(error, "Error initializing auth", { silent: true });
       } finally {
         if (mounted) setAuthLoading(false);

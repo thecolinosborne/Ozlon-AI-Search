@@ -43,6 +43,18 @@ type ClickUpAuthContext = {
   connectionId: string | null;
 };
 
+class ClickUpAuthError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, code: string, status = 401) {
+    super(message);
+    this.name = 'ClickUpAuthError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 // deno-lint-ignore no-explicit-any
 async function tryVaultRead(
   adminClient: any,
@@ -131,22 +143,63 @@ async function resolveClickUpAuth(req: Request, tokenOverride?: string): Promise
         const conn = (conns || []).find((c) => c.status === 'connected') || (conns || [])[0];
         connectionId = conn?.id ?? null;
 
-        if (conn?.id) {
-          const token = await resolveStoredClickUpToken(
-            adminClient,
-            conn.id,
-            user.id,
-            (conn.metadata as Record<string, unknown> | null) ?? null,
+        if (!conn?.id) {
+          console.error('[ClickUp/auth] No ClickUp connection for authenticated user', { userId });
+          throw new ClickUpAuthError(
+            'ClickUp is not connected for this account. Reconnect it in Integrations → ClickUp.',
+            'CLICKUP_CONNECTION_MISSING',
+            404,
           );
-          if (token) return { token, userId, connectionId };
         }
+
+        const token = await resolveStoredClickUpToken(
+          adminClient,
+          conn.id,
+          user.id,
+          (conn.metadata as Record<string, unknown> | null) ?? null,
+        );
+        if (!token) {
+          console.error('[ClickUp/auth] ClickUp connection exists but no stored token found', {
+            userId,
+            connectionId: conn.id,
+          });
+          throw new ClickUpAuthError(
+            'ClickUp is connected in name only for this account, but the saved token is missing. Reconnect it in Integrations → ClickUp.',
+            'CLICKUP_TOKEN_MISSING',
+            409,
+          );
+        }
+        return { token, userId, connectionId };
       }
-    } catch { /* fall through */ }
+
+      console.error('[ClickUp/auth] Authorization header present but no user resolved');
+      throw new ClickUpAuthError(
+        'Your session is no longer valid. Sign in again, then retry ClickUp.',
+        'AUTH_USER_MISSING',
+        401,
+      );
+    } catch (error) {
+      if (error instanceof ClickUpAuthError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[ClickUp/auth] Failed to resolve authenticated user', { message });
+      if (/missing sub claim|bad jwt|jwt/i.test(message)) {
+        throw new ClickUpAuthError(
+          'Your session is invalid. Sign in again, then retry ClickUp.',
+          'AUTH_INVALID_JWT',
+          401,
+        );
+      }
+      throw new ClickUpAuthError(
+        'Could not verify your session for ClickUp. Sign in again and retry.',
+        'AUTH_RESOLUTION_FAILED',
+        401,
+      );
+    }
   }
 
   if (trimmedOverride) return { token: trimmedOverride, userId, connectionId };
 
-  throw new Error('ClickUp not connected. Add your API key in Integrations → ClickUp.');
+  throw new ClickUpAuthError('ClickUp requires an authenticated session. Sign in, then retry.', 'AUTH_REQUIRED', 401);
 }
 
 async function resolveTeamId(
@@ -235,6 +288,29 @@ async function getListId(
   } catch { /* fall through */ }
 
   return '';
+}
+
+async function refreshDefaultListId(
+  params?: Record<string, unknown>,
+  resolvedToken?: string,
+  authCtx?: Pick<ClickUpAuthContext, 'userId' | 'connectionId'>,
+): Promise<string> {
+  const supabase = getSupabase();
+  if (authCtx?.connectionId) {
+    await supabase
+      .from('clickup_integration_state')
+      .update({ default_list_id: null, updated_at: new Date().toISOString() })
+      .eq('connection_id', authCtx.connectionId);
+  } else if (authCtx?.userId) {
+    let query = supabase
+      .from('clickup_integration_state')
+      .update({ default_list_id: null, updated_at: new Date().toISOString() })
+      .eq('user_id', authCtx.userId);
+    if (params?.teamId) query = query.eq('team_id', String(params.teamId));
+    await query;
+  }
+
+  return getListId(params, resolvedToken, authCtx);
 }
 
 function getSupabase() {
@@ -791,7 +867,7 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);
+        let listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('No ClickUp list configured. Ask the user to either pick a default list in Integrations → ClickUp, or call list_clickup_spaces / list_clickup_lists to choose one and pass listId explicitly.');
         const {
           name, description, priority, status, due_date, due_date_time,
@@ -810,7 +886,19 @@ serve(async (req) => {
         if (assignees !== undefined) payload.assignees = assignees;
         if (tags !== undefined) payload.tags = tags;
         if (parent !== undefined) payload.parent = parent;
-        const data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+        let data;
+        try {
+          data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!params?.listId && /List deleted|ACCESS_100/i.test(message)) {
+            listId = await refreshDefaultListId(params, resolvedToken, authCtx);
+            if (!listId) throw error;
+            data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+          } else {
+            throw error;
+          }
+        }
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -1364,8 +1452,10 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error('[ClickUp]', err);
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500,
+    const status = err instanceof ClickUpAuthError ? err.status : 500;
+    const code = err instanceof ClickUpAuthError ? err.code : 'CLICKUP_UNKNOWN_ERROR';
+    return new Response(JSON.stringify({ error: (err as Error).message, code }), {
+      status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
