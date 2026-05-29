@@ -1,13 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
+  assertGoogleScope,
   corsHeaders,
   getAuthedUserId,
   getGoogleAccessToken,
+  GoogleScopeMissingError,
   jsonErr,
   jsonOk,
 } from "../_shared/google-token.ts";
 
 const GSC_BASE = "https://www.googleapis.com/webmasters/v3";
+const WEBMASTERS_WRITE_SCOPE = "https://www.googleapis.com/auth/webmasters";
+const WEBMASTERS_WRITE_LABEL = "Manage Search Console data for your verified sites";
+
 const INSPECTION_BASE = "https://searchconsole.googleapis.com/v1";
 
 type AnyJson = Record<string, unknown>;
