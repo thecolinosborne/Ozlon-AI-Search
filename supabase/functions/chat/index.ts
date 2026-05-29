@@ -2814,6 +2814,21 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'enqueue_background_job',
+      description: 'Detach a long-running task into a background job that runs without blocking chat. Use for: deep research (>30s), event scraping, SEO audits, YouTube channel analysis. The user can keep chatting; results appear when the job finishes. Returns a job_id. Do NOT use for quick lookups — those should run inline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['deep_research', 'scrape_events', 'youtube_channel_analysis', 'seo_audit', 'echo'], description: 'Type of background work to run.' },
+          payload: { type: 'object', description: 'Job-specific parameters (query, target, options).' },
+        },
+        required: ['kind'],
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
@@ -5879,6 +5894,35 @@ async function executeToolCall(
           return { success: false, result: `Artifact lookup error: ${e instanceof Error ? e.message : String(e)}` };
         }
       }
+
+      case 'enqueue_background_job': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot enqueue jobs.' };
+          const kind = String(args.kind || '').trim();
+          if (!kind) return { success: false, result: 'Missing kind.' };
+          const payload = (args.payload && typeof args.payload === 'object') ? args.payload : {};
+          const conversationId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const assistantMessageId = (globalThis as Record<string, unknown>).__currentAssistantMessageId as string | undefined;
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('background_jobs').insert({
+            user_id: userId,
+            kind,
+            payload,
+            conversation_id: conversationId ?? null,
+            assistant_message_id: assistantMessageId ?? null,
+          }).select('id').single();
+          if (error) return { success: false, result: `Enqueue failed: ${error.message}` };
+          return { success: true, result: `Job ${data.id} queued (kind=${kind}). It runs in the background; the user can keep chatting. Tell them you've detached it and you'll surface results when ready.` };
+        } catch (e) {
+          return { success: false, result: `Enqueue error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
 
 
 
@@ -9360,8 +9404,10 @@ async function runToolLoop(
 
       // Execute tool calls with bounded concurrency to avoid per-edge-function
       // rate limits (e.g. Deno edge runtime caps individual functions at ~60/min).
-      // 4 parallel keeps latency low without nuking burst-sensitive integrations.
-      const TOOL_LOOP_CONCURRENCY = 4;
+      // 8 parallel: most multi-tool turns are reads against different providers
+      // (Gmail / GSC / ClickUp / Drive). Burst-sensitive single-provider calls
+      // are still throttled inside _dispatcher.ts via MULTI_CONCURRENCY.
+      const TOOL_LOOP_CONCURRENCY = 8;
       const toolResults: Array<{ role: 'tool'; tool_call_id: string; name: string; content: string }> = new Array(msg.tool_calls.length);
       let _toolCursor = 0;
       const _toolWorkers = Array.from(
@@ -9379,7 +9425,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;

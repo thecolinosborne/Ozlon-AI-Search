@@ -119,6 +119,69 @@ export type Database = {
           },
         ]
       }
+      background_jobs: {
+        Row: {
+          assistant_message_id: string | null
+          attempts: number
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          error: string | null
+          id: string
+          kind: string
+          max_attempts: number
+          payload: Json
+          progress: number
+          progress_message: string | null
+          result: Json | null
+          scheduled_for: string
+          started_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          assistant_message_id?: string | null
+          attempts?: number
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          kind: string
+          max_attempts?: number
+          payload?: Json
+          progress?: number
+          progress_message?: string | null
+          result?: Json | null
+          scheduled_for?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          assistant_message_id?: string | null
+          attempts?: number
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          kind?: string
+          max_attempts?: number
+          payload?: Json
+          progress?: number
+          progress_message?: string | null
+          result?: Json | null
+          scheduled_for?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       cache_policy: {
         Row: {
           action: string
@@ -1136,8 +1199,10 @@ export type Database = {
           credential_ref: string | null
           external_account_id: string | null
           external_account_label: string | null
+          health_status: string | null
           id: string
           last_error: string | null
+          last_health_check_at: string | null
           last_sync_at: string | null
           last_validated_at: string | null
           metadata: Json | null
@@ -1152,8 +1217,10 @@ export type Database = {
           credential_ref?: string | null
           external_account_id?: string | null
           external_account_label?: string | null
+          health_status?: string | null
           id?: string
           last_error?: string | null
+          last_health_check_at?: string | null
           last_sync_at?: string | null
           last_validated_at?: string | null
           metadata?: Json | null
@@ -1168,8 +1235,10 @@ export type Database = {
           credential_ref?: string | null
           external_account_id?: string | null
           external_account_label?: string | null
+          health_status?: string | null
           id?: string
           last_error?: string | null
+          last_health_check_at?: string | null
           last_sync_at?: string | null
           last_validated_at?: string | null
           metadata?: Json | null

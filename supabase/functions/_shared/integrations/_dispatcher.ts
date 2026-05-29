@@ -193,7 +193,7 @@ export interface MultiResult {
   success: boolean;
   result: string;
 }
-const MULTI_CONCURRENCY = 4;
+const MULTI_CONCURRENCY = 6;
 
 export async function dispatchMulti(
   calls: MultiCall[],
