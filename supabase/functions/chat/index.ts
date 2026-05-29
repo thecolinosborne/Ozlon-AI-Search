@@ -5450,8 +5450,8 @@ async function executeToolCall(
           return { success: true, result: `Sitemap ${args.sitemap_url} submitted to Google Search Console for ${args.site_url}. Google will recrawl shortly.` };
         } catch (e) {
           const msg = (e as Error).message;
-          if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|403/i.test(msg)) {
-            return { success: false, result: `Cannot submit sitemap: the connected Google account only has read-only Search Console access. Reconnect Google in Integrations and approve the write permission "Manage Search Console data", then retry. (Underlying error: ${msg})` };
+          if (/GOOGLE_SCOPE_MISSING|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|403/i.test(msg)) {
+            return { success: false, result: `Cannot submit sitemap: the connected Google account is read-only for Search Console. To fix it: (1) Open Integrations → Google and disconnect. (2) Reconnect. (3) On Google's consent screen, MAKE SURE the checkbox "Manage Search Console data for your verified sites" stays TICKED — Google shows it as opt-in and silently downgrades to read-only if unchecked. Then retry. (Underlying: ${msg})` };
           }
           return { success: false, result: `GSC submit_sitemap error: ${msg}` };
         }
@@ -5461,8 +5461,15 @@ async function executeToolCall(
         try {
           await callNativeEdge('google-search-console', 'delete_sitemap', { siteUrl: args.site_url, feedpath: args.sitemap_url });
           return { success: true, result: `Sitemap ${args.sitemap_url} removed from ${args.site_url}.` };
-        } catch (e) { return { success: false, result: `GSC delete_sitemap error: ${(e as Error).message}` }; }
+        } catch (e) {
+          const msg = (e as Error).message;
+          if (/GOOGLE_SCOPE_MISSING|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|403/i.test(msg)) {
+            return { success: false, result: `Cannot delete sitemap: read-only Google access. Reconnect Google in Integrations and TICK "Manage Search Console data for your verified sites" on the consent screen.` };
+          }
+          return { success: false, result: `GSC delete_sitemap error: ${msg}` };
+        }
       }
+
 
 
       case 'web_search_google': {
