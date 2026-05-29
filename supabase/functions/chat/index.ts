@@ -905,13 +905,29 @@ const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 // This is the scalable guardrail — add a new ghl handler, locationId is handled.
 let __currentGHLLocationId: string | undefined;
 
+// Endpoints that REJECT a locationId in the JSON body (the path / parent
+// resource already implies the location). Auto-injecting locationId here
+// causes a 422 "property locationId should not exist" from GHL.
+const GHL_BODY_LOC_DENY: RegExp[] = [
+  /^\/contacts\/[^/]+\/tasks(?:\/|$)/,
+  /^\/contacts\/[^/]+\/notes(?:\/|$)/,
+  /^\/contacts\/[^/]+\/tags(?:\/|$)/,
+  /^\/contacts\/[^/]+\/workflow\//,
+  /^\/contacts\/[^/]+\/appointments(?:\/|$)/,
+  /^\/calendars\/events\/appointments\/[^/]+/,
+  /^\/conversations\/[^/]+\/messages(?:\/|$)/,
+];
+
 function __injectGHLLocation(path: string, method: string, body: unknown): { path: string; body: unknown } {
   const loc = __currentGHLLocationId;
   if (!loc) return { path, body };
   const upper = method.toUpperCase();
+  const pathOnly = path.split('?')[0];
+  const bodyDenied = GHL_BODY_LOC_DENY.some((re) => re.test(pathOnly));
 
-  // 1) Auto-inject into JSON object bodies on writes if not already present.
-  if (body && typeof body === 'object' && !Array.isArray(body) && (upper === 'POST' || upper === 'PUT' || upper === 'PATCH')) {
+  // 1) Auto-inject into JSON object bodies on writes if not already present,
+  //    unless the endpoint denies it.
+  if (!bodyDenied && body && typeof body === 'object' && !Array.isArray(body) && (upper === 'POST' || upper === 'PUT' || upper === 'PATCH')) {
     const b = body as Record<string, unknown>;
     const hasLoc = 'locationId' in b || 'altId' in b || 'location_id' in b;
     if (!hasLoc) body = { ...b, locationId: loc };
@@ -921,14 +937,14 @@ function __injectGHLLocation(path: string, method: string, body: unknown): { pat
   //    isn't a single-resource lookup (e.g. /contacts/{id}). GHL list/search
   //    endpoints universally require locationId or altId.
   if (upper === 'GET' || upper === 'DELETE') {
-    const [pathOnly, qs = ''] = path.split('?');
+    const [pOnly, qs = ''] = path.split('?');
     const hasLocInQs = /(?:^|&)(?:locationId|altId|location_id)=/.test(qs);
-    const segments = pathOnly.split('/').filter(Boolean);
+    const segments = pOnly.split('/').filter(Boolean);
     const lastSeg = segments[segments.length - 1] || '';
     const looksLikeResourceById = segments.length >= 2 && /^[a-zA-Z0-9_-]{8,}$/.test(lastSeg) && !/^[a-z-]+$/.test(lastSeg);
     if (!hasLocInQs && !looksLikeResourceById) {
       const sep = qs ? '&' : '';
-      path = `${pathOnly}?${qs}${sep}locationId=${encodeURIComponent(loc)}`;
+      path = `${pOnly}?${qs}${sep}locationId=${encodeURIComponent(loc)}`;
     }
   }
 
