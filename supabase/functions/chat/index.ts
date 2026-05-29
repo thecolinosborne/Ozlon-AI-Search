@@ -2814,6 +2814,21 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'enqueue_background_job',
+      description: 'Detach a long-running task into a background job that runs without blocking chat. Use for: deep research (>30s), event scraping, SEO audits, YouTube channel analysis. The user can keep chatting; results appear when the job finishes. Returns a job_id. Do NOT use for quick lookups — those should run inline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['deep_research', 'scrape_events', 'youtube_channel_analysis', 'seo_audit', 'echo'], description: 'Type of background work to run.' },
+          payload: { type: 'object', description: 'Job-specific parameters (query, target, options).' },
+        },
+        required: ['kind'],
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
