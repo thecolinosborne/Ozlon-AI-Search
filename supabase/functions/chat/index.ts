@@ -9510,6 +9510,7 @@ const DOMAIN_KEYWORDS: Record<Exclude<ToolDomain, 'system'>, string[]> = {
   ],
   'google-marketing': [
     'search console', 'gsc', 'seo', 'ranking', 'impressions', 'ctr', 'organic',
+    'sitemap', 'sitemap.xml', 'sitemap_index.xml', 'robots.txt', 'crawl', 'crawling', 'indexing', 'indexed', 'sc-domain:',
     'analytics', 'ga4', 'traffic', 'sessions', 'pageviews', 'bounce', 'conversion rate',
     'tag manager', 'gtm',
   ],
@@ -9597,7 +9598,7 @@ function classifyMessage(messages: { role: string; content: string }[]): Infinit
   const memoryKw = ['remember', 'recall', 'last time', 'you said', 'we discussed', 'previously', 'my preference', 'i told you', 'you know that'];
   const analysisKw = ['analyze', 'analysis', 'compare', 'synthesize', 'summarize a long', 'deep dive', 'explain in detail', 'break down', 'evaluate', 'assess', 'review this', 'what do you think about'];
   const multimodalKw = ['image', 'photo', 'screenshot', 'picture', 'file', 'pdf', 'document', 'attachment'];
-  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'upload'];
+  const actionKw = ['send', 'create', 'schedule', 'book', 'post', 'draft', 'compose', 'upload', 'submit', 'delete', 'remove', 'resubmit'];
   const liveDataKw = ['weather', 'stock', 'price', 'news', 'current', 'today\'s', 'latest'];
   const contextualFollowup = isContextDependentFollowup(text);
   const directDomains = detectDomains(text);
