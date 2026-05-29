@@ -75,6 +75,7 @@ serve(async (req) => {
         const siteUrl = String((params as AnyJson).siteUrl || "");
         const feedpath = String((params as AnyJson).feedpath || "");
         if (!siteUrl || !feedpath) return jsonErr("siteUrl and feedpath are required");
+        await assertGoogleScope(userId, WEBMASTERS_WRITE_SCOPE, WEBMASTERS_WRITE_LABEL);
         await gFetch(token, `${GSC_BASE}/sites/${encodeURIComponent(siteUrl)}/sitemaps/${encodeURIComponent(feedpath)}`, {
           method: "PUT",
         });
@@ -85,11 +86,13 @@ serve(async (req) => {
         const siteUrl = String((params as AnyJson).siteUrl || "");
         const feedpath = String((params as AnyJson).feedpath || "");
         if (!siteUrl || !feedpath) return jsonErr("siteUrl and feedpath are required");
+        await assertGoogleScope(userId, WEBMASTERS_WRITE_SCOPE, WEBMASTERS_WRITE_LABEL);
         await gFetch(token, `${GSC_BASE}/sites/${encodeURIComponent(siteUrl)}/sitemaps/${encodeURIComponent(feedpath)}`, {
           method: "DELETE",
         });
         return jsonOk({ success: true });
       }
+
 
       case "inspect_url": {
         const inspectionUrl = String((params as AnyJson).inspectionUrl || "");
