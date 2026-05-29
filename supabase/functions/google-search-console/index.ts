@@ -110,7 +110,16 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error("[google-search-console] error:", err);
+    if (err instanceof GoogleScopeMissingError) {
+      return jsonErr(err.message, 403, {
+        code: err.code,
+        requiredScope: err.requiredScope,
+        grantedScopes: err.grantedScopes,
+        consentLabel: err.consentLabel,
+      });
+    }
     const msg = err instanceof Error ? err.message : "Unknown error";
     return jsonErr(msg, 500);
   }
+
 });
