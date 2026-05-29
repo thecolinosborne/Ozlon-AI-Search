@@ -5448,7 +5448,13 @@ async function executeToolCall(
         try {
           await callNativeEdge('google-search-console', 'submit_sitemap', { siteUrl: args.site_url, feedpath: args.sitemap_url });
           return { success: true, result: `Sitemap ${args.sitemap_url} submitted to Google Search Console for ${args.site_url}. Google will recrawl shortly.` };
-        } catch (e) { return { success: false, result: `GSC submit_sitemap error: ${(e as Error).message}` }; }
+        } catch (e) {
+          const msg = (e as Error).message;
+          if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|403/i.test(msg)) {
+            return { success: false, result: `Cannot submit sitemap: the connected Google account only has read-only Search Console access. Reconnect Google in Integrations and approve the write permission "Manage Search Console data", then retry. (Underlying error: ${msg})` };
+          }
+          return { success: false, result: `GSC submit_sitemap error: ${msg}` };
+        }
       }
 
       case 'gsc_delete_sitemap': {
