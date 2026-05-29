@@ -5743,7 +5743,78 @@ async function executeToolCall(
           if (error) {
             console.error('[search_wisdom_memories] error:', error);
             return { success: false, result: `Memory search failed: ${error.message}` };
-          }
+      }
+
+      case 'recall_past_chats': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot search past chats.' };
+          const query = String(args.query || '').trim();
+          if (!query) return { success: false, result: 'query is required' };
+          const days = Math.min(Math.max(Number(args.days ?? 30), 1), 180);
+          const limit = Math.min(Math.max(Number(args.limit ?? 8), 1), 20);
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
+          const currentSession = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const { data, error } = await admin
+            .from('chat_messages')
+            .select('id, session_id, role, content, created_at')
+            .eq('user_id', userId)
+            .gte('created_at', sinceIso)
+            .ilike('content', `%${query.replace(/[%_]/g, '')}%`)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+          if (error) return { success: false, result: `Recall failed: ${error.message}` };
+          const rows = (data || []) as Array<{ id: string; session_id: string; role: string; content: string; created_at: string }>;
+          if (!rows.length) return { success: true, result: `No prior messages matching "${query}" in the last ${days} days.` };
+          const formatted = rows.map((r, i) => {
+            const isCurrent = r.session_id === currentSession ? ' (current session)' : '';
+            const snippet = r.content.length > 320 ? r.content.slice(0, 320) + '…' : r.content;
+            return `${i + 1}. [${r.role} · ${new Date(r.created_at).toISOString().slice(0, 16).replace('T', ' ')}${isCurrent}] session=${r.session_id.slice(0, 8)}\n   ${snippet}`;
+          }).join('\n');
+          return { success: true, result: `Found ${rows.length} prior message(s) matching "${query}":\n${formatted}` };
+        } catch (e) {
+          return { success: false, result: `Recall error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'recall_recent_artifacts': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot list artifacts.' };
+          const limit = Math.min(Math.max(Number(args.limit ?? 20), 1), 50);
+          const typeFilter = (args.type as string) || null;
+          const queryFilter = String(args.query || '').trim();
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          let q = admin.from('artifacts')
+            .select('id, type, title, external_ref, updated_at, conversation_id, version')
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false })
+            .limit(limit);
+          if (typeFilter) q = q.eq('type', typeFilter);
+          if (queryFilter) q = q.ilike('title', `%${queryFilter.replace(/[%_]/g, '')}%`);
+          const { data, error } = await q;
+          if (error) return { success: false, result: `Artifact lookup failed: ${error.message}` };
+          const rows = (data || []) as Array<{ id: string; type: string; title: string | null; external_ref: Record<string, unknown>; updated_at: string; conversation_id: string; version: number }>;
+          if (!rows.length) return { success: true, result: 'No recent artifacts found.' };
+          const formatted = rows.map((r, i) => {
+            const ref = r.external_ref ? Object.entries(r.external_ref).map(([k, v]) => `${k}=${typeof v === 'string' && v.length > 60 ? v.slice(0, 60) + '…' : v}`).join(' ') : '';
+            return `${i + 1}. [${r.type}] ${r.title || '(untitled)'} — v${r.version} — ${new Date(r.updated_at).toISOString().slice(0, 10)}${ref ? ` — ${ref}` : ''}`;
+          }).join('\n');
+          return { success: true, result: `Recent artifacts:\n${formatted}\n\nUse the matching external id with the appropriate update tool (e.g. docs_insert_text with documentId) instead of creating a new one.` };
+        } catch (e) {
+          return { success: false, result: `Artifact lookup error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
           const rows = (data ?? []) as Array<{ id: string; memory_type: string; summary: string; content: string; salience: number; recurrence_count: number; similarity: number }>;
           if (rows.length === 0) {
             return { success: true, result: `No matching memories found for "${query}"${memoryType ? ` (type=${memoryType})` : ''}.` };
