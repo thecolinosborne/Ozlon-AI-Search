@@ -5895,6 +5895,35 @@ async function executeToolCall(
         }
       }
 
+      case 'enqueue_background_job': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot enqueue jobs.' };
+          const kind = String(args.kind || '').trim();
+          if (!kind) return { success: false, result: 'Missing kind.' };
+          const payload = (args.payload && typeof args.payload === 'object') ? args.payload : {};
+          const conversationId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const assistantMessageId = (globalThis as Record<string, unknown>).__currentAssistantMessageId as string | undefined;
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const { data, error } = await admin.from('background_jobs').insert({
+            user_id: userId,
+            kind,
+            payload,
+            conversation_id: conversationId ?? null,
+            assistant_message_id: assistantMessageId ?? null,
+          }).select('id').single();
+          if (error) return { success: false, result: `Enqueue failed: ${error.message}` };
+          return { success: true, result: `Job ${data.id} queued (kind=${kind}). It runs in the background; the user can keep chatting. Tell them you've detached it and you'll surface results when ready.` };
+        } catch (e) {
+          return { success: false, result: `Enqueue error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+
 
 
       case 'create_routine': {
