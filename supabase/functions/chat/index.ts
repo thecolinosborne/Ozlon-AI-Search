@@ -4418,6 +4418,7 @@ async function executeToolCall(
           const data = await callNativeEdge('google-slides', 'create_presentation', { title: args.title });
           const pres = data as { presentationId?: string };
           const link = `https://docs.google.com/presentation/d/${pres.presentationId}/edit`;
+          if (pres.presentationId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Presentation'), externalRef: { provider: 'google-slides', presentationId: pres.presentationId, url: link } });
           return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
         } catch (e) { return { success: false, result: `Failed to create presentation: ${(e as Error).message}` }; }
       }
