@@ -5792,7 +5792,23 @@ async function executeToolCall(
           if (error) {
             console.error('[search_wisdom_memories] error:', error);
             return { success: false, result: `Memory search failed: ${error.message}` };
+          }
+          const rows = (data ?? []) as Array<{ id: string; memory_type: string; summary: string; content: string; salience: number; recurrence_count: number; similarity: number }>;
+          if (rows.length === 0) {
+            return { success: true, result: `No matching memories found for "${query}"${memoryType ? ` (type=${memoryType})` : ''}.` };
+          }
+          const formatted = rows.map((r, i) =>
+            `${i + 1}. [${r.memory_type}] ${r.summary} (sim ${r.similarity.toFixed(2)}, seen ${r.recurrence_count}x)\n   ${r.content}`,
+          ).join('\n');
+          console.log(`[search_wisdom_memories] ${rows.length} matches for "${query}"`);
+          return { success: true, result: `Found ${rows.length} memory match(es):\n${formatted}` };
+        } catch (e) {
+          console.error('[search_wisdom_memories] Error:', e);
+          return { success: false, result: `Memory search error: ${e instanceof Error ? e.message : String(e)}` };
+        }
       }
+
+
 
       case 'recall_past_chats': {
         try {
