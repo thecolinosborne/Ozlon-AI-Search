@@ -8049,7 +8049,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'gsc_list_sitemaps': 'Listing sitemaps',
   'gsc_submit_sitemap': 'Submitting sitemap to Google',
   'gsc_delete_sitemap': 'Removing sitemap',
-  'searchatlas_rank_tracker': 'Loading tracked rankings',
+  
   'web_search_google': 'Searching Google',
   'save_memory': 'Saving to memory',
   'search_wisdom_memories': 'Recalling memory',
