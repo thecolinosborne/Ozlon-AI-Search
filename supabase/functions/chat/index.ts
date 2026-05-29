@@ -9360,8 +9360,10 @@ async function runToolLoop(
 
       // Execute tool calls with bounded concurrency to avoid per-edge-function
       // rate limits (e.g. Deno edge runtime caps individual functions at ~60/min).
-      // 4 parallel keeps latency low without nuking burst-sensitive integrations.
-      const TOOL_LOOP_CONCURRENCY = 4;
+      // 8 parallel: most multi-tool turns are reads against different providers
+      // (Gmail / GSC / ClickUp / Drive). Burst-sensitive single-provider calls
+      // are still throttled inside _dispatcher.ts via MULTI_CONCURRENCY.
+      const TOOL_LOOP_CONCURRENCY = 8;
       const toolResults: Array<{ role: 'tool'; tool_call_id: string; name: string; content: string }> = new Array(msg.tool_calls.length);
       let _toolCursor = 0;
       const _toolWorkers = Array.from(
