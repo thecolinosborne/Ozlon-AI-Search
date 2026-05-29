@@ -139,6 +139,65 @@ export async function forceRefreshGoogleToken(userId: string): Promise<string> {
   return newAccessToken;
 }
 
+/**
+ * Return the granted OAuth scopes (space-separated string from Google's token response)
+ * for the user's connected Google account, as currently stored in integration_connections.
+ */
+export async function getStoredGoogleScopes(userId: string): Promise<string> {
+  const admin = getAdminClient();
+  const { data: conn } = await admin
+    .from("integration_connections")
+    .select("metadata")
+    .eq("user_id", userId)
+    .eq("provider", "youtube")
+    .eq("auth_type", "oauth2")
+    .eq("status", "connected")
+    .maybeSingle();
+  if (!conn) return "";
+  const meta = (conn.metadata || {}) as AnyJson;
+  return String(meta.scope || "");
+}
+
+/**
+ * Structured error for missing OAuth scopes. The chat layer recognises
+ * `code === 'GOOGLE_SCOPE_MISSING'` and renders an actionable reconnect message.
+ */
+export class GoogleScopeMissingError extends Error {
+  code = "GOOGLE_SCOPE_MISSING" as const;
+  requiredScope: string;
+  grantedScopes: string;
+  consentLabel: string;
+  constructor(requiredScope: string, grantedScopes: string, consentLabel: string) {
+    super(
+      `GOOGLE_SCOPE_MISSING: required="${requiredScope}" granted="${grantedScopes}" consentLabel="${consentLabel}"`,
+    );
+    this.requiredScope = requiredScope;
+    this.grantedScopes = grantedScopes;
+    this.consentLabel = consentLabel;
+  }
+}
+
+/**
+ * Pre-flight check: throw GoogleScopeMissingError if the stored Google token does
+ * not include the exact OAuth scope URL required for an action. Use this in any
+ * edge function action that calls a Google API requiring write/elevated scopes,
+ * so users get a clear reconnect-with-checkbox message instead of an opaque 403.
+ *
+ * `consentLabel` is the human-readable label shown on Google's consent screen
+ * (e.g. "Manage Search Console data for your verified sites").
+ */
+export async function assertGoogleScope(
+  userId: string,
+  requiredScope: string,
+  consentLabel: string,
+): Promise<void> {
+  const granted = await getStoredGoogleScopes(userId);
+  const have = new Set(granted.split(/\s+/).filter(Boolean));
+  if (!have.has(requiredScope)) {
+    throw new GoogleScopeMissingError(requiredScope, granted, consentLabel);
+  }
+}
+
 export function jsonOk(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -152,3 +211,4 @@ export function jsonErr(message: string, status = 400, extra: AnyJson = {}) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+

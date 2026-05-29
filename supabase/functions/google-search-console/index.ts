@@ -1,13 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
+  assertGoogleScope,
   corsHeaders,
   getAuthedUserId,
   getGoogleAccessToken,
+  GoogleScopeMissingError,
   jsonErr,
   jsonOk,
 } from "../_shared/google-token.ts";
 
 const GSC_BASE = "https://www.googleapis.com/webmasters/v3";
+const WEBMASTERS_WRITE_SCOPE = "https://www.googleapis.com/auth/webmasters";
+const WEBMASTERS_WRITE_LABEL = "Manage Search Console data for your verified sites";
+
 const INSPECTION_BASE = "https://searchconsole.googleapis.com/v1";
 
 type AnyJson = Record<string, unknown>;
@@ -70,6 +75,7 @@ serve(async (req) => {
         const siteUrl = String((params as AnyJson).siteUrl || "");
         const feedpath = String((params as AnyJson).feedpath || "");
         if (!siteUrl || !feedpath) return jsonErr("siteUrl and feedpath are required");
+        await assertGoogleScope(userId, WEBMASTERS_WRITE_SCOPE, WEBMASTERS_WRITE_LABEL);
         await gFetch(token, `${GSC_BASE}/sites/${encodeURIComponent(siteUrl)}/sitemaps/${encodeURIComponent(feedpath)}`, {
           method: "PUT",
         });
@@ -80,11 +86,13 @@ serve(async (req) => {
         const siteUrl = String((params as AnyJson).siteUrl || "");
         const feedpath = String((params as AnyJson).feedpath || "");
         if (!siteUrl || !feedpath) return jsonErr("siteUrl and feedpath are required");
+        await assertGoogleScope(userId, WEBMASTERS_WRITE_SCOPE, WEBMASTERS_WRITE_LABEL);
         await gFetch(token, `${GSC_BASE}/sites/${encodeURIComponent(siteUrl)}/sitemaps/${encodeURIComponent(feedpath)}`, {
           method: "DELETE",
         });
         return jsonOk({ success: true });
       }
+
 
       case "inspect_url": {
         const inspectionUrl = String((params as AnyJson).inspectionUrl || "");
@@ -102,7 +110,16 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error("[google-search-console] error:", err);
+    if (err instanceof GoogleScopeMissingError) {
+      return jsonErr(err.message, 403, {
+        code: err.code,
+        requiredScope: err.requiredScope,
+        grantedScopes: err.grantedScopes,
+        consentLabel: err.consentLabel,
+      });
+    }
     const msg = err instanceof Error ? err.message : "Unknown error";
     return jsonErr(msg, 500);
   }
+
 });
