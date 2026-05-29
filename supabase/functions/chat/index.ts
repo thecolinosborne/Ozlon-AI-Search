@@ -4384,6 +4384,7 @@ async function executeToolCall(
           const data = await callNativeEdge('google-sheets', 'create_spreadsheet', { title: args.title });
           const sheet = data.spreadsheet as { spreadsheetId?: string; spreadsheetUrl?: string } | undefined;
           const link = sheet?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheet?.spreadsheetId}/edit`;
+          if (sheet?.spreadsheetId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Sheet'), externalRef: { provider: 'google-sheets', spreadsheetId: sheet.spreadsheetId, url: link } });
           return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
         } catch (e) { return { success: false, result: `Failed to create sheet: ${(e as Error).message}` }; }
       }
