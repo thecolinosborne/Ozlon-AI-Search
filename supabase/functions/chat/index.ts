@@ -8989,16 +8989,16 @@ async function runToolLoop(
           'gsc_inspect_url',
         ],
         gmail: [
-          'gmail_search_messages',
-          'gmail_list_messages',
-          'gmail_get_message',
-          'gmail_send_message',
-          'gmail_create_draft',
+          'list_emails',
+          'get_email',
+          'send_email',
         ],
         clickup: [
-          'clickup_create_task',
-          'clickup_list_tasks',
-          'clickup_update_task',
+          'create_clickup_task',
+          'list_clickup_tasks',
+          'update_clickup_task',
+          'search_clickup_tasks',
+          'create_clickup_subtask',
         ],
       };
       const reservedFloor = new Set<string>();
