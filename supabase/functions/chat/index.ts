@@ -2752,6 +2752,38 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Cross-session Recall (chat history + artifact ledger) ============
+  {
+    type: 'function',
+    function: {
+      name: 'recall_past_chats',
+      description: 'Search the user\'s prior chat messages across ALL past sessions (not just the current one). Call this WHENEVER the user references something earlier that is not in the current visible context: "the test we just did", "that task from yesterday", "what we decided last time", "the doc we made", "redo what we did before". Returns matching exchanges with session id, role, snippet, and timestamp. Use the snippets to ground your next action before answering "I don\'t remember".',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords from what the user is referring to (e.g. "clickup test", "seo plan doc", "sweetbliss sitemap").' },
+          days: { type: 'number', description: 'How far back to search in days. Default 30, max 180.' },
+          limit: { type: 'number', description: 'Max matching messages, default 8, max 20.' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_recent_artifacts',
+      description: 'List the user\'s recent artifacts (Google Docs, Sheets, ClickUp tasks, drafts, plans) created or edited in past chats. Call this BEFORE any *_create_* tool when the user says "update", "edit", "add to", "change", or references a prior document/task ("that doc", "the task we made", "our SEO plan"). Returns title, type, external id, and when. If a match is found, prefer the corresponding update tool (e.g. docs_insert_text against the existing documentId) over creating a new one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Optional filter by artifact type.', enum: ['doc_link', 'action_result', 'email_draft', 'markdown', 'plan', 'checklist', 'image', 'file'] },
+          query: { type: 'string', description: 'Optional title keyword filter (case-insensitive).' },
+          limit: { type: 'number', description: 'Max results, default 20, max 50.' },
+        },
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
