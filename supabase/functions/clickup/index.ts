@@ -290,6 +290,29 @@ async function getListId(
   return '';
 }
 
+async function refreshDefaultListId(
+  params?: Record<string, unknown>,
+  resolvedToken?: string,
+  authCtx?: Pick<ClickUpAuthContext, 'userId' | 'connectionId'>,
+): Promise<string> {
+  const supabase = getSupabase();
+  if (authCtx?.connectionId) {
+    await supabase
+      .from('clickup_integration_state')
+      .update({ default_list_id: null, updated_at: new Date().toISOString() })
+      .eq('connection_id', authCtx.connectionId);
+  } else if (authCtx?.userId) {
+    let query = supabase
+      .from('clickup_integration_state')
+      .update({ default_list_id: null, updated_at: new Date().toISOString() })
+      .eq('user_id', authCtx.userId);
+    if (params?.teamId) query = query.eq('team_id', String(params.teamId));
+    await query;
+  }
+
+  return getListId(params, resolvedToken, authCtx);
+}
+
 function getSupabase() {
   return createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -844,7 +867,7 @@ serve(async (req) => {
 
       // ============ TASKS ============
       case 'create_task': {
-        const listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);
+        let listId = params?.listId ? String(params.listId) : await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('No ClickUp list configured. Ask the user to either pick a default list in Integrations → ClickUp, or call list_clickup_spaces / list_clickup_lists to choose one and pass listId explicitly.');
         const {
           name, description, priority, status, due_date, due_date_time,
@@ -863,7 +886,19 @@ serve(async (req) => {
         if (assignees !== undefined) payload.assignees = assignees;
         if (tags !== undefined) payload.tags = tags;
         if (parent !== undefined) payload.parent = parent;
-        const data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+        let data;
+        try {
+          data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!params?.listId && /List deleted|ACCESS_100/i.test(message)) {
+            listId = await refreshDefaultListId(params, resolvedToken, authCtx);
+            if (!listId) throw error;
+            data = await clickupCall(`/list/${listId}/task`, 'POST', payload);
+          } else {
+            throw error;
+          }
+        }
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
