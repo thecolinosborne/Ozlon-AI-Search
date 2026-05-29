@@ -43,6 +43,18 @@ type ClickUpAuthContext = {
   connectionId: string | null;
 };
 
+class ClickUpAuthError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, code: string, status = 401) {
+    super(message);
+    this.name = 'ClickUpAuthError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 // deno-lint-ignore no-explicit-any
 async function tryVaultRead(
   adminClient: any,
@@ -131,22 +143,63 @@ async function resolveClickUpAuth(req: Request, tokenOverride?: string): Promise
         const conn = (conns || []).find((c) => c.status === 'connected') || (conns || [])[0];
         connectionId = conn?.id ?? null;
 
-        if (conn?.id) {
-          const token = await resolveStoredClickUpToken(
-            adminClient,
-            conn.id,
-            user.id,
-            (conn.metadata as Record<string, unknown> | null) ?? null,
+        if (!conn?.id) {
+          console.error('[ClickUp/auth] No ClickUp connection for authenticated user', { userId });
+          throw new ClickUpAuthError(
+            'ClickUp is not connected for this account. Reconnect it in Integrations → ClickUp.',
+            'CLICKUP_CONNECTION_MISSING',
+            404,
           );
-          if (token) return { token, userId, connectionId };
         }
+
+        const token = await resolveStoredClickUpToken(
+          adminClient,
+          conn.id,
+          user.id,
+          (conn.metadata as Record<string, unknown> | null) ?? null,
+        );
+        if (!token) {
+          console.error('[ClickUp/auth] ClickUp connection exists but no stored token found', {
+            userId,
+            connectionId: conn.id,
+          });
+          throw new ClickUpAuthError(
+            'ClickUp is connected in name only for this account, but the saved token is missing. Reconnect it in Integrations → ClickUp.',
+            'CLICKUP_TOKEN_MISSING',
+            409,
+          );
+        }
+        return { token, userId, connectionId };
       }
-    } catch { /* fall through */ }
+
+      console.error('[ClickUp/auth] Authorization header present but no user resolved');
+      throw new ClickUpAuthError(
+        'Your session is no longer valid. Sign in again, then retry ClickUp.',
+        'AUTH_USER_MISSING',
+        401,
+      );
+    } catch (error) {
+      if (error instanceof ClickUpAuthError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[ClickUp/auth] Failed to resolve authenticated user', { message });
+      if (/missing sub claim|bad jwt|jwt/i.test(message)) {
+        throw new ClickUpAuthError(
+          'Your session is invalid. Sign in again, then retry ClickUp.',
+          'AUTH_INVALID_JWT',
+          401,
+        );
+      }
+      throw new ClickUpAuthError(
+        'Could not verify your session for ClickUp. Sign in again and retry.',
+        'AUTH_RESOLUTION_FAILED',
+        401,
+      );
+    }
   }
 
   if (trimmedOverride) return { token: trimmedOverride, userId, connectionId };
 
-  throw new Error('ClickUp not connected. Add your API key in Integrations → ClickUp.');
+  throw new ClickUpAuthError('ClickUp requires an authenticated session. Sign in, then retry.', 'AUTH_REQUIRED', 401);
 }
 
 async function resolveTeamId(
@@ -1364,8 +1417,10 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error('[ClickUp]', err);
+    const status = err instanceof ClickUpAuthError ? err.status : 500;
+    const code = err instanceof ClickUpAuthError ? err.code : 'CLICKUP_UNKNOWN_ERROR';
     return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
