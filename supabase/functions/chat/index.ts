@@ -905,13 +905,29 @@ const GHL_BASE_URL = 'https://services.leadconnectorhq.com';
 // This is the scalable guardrail — add a new ghl handler, locationId is handled.
 let __currentGHLLocationId: string | undefined;
 
+// Endpoints that REJECT a locationId in the JSON body (the path / parent
+// resource already implies the location). Auto-injecting locationId here
+// causes a 422 "property locationId should not exist" from GHL.
+const GHL_BODY_LOC_DENY: RegExp[] = [
+  /^\/contacts\/[^/]+\/tasks(?:\/|$)/,
+  /^\/contacts\/[^/]+\/notes(?:\/|$)/,
+  /^\/contacts\/[^/]+\/tags(?:\/|$)/,
+  /^\/contacts\/[^/]+\/workflow\//,
+  /^\/contacts\/[^/]+\/appointments(?:\/|$)/,
+  /^\/calendars\/events\/appointments\/[^/]+/,
+  /^\/conversations\/[^/]+\/messages(?:\/|$)/,
+];
+
 function __injectGHLLocation(path: string, method: string, body: unknown): { path: string; body: unknown } {
   const loc = __currentGHLLocationId;
   if (!loc) return { path, body };
   const upper = method.toUpperCase();
+  const pathOnly = path.split('?')[0];
+  const bodyDenied = GHL_BODY_LOC_DENY.some((re) => re.test(pathOnly));
 
-  // 1) Auto-inject into JSON object bodies on writes if not already present.
-  if (body && typeof body === 'object' && !Array.isArray(body) && (upper === 'POST' || upper === 'PUT' || upper === 'PATCH')) {
+  // 1) Auto-inject into JSON object bodies on writes if not already present,
+  //    unless the endpoint denies it.
+  if (!bodyDenied && body && typeof body === 'object' && !Array.isArray(body) && (upper === 'POST' || upper === 'PUT' || upper === 'PATCH')) {
     const b = body as Record<string, unknown>;
     const hasLoc = 'locationId' in b || 'altId' in b || 'location_id' in b;
     if (!hasLoc) body = { ...b, locationId: loc };
@@ -921,14 +937,14 @@ function __injectGHLLocation(path: string, method: string, body: unknown): { pat
   //    isn't a single-resource lookup (e.g. /contacts/{id}). GHL list/search
   //    endpoints universally require locationId or altId.
   if (upper === 'GET' || upper === 'DELETE') {
-    const [pathOnly, qs = ''] = path.split('?');
+    const [pOnly, qs = ''] = path.split('?');
     const hasLocInQs = /(?:^|&)(?:locationId|altId|location_id)=/.test(qs);
-    const segments = pathOnly.split('/').filter(Boolean);
+    const segments = pOnly.split('/').filter(Boolean);
     const lastSeg = segments[segments.length - 1] || '';
     const looksLikeResourceById = segments.length >= 2 && /^[a-zA-Z0-9_-]{8,}$/.test(lastSeg) && !/^[a-z-]+$/.test(lastSeg);
     if (!hasLocInQs && !looksLikeResourceById) {
       const sep = qs ? '&' : '';
-      path = `${pathOnly}?${qs}${sep}locationId=${encodeURIComponent(loc)}`;
+      path = `${pOnly}?${qs}${sep}locationId=${encodeURIComponent(loc)}`;
     }
   }
 
@@ -1845,8 +1861,8 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_add_contact_task',
-      description: 'Add a task/to-do for a GoHighLevel contact.',
-      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional)' } }, required: ['contact_id', 'title'] },
+      description: 'Add a task/to-do for a GoHighLevel contact. Defaults completed=false. Do NOT pass locationId — the contact path implies it (GHL rejects it on this endpoint).',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional, e.g. 2026-06-01T17:00:00Z)' }, completed: { type: 'boolean', description: 'Completion status (default false). Set true only if the user explicitly says the task is already done.' } }, required: ['contact_id', 'title'] },
     },
   },
   {
@@ -4223,12 +4239,17 @@ async function executeToolCall(
       }
 
       case 'ghl_add_contact_task': {
-        const taskData: Record<string, unknown> = { title: args.title };
+        // GHL requires `completed` as a boolean and REJECTS locationId on this endpoint.
+        // We default completed=false unless caller explicitly opts in.
+        const taskData: Record<string, unknown> = {
+          title: args.title,
+          completed: typeof args.completed === 'boolean' ? args.completed : false,
+        };
         if (args.body) taskData.body = args.body;
         if (args.dueDate) taskData.dueDate = args.dueDate;
         const res = await callGHL(`/contacts/${args.contact_id}/tasks`, 'POST', taskData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}.` };
+        return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}${args.dueDate ? ` (due ${args.dueDate})` : ''}.` };
       }
 
       case 'ghl_list_contact_tasks': {
@@ -7226,6 +7247,31 @@ When the user asks to attach a file from an email onto a ClickUp task:
 4. Only call \`gmail_get_attachment\` if another step truly needs the raw bytes. Never paste or shuttle large base64 blobs through normal chat reasoning when a direct transfer path exists.
 5. Confirm the upload to the user with the returned attachment URL. Do NOT fall back to "I left a comment instead" unless the upload itself failed.
 
+===========================================================
+EMAIL → CLICKUP TASK (general recipe — no attachments)
+===========================================================
+When the user asks anything like "scan this email and make a task", "pull from inbox into ClickUp", "log this email as a task", "track this email", "create a task from the message about X":
+1. Locate the message: list_emails with a focused query (sender, subject keywords, date) — newest first. If the user already gave a messageId or threadId, skip search.
+2. Read the body: get_email with the messageId to pull subject, sender, full text body, and any linked URLs.
+3. Summarize internally: title = email subject (trimmed), description = 2-4 sentence summary of intent + any deadlines, links, or asks. Include the sender and message URL at the bottom of the description for traceability.
+4. Create the task: create_clickup_task with { name: <title>, description: <summary + sender + message URL> }. Only ask for list_id if no default list is configured AND list_clickup_spaces / list_clickup_lists reveals ambiguity.
+5. Confirm to the user with the ClickUp task URL. Do NOT report a capability gap — every tool in this chain exists.
+
+Vocabulary flexibility: treat all of these as the same intent — "scan", "pull", "extract", "process", "log", "track", "ingest", "turn into a task", "make a ClickUp", "add to my board". If the user is vague about which email, list the top candidates from list_emails and confirm before creating the task.
+
+===========================================================
+SITEMAPS & SEARCH CONSOLE
+===========================================================
+Sitemap actions exist as first-class tools — never report them as missing:
+- "submit my sitemap" / "tell Google about /sitemap.xml" → gsc_submit_sitemap({ site_url, sitemap_url }). For sc-domain properties (e.g. "sc-domain:example.com"), pass that exact string as site_url and the full public URL like "https://example.com/sitemap.xml" as sitemap_url.
+- "what sitemaps are submitted" → gsc_list_sitemaps.
+- "remove that sitemap" → gsc_delete_sitemap.
+
+===========================================================
+GHL CONTACT TASKS
+===========================================================
+- ghl_add_contact_task auto-defaults completed=false and never needs locationId. Just pass contact_id, title, and optional body/dueDate. If the user says "and mark it done", set completed: true.
+
 You are the intelligence, memory, and action layer of ${osName}.`;
 };
 
@@ -8780,7 +8826,13 @@ async function runToolLoop(
     'web_search', 'web_scrape', 'web_map', 'web_search_google',
     'analyze_content', 'analyze_youtube_channel',
   ]);
+  // Writes that share a read-only prefix (e.g. gsc_*) must NEVER be cached —
+  // submitting a sitemap twice in a turn should hit the API twice.
+  const NEVER_CACHE = new Set<string>([
+    'gsc_submit_sitemap', 'gsc_delete_sitemap', 'gsc_save_snapshot',
+  ]);
   const isCacheable = (name: string): boolean => {
+    if (NEVER_CACHE.has(name)) return false;
     if (READ_ONLY_EXACT.has(name)) return true;
     return READ_ONLY_PREFIXES.some((p) => name.startsWith(p));
   };
@@ -8874,21 +8926,33 @@ async function runToolLoop(
       // Keyword fallback (broader vocabulary)
       const kwMap: Array<[RegExp, string]> = [
         [/\b(ghl|gohighlevel|high\s*level|pipeline|opportunity|funnel|workflow|appointment|invoice|sub[- ]?account)\b/, 'ghl'],
-        [/\b(clickup|task|subtask|sprint|space|folder)\b/, 'clickup'],
-        [/\b(email|gmail|inbox|message|thread|reply|draft)\b/, 'gmail'],
+        [/\b(clickup|task|subtask|sprint|space|folder|to[- ]?do|todo)\b/, 'clickup'],
+        [/\b(email|e[- ]?mail|gmail|inbox|message|thread|reply|draft|scan|pull|extract|forward|process)\b/, 'gmail'],
         [/\b(calendar|meeting|schedule|appointment)\b/, 'calendar'],
         [/\b(drive|file|folder)\b/, 'drive'],
         [/\b(doc|document)\b/, 'docs'],
         [/\b(sheet|spreadsheet|csv|rows?)\b/, 'sheets'],
         [/\b(slide|deck|presentation)\b/, 'slides'],
         [/\b(youtube|video|channel)\b/, 'youtube'],
-        [/\b(seo|search\s*console|gsc|impressions|clicks)\b/, 'gsc'],
+        [/\b(seo|search\s*console|gsc|impressions|clicks|sitemap|index(?:ing|ed)?|crawl|robots\.txt|coverage|verified\s*site)\b/, 'gsc'],
         [/\b(analytics|ga4|sessions|pageview)\b/, 'analytics'],
         [/\b(meet|google\s*meet)\b/, 'meet'],
         [/\b(image|generate|render|animate|higgsfield|art|illustration|picture|photo)\b/, 'higgsfield'],
         [/\b(descript|transcript|edit\s*video|voiceover)\b/, 'descript'],
       ];
       for (const [re, bucket] of kwMap) if (re.test(hint)) namedIntegrations.add(bucket);
+
+      // Phrase-level co-promotion: certain phrases reliably need TWO buckets at once.
+      // Forces both to Tier A so the model has the full chain available.
+      const pairRules: Array<[RegExp, string[]]> = [
+        [/\b(email|inbox|gmail|message|thread).{0,40}(task|clickup|to[- ]?do|todo)\b/i, ['gmail', 'clickup']],
+        [/\b(task|clickup|to[- ]?do|todo).{0,40}(email|inbox|gmail|message|thread)\b/i, ['gmail', 'clickup']],
+        [/\b(scan|pull|extract|process|log|track).{0,30}(email|inbox|message|thread)\b/i, ['gmail']],
+        [/\b(from\s+this\s+email|from\s+inbox|from\s+the\s+message)\b/i, ['gmail']],
+      ];
+      for (const [re, buckets] of pairRules) {
+        if (re.test(hint)) for (const b of buckets) namedIntegrations.add(b);
+      }
 
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
@@ -8954,10 +9018,33 @@ async function runToolLoop(
           'ghl_list_contacts',
           'ghl_search_contacts',
           'ghl_create_contact',
+          'ghl_add_contact_task',
+          'ghl_list_contact_tasks',
+          'ghl_add_contact_note',
           'ghl_list_pipelines',
           'ghl_list_calendars',
           'ghl_list_workflows',
           'ghl_inspect_capabilities',
+        ],
+        gsc: [
+          'gsc_list_sites',
+          'gsc_list_sitemaps',
+          'gsc_submit_sitemap',
+          'gsc_delete_sitemap',
+          'gsc_query',
+          'gsc_inspect_url',
+        ],
+        gmail: [
+          'list_emails',
+          'get_email',
+          'send_email',
+        ],
+        clickup: [
+          'create_clickup_task',
+          'list_clickup_tasks',
+          'update_clickup_task',
+          'search_clickup_tasks',
+          'create_clickup_subtask',
         ],
       };
       const reservedFloor = new Set<string>();
