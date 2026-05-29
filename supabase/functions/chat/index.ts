@@ -3727,6 +3727,22 @@ async function executeToolCall(
             structured: dispatched.data as Record<string, unknown> | undefined,
           };
         }
+        // Write-through artifact ledger for "create" actions so future sessions can recall
+        // the external id and prefer an update tool over a duplicate create.
+        if (dispatched.success) {
+          try {
+            const d = (dispatched.data || {}) as Record<string, unknown>;
+            if (toolName === 'create_clickup_task') {
+              const task = (d.task as Record<string, unknown>) || d;
+              const taskId = String(task?.id || d.id || '');
+              const taskUrl = String(task?.url || d.url || '');
+              if (taskId) await recordArtifact({ type: 'action_result', title: String(args.name || args.title || 'ClickUp Task'), externalRef: { provider: 'clickup', taskId, listId: String(args.list_id || ''), url: taskUrl } });
+            } else if (toolName === 'docs_create_document') {
+              const docId = String((d.documentId as string) || ((d.document as Record<string, unknown>)?.documentId as string) || '');
+              if (docId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Doc'), externalRef: { provider: 'google-docs', documentId: docId, url: `https://docs.google.com/document/d/${docId}/edit` } });
+            }
+          } catch (e) { console.warn('[artifact write-through] failed:', (e as Error).message); }
+        }
         return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
       }
     }
