@@ -1419,7 +1419,7 @@ serve(async (req) => {
     console.error('[ClickUp]', err);
     const status = err instanceof ClickUpAuthError ? err.status : 500;
     const code = err instanceof ClickUpAuthError ? err.code : 'CLICKUP_UNKNOWN_ERROR';
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
+    return new Response(JSON.stringify({ error: (err as Error).message, code }), {
       status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
