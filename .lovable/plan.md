@@ -1,34 +1,54 @@
-# Fix ClickUp first
+# Make the assistant remember past chats and edit the right document
 
-## Goal
-Restore ClickUp task actions reliably and stop them from breaking when auth/session state shifts.
+## The problem you're hitting
 
-## What I found
-- The current session is resolving as one backend user, while the saved ClickUp connection belongs to a different backend user.
-- A failed refresh-token recovery happened in the preview, which likely pushed the app into the wrong auth state before ClickUp calls ran.
-- The ClickUp function is then correctly returning “not connected” for the current user, even though another user record still has the saved ClickUp key.
+Two separate gaps in the system, both real:
 
-## Plan
-1. **Stabilize auth recovery on the frontend**
-   - Make the auth bootstrap treat stale refresh tokens as an explicit signed-out reset instead of leaving the app in a half-broken state.
-   - Ensure integration state is only hydrated after a valid session is confirmed.
+1. **No cross-session recall.** Each chat session only loads its own messages. When you start a new chat and ask "redo the task we just tested," the model literally cannot see the previous session — it only sees the current one plus whatever you explicitly told it to `save_memory`. That's why follow-ups feel amnesiac.
 
-2. **Harden ClickUp identity resolution in the backend**
-   - Add targeted logging and stricter checks in the ClickUp function so it clearly distinguishes:
-     - no authenticated user
-     - authenticated user with no ClickUp connection
-     - authenticated user with connection row but no stored secret
-   - Prevent ambiguous fallback behavior from masking identity mismatches.
+2. **No document continuity.** When you ask it to "edit that doc," it has no record of *which* Google Doc it touched last time, so it falls back to `docs_create_document` and you end up with duplicates. There's an `artifacts` table that stores some outputs, but Google Docs IDs from prior turns aren't searchable by the model in a new session.
 
-3. **Repair the current ClickUp connection path safely**
-   - Verify whether the intended active user should own the existing ClickUp connection.
-   - If needed, migrate or recreate the connection record for the correct authenticated user without weakening per-user isolation.
+## What this plan adds
 
-4. **Validate end-to-end**
-   - Test from the frontend integration screen and through the chat/tool path.
-   - Confirm ClickUp connect, test connection, and task creation all work under the same user identity.
+### 1. Cross-session chat recall tool
+A new `recall_past_chats` tool the model can call when you reference something earlier ("the test we just did", "that task from before", "what did we decide yesterday"). It searches your own prior `chat_messages` by keyword + recency (last 30 days, your user id only), returns the top matching exchanges with session id and timestamp, and the model uses that context before acting.
 
-## Technical notes
-- I will only touch the auth/session flow and the ClickUp integration path for this pass.
-- I will not bundle Search Console or YouTube into this fix until ClickUp is fully stable.
-- If the current broken state comes from duplicate user identities, I’ll fix the resolution path first and then clean up the connection ownership safely rather than adding hacks.
+No new embeddings infra required for v1 — Postgres full-text search over `chat_messages.content` is fast enough and avoids re-embedding the entire history. Embedding-based recall can be a phase 2 if FTS isn't sharp enough.
+
+### 2. Document/artifact ledger
+Every time the assistant creates or edits a Google Doc, Sheet, ClickUp task, etc., we already log the external id in `artifacts.external_ref`. We'll add:
+
+- A `recall_recent_artifacts` tool that lists the user's last ~20 artifacts (title, type, external id, when, which session) so the model can find "the doc from last time" before deciding to create a new one.
+- A system-prompt rule: *"Before calling any `*_create_*` tool, call `recall_recent_artifacts` if the user references a prior document/task/sheet. Prefer update over create."*
+- Backfill writes for `docs_create_document`, `docs_insert_text`, and ClickUp create paths so they always record an artifact row with the external id. Some already do; some don't.
+
+### 3. Explicit "use this doc" handle
+When you say "edit the doc we made last time," the model will:
+1. Call `recall_recent_artifacts` (and `recall_past_chats` if needed),
+2. Show you the candidate ("Updating *Q4 SEO Plan* — created Tue") and proceed,
+3. Call `docs_insert_text` / `docs_replace_text` against the existing `documentId` instead of `docs_create_document`.
+
+If you want, a stricter mode can require confirmation before any new-document creation when a recent similar artifact exists.
+
+## Technical details
+
+**New edge function tools (in `supabase/functions/chat/index.ts`):**
+- `recall_past_chats({ query, days?=30, limit?=8 })` → SQL: `SELECT session_id, role, content, created_at FROM chat_messages WHERE user_id = $auth AND created_at > now() - $days AND content ILIKE '%' || $query || '%' ORDER BY created_at DESC LIMIT $limit`. Returns trimmed snippets.
+- `recall_recent_artifacts({ type?, limit?=20 })` → reads `artifacts` filtered by `user_id` and optional `type`, returns id, title, type, external_ref, updated_at, conversation_id.
+
+**Artifact write-through (gap fix):**
+- In the `docs_create_document` handler, after success, insert into `artifacts` with `type='doc_link'`, `external_ref={ documentId, url }`.
+- Same for the ClickUp create-task path (`type='action_result'`, `external_ref={ taskId, listId }`) — confirms the record needed for "update that task."
+
+**System prompt additions (small, surgical):**
+- One paragraph telling the model to call recall tools when the user uses anaphoric references ("that doc", "the task", "what we did"), and to prefer update tools over create tools when a match is found.
+
+**No schema changes required.** `chat_messages`, `artifacts`, and `chat_sessions` already have everything we need. Indexes already cover `user_id + created_at`. If FTS performance becomes an issue we can add a `to_tsvector` index later.
+
+**No UI changes.** This is all backend / system-prompt work. The chat UI keeps behaving the same; the model just gets smarter about reaching back.
+
+## What it won't do (so we're aligned)
+
+- It won't auto-merge sessions or change how the sidebar groups chats.
+- It won't replay full prior conversations into context (token cost) — it pulls targeted snippets on demand.
+- It won't silently overwrite a doc; for destructive replacements it still asks you to confirm, per the existing list-confirm-act rule.
