@@ -712,6 +712,36 @@ async function fetchGoogleMeetData(): Promise<string> {
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
 }
 
+// ---------- Artifact ledger (write-through for cross-session "edit that doc" recall) ----------
+async function recordArtifact(opts: {
+  type: 'doc_link' | 'action_result' | 'email_draft' | 'markdown' | 'plan' | 'checklist' | 'image' | 'file';
+  title: string;
+  externalRef: Record<string, unknown>;
+  content?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+    const sessionId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+    if (!userId || !sessionId) return;
+    const messageId = (globalThis as Record<string, unknown>).__currentAssistantMessageId as string | undefined;
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    await admin.from('artifacts').insert({
+      user_id: userId,
+      conversation_id: sessionId,
+      message_id: messageId || null,
+      type: opts.type,
+      title: opts.title.slice(0, 200),
+      content: opts.content || {},
+      external_ref: opts.externalRef,
+      created_by: 'ai',
+      status: 'published',
+    });
+  } catch (e) {
+    console.warn('[recordArtifact] failed:', (e as Error).message);
+  }
+}
+
 // ---------- ClickUp (via dedicated edge function) ----------
 async function callClickUpEdge(action: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clickupUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/clickup`;
@@ -2752,6 +2782,38 @@ const ACTION_TOOLS: ToolDef[] = [
       },
     },
   },
+  // ============ Cross-session Recall (chat history + artifact ledger) ============
+  {
+    type: 'function',
+    function: {
+      name: 'recall_past_chats',
+      description: 'Search the user\'s prior chat messages across ALL past sessions (not just the current one). Call this WHENEVER the user references something earlier that is not in the current visible context: "the test we just did", "that task from yesterday", "what we decided last time", "the doc we made", "redo what we did before". Returns matching exchanges with session id, role, snippet, and timestamp. Use the snippets to ground your next action before answering "I don\'t remember".',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords from what the user is referring to (e.g. "clickup test", "seo plan doc", "sweetbliss sitemap").' },
+          days: { type: 'number', description: 'How far back to search in days. Default 30, max 180.' },
+          limit: { type: 'number', description: 'Max matching messages, default 8, max 20.' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_recent_artifacts',
+      description: 'List the user\'s recent artifacts (Google Docs, Sheets, ClickUp tasks, drafts, plans) created or edited in past chats. Call this BEFORE any *_create_* tool when the user says "update", "edit", "add to", "change", or references a prior document/task ("that doc", "the task we made", "our SEO plan"). Returns title, type, external id, and when. If a match is found, prefer the corresponding update tool (e.g. docs_insert_text against the existing documentId) over creating a new one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Optional filter by artifact type.', enum: ['doc_link', 'action_result', 'email_draft', 'markdown', 'plan', 'checklist', 'image', 'file'] },
+          query: { type: 'string', description: 'Optional title keyword filter (case-insensitive).' },
+          limit: { type: 'number', description: 'Max results, default 20, max 50.' },
+        },
+      },
+    },
+  },
   // ============ Scheduled Routines (Recurring Workflows) ============
   {
     type: 'function',
@@ -3665,6 +3727,22 @@ async function executeToolCall(
             structured: dispatched.data as Record<string, unknown> | undefined,
           };
         }
+        // Write-through artifact ledger for "create" actions so future sessions can recall
+        // the external id and prefer an update tool over a duplicate create.
+        if (dispatched.success) {
+          try {
+            const d = (dispatched.data || {}) as Record<string, unknown>;
+            if (toolName === 'create_clickup_task') {
+              const task = (d.task as Record<string, unknown>) || d;
+              const taskId = String(task?.id || d.id || '');
+              const taskUrl = String(task?.url || d.url || '');
+              if (taskId) await recordArtifact({ type: 'action_result', title: String(args.name || args.title || 'ClickUp Task'), externalRef: { provider: 'clickup', taskId, listId: String(args.list_id || ''), url: taskUrl } });
+            } else if (toolName === 'docs_create_document') {
+              const docId = String((d.documentId as string) || ((d.document as Record<string, unknown>)?.documentId as string) || '');
+              if (docId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Doc'), externalRef: { provider: 'google-docs', documentId: docId, url: `https://docs.google.com/document/d/${docId}/edit` } });
+            }
+          } catch (e) { console.warn('[artifact write-through] failed:', (e as Error).message); }
+        }
         return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
       }
     }
@@ -4311,6 +4389,7 @@ async function executeToolCall(
               result += '\nContent added successfully.';
             } catch (e) { result += `\nDoc created but could not insert content: ${(e as Error).message}`; }
           }
+          await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Doc'), externalRef: { provider: 'google-docs', documentId: docId, url: link } });
           return { success: true, result };
         } catch (e) { return { success: false, result: `Failed to create doc: ${(e as Error).message}` }; }
       }
@@ -4321,6 +4400,7 @@ async function executeToolCall(
           const data = await callNativeEdge('google-sheets', 'create_spreadsheet', { title: args.title });
           const sheet = data.spreadsheet as { spreadsheetId?: string; spreadsheetUrl?: string } | undefined;
           const link = sheet?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheet?.spreadsheetId}/edit`;
+          if (sheet?.spreadsheetId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Sheet'), externalRef: { provider: 'google-sheets', spreadsheetId: sheet.spreadsheetId, url: link } });
           return { success: true, result: `Google Sheet created: "${args.title}" — ${link}` };
         } catch (e) { return { success: false, result: `Failed to create sheet: ${(e as Error).message}` }; }
       }
@@ -4354,6 +4434,7 @@ async function executeToolCall(
           const data = await callNativeEdge('google-slides', 'create_presentation', { title: args.title });
           const pres = data as { presentationId?: string };
           const link = `https://docs.google.com/presentation/d/${pres.presentationId}/edit`;
+          if (pres.presentationId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Presentation'), externalRef: { provider: 'google-slides', presentationId: pres.presentationId, url: link } });
           return { success: true, result: `Google Slides presentation created: "${args.title}" — ${link}` };
         } catch (e) { return { success: false, result: `Failed to create presentation: ${(e as Error).message}` }; }
       }
@@ -5727,6 +5808,80 @@ async function executeToolCall(
         }
       }
 
+
+
+      case 'recall_past_chats': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot search past chats.' };
+          const query = String(args.query || '').trim();
+          if (!query) return { success: false, result: 'query is required' };
+          const days = Math.min(Math.max(Number(args.days ?? 30), 1), 180);
+          const limit = Math.min(Math.max(Number(args.limit ?? 8), 1), 20);
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
+          const currentSession = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+          const { data, error } = await admin
+            .from('chat_messages')
+            .select('id, session_id, role, content, created_at')
+            .eq('user_id', userId)
+            .gte('created_at', sinceIso)
+            .ilike('content', `%${query.replace(/[%_]/g, '')}%`)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+          if (error) return { success: false, result: `Recall failed: ${error.message}` };
+          const rows = (data || []) as Array<{ id: string; session_id: string; role: string; content: string; created_at: string }>;
+          if (!rows.length) return { success: true, result: `No prior messages matching "${query}" in the last ${days} days.` };
+          const formatted = rows.map((r, i) => {
+            const isCurrent = r.session_id === currentSession ? ' (current session)' : '';
+            const snippet = r.content.length > 320 ? r.content.slice(0, 320) + '…' : r.content;
+            return `${i + 1}. [${r.role} · ${new Date(r.created_at).toISOString().slice(0, 16).replace('T', ' ')}${isCurrent}] session=${r.session_id.slice(0, 8)}\n   ${snippet}`;
+          }).join('\n');
+          return { success: true, result: `Found ${rows.length} prior message(s) matching "${query}":\n${formatted}` };
+        } catch (e) {
+          return { success: false, result: `Recall error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'recall_recent_artifacts': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot list artifacts.' };
+          const limit = Math.min(Math.max(Number(args.limit ?? 20), 1), 50);
+          const typeFilter = (args.type as string) || null;
+          const queryFilter = String(args.query || '').trim();
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(supabaseUrl, serviceRoleKey);
+          let q = admin.from('artifacts')
+            .select('id, type, title, external_ref, updated_at, conversation_id, version')
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false })
+            .limit(limit);
+          if (typeFilter) q = q.eq('type', typeFilter);
+          if (queryFilter) q = q.ilike('title', `%${queryFilter.replace(/[%_]/g, '')}%`);
+          const { data, error } = await q;
+          if (error) return { success: false, result: `Artifact lookup failed: ${error.message}` };
+          const rows = (data || []) as Array<{ id: string; type: string; title: string | null; external_ref: Record<string, unknown>; updated_at: string; conversation_id: string; version: number }>;
+          if (!rows.length) return { success: true, result: 'No recent artifacts found.' };
+          const formatted = rows.map((r, i) => {
+            const ref = r.external_ref ? Object.entries(r.external_ref).map(([k, v]) => `${k}=${typeof v === 'string' && v.length > 60 ? v.slice(0, 60) + '…' : v}`).join(' ') : '';
+            return `${i + 1}. [${r.type}] ${r.title || '(untitled)'} — v${r.version} — ${new Date(r.updated_at).toISOString().slice(0, 10)}${ref ? ` — ${ref}` : ''}`;
+          }).join('\n');
+          return { success: true, result: `Recent artifacts:\n${formatted}\n\nUse the matching external id with the appropriate update tool (e.g. docs_insert_text with documentId) instead of creating a new one.` };
+        } catch (e) {
+          return { success: false, result: `Artifact lookup error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+
+
       case 'create_routine': {
         try {
           const userId = (args as Record<string, unknown>).__user_id as string;
@@ -6814,6 +6969,16 @@ You act as:
 - A reflective reasoning system that notices patterns and connects dots
 - A truth-seeking advisor who prioritizes usefulness and honesty
 - A pattern-recognizer across the user's life, business, and goals
+
+===========================================================
+CROSS-SESSION RECALL (USE WHEN THE USER REFERS TO SOMETHING EARLIER)
+===========================================================
+The current chat shows ONLY this session's messages. Prior sessions are NOT in your context. When the user uses anaphoric references like "the test we just did", "that doc", "the task from before", "what we decided yesterday", "redo it", "update that", or names a thing you can't see in the visible messages:
+1. Call recall_past_chats with keywords from the reference BEFORE answering "I don't remember" or asking the user to repeat themselves.
+2. If they reference a document/task/sheet/draft, ALSO call recall_recent_artifacts (optionally with type filter) to find the actual external id.
+3. When a matching artifact is found, prefer the corresponding UPDATE tool (docs_insert_text/docs_replace_text against the existing documentId, update_clickup_task against the existing taskId, etc.) over the *_create_* variant. Do not silently duplicate an existing document.
+4. Briefly confirm in your reply which prior item you're acting on (e.g. "Updating *Q4 SEO Plan* from Tue —").
+
 
 ===========================================================
 CAPABILITY GAP RECOVERY (WHEN A TOOL FAILS)
@@ -9214,7 +9379,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -9988,8 +10153,10 @@ serve(async (req) => {
       }
     }
 
-    // Expose userId to tool handlers (used by load_skill, etc.)
+    // Expose userId + sessionId to tool handlers (used by load_skill, recall tools, artifact write-through, etc.)
     (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
+    (globalThis as Record<string, unknown>).__currentSessionId = (body.sessionId as string) || undefined;
+    (globalThis as Record<string, unknown>).__currentAssistantMessageId = (body.assistantMessageId as string) || undefined;
 
     // ================================================================
     // SKILLS PLATFORM — inject compact index of installed skills.
