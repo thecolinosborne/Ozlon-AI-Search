@@ -712,6 +712,36 @@ async function fetchGoogleMeetData(): Promise<string> {
   return events.map(e => `- ${e.summary || '(no title)'} | ${e.start?.dateTime || e.start?.date || 'TBD'} | ${e.hangoutLink || e.htmlLink || ''}`).join('\n');
 }
 
+// ---------- Artifact ledger (write-through for cross-session "edit that doc" recall) ----------
+async function recordArtifact(opts: {
+  type: 'doc_link' | 'action_result' | 'email_draft' | 'markdown' | 'plan' | 'checklist' | 'image' | 'file';
+  title: string;
+  externalRef: Record<string, unknown>;
+  content?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+    const sessionId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+    if (!userId || !sessionId) return;
+    const messageId = (globalThis as Record<string, unknown>).__currentAssistantMessageId as string | undefined;
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    await admin.from('artifacts').insert({
+      user_id: userId,
+      conversation_id: sessionId,
+      message_id: messageId || null,
+      type: opts.type,
+      title: opts.title.slice(0, 200),
+      content: opts.content || {},
+      external_ref: opts.externalRef,
+      created_by: 'ai',
+      status: 'published',
+    });
+  } catch (e) {
+    console.warn('[recordArtifact] failed:', (e as Error).message);
+  }
+}
+
 // ---------- ClickUp (via dedicated edge function) ----------
 async function callClickUpEdge(action: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clickupUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/clickup`;
