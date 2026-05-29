@@ -8780,7 +8780,13 @@ async function runToolLoop(
     'web_search', 'web_scrape', 'web_map', 'web_search_google',
     'analyze_content', 'analyze_youtube_channel',
   ]);
+  // Writes that share a read-only prefix (e.g. gsc_*) must NEVER be cached —
+  // submitting a sitemap twice in a turn should hit the API twice.
+  const NEVER_CACHE = new Set<string>([
+    'gsc_submit_sitemap', 'gsc_delete_sitemap', 'gsc_save_snapshot',
+  ]);
   const isCacheable = (name: string): boolean => {
+    if (NEVER_CACHE.has(name)) return false;
     if (READ_ONLY_EXACT.has(name)) return true;
     return READ_ONLY_PREFIXES.some((p) => name.startsWith(p));
   };
@@ -8874,21 +8880,33 @@ async function runToolLoop(
       // Keyword fallback (broader vocabulary)
       const kwMap: Array<[RegExp, string]> = [
         [/\b(ghl|gohighlevel|high\s*level|pipeline|opportunity|funnel|workflow|appointment|invoice|sub[- ]?account)\b/, 'ghl'],
-        [/\b(clickup|task|subtask|sprint|space|folder)\b/, 'clickup'],
-        [/\b(email|gmail|inbox|message|thread|reply|draft)\b/, 'gmail'],
+        [/\b(clickup|task|subtask|sprint|space|folder|to[- ]?do|todo)\b/, 'clickup'],
+        [/\b(email|e[- ]?mail|gmail|inbox|message|thread|reply|draft|scan|pull|extract|forward|process)\b/, 'gmail'],
         [/\b(calendar|meeting|schedule|appointment)\b/, 'calendar'],
         [/\b(drive|file|folder)\b/, 'drive'],
         [/\b(doc|document)\b/, 'docs'],
         [/\b(sheet|spreadsheet|csv|rows?)\b/, 'sheets'],
         [/\b(slide|deck|presentation)\b/, 'slides'],
         [/\b(youtube|video|channel)\b/, 'youtube'],
-        [/\b(seo|search\s*console|gsc|impressions|clicks)\b/, 'gsc'],
+        [/\b(seo|search\s*console|gsc|impressions|clicks|sitemap|index(?:ing|ed)?|crawl|robots\.txt|coverage|verified\s*site)\b/, 'gsc'],
         [/\b(analytics|ga4|sessions|pageview)\b/, 'analytics'],
         [/\b(meet|google\s*meet)\b/, 'meet'],
         [/\b(image|generate|render|animate|higgsfield|art|illustration|picture|photo)\b/, 'higgsfield'],
         [/\b(descript|transcript|edit\s*video|voiceover)\b/, 'descript'],
       ];
       for (const [re, bucket] of kwMap) if (re.test(hint)) namedIntegrations.add(bucket);
+
+      // Phrase-level co-promotion: certain phrases reliably need TWO buckets at once.
+      // Forces both to Tier A so the model has the full chain available.
+      const pairRules: Array<[RegExp, string[]]> = [
+        [/\b(email|inbox|gmail|message|thread).{0,40}(task|clickup|to[- ]?do|todo)\b/i, ['gmail', 'clickup']],
+        [/\b(task|clickup|to[- ]?do|todo).{0,40}(email|inbox|gmail|message|thread)\b/i, ['gmail', 'clickup']],
+        [/\b(scan|pull|extract|process|log|track).{0,30}(email|inbox|message|thread)\b/i, ['gmail']],
+        [/\b(from\s+this\s+email|from\s+inbox|from\s+the\s+message)\b/i, ['gmail']],
+      ];
+      for (const [re, buckets] of pairRules) {
+        if (re.test(hint)) for (const b of buckets) namedIntegrations.add(b);
+      }
 
       // Tier B core tools — always preserved.
       const CORE_TOOLS = new Set([
@@ -8954,10 +8972,33 @@ async function runToolLoop(
           'ghl_list_contacts',
           'ghl_search_contacts',
           'ghl_create_contact',
+          'ghl_add_contact_task',
+          'ghl_list_contact_tasks',
+          'ghl_add_contact_note',
           'ghl_list_pipelines',
           'ghl_list_calendars',
           'ghl_list_workflows',
           'ghl_inspect_capabilities',
+        ],
+        gsc: [
+          'gsc_list_sites',
+          'gsc_list_sitemaps',
+          'gsc_submit_sitemap',
+          'gsc_delete_sitemap',
+          'gsc_query',
+          'gsc_inspect_url',
+        ],
+        gmail: [
+          'gmail_search_messages',
+          'gmail_list_messages',
+          'gmail_get_message',
+          'gmail_send_message',
+          'gmail_create_draft',
+        ],
+        clickup: [
+          'clickup_create_task',
+          'clickup_list_tasks',
+          'clickup_update_task',
         ],
       };
       const reservedFloor = new Set<string>();
