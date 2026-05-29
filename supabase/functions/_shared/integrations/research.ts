@@ -139,7 +139,7 @@ export const researchIntegration: IntegrationManifest = {
     {
       name: "web_investigate",
       description:
-        "Multi-hop autonomous research. Decomposes a complex question into 2-5 focused sub-queries (planned by Gemini), runs them in parallel via web_search, auto-enriches the top hits, synthesizes a structured answer with citations, and self-critiques for gaps (firing one targeted follow-up if needed). Use for COMPARATIVE, MULTI-FACETED, or CROSS-SOURCE questions like 'compare X vs Y', 'give me a full briefing on Z', 'what's happening with A across pricing/reviews/news'. One call replaces 4-8 manual rounds. Hard budget: 5 sub-queries, 8 enriches, 30s wall-clock. Falls back to web_answer if budgets exceeded.",
+        "Multi-hop autonomous research. Decomposes a complex question into 2-5 focused sub-queries (planned by Gemini), runs them in parallel via web_search, auto-enriches the top hits, synthesizes a structured answer with citations, and self-critiques for gaps (firing one targeted follow-up if needed). Use for COMPARATIVE, MULTI-FACETED, or CROSS-SOURCE questions like 'compare X vs Y', 'give me a full briefing on Z', 'what's happening with A across pricing/reviews/news'. One call replaces 4-8 manual rounds. Hard budget: 5 sub-queries, 8 enriches, 30s wall-clock. Falls back to web_answer if budgets exceeded. DO NOT use this to figure out how to perform an action that has a dedicated tool (e.g. submitting a sitemap → call gsc_submit_sitemap directly; creating a task → call the task tool directly). Only research, never substitute for an available action tool.",
       action: "web_investigate",
       sideEffect: "external_call",
       cost: "expensive",
