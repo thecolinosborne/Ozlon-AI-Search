@@ -4373,6 +4373,7 @@ async function executeToolCall(
               result += '\nContent added successfully.';
             } catch (e) { result += `\nDoc created but could not insert content: ${(e as Error).message}`; }
           }
+          await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Doc'), externalRef: { provider: 'google-docs', documentId: docId, url: link } });
           return { success: true, result };
         } catch (e) { return { success: false, result: `Failed to create doc: ${(e as Error).message}` }; }
       }
