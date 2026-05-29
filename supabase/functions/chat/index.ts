@@ -1861,8 +1861,8 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'ghl_add_contact_task',
-      description: 'Add a task/to-do for a GoHighLevel contact.',
-      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional)' } }, required: ['contact_id', 'title'] },
+      description: 'Add a task/to-do for a GoHighLevel contact. Defaults completed=false. Do NOT pass locationId — the contact path implies it (GHL rejects it on this endpoint).',
+      parameters: { type: 'object', properties: { contact_id: { type: 'string', description: 'Contact ID' }, title: { type: 'string', description: 'Task title' }, body: { type: 'string', description: 'Task description (optional)' }, dueDate: { type: 'string', description: 'Due date ISO 8601 (optional, e.g. 2026-06-01T17:00:00Z)' }, completed: { type: 'boolean', description: 'Completion status (default false). Set true only if the user explicitly says the task is already done.' } }, required: ['contact_id', 'title'] },
     },
   },
   {
@@ -4239,12 +4239,17 @@ async function executeToolCall(
       }
 
       case 'ghl_add_contact_task': {
-        const taskData: Record<string, unknown> = { title: args.title };
+        // GHL requires `completed` as a boolean and REJECTS locationId on this endpoint.
+        // We default completed=false unless caller explicitly opts in.
+        const taskData: Record<string, unknown> = {
+          title: args.title,
+          completed: typeof args.completed === 'boolean' ? args.completed : false,
+        };
         if (args.body) taskData.body = args.body;
         if (args.dueDate) taskData.dueDate = args.dueDate;
         const res = await callGHL(`/contacts/${args.contact_id}/tasks`, 'POST', taskData, ghlCreds?.apiKey) as { id?: string; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
-        return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}.` };
+        return { success: true, result: `Task "${args.title}" added to contact ${args.contact_id}${args.dueDate ? ` (due ${args.dueDate})` : ''}.` };
       }
 
       case 'ghl_list_contact_tasks': {
