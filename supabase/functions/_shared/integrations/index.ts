@@ -14,7 +14,7 @@ import { googleDriveIntegration } from "./google-drive.ts";
 import { googleAnalyticsIntegration } from "./google-analytics.ts";
 import { googleTagManagerIntegration } from "./google-tag-manager.ts";
 import { descriptIntegration } from "./descript.ts";
-import { searchAtlasIntegration } from "./search-atlas.ts";
+
 import { slackIntegration } from "./slack.ts";
 import { gmailIntegration } from "./gmail.ts";
 import { clickupIntegration } from "./clickup.ts";
@@ -36,7 +36,7 @@ export const INTEGRATIONS: IntegrationManifest[] = [
   googleAnalyticsIntegration,
   googleTagManagerIntegration,
   descriptIntegration,
-  searchAtlasIntegration,
+  
   slackIntegration,
   gmailIntegration,
   clickupIntegration,
