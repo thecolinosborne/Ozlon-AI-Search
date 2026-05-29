@@ -227,19 +227,6 @@ export const INTEGRATIONS: IntegrationManifest[] = [
     auth: "google-oauth",
     customDetailPage: true,
   },
-  {
-    id: "search-atlas",
-    name: "Search Atlas",
-    description: "Site audit, keyword research, backlinks, and rank tracking.",
-    icon: Search,
-    category: "seo",
-    provider: "search_atlas",
-    fnName: "search-atlas",
-    testAction: "list_projects",
-    testLabel: "Projects",
-    auth: "api-key",
-    customDetailPage: true,
-  },
 
   // Slack — multi-tenant per-user OAuth install (custom detail page).
   {
