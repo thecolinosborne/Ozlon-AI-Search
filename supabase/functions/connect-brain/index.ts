@@ -188,10 +188,13 @@ serve(async (req) => {
 
     // ---------------- list_status ----------------
     if (body.action === "list_status" || !body.action) {
-      const { data: rows } = await admin
-        .from("custom_models")
-        .select("model_id, api_key_secret_name, metadata")
-        .eq("user_id", userId);
+      const { data: rows } = userId
+        ? await admin
+            .from("custom_models")
+            .select("model_id, api_key_secret_name, metadata")
+            .eq("user_id", userId)
+        : { data: [] as Array<Record<string, unknown>> };
+
       const byPlatform = new Map<string, { last4: string; label: string | null }>();
       for (const r of (rows || []) as Array<{ model_id: string; api_key_secret_name: string | null; metadata: Record<string, unknown> | null }>) {
         const pid = (r.metadata?.platform_id as string) || inferPlatformIdFromModelId(r.model_id);
