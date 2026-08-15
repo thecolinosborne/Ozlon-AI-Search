@@ -1,54 +1,75 @@
-# Make the assistant remember past chats and edit the right document
+# Ozlon as a Life Operating System (EOS-style)
 
-## The problem you're hitting
+Goal: turn Ozlon from a set of integrations into a brain that knows your life, thinks in a consistent operating model, and pushes you forward — clarify, quantify, decide, assign, review.
 
-Two separate gaps in the system, both real:
+## The operating model it thinks in
 
-1. **No cross-session recall.** Each chat session only loads its own messages. When you start a new chat and ask "redo the task we just tested," the model literally cannot see the previous session — it only sees the current one plus whatever you explicitly told it to `save_memory`. That's why follow-ups feel amnesiac.
+Borrowed from EOS, adapted for one person instead of a company:
 
-2. **No document continuity.** When you ask it to "edit that doc," it has no record of *which* Google Doc it touched last time, so it falls back to `docs_create_document` and you end up with duplicates. There's an `artifacts` table that stores some outputs, but Google Docs IDs from prior turns aren't searchable by the model in a new session.
+- **Vision** — where you're going, your core values, the 1-year and 3-year picture.
+- **Rocks** — 3 to 7 priorities per 90-day quarter. Everything it suggests must serve a rock or get named as a distraction.
+- **Scorecard** — a handful of weekly numbers you actually watch (revenue, pipeline, hours, health, whatever you pick).
+- **Issues list** — anything unresolved, worked through with Identify → Discuss → Solve. Every solved issue produces an owner and a date.
+- **Weekly review** — a standing Level 10-style check: scorecard, rock status, issues solved, next week's commitments.
+- **Life domains** — work, money, health, people. Each rock, issue, and number belongs to a domain so nothing quietly rots.
 
-## What this plan adds
+Every answer it gives runs through that frame. If you hand it a document, a number, or a messy situation, the default response is: what this is → what it means → the math → the recommendation → who does what by when.
 
-### 1. Cross-session chat recall tool
-A new `recall_past_chats` tool the model can call when you reference something earlier ("the test we just did", "that task from before", "what did we decide yesterday"). It searches your own prior `chat_messages` by keyword + recency (last 30 days, your user id only), returns the top matching exchanges with session id and timestamp, and the model uses that context before acting.
+## What already exists
 
-No new embeddings infra required for v1 — Postgres full-text search over `chat_messages.content` is fast enough and avoids re-embedding the entire history. Embedding-based recall can be a phase 2 if FTS isn't sharp enough.
+- Memory that persists across sessions (wisdom memories, knowledge entries, reflections, artifacts ledger).
+- Signals/Stack: a ranked actionable inbox with capture and urgency logic.
+- People and events tables, plus a Today layer.
+- A daily brief job, though it currently emits one generic sentence from an overdue-task count.
+- Deep integrations: Gmail, Calendar, Drive/Docs/Sheets/Slides, ClickUp, GoHighLevel, Plaid, Slack, Search Console, research and voice.
 
-### 2. Document/artifact ledger
-Every time the assistant creates or edits a Google Doc, Sheet, ClickUp task, etc., we already log the external id in `artifacts.external_ref`. We'll add:
+What's missing is the connective layer: a defined life model, a context pack that reaches the chat brain on every turn, and rituals that close the loop.
 
-- A `recall_recent_artifacts` tool that lists the user's last ~20 artifacts (title, type, external id, when, which session) so the model can find "the doc from last time" before deciding to create a new one.
-- A system-prompt rule: *"Before calling any `*_create_*` tool, call `recall_recent_artifacts` if the user references a prior document/task/sheet. Prefer update over create."*
-- Backfill writes for `docs_create_document`, `docs_insert_text`, and ClickUp create paths so they always record an artifact row with the external id. Some already do; some don't.
+## Phase 1 — The life model
 
-### 3. Explicit "use this doc" handle
-When you say "edit the doc we made last time," the model will:
-1. Call `recall_recent_artifacts` (and `recall_past_chats` if needed),
-2. Show you the candidate ("Updating *Q4 SEO Plan* — created Tue") and proceed,
-3. Call `docs_insert_text` / `docs_replace_text` against the existing `documentId` instead of `docs_create_document`.
+New tables (all user-scoped, RLS on):
 
-If you want, a stricter mode can require confirmation before any new-document creation when a recent similar artifact exists.
+- `life_vision` — core values, 10-year target, 3-year picture, 1-year plan.
+- `life_rocks` — quarter, title, domain, owner, due date, status, progress, linked goal.
+- `life_scorecard_metrics` and `life_scorecard_entries` — metric definition (name, domain, unit, target, cadence) plus weekly values.
+- `life_issues` — issue text, domain, priority, status, solution, resulting owner/date.
+- `life_reviews` — one row per weekly review with the generated summary and commitments.
 
-## Technical details
+`life_goals`, `life_people`, `life_events`, and `work_tasks` already exist and get wired into this rather than duplicated.
 
-**New edge function tools (in `supabase/functions/chat/index.ts`):**
-- `recall_past_chats({ query, days?=30, limit?=8 })` → SQL: `SELECT session_id, role, content, created_at FROM chat_messages WHERE user_id = $auth AND created_at > now() - $days AND content ILIKE '%' || $query || '%' ORDER BY created_at DESC LIMIT $limit`. Returns trimmed snippets.
-- `recall_recent_artifacts({ type?, limit?=20 })` → reads `artifacts` filtered by `user_id` and optional `type`, returns id, title, type, external_ref, updated_at, conversation_id.
+## Phase 2 — The brain
 
-**Artifact write-through (gap fix):**
-- In the `docs_create_document` handler, after success, insert into `artifacts` with `type='doc_link'`, `external_ref={ documentId, url }`.
-- Same for the ClickUp create-task path (`type='action_result'`, `external_ref={ taskId, listId }`) — confirms the record needed for "update that task."
+- **Context pack**: before every chat turn, assemble a compact block — vision, active rocks with status, last scorecard row plus trend, open issues, today's calendar and stack, and relevant memories. Injected as system context so it never has to be told who you are or what matters.
+- **Operating-model prompt**: the reasoning frame above, plus rules — always do the arithmetic explicitly, always tie advice to a rock or flag it as off-plan, always end with a concrete next action and a date, never dump raw JSON.
+- **New tools** so it can run the model itself: read/set vision, create and update rocks, log scorecard numbers, open and solve issues, and pull a full life snapshot.
+- **Analyze-anything path**: any pasted number, doc link, screenshot, or situation goes through capture → classify into a domain → analyze (with the math shown) → recommend → offer to create the task, doc, or reminder.
 
-**System prompt additions (small, surgical):**
-- One paragraph telling the model to call recall tools when the user uses anaphoric references ("that doc", "the task", "what we did"), and to prefer update tools over create tools when a match is found.
+## Phase 3 — Rituals
 
-**No schema changes required.** `chat_messages`, `artifacts`, and `chat_sessions` already have everything we need. Indexes already cover `user_id + created_at`. If FTS performance becomes an issue we can add a `to_tsvector` index later.
+- **Daily brief** upgraded: rock status, what's due, what slipped, the one thing that matters today, written in your plain-speak voice.
+- **Weekly review**: a scheduled run that scores the week — metrics hit or missed, rock progress, issues opened and solved — then asks you the handful of questions it can't answer alone and stores the result as a review record.
+- **Quarterly reset**: at quarter end it closes out rocks, reports the hit rate, and walks you through setting the next set.
 
-**No UI changes.** This is all backend / system-prompt work. The chat UI keeps behaving the same; the model just gets smarter about reaching back.
+## Phase 4 — The surface
 
-## What it won't do (so we're aligned)
+A `/life` page, in the existing calm visual language, with:
 
-- It won't auto-merge sessions or change how the sidebar groups chats.
-- It won't replay full prior conversations into context (token cost) — it pulls targeted snippets on demand.
-- It won't silently overwrite a doc; for destructive replacements it still asks you to confirm, per the existing list-confirm-act rule.
+- Vision card at the top.
+- Rocks as progress rows for the current quarter.
+- Scorecard as a compact weekly grid, green/red per target.
+- Issues list with a solve action.
+- Latest review and the daily brief.
+
+Everything on the page is also reachable by voice or chat — the page is a mirror of what the brain already knows, not a separate app.
+
+## Technical notes
+
+- New tables via migration with GRANTs and `auth.uid()`-scoped RLS policies; no new client-side business logic.
+- Context pack built server-side in the chat edge function and size-capped so it never crowds the tool budget.
+- New chat tools registered in the existing tool registry with keyword promotion, following the current pattern.
+- Weekly and quarterly rituals run as cron-invoked edge functions alongside the existing morning brief.
+- Additive only: Stack, Signals, Wisdom, Communications, and all integrations stay as they are.
+
+## Suggested order
+
+Phase 1 and 2 together deliver most of the value — the brain becomes context-aware and starts thinking in the model. Phase 3 makes it proactive. Phase 4 gives it a face.
