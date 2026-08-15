@@ -156,19 +156,25 @@ serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader) {
-      return json({ error: "Unauthorized" }, 401);
+    let userId: string | null = null;
+    if (authHeader.startsWith("Bearer ")) {
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      userId = userData?.user?.id ?? null;
     }
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) return json({ error: "Invalid token" }, 401);
-    const userId = userData.user.id;
 
     const body = (await req.json().catch(() => ({}))) as ReqBody;
     const platformId = body.platform_id || body.preset_id;
     const admin = createClient(supabaseUrl, serviceKey);
+
+    // Read-only actions work signed-out; mutations require a valid session.
+    const readOnly = body.action === "list_presets" || body.action === "list_status" || !body.action;
+    if (!userId && !readOnly) {
+      return json({ error: "Sign in to connect a brain." }, 401);
+    }
+
 
     // ---------------- list_presets ----------------
     if (body.action === "list_presets") {
@@ -182,10 +188,13 @@ serve(async (req) => {
 
     // ---------------- list_status ----------------
     if (body.action === "list_status" || !body.action) {
-      const { data: rows } = await admin
-        .from("custom_models")
-        .select("model_id, api_key_secret_name, metadata")
-        .eq("user_id", userId);
+      const { data: rows } = userId
+        ? await admin
+            .from("custom_models")
+            .select("model_id, api_key_secret_name, metadata")
+            .eq("user_id", userId)
+        : { data: [] as Array<Record<string, unknown>> };
+
       const byPlatform = new Map<string, { last4: string; label: string | null }>();
       for (const r of (rows || []) as Array<{ model_id: string; api_key_secret_name: string | null; metadata: Record<string, unknown> | null }>) {
         const pid = (r.metadata?.platform_id as string) || inferPlatformIdFromModelId(r.model_id);
