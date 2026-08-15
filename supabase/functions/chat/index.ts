@@ -16,6 +16,7 @@ import { buildSignalEnvelope, pickAccountByPriority } from "../_shared/signals/b
 import { renderForChatPrompt } from "../_shared/signals/render.ts";
 import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
+import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
@@ -1055,6 +1056,8 @@ interface ToolDef {
 }
 
 const ACTION_TOOLS: ToolDef[] = [
+  // Life OS (EOS-style): vision, 90-day priorities, scorecard, issues, weekly review
+  ...(LIFE_TOOLS as ToolDef[]),
   // Gmail actions
   {
     type: 'function',
@@ -3549,6 +3552,12 @@ async function executeToolCall(
     if (toolName.startsWith('ghl_') && ghlCreds?.locationId) {
       __currentGHLLocationId = ghlCreds.locationId;
     }
+    // ---- Life OS tools (vision / rocks / scorecard / issues / review) ----
+    if (LIFE_TOOL_NAMES.has(toolName)) {
+      const lifeUserId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+      return await handleLifeTool(toolName, args, lifeUserId || '');
+    }
+
     // ---- multi_action: parallel fan-out ----
     if (toolName === 'multi_action') {
       const authHeader = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
@@ -7600,6 +7609,7 @@ let _registryDriftReport: { missingCases: string[]; orphanCases: string[] } = {
 _registryDriftReport = checkRegistryDrift({
   executeToolCallSource: executeToolCall.toString(),
   declaredToolNames: ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
+  nonLegacyTools: [...LIFE_TOOL_NAMES],
   nativeGoogleRouteKeys: Object.keys(NATIVE_GOOGLE_ROUTES),
 });
 
@@ -9191,6 +9201,7 @@ async function runToolLoop(
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
         'deep_research', 'web_search_google',
+        ...LIFE_TOOL_NAMES,
       ]);
 
       // Per-integration soft cap when 2+ named (proportional split).
@@ -10973,6 +10984,17 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
         console.log(`[Identity] Injected: ${orders.length} orders, ${goals.length} goals, ${summaries.length} summaries`);
       } catch (e) {
         console.error('[Identity] Injection failed:', e);
+      }
+    }
+
+    // ===== Life OS: operating frame + current life picture =====
+    systemPrompt += `\n\n${LIFE_OS_FRAME}\n`;
+    if (credUserId) {
+      try {
+        const lifeCtx = await buildLifeContext(lifeAdminClient(), credUserId);
+        if (lifeCtx) systemPrompt += `\n\n${lifeCtx}\n`;
+      } catch (e) {
+        console.error('[life-os] injection failed:', e);
       }
     }
 
