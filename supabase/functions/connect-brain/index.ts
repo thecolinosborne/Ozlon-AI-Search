@@ -156,19 +156,25 @@ serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader) {
-      return json({ error: "Unauthorized" }, 401);
+    let userId: string | null = null;
+    if (authHeader.startsWith("Bearer ")) {
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      userId = userData?.user?.id ?? null;
     }
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) return json({ error: "Invalid token" }, 401);
-    const userId = userData.user.id;
 
     const body = (await req.json().catch(() => ({}))) as ReqBody;
     const platformId = body.platform_id || body.preset_id;
     const admin = createClient(supabaseUrl, serviceKey);
+
+    // Read-only actions work signed-out; mutations require a valid session.
+    const readOnly = body.action === "list_presets" || body.action === "list_status" || !body.action;
+    if (!userId && !readOnly) {
+      return json({ error: "Sign in to connect a brain." }, 401);
+    }
+
 
     // ---------------- list_presets ----------------
     if (body.action === "list_presets") {
