@@ -1536,6 +1536,65 @@ export type Database = {
         }
         Relationships: []
       }
+      life_issues: {
+        Row: {
+          created_at: string
+          detail: string | null
+          domain: string
+          due_date: string | null
+          id: string
+          owner: string | null
+          priority: number
+          rock_id: string | null
+          solution: string | null
+          solved_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          domain?: string
+          due_date?: string | null
+          id?: string
+          owner?: string | null
+          priority?: number
+          rock_id?: string | null
+          solution?: string | null
+          solved_at?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          domain?: string
+          due_date?: string | null
+          id?: string
+          owner?: string | null
+          priority?: number
+          rock_id?: string | null
+          solution?: string | null
+          solved_at?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_issues_rock_id_fkey"
+            columns: ["rock_id"]
+            isOneToOne: false
+            referencedRelation: "life_rocks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_people: {
         Row: {
           birthday: string | null
@@ -1576,6 +1635,221 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           relationship?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      life_reviews: {
+        Row: {
+          commitments: Json
+          created_at: string
+          id: string
+          kind: string
+          open_questions: Json
+          period_end: string | null
+          period_start: string
+          rock_snapshot: Json
+          scorecard_snapshot: Json
+          summary: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          commitments?: Json
+          created_at?: string
+          id?: string
+          kind?: string
+          open_questions?: Json
+          period_end?: string | null
+          period_start: string
+          rock_snapshot?: Json
+          scorecard_snapshot?: Json
+          summary?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          commitments?: Json
+          created_at?: string
+          id?: string
+          kind?: string
+          open_questions?: Json
+          period_end?: string | null
+          period_start?: string
+          rock_snapshot?: Json
+          scorecard_snapshot?: Json
+          summary?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      life_rocks: {
+        Row: {
+          created_at: string
+          description: string | null
+          domain: string
+          due_date: string | null
+          goal_id: string | null
+          id: string
+          measurable: string | null
+          progress: number
+          quarter: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          domain?: string
+          due_date?: string | null
+          goal_id?: string | null
+          id?: string
+          measurable?: string | null
+          progress?: number
+          quarter: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          domain?: string
+          due_date?: string | null
+          goal_id?: string | null
+          id?: string
+          measurable?: string | null
+          progress?: number
+          quarter?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      life_scorecard_entries: {
+        Row: {
+          created_at: string
+          id: string
+          metric_id: string
+          note: string | null
+          period_start: string
+          user_id: string
+          value: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric_id: string
+          note?: string | null
+          period_start: string
+          user_id: string
+          value: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric_id?: string
+          note?: string | null
+          period_start?: string
+          user_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_scorecard_entries_metric_id_fkey"
+            columns: ["metric_id"]
+            isOneToOne: false
+            referencedRelation: "life_scorecard_metrics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      life_scorecard_metrics: {
+        Row: {
+          cadence: string
+          created_at: string
+          direction: string
+          domain: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          target: number | null
+          unit: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cadence?: string
+          created_at?: string
+          direction?: string
+          domain?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          target?: number | null
+          unit?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cadence?: string
+          created_at?: string
+          direction?: string
+          domain?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          target?: number | null
+          unit?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      life_vision: {
+        Row: {
+          core_values: string[]
+          created_at: string
+          id: string
+          notes: string | null
+          one_year_plan: string | null
+          purpose: string | null
+          ten_year_target: string | null
+          three_year_picture: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          core_values?: string[]
+          created_at?: string
+          id?: string
+          notes?: string | null
+          one_year_plan?: string | null
+          purpose?: string | null
+          ten_year_target?: string | null
+          three_year_picture?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          core_values?: string[]
+          created_at?: string
+          id?: string
+          notes?: string | null
+          one_year_plan?: string | null
+          purpose?: string | null
+          ten_year_target?: string | null
+          three_year_picture?: string | null
           updated_at?: string
           user_id?: string
         }
