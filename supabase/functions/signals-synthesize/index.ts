@@ -964,7 +964,13 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const mode = url.searchParams.get("mode") ?? "now";
+    let bodyMode: string | null = null;
+    let cachedBody: Record<string, unknown> = {};
+    if (req.method === "POST") {
+      cachedBody = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+      if (typeof cachedBody.mode === "string") bodyMode = cachedBody.mode;
+    }
+    const mode = url.searchParams.get("mode") ?? bodyMode ?? "now";
 
     // Cron path: scheduled-routines invokes with ?mode=lookahead_tick
     if (mode === "lookahead_tick" || mode === "daily_digest_tick") {
