@@ -49,6 +49,13 @@ async function resolveUser(authHeader: string | null): Promise<string | null> {
     const { data } = await sb.auth.getUser(token);
     if (data.user?.id) return data.user.id;
   } catch (_) { /* ignore */ }
+  // Final fallback: validate the token with the service-role client. This works
+  // with signing-keys JWTs where the anon-key paths can fail.
+  try {
+    const token = authHeader.slice(7);
+    const { data } = await admin.auth.getUser(token);
+    if (data.user?.id) return data.user.id;
+  } catch (_) { /* ignore */ }
   return null;
 }
 
