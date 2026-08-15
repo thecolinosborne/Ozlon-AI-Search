@@ -20,6 +20,14 @@ export async function getAuthedUserId(req: Request): Promise<string> {
   const auth = req.headers.get("Authorization") || "";
   if (!auth.startsWith("Bearer ")) throw new Error("Missing bearer token");
   const token = auth.slice(7);
+  // Trusted internal callers (jobs worker, cron functions) pass the service-role
+  // key plus an explicit x-user-id header.
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (serviceKey && token === serviceKey) {
+    const xUid = req.headers.get("x-user-id");
+    if (!xUid) throw new Error("Service-role caller must provide x-user-id header");
+    return xUid;
+  }
   const client = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -28,6 +36,7 @@ export async function getAuthedUserId(req: Request): Promise<string> {
   if (error || !data.user) throw new Error("Unauthorized");
   return data.user.id;
 }
+
 
 export async function getGoogleAccessToken(userId: string): Promise<string> {
   const admin = getAdminClient();

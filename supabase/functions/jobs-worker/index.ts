@@ -31,24 +31,29 @@ async function runJob(admin: ReturnType<typeof createClient>, job: Job): Promise
     case "scrape_events":
     case "youtube_channel_analysis":
     case "seo_audit": {
-      // Delegate to existing edge function with the user's id baked into payload.
-      const fnMap: Record<string, string> = {
-        deep_research: "deep-research",
-        scrape_events: "scrape-events",
-        youtube_channel_analysis: "youtube-analyze",
-        seo_audit: "seo-audit",
+      // Map job kinds onto real edge functions + their action envelope.
+      const routes: Record<string, { fn: string; action: string }> = {
+        deep_research: { fn: "research", action: "web_investigate" },
+        scrape_events: { fn: "research", action: "web_scrape" },
+        youtube_channel_analysis: { fn: "youtube", action: "analyze_public_channel" },
+        seo_audit: { fn: "research", action: "web_investigate" },
       };
-      const fn = fnMap[job.kind];
-      if (!fn) return { error: `no edge fn mapped for ${job.kind}` };
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      const route = routes[job.kind];
+      if (!route) return { error: `no edge fn mapped for ${job.kind}` };
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/${route.fn}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
-        body: JSON.stringify({ ...job.payload, __user_id: job.user_id }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          "x-user-id": job.user_id,
+        },
+        body: JSON.stringify({ action: route.action, params: job.payload ?? {} }),
       });
       const text = await r.text();
-      if (!r.ok) return { error: `${fn} ${r.status}: ${text.slice(0, 500)}` };
+      if (!r.ok) return { error: `${route.fn}/${route.action} ${r.status}: ${text.slice(0, 500)}` };
       try { return { result: JSON.parse(text) }; } catch { return { result: { raw: text } }; }
     }
+
 
     default:
       return { error: `unknown job kind: ${job.kind}` };
