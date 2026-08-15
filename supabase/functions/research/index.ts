@@ -1210,14 +1210,25 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) {
       return jsonResp({ success: false, error: "Unauthorized" }, 401);
     }
-    const supabase = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData?.user?.id) {
-      return jsonResp({ success: false, error: "Unauthorized" }, 401);
+    const bearer = authHeader.slice(7);
+    if (bearer === serviceKey) {
+      // Trusted internal caller (jobs worker / cron) — user identified by header.
+      const xUid = req.headers.get("x-user-id");
+      if (!xUid) {
+        return jsonResp({ success: false, error: "Service-role caller must provide x-user-id" }, 400);
+      }
+      userId = xUid;
+    } else {
+      const supabase = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData?.user?.id) {
+        return jsonResp({ success: false, error: "Unauthorized" }, 401);
+      }
+      userId = userData.user.id;
     }
-    userId = userData.user.id;
+
 
     const body = await req.json().catch(() => ({}));
     action = String(body?.action ?? "");
