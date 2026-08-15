@@ -49,6 +49,13 @@ async function resolveUser(authHeader: string | null): Promise<string | null> {
     const { data } = await sb.auth.getUser(token);
     if (data.user?.id) return data.user.id;
   } catch (_) { /* ignore */ }
+  // Final fallback: validate the token with the service-role client. This works
+  // with signing-keys JWTs where the anon-key paths can fail.
+  try {
+    const token = authHeader.slice(7);
+    const { data } = await admin.auth.getUser(token);
+    if (data.user?.id) return data.user.id;
+  } catch (_) { /* ignore */ }
   return null;
 }
 
@@ -957,7 +964,13 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const mode = url.searchParams.get("mode") ?? "now";
+    let bodyMode: string | null = null;
+    let cachedBody: Record<string, unknown> = {};
+    if (req.method === "POST") {
+      cachedBody = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+      if (typeof cachedBody.mode === "string") bodyMode = cachedBody.mode;
+    }
+    const mode = url.searchParams.get("mode") ?? bodyMode ?? "now";
 
     // Cron path: scheduled-routines invokes with ?mode=lookahead_tick
     if (mode === "lookahead_tick" || mode === "daily_digest_tick") {
@@ -976,9 +989,11 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     const userId = await resolveUser(authHeader);
     if (!userId) {
-      console.warn("[signals-synthesize] auth failed; header present:", !!authHeader);
-      return new Response(JSON.stringify({ error: "unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      // Signed-out / stale session: this is a best-effort background pass, so
+      // return an empty result instead of a 401 that surfaces as a runtime error.
+      console.warn("[signals-synthesize] no session; returning empty result");
+      return new Response(JSON.stringify({ skipped: "no_session", moments: [] }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
