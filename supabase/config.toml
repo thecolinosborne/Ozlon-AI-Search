@@ -10,10 +10,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.voice-settings]
-verify_jwt = true
+verify_jwt = false
 
 [functions.voice-clone]
-verify_jwt = true
+verify_jwt = false
 
 [functions.realtime-session]
 verify_jwt = false
