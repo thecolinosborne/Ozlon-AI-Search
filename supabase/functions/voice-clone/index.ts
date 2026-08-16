@@ -36,7 +36,18 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } }
     });
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    let { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if ((authError || !user) && SUPABASE_SERVICE_ROLE_KEY) {
+      const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      const res = await admin.auth.getUser(token);
+      if (res.data?.user) {
+        user = res.data.user;
+        authError = null;
+      }
+    }
+
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: 'Invalid authorization' }),
