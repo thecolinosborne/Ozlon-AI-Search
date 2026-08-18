@@ -1,0 +1,1 @@
+select net.http_post(url:='https://api.clickup.com/api/v2/task/86e2vuz98', body:='{"name":"Newsletter Series"}'::jsonb, headers:=jsonb_build_object('Content-Type','application/json','Authorization', (select metadata->>'api_key' from integration_connections where id='a4577013-1a2f-4ef4-ba17-d55ee6c7b293'))) as req_id;

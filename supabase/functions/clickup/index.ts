@@ -320,7 +320,17 @@ function getSupabase() {
   );
 }
 
+/** Accept raw ids, "#id", or full ClickUp task URLs and return the bare task id. */
+function normalizeTaskId(raw: string): string {
+  let id = raw.trim();
+  const urlMatch = id.match(/clickup\.com\/t\/(?:\d+\/)?([^/?#\s]+)/i);
+  if (urlMatch) id = urlMatch[1];
+  id = id.replace(/^#/, '').replace(/^t\//i, '');
+  return id.split(/[?#\s]/)[0];
+}
+
 async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenOverride?: string) {
+
   const token = getToken(tokenOverride);
   const opts: RequestInit = {
     method,
@@ -724,8 +734,46 @@ serve(async (req) => {
     // All other (authenticated) paths require per-user credentials.
     const authCtx = await resolveClickUpAuth(req, tokenFromParams);
     const resolvedToken = authCtx.token;
-    const clickupCall = (path: string, method = 'GET', payload?: unknown) =>
-      clickupFetch(path, method, payload, resolvedToken);
+
+    // Normalize any task identifiers the model may have passed as URLs, "#id", or "t/id".
+    if (params && typeof params === 'object') {
+      for (const key of ['taskId', 'task_id', 'parentId', 'parent']) {
+        const raw = (params as Record<string, unknown>)[key];
+        if (typeof raw === 'string' && raw.trim()) {
+          (params as Record<string, unknown>)[key] = normalizeTaskId(raw);
+        }
+      }
+    }
+
+    const clickupCall = async (path: string, method = 'GET', payload?: unknown) => {
+      try {
+        return await clickupFetch(path, method, payload, resolvedToken);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isTaskPath = /^\/task\/[^/?]+/.test(path);
+        // ClickUp answers OAUTH_023 ("Team(s) not authorized") when a task id is a
+        // custom id — retry once scoped to the workspace before surfacing an auth error.
+        if (isTaskPath && !path.includes('custom_task_ids') && /OAUTH_023|not authorized/i.test(msg)) {
+          try {
+            const { teamId } = await resolveTeamId(resolvedToken);
+            if (teamId) {
+              const sep = path.includes('?') ? '&' : '?';
+              return await clickupFetch(
+                `${path}${sep}custom_task_ids=true&team_id=${encodeURIComponent(teamId)}`,
+                method,
+                payload,
+                resolvedToken,
+              );
+            }
+          } catch { /* fall through to original error */ }
+          throw new Error(
+            `ClickUp could not access that task (OAUTH_023). The task id may belong to a different workspace, or it was mistyped. Verify the task id with search_tasks/list_tasks and retry. Original: ${msg}`,
+          );
+        }
+        throw err;
+      }
+    };
+
 
     // Action-based routing for frontend calls
     switch (action) {
