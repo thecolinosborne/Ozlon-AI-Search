@@ -320,7 +320,17 @@ function getSupabase() {
   );
 }
 
+/** Accept raw ids, "#id", or full ClickUp task URLs and return the bare task id. */
+function normalizeTaskId(raw: string): string {
+  let id = raw.trim();
+  const urlMatch = id.match(/clickup\.com\/t\/(?:\d+\/)?([^/?#\s]+)/i);
+  if (urlMatch) id = urlMatch[1];
+  id = id.replace(/^#/, '').replace(/^t\//i, '');
+  return id.split(/[?#\s]/)[0];
+}
+
 async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenOverride?: string) {
+
   const token = getToken(tokenOverride);
   const opts: RequestInit = {
     method,
