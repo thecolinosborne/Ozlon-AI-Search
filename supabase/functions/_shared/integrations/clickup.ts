@@ -365,6 +365,76 @@ export const clickupIntegration: IntegrationManifest = {
       },
       mapArgs: (a) => ({ taskId: a.task_id, fieldId: a.field_id, value: a.value }),
     },
+    {
+      name: "create_clickup_custom_field",
+      action: "create_custom_field",
+      description: "Create a NEW custom field (schema) on a ClickUp list. Use this instead of telling the user to create fields manually. Types: text, number, date, drop_down, labels, checkbox, url, email, phone, money, rating, currency.",
+      sideEffect: "write",
+      schema: {
+        type: "object",
+        properties: {
+          list_id: { type: "string", description: "Optional — defaults to the configured list." },
+          name: { type: "string" },
+          type: { type: "string", description: "text | number | date | drop_down | labels | checkbox | url | email | phone | money | rating" },
+          type_config: { type: "object", description: "For drop_down/labels pass { options: [{ name: 'Option A' }] }." },
+        },
+        required: ["name", "type"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { name: a.name, type: a.type };
+        if (a.list_id) p.listId = a.list_id;
+        if (a.type_config) p.type_config = a.type_config;
+        return p;
+      },
+    },
+    {
+      name: "ensure_clickup_custom_fields",
+      action: "ensure_custom_fields",
+      description: "Idempotently make sure a set of custom fields exists on a ClickUp list — creates missing ones, reuses existing ones by name, and returns every field_id ready for set_clickup_custom_field. Use this when the user asks for several fields at once.",
+      sideEffect: "write",
+      schema: {
+        type: "object",
+        properties: {
+          list_id: { type: "string", description: "Optional — defaults to the configured list." },
+          fields: {
+            type: "array",
+            description: "Fields to ensure.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                type: { type: "string" },
+                type_config: { type: "object" },
+              },
+              required: ["name", "type"],
+            },
+          },
+        },
+        required: ["fields"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { fields: a.fields };
+        if (a.list_id) p.listId = a.list_id;
+        return p;
+      },
+    },
+    {
+      name: "delete_clickup_custom_field",
+      action: "delete_custom_field",
+      description: "Delete a custom field from a ClickUp list. Destructive — confirm with the user first.",
+      sideEffect: "destructive",
+      schema: {
+        type: "object",
+        properties: { list_id: { type: "string" }, field_id: { type: "string" } },
+        required: ["field_id"],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = { fieldId: a.field_id };
+        if (a.list_id) p.listId = a.list_id;
+        return p;
+      },
+    },
+
 
     // ---- Dependencies ----
     {
