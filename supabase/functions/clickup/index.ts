@@ -1278,6 +1278,63 @@ serve(async (req) => {
         return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      case 'create_custom_field': {
+        const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
+        if (!listId) throw new Error('listId required');
+        if (!params?.name || !params?.type) throw new Error('name and type required');
+        const body: Record<string, unknown> = { name: params.name, type: params.type };
+        if (params.type_config) body.type_config = params.type_config;
+        const data = await clickupCall(`/list/${listId}/field`, 'POST', body);
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'delete_custom_field': {
+        const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
+        if (!listId || !params?.fieldId) throw new Error('listId and fieldId required');
+        const data = await clickupCall(`/list/${listId}/field/${params.fieldId}`, 'DELETE');
+        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // Idempotent schema sync: create any missing fields, reuse existing ones by name.
+      case 'ensure_custom_fields': {
+        const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
+        if (!listId) throw new Error('listId required');
+        const wanted = Array.isArray(params?.fields) ? params.fields as Array<Record<string, unknown>> : [];
+        if (!wanted.length) throw new Error('fields array required');
+
+        const existingRaw = await clickupCall(`/list/${listId}/field`);
+        const existing = (existingRaw?.fields || []) as Array<{ id: string; name: string; type: string }>;
+        const byName = new Map(existing.map((f) => [String(f.name).trim().toLowerCase(), f]));
+
+        const results: Array<Record<string, unknown>> = [];
+        for (const f of wanted) {
+          const name = String(f.name || '').trim();
+          if (!name) continue;
+          const hit = byName.get(name.toLowerCase());
+          if (hit) {
+            results.push({ name, field_id: hit.id, type: hit.type, status: 'existing' });
+            continue;
+          }
+          try {
+            const body: Record<string, unknown> = { name, type: f.type || 'text' };
+            if (f.type_config) body.type_config = f.type_config;
+            const created = await clickupCall(`/list/${listId}/field`, 'POST', body);
+            const created_id = created?.field?.id || created?.id || null;
+            results.push({ name, field_id: created_id, type: f.type || 'text', status: 'created' });
+          } catch (e) {
+            results.push({
+              name,
+              status: 'failed',
+              error: e instanceof Error ? e.message : String(e),
+              hint: 'ClickUp only allows custom field creation on paid plans with admin/owner API tokens. Create it manually in the list, then re-run to link it.',
+            });
+          }
+        }
+        return new Response(JSON.stringify({ list_id: listId, fields: results }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       // ============ MEMBERS ============
       case 'list_members': {
         if (!params?.taskId) throw new Error('taskId required');
