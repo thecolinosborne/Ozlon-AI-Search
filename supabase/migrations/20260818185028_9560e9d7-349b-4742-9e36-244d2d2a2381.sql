@@ -1,0 +1,1 @@
+select net.http_get(url:='https://api.clickup.com/api/v2/team', headers:=jsonb_build_object('Authorization', (select metadata->>'api_key' from integration_connections where id='a4577013-1a2f-4ef4-ba17-d55ee6c7b293'))) as req_id;
