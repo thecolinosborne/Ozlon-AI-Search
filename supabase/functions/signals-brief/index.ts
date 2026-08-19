@@ -65,6 +65,60 @@ async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: str
   }
 }
 
+interface EmailThread {
+  id: string;
+  from: string;
+  subject: string;
+  snippet: string;
+  date: string | null;
+  unread: boolean;
+}
+
+// Light Gmail scan: recent inbox messages (metadata only) so the brief can spot
+// people waiting on you and deadlines buried in email.
+async function fetchRecentEmail(userId: string): Promise<EmailThread[]> {
+  try {
+    const token = await getGoogleAccessToken(userId);
+    if (!token) return [];
+    const q = encodeURIComponent("newer_than:3d -in:chats -category:promotions -category:social");
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=${q}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!listRes.ok) return [];
+    const listJson = await listRes.json();
+    const ids = ((listJson?.messages ?? []) as Array<{ id: string }>).map((m) => m.id).slice(0, 15);
+    const details = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const r = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (!r.ok) return null;
+          const m = await r.json();
+          const headers = (m?.payload?.headers ?? []) as Array<{ name: string; value: string }>;
+          const h = (n: string) => headers.find((x) => x.name.toLowerCase() === n)?.value ?? "";
+          return {
+            id: String(m.id),
+            from: h("from"),
+            subject: h("subject") || "(no subject)",
+            snippet: String(m.snippet ?? "").slice(0, 220),
+            date: h("date") || null,
+            unread: Array.isArray(m.labelIds) && m.labelIds.includes("UNREAD"),
+          } as EmailThread;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return details.filter((d): d is EmailThread => !!d);
+  } catch (err) {
+    console.log("[signals-brief] gmail skip:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
