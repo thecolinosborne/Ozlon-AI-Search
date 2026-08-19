@@ -41,9 +41,21 @@ export const clickupIntegration: IntegrationManifest = {
     {
       name: "list_clickup_tasks",
       action: "list_tasks",
-      description: "List tasks from a ClickUp list. If list_id is omitted, uses the configured default list.",
-      schema: { type: "object", properties: { list_id: { type: "string" } }, required: [] },
-      mapArgs: (a) => (a.list_id ? { listId: a.list_id } : {}),
+      description: "List tasks from a ClickUp list. If list_id is omitted, uses the configured default list. Set subtasks=true to include subtasks in the results (needed when the user asks about subtasks of a task).",
+      schema: {
+        type: "object",
+        properties: {
+          list_id: { type: "string" },
+          subtasks: { type: "boolean", description: "Include subtasks in the response." },
+        },
+        required: [],
+      },
+      mapArgs: (a) => {
+        const p: Record<string, unknown> = {};
+        if (a.list_id) p.listId = a.list_id;
+        if (a.subtasks) p.subtasks = true;
+        return p;
+      },
     },
     {
       name: "get_clickup_task",
