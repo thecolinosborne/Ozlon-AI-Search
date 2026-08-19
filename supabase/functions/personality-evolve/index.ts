@@ -255,8 +255,11 @@ async function persistProposals(
   const rows = proposals.map((p) => ({
     user_id: userId,
     proposal_type: `personality_${p.field}`,
-    title: p.title.slice(0, 200),
-    description: p.description,
+    title: (p.title || `Update ${p.field}`).slice(0, 200),
+    description:
+      p.description ||
+      p.evidence ||
+      `Proposed change to ${p.field}: ${p.proposed_value ?? "(no value)"}`,
     patch_text: null,
     status: "pending",
     metadata: {
