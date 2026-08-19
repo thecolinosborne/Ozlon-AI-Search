@@ -361,7 +361,11 @@ Produce one structured briefing via the daily_brief tool. Rules:
 - now_line: one short sentence introducing today.
 - top_of_mind: the single highest-leverage next move. If nothing matters, set headline to "You're clear right now." with a deep-work suggestion.
 - For each card, one short ai_line that interprets, doesn't list. Empty cards: ai_line = "Clear", value = "Clear".
-- why_this objects must use plain English with the user's actual data points.`,
+- why_this objects must use plain English with the user's actual data points.
+- todos: up to 7 concrete things to do today, ranked most important first. Draw from overdue items, today's life events, meeting prep implied by the calendar, and replies clearly owed from recent_email. Each title is an action starting with a verb, max 10 words. Set source to where it came from. Skip newsletters, receipts, and marketing mail.
+- watchouts: up to 5 things to keep an eye on: back-to-back or conflicting meetings, a meeting with no prep, a promise made in email with a date, someone waiting more than two days, a goal going stale. Never invent facts; each one must trace to context. If there is nothing real, return an empty list.
+- do_now_intent on every item: a short chat prompt that starts the work.`,
+
           },
         ],
         tools: [
