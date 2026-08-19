@@ -109,13 +109,58 @@ serve(async (req) => {
 
       case "quick_add": {
         const calendarId = String((params as AnyJson).calendarId || "primary");
-        const text = String((params as AnyJson).text || "");
-        if (!text) return jsonErr("text is required");
+        const raw = String((params as AnyJson).text || "");
+        if (!raw) return jsonErr("text is required");
+
+        // Strip structured metadata that models sometimes cram into the
+        // natural-language string — Google would bake it into the title.
+        let colorId = (params as AnyJson).colorId ? String((params as AnyJson).colorId) : undefined;
+        let description = (params as AnyJson).description ? String((params as AnyJson).description) : undefined;
+        let location = (params as AnyJson).location ? String((params as AnyJson).location) : undefined;
+
+        let text = raw
+          .replace(/[,;|]?\s*colou?r(?:\s*id)?\s*[:=]?\s*(\d{1,2}|[a-z]+)\b/gi, (_m, v) => {
+            if (!colorId && /^\d{1,2}$/.test(String(v))) colorId = String(v);
+            return "";
+          })
+          .replace(/[,;|]?\s*description\s*[:=]\s*(.+)$/i, (_m, v) => {
+            if (!description) description = String(v).trim();
+            return "";
+          })
+          .replace(/[,;|]?\s*location\s*[:=]\s*([^,;|]+)/i, (_m, v) => {
+            if (!location) location = String(v).trim();
+            return "";
+          })
+          .replace(/\s{2,}/g, " ")
+          .replace(/[\s,;|]+$/g, "")
+          .trim();
+
+        if (!text) text = raw;
+
         const data = await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/quickAdd?text=${encodeURIComponent(text)}`, {
           method: "POST",
         });
-        return jsonOk({ success: true, event: data });
+
+        // Apply the structured extras via PATCH so they never pollute the title.
+        let event = data as AnyJson;
+        const patch: AnyJson = {};
+        if (colorId) patch.colorId = colorId;
+        if (description) patch.description = description;
+        if (location) patch.location = location;
+        const eventId = (data as AnyJson)?.id;
+        if (eventId && Object.keys(patch).length > 0) {
+          try {
+            event = await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(String(eventId))}`, {
+              method: "PATCH",
+              body: JSON.stringify(patch),
+            }) as AnyJson;
+          } catch (_e) {
+            // keep the created event even if the enrichment patch fails
+          }
+        }
+        return jsonOk({ success: true, event, cleaned_text: text });
       }
+
 
       case "list_colors": {
         const data = await gFetch(token, `${CAL_BASE}/colors`);
