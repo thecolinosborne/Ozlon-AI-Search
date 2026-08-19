@@ -26,9 +26,25 @@ interface CalendarEvent {
   status: string | null;
 }
 
+// Google token is refreshed once per invocation and shared by the calendar and
+// Gmail scans — refreshing twice in parallel can invalidate the newer token.
+const tokenCache = new Map<string, { token: string | null; at: number }>();
+async function getSharedGoogleToken(userId: string): Promise<string | null> {
+  const hit = tokenCache.get(userId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.token;
+  let token: string | null = null;
+  try {
+    token = (await getGoogleAccessToken(userId)) ?? null;
+  } catch (err) {
+    console.log("[signals-brief] google token error:", err instanceof Error ? err.message : err);
+  }
+  tokenCache.set(userId, { token, at: Date.now() });
+  return token;
+}
+
 async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: string): Promise<CalendarEvent[]> {
   try {
-    const token = await getGoogleAccessToken(userId);
+    const token = await getSharedGoogleToken(userId);
     if (!token) return [];
     const qs = new URLSearchParams({
       timeMin, timeMax,
@@ -38,7 +54,10 @@ async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: str
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?${qs.toString()}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.log("[signals-brief] calendar list failed:", res.status, (await res.text()).slice(0, 200));
+      return [];
+    }
     const data = await res.json();
     const items = (data?.items ?? []) as Array<Record<string, unknown>>;
     return items.map((e) => {
@@ -78,7 +97,7 @@ interface EmailThread {
 // people waiting on you and deadlines buried in email.
 async function fetchRecentEmail(userId: string): Promise<EmailThread[]> {
   try {
-    const token = await getGoogleAccessToken(userId);
+    const token = await getSharedGoogleToken(userId);
     if (!token) {
       console.log("[signals-brief] gmail: no google token");
       return [];
@@ -507,7 +526,7 @@ Produce one structured briefing via the daily_brief tool. Rules:
         watchouts: brief.watchouts ?? [],
         email_scanned: emailThreads.length,
         calendar_events: calendarEvents,
-        calendar_connected: calendarEvents.length > 0 || (await getGoogleAccessToken(user.id).then(t => !!t).catch(() => false)),
+        calendar_connected: calendarEvents.length > 0 || !!(await getSharedGoogleToken(user.id)),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
