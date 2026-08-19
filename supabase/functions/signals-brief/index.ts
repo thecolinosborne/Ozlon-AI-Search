@@ -145,18 +145,68 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const reqUrl = new URL(req.url);
+    const mode = reqUrl.searchParams.get("mode");
     const auth = req.headers.get("Authorization") ?? "";
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: auth } },
-    });
-    const { data: userData } = await userClient.auth.getUser();
-    const user = userData?.user;
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const isServiceCaller = !!SERVICE_ROLE && bearer === SERVICE_ROLE;
+
+    // Morning fan-out: cron calls ?mode=tick with the service role.
+    // Bounded to 50 recently-active users, one brief each, best-effort.
+    if (mode === "tick") {
+      if (!isServiceCaller) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const adminTick = createClient(SUPABASE_URL, SERVICE_ROLE);
+      const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const { data: actives } = await adminTick
+        .from("now_line_state")
+        .select("user_id")
+        .gte("updated_at", since)
+        .limit(50);
+      let ok = 0;
+      for (const row of actives ?? []) {
+        try {
+          const r = await fetch(`${SUPABASE_URL}/functions/v1/signals-brief`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SERVICE_ROLE}`,
+              apikey: SUPABASE_ANON_KEY,
+              "x-user-id": row.user_id as string,
+            },
+            body: "{}",
+          });
+          if (r.ok) ok++;
+        } catch (e) {
+          console.log("[signals-brief tick] skip", e instanceof Error ? e.message : e);
+        }
+      }
+      return new Response(JSON.stringify({ mode: "tick", attempted: (actives ?? []).length, ok }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let user: { id: string } | null = null;
+    if (isServiceCaller && req.headers.get("x-user-id")) {
+      user = { id: req.headers.get("x-user-id") as string };
+    } else {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: auth } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      user = userData?.user ?? null;
+    }
     if (!user) {
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
