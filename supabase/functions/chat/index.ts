@@ -9570,6 +9570,44 @@ async function runToolLoop(
       // Add all tool results to messages
       openAIMessages.push(...toolResults);
 
+      // ─── Universal stagnation detector ───────────────────────────────
+      // If a whole iteration produced no information the model hasn't
+      // already seen (identical tool payloads), it is spinning. Two such
+      // iterations in a row force a tools-off synthesis instead of
+      // burning the remaining steps and dead-ending the user.
+      {
+        let newInfo = false;
+        for (const tr of toolResults) {
+          const fp = `${tr.name}::${tr.content.length}::${tr.content.slice(0, 400)}`;
+          if (!seenResultFingerprints.has(fp)) { seenResultFingerprints.add(fp); newInfo = true; }
+        }
+        if (newInfo) {
+          stagnantIterations = 0;
+        } else {
+          stagnantIterations++;
+          console.warn(`[ToolLoop] Stagnant iteration ${stagnantIterations} (no new tool data at iter ${iteration}).`);
+          if (stagnantIterations >= 2 && !forcedSynthesis) {
+            forcedSynthesis = true;
+            openAIMessages.push({
+              role: 'system',
+              content:
+                'NO NEW INFORMATION. The last two rounds of tool calls returned data you already have. Stop calling tools and answer NOW from what is above. ' +
+                'If the answer requires data none of the tools returned, say exactly what is missing and suggest the single next action — never re-fetch.',
+            });
+          }
+        }
+        // Escalating step-budget warning so the model lands the answer
+        // itself instead of being cut off at the hard limit.
+        const stepsLeft = maxIterations - iteration;
+        if (!forcedSynthesis && stepsLeft <= 3) {
+          openAIMessages.push({
+            role: 'system',
+            content: `STEP BUDGET WARNING: ${stepsLeft} tool round(s) remain. Use them only if strictly required, then deliver the final answer.`,
+          });
+        }
+      }
+
+
       // ─── Gmail anti-loop guard ───────────────────────────────────────
       // Track how many email read tools have been called this turn and
       // whether we've already fetched the same message id more than once.
