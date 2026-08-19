@@ -406,8 +406,40 @@ Produce one structured briefing via the daily_brief tool. Rules:
                     properties: cardSchemaProperties(),
                     required: ["plan", "late", "up_next", "people", "habits", "goals", "watch", "won_today"],
                   },
+                  todos: {
+                    type: "array",
+                    description: "Ranked things to do today.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        title: { type: "string" },
+                        detail: { type: "string", description: "One short line of context." },
+                        source: { type: "string", enum: ["email", "calendar", "life", "goal", "signal", "person"] },
+                        urgency: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                        est_minutes: { type: "integer" },
+                        do_now_intent: { type: "string" },
+                      },
+                      required: ["title", "source", "urgency"],
+                    },
+                  },
+                  watchouts: {
+                    type: "array",
+                    description: "Things to keep an eye on today.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        title: { type: "string" },
+                        detail: { type: "string" },
+                        source: { type: "string", enum: ["email", "calendar", "life", "goal", "signal", "person"] },
+                        severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                        do_now_intent: { type: "string" },
+                      },
+                      required: ["title", "source", "severity"],
+                    },
+                  },
                 },
-                required: ["now_line", "top_of_mind", "cards"],
+                required: ["now_line", "top_of_mind", "cards", "todos", "watchouts"],
+
                 additionalProperties: false,
               },
             },
