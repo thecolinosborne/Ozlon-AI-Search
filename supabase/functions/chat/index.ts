@@ -9104,6 +9104,9 @@ async function runToolLoop(
   const loopStartedAt = Date.now();
   const TOOL_LOOP_BUDGET_MS = 150_000;
   let forcedSynthesis = false;
+  // Stagnation tracking: fingerprints of every tool payload seen this turn.
+  const seenResultFingerprints = new Set<string>();
+  let stagnantIterations = 0;
 
   while (iteration < maxIterations) {
     iteration++;
