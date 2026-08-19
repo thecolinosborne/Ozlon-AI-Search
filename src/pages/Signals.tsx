@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 export default function Signals() {
   const { moments, synthesizing, synthesize, scanNow, dismissAll, respond, createSignal } = useSignals();
-  const { brief, loading: briefLoading } = useDailyBriefing();
+  const { brief, loading: briefLoading, refresh: refreshBrief } = useDailyBriefing();
   const navigate = useNavigate();
   const [composerText, setComposerText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -87,9 +87,9 @@ export default function Signals() {
         )}
         <button
           type="button"
-          onClick={() => scanNow()}
+          onClick={() => { void scanNow(); void refreshBrief(); }}
           disabled={synthesizing || scanCoolingDown}
-          title={scanCoolingDown ? "Daily scan available again in a few hours" : "Scan all integrations"}
+          title={scanCoolingDown ? "Daily scan available again in a few hours" : "Scan calendar, email and integrations now"}
           className="inline-flex items-center gap-1 px-2 py-1 rounded-full hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40"
           aria-label="Scan now"
         >
