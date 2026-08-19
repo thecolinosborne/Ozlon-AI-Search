@@ -79,13 +79,19 @@ interface EmailThread {
 async function fetchRecentEmail(userId: string): Promise<EmailThread[]> {
   try {
     const token = await getGoogleAccessToken(userId);
-    if (!token) return [];
+    if (!token) {
+      console.log("[signals-brief] gmail: no google token");
+      return [];
+    }
     const q = encodeURIComponent("newer_than:3d -in:chats -category:promotions -category:social");
     const listRes = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=${q}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!listRes.ok) return [];
+    if (!listRes.ok) {
+      console.log("[signals-brief] gmail list failed:", listRes.status, (await listRes.text()).slice(0, 200));
+      return [];
+    }
     const listJson = await listRes.json();
     const ids = ((listJson?.messages ?? []) as Array<{ id: string }>).map((m) => m.id).slice(0, 15);
     const details = await Promise.all(
@@ -112,7 +118,9 @@ async function fetchRecentEmail(userId: string): Promise<EmailThread[]> {
         }
       }),
     );
-    return details.filter((d): d is EmailThread => !!d);
+    const out = details.filter((d): d is EmailThread => !!d);
+    console.log("[signals-brief] gmail scanned:", out.length);
+    return out;
   } catch (err) {
     console.log("[signals-brief] gmail skip:", err instanceof Error ? err.message : err);
     return [];
