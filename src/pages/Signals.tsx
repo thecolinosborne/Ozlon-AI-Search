@@ -7,13 +7,13 @@ import { TodayHero } from "@/components/today/TodayHero";
 import { FloatingCapture } from "@/components/today/FloatingCapture";
 import { TopOfMindCard } from "@/components/today/TopOfMindCard";
 import { CommandCenter } from "@/components/today/CommandCenter";
-import { CalendarCard } from "@/components/today/CalendarCard";
+import { DayColumns } from "@/components/today/DayColumns";
 import { useDailyBriefing } from "@/hooks/useDailyBriefing";
 import { toast } from "sonner";
 
 export default function Signals() {
   const { moments, synthesizing, synthesize, scanNow, dismissAll, respond, createSignal } = useSignals();
-  const { brief, loading: briefLoading } = useDailyBriefing();
+  const { brief, loading: briefLoading, refresh: refreshBrief } = useDailyBriefing();
   const navigate = useNavigate();
   const [composerText, setComposerText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -87,9 +87,9 @@ export default function Signals() {
         )}
         <button
           type="button"
-          onClick={() => scanNow()}
+          onClick={() => { void scanNow(); void refreshBrief(); }}
           disabled={synthesizing || scanCoolingDown}
-          title={scanCoolingDown ? "Daily scan available again in a few hours" : "Scan all integrations"}
+          title={scanCoolingDown ? "Daily scan available again in a few hours" : "Scan calendar, email and integrations now"}
           className="inline-flex items-center gap-1 px-2 py-1 rounded-full hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-40"
           aria-label="Scan now"
         >
@@ -124,10 +124,13 @@ export default function Signals() {
       {/* Top of Mind — single highest-leverage next move. */}
       <TopOfMindCard topOfMind={brief?.top_of_mind ?? null} loading={briefLoading} />
 
-      {/* Calendar — synced from Google Calendar; grouped Now / Next / Later / Tomorrow. */}
-      <CalendarCard
+      {/* Day command center — Schedule · To-Do · Watch Out (calendar + email scan). */}
+      <DayColumns
         events={brief?.calendar_events}
         connected={brief?.calendar_connected}
+        todos={brief?.todos}
+        watchouts={brief?.watchouts}
+        emailScanned={brief?.email_scanned}
         loading={briefLoading}
       />
 

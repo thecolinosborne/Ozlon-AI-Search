@@ -248,6 +248,24 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Morning brief tick — regenerates the Signals day view (schedule, to-dos,
+    // watch-outs) for recently-active users. Cron calls this once each morning.
+    if (mode === "signals_brief_tick") {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/signals-brief?mode=tick`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SERVICE_ROLE}`,
+          apikey: ANON_KEY,
+        },
+        body: "{}",
+      });
+      const body = await res.json().catch(() => ({}));
+      return new Response(JSON.stringify({ forwarded: true, status: res.status, ...body }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Daily Digest tick — fans out cross-integration brief to active users.
     if (mode === "signals_daily_digest_tick") {
       const cronKey = Deno.env.get("SIGNALS_CRON_KEY") ?? SERVICE_ROLE;

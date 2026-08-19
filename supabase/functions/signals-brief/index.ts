@@ -26,9 +26,25 @@ interface CalendarEvent {
   status: string | null;
 }
 
+// Google token is refreshed once per invocation and shared by the calendar and
+// Gmail scans — refreshing twice in parallel can invalidate the newer token.
+const tokenCache = new Map<string, { token: string | null; at: number }>();
+async function getSharedGoogleToken(userId: string): Promise<string | null> {
+  const hit = tokenCache.get(userId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.token;
+  let token: string | null = null;
+  try {
+    token = (await getGoogleAccessToken(userId)) ?? null;
+  } catch (err) {
+    console.log("[signals-brief] google token error:", err instanceof Error ? err.message : err);
+  }
+  tokenCache.set(userId, { token, at: Date.now() });
+  return token;
+}
+
 async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: string): Promise<CalendarEvent[]> {
   try {
-    const token = await getGoogleAccessToken(userId);
+    const token = await getSharedGoogleToken(userId);
     if (!token) return [];
     const qs = new URLSearchParams({
       timeMin, timeMax,
@@ -38,7 +54,10 @@ async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: str
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?${qs.toString()}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.log("[signals-brief] calendar list failed:", res.status, (await res.text()).slice(0, 200));
+      return [];
+    }
     const data = await res.json();
     const items = (data?.items ?? []) as Array<Record<string, unknown>>;
     return items.map((e) => {
@@ -61,6 +80,68 @@ async function fetchCalendarEvents(userId: string, timeMin: string, timeMax: str
     });
   } catch (err) {
     console.log("[signals-brief] calendar skip:", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+interface EmailThread {
+  id: string;
+  from: string;
+  subject: string;
+  snippet: string;
+  date: string | null;
+  unread: boolean;
+}
+
+// Light Gmail scan: recent inbox messages (metadata only) so the brief can spot
+// people waiting on you and deadlines buried in email.
+async function fetchRecentEmail(userId: string): Promise<EmailThread[]> {
+  try {
+    const token = await getSharedGoogleToken(userId);
+    if (!token) {
+      console.log("[signals-brief] gmail: no google token");
+      return [];
+    }
+    const q = encodeURIComponent("newer_than:3d -in:chats -category:promotions -category:social");
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=${q}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!listRes.ok) {
+      console.log("[signals-brief] gmail list failed:", listRes.status, (await listRes.text()).slice(0, 200));
+      return [];
+    }
+    const listJson = await listRes.json();
+    const ids = ((listJson?.messages ?? []) as Array<{ id: string }>).map((m) => m.id).slice(0, 15);
+    const details = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const r = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (!r.ok) return null;
+          const m = await r.json();
+          const headers = (m?.payload?.headers ?? []) as Array<{ name: string; value: string }>;
+          const h = (n: string) => headers.find((x) => x.name.toLowerCase() === n)?.value ?? "";
+          return {
+            id: String(m.id),
+            from: h("from"),
+            subject: h("subject") || "(no subject)",
+            snippet: String(m.snippet ?? "").slice(0, 220),
+            date: h("date") || null,
+            unread: Array.isArray(m.labelIds) && m.labelIds.includes("UNREAD"),
+          } as EmailThread;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const out = details.filter((d): d is EmailThread => !!d);
+    console.log("[signals-brief] gmail scanned:", out.length);
+    return out;
+  } catch (err) {
+    console.log("[signals-brief] gmail skip:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -91,18 +172,68 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const reqUrl = new URL(req.url);
+    const mode = reqUrl.searchParams.get("mode");
     const auth = req.headers.get("Authorization") ?? "";
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: auth } },
-    });
-    const { data: userData } = await userClient.auth.getUser();
-    const user = userData?.user;
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const isServiceCaller = !!SERVICE_ROLE && bearer === SERVICE_ROLE;
+
+    // Morning fan-out: cron calls ?mode=tick with the service role.
+    // Bounded to 50 recently-active users, one brief each, best-effort.
+    if (mode === "tick") {
+      if (!isServiceCaller) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const adminTick = createClient(SUPABASE_URL, SERVICE_ROLE);
+      const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const { data: actives } = await adminTick
+        .from("now_line_state")
+        .select("user_id")
+        .gte("updated_at", since)
+        .limit(50);
+      let ok = 0;
+      for (const row of actives ?? []) {
+        try {
+          const r = await fetch(`${SUPABASE_URL}/functions/v1/signals-brief`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SERVICE_ROLE}`,
+              apikey: SUPABASE_ANON_KEY,
+              "x-user-id": row.user_id as string,
+            },
+            body: "{}",
+          });
+          if (r.ok) ok++;
+        } catch (e) {
+          console.log("[signals-brief tick] skip", e instanceof Error ? e.message : e);
+        }
+      }
+      return new Response(JSON.stringify({ mode: "tick", attempted: (actives ?? []).length, ok }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let user: { id: string } | null = null;
+    if (isServiceCaller && req.headers.get("x-user-id")) {
+      user = { id: req.headers.get("x-user-id") as string };
+    } else {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: auth } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      user = userData?.user ?? null;
+    }
     if (!user) {
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
@@ -198,13 +329,16 @@ Deno.serve(async (req) => {
 
     // Habits = recurring life_events (already in lifeEvents if due today,
     // but we also peek at the broader set so habits aren't empty if none due).
-    const habitsRes = await admin
-      .from("life_events")
-      .select("id, title, recurrence_days, last_done_at")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .not("recurrence_days", "is", null)
-      .limit(8);
+    const [habitsRes, emailThreads] = await Promise.all([
+      admin
+        .from("life_events")
+        .select("id, title, recurrence_days, last_done_at")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .not("recurrence_days", "is", null)
+        .limit(8),
+      fetchRecentEmail(user.id),
+    ]);
     const habits = habitsRes.data ?? [];
 
     const ctx = {
@@ -224,7 +358,11 @@ Deno.serve(async (req) => {
         .slice(0, 12)
         .map((e) => ({ start: e.start, end: e.end, title: e.summary, attendees: e.attendee_count, location: e.location })),
       calendar_tomorrow_count: calendarEvents.filter((e) => e.start && new Date(e.start) > todayEnd).length,
+      recent_email: emailThreads.slice(0, 15).map((e) => ({
+        from: e.from, subject: e.subject, snippet: e.snippet, date: e.date, unread: e.unread,
+      })),
     };
+
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -250,7 +388,11 @@ Produce one structured briefing via the daily_brief tool. Rules:
 - now_line: one short sentence introducing today.
 - top_of_mind: the single highest-leverage next move. If nothing matters, set headline to "You're clear right now." with a deep-work suggestion.
 - For each card, one short ai_line that interprets, doesn't list. Empty cards: ai_line = "Clear", value = "Clear".
-- why_this objects must use plain English with the user's actual data points.`,
+- why_this objects must use plain English with the user's actual data points.
+- todos: up to 7 concrete things to do today, ranked most important first. Draw from overdue items, today's life events, meeting prep implied by the calendar, and replies clearly owed from recent_email. Each title is an action starting with a verb, max 10 words. Set source to where it came from. Skip newsletters, receipts, and marketing mail.
+- watchouts: up to 5 things to keep an eye on: back-to-back or conflicting meetings, a meeting with no prep, a promise made in email with a date, someone waiting more than two days, a goal going stale. Never invent facts; each one must trace to context. If there is nothing real, return an empty list.
+- do_now_intent on every item: a short chat prompt that starts the work.`,
+
           },
         ],
         tools: [
@@ -291,8 +433,40 @@ Produce one structured briefing via the daily_brief tool. Rules:
                     properties: cardSchemaProperties(),
                     required: ["plan", "late", "up_next", "people", "habits", "goals", "watch", "won_today"],
                   },
+                  todos: {
+                    type: "array",
+                    description: "Ranked things to do today.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        title: { type: "string" },
+                        detail: { type: "string", description: "One short line of context." },
+                        source: { type: "string", enum: ["email", "calendar", "life", "goal", "signal", "person"] },
+                        urgency: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                        est_minutes: { type: "integer" },
+                        do_now_intent: { type: "string" },
+                      },
+                      required: ["title", "source", "urgency"],
+                    },
+                  },
+                  watchouts: {
+                    type: "array",
+                    description: "Things to keep an eye on today.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        title: { type: "string" },
+                        detail: { type: "string" },
+                        source: { type: "string", enum: ["email", "calendar", "life", "goal", "signal", "person"] },
+                        severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                        do_now_intent: { type: "string" },
+                      },
+                      required: ["title", "source", "severity"],
+                    },
+                  },
                 },
-                required: ["now_line", "top_of_mind", "cards"],
+                required: ["now_line", "top_of_mind", "cards", "todos", "watchouts"],
+
                 additionalProperties: false,
               },
             },
@@ -348,8 +522,11 @@ Produce one structured briefing via the daily_brief tool. Rules:
         day_mode: dayMode,
         top_of_mind: brief.top_of_mind ?? null,
         cards: brief.cards ?? null,
+        todos: brief.todos ?? [],
+        watchouts: brief.watchouts ?? [],
+        email_scanned: emailThreads.length,
         calendar_events: calendarEvents,
-        calendar_connected: calendarEvents.length > 0 || (await getGoogleAccessToken(user.id).then(t => !!t).catch(() => false)),
+        calendar_connected: calendarEvents.length > 0 || !!(await getSharedGoogleToken(user.id)),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

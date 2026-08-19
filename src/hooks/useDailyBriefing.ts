@@ -32,6 +32,23 @@ export interface BriefCard {
   why_this?: WhyThis;
 }
 
+export interface TodoItem {
+  title: string;
+  detail?: string;
+  source: "email" | "calendar" | "life" | "goal" | "signal" | "person";
+  urgency: SignalStrength;
+  est_minutes?: number;
+  do_now_intent?: string;
+}
+
+export interface WatchOut {
+  title: string;
+  detail?: string;
+  source: "email" | "calendar" | "life" | "goal" | "signal" | "person";
+  severity: SignalStrength;
+  do_now_intent?: string;
+}
+
 export type CardKey = "plan" | "late" | "up_next" | "people" | "habits" | "goals" | "watch" | "won_today";
 
 export interface DailyBrief {
@@ -40,6 +57,9 @@ export interface DailyBrief {
   day_mode: DayMode;
   top_of_mind: TopOfMind | null;
   cards: Record<CardKey, BriefCard> | null;
+  todos?: TodoItem[];
+  watchouts?: WatchOut[];
+  email_scanned?: number;
   calendar_events?: CalendarEvent[];
   calendar_connected?: boolean;
 }
@@ -86,6 +106,9 @@ export function useDailyBriefing() {
           day_mode: (data.day_mode as DayMode) ?? getDayMode(),
           top_of_mind: data.top_of_mind ?? null,
           cards: data.cards ?? null,
+          todos: (data.todos as TodoItem[]) ?? [],
+          watchouts: (data.watchouts as WatchOut[]) ?? [],
+          email_scanned: data.email_scanned ?? 0,
           calendar_events: (data.calendar_events as CalendarEvent[]) ?? [],
           calendar_connected: data.calendar_connected ?? false,
         });
@@ -118,6 +141,8 @@ export function useDailyBriefing() {
           day_mode: (meta.day_mode as DayMode) ?? getDayMode(),
           top_of_mind: (cached.top_of_mind as TopOfMind) ?? null,
           cards: (cached.cards as Record<CardKey, BriefCard>) ?? null,
+          todos: (cached.todos as TodoItem[]) ?? [],
+          watchouts: (cached.watchouts as WatchOut[]) ?? [],
         });
       }
       const generatedAt = meta.generated_at ? new Date(meta.generated_at as string).getTime() : 0;
