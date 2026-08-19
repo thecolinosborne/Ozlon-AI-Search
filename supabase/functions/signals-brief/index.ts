@@ -302,13 +302,16 @@ Deno.serve(async (req) => {
 
     // Habits = recurring life_events (already in lifeEvents if due today,
     // but we also peek at the broader set so habits aren't empty if none due).
-    const habitsRes = await admin
-      .from("life_events")
-      .select("id, title, recurrence_days, last_done_at")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .not("recurrence_days", "is", null)
-      .limit(8);
+    const [habitsRes, emailThreads] = await Promise.all([
+      admin
+        .from("life_events")
+        .select("id, title, recurrence_days, last_done_at")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .not("recurrence_days", "is", null)
+        .limit(8),
+      fetchRecentEmail(user.id),
+    ]);
     const habits = habitsRes.data ?? [];
 
     const ctx = {
@@ -328,7 +331,11 @@ Deno.serve(async (req) => {
         .slice(0, 12)
         .map((e) => ({ start: e.start, end: e.end, title: e.summary, attendees: e.attendee_count, location: e.location })),
       calendar_tomorrow_count: calendarEvents.filter((e) => e.start && new Date(e.start) > todayEnd).length,
+      recent_email: emailThreads.slice(0, 15).map((e) => ({
+        from: e.from, subject: e.subject, snippet: e.snippet, date: e.date, unread: e.unread,
+      })),
     };
+
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
