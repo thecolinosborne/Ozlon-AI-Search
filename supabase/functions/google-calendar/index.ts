@@ -123,14 +123,15 @@ serve(async (req) => {
             if (!colorId && /^\d{1,2}$/.test(String(v))) colorId = String(v);
             return "";
           })
-          .replace(/[,;|]?\s*description\s*[:=]\s*(.+)$/i, (_m, v) => {
-            if (!description) description = String(v).trim();
-            return "";
-          })
           .replace(/[,;|]?\s*location\s*[:=]\s*([^,;|]+)/i, (_m, v) => {
             if (!location) location = String(v).trim();
             return "";
           })
+          .replace(/[,;|]?\s*(?:description|notes|details)\s*[:=]\s*(.+)$/i, (_m, v) => {
+            if (!description) description = String(v).trim().replace(/[\s,;|]+$/g, "");
+            return "";
+          })
+
           .replace(/\s{2,}/g, " ")
           .replace(/[\s,;|]+$/g, "")
           .trim();
