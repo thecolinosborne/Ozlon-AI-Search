@@ -9500,7 +9500,21 @@ async function runToolLoop(
               // Per-turn cache hit for read-only tools
               const cacheable = isCacheable(tc.function.name);
               const ck = cacheable ? cacheKey(tc.function.name, args) : '';
-              if (cacheable && toolCache.has(ck)) {
+              // Repeat-call breaker: the same read with the same args more than
+              // twice in one turn means the model is stuck. Tell it to stop.
+              const rk = cacheKey(tc.function.name, args);
+              const rc = (repeatCounts.get(rk) || 0) + 1;
+              repeatCounts.set(rk, rc);
+              if (rc > 2) {
+                console.warn(`[tool-loop-breaker] ${tc.function.name} called ${rc}x with identical args — refusing`);
+                result = {
+                  success: false,
+                  result: JSON.stringify({
+                    error: 'DUPLICATE_TOOL_CALL',
+                    message: `You already called ${tc.function.name} with these exact arguments ${rc - 1} times this turn and the data has not changed. Do NOT call it again. Answer the user now using the results you already have. If the data is missing something, say so plainly instead of re-fetching.`,
+                  }),
+                };
+              } else if (cacheable && toolCache.has(ck)) {
                 result = toolCache.get(ck)!;
                 console.log(`[tool-cache] HIT ${tc.function.name}`);
               } else {
