@@ -9090,6 +9090,8 @@ async function runToolLoop(
       return `${name}:<unhashable>`;
     }
   };
+  // Counts how many times the exact same tool+args pair was requested this turn.
+  const repeatCounts = new Map<string, number>();
   (globalThis as Record<string, unknown>).__toolCache = toolCache;
   (globalThis as Record<string, unknown>).__toolCacheKey = cacheKey;
   (globalThis as Record<string, unknown>).__toolCacheable = isCacheable;
