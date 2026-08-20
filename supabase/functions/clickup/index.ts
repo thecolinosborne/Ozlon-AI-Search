@@ -1380,11 +1380,25 @@ serve(async (req) => {
         const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
         if (!listId) throw new Error('listId required');
         if (!params?.name || !params?.type) throw new Error('name and type required');
-        const body: Record<string, unknown> = { name: params.name, type: params.type };
-        if (params.type_config) body.type_config = params.type_config;
-        const data = await clickupCall(`/list/${listId}/field`, 'POST', body);
-        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        const spec = normalizeFieldSpec(params);
+        const body: Record<string, unknown> = { name: spec.name, type: spec.type };
+        if (spec.type_config) body.type_config = spec.type_config;
+        let data;
+        try {
+          data = await clickupCall(`/list/${listId}/field`, 'POST', body);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/Invalid field type/i.test(msg) && spec.type !== 'number' && spec.type !== 'text') {
+            // Last-resort degrade so the user still gets a usable field.
+            data = await clickupCall(`/list/${listId}/field`, 'POST', { name: spec.name, type: 'text' });
+            spec.note = `ClickUp rejected field type "${spec.type}" — created "${spec.name}" as a text field instead.`;
+          } else {
+            throw e;
+          }
+        }
+        return new Response(JSON.stringify(spec.note ? { ...data, note: spec.note } : data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
+
 
       case 'delete_custom_field': {
         const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
