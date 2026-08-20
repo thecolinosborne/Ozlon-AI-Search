@@ -1420,19 +1420,35 @@ serve(async (req) => {
 
         const results: Array<Record<string, unknown>> = [];
         for (const f of wanted) {
-          const name = String(f.name || '').trim();
-          if (!name) continue;
-          const hit = byName.get(name.toLowerCase());
+          const requestedName = String(f.name || '').trim();
+          if (!requestedName) continue;
+          const spec = normalizeFieldSpec(f);
+          const name = spec.name;
+          const hit = byName.get(name.toLowerCase()) || byName.get(requestedName.toLowerCase());
           if (hit) {
-            results.push({ name, field_id: hit.id, type: hit.type, status: 'existing' });
+            results.push({ name: hit.name, field_id: hit.id, type: hit.type, status: 'existing', note: spec.note });
             continue;
           }
           try {
-            const body: Record<string, unknown> = { name, type: f.type || 'text' };
-            if (f.type_config) body.type_config = f.type_config;
-            const created = await clickupCall(`/list/${listId}/field`, 'POST', body);
+            const body: Record<string, unknown> = { name, type: spec.type };
+            if (spec.type_config) body.type_config = spec.type_config;
+            let created;
+            let type = spec.type;
+            let note = spec.note;
+            try {
+              created = await clickupCall(`/list/${listId}/field`, 'POST', body);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (/Invalid field type/i.test(msg) && spec.type !== 'text') {
+                created = await clickupCall(`/list/${listId}/field`, 'POST', { name, type: 'text' });
+                type = 'text';
+                note = `ClickUp rejected field type "${spec.type}" — created "${name}" as a text field instead.`;
+              } else {
+                throw err;
+              }
+            }
             const created_id = created?.field?.id || created?.id || null;
-            results.push({ name, field_id: created_id, type: f.type || 'text', status: 'created' });
+            results.push({ name, field_id: created_id, type, status: 'created', note });
           } catch (e) {
             results.push({
               name,
@@ -1442,6 +1458,7 @@ serve(async (req) => {
             });
           }
         }
+
         return new Response(JSON.stringify({ list_id: listId, fields: results }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
