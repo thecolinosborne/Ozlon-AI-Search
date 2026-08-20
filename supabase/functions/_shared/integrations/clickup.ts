@@ -380,14 +380,15 @@ export const clickupIntegration: IntegrationManifest = {
     {
       name: "create_clickup_custom_field",
       action: "create_custom_field",
-      description: "Create a NEW custom field (schema) on a ClickUp list. Use this instead of telling the user to create fields manually. Types: text, number, date, drop_down, labels, checkbox, url, email, phone, money, rating, currency.",
+      description: "Create a NEW custom field (schema) on a ClickUp list. Use this instead of telling the user to create fields manually. Types: text, number, date, drop_down, labels, checkbox, url, email, phone, rating. ClickUp has NO currency field — request type 'money' and it is auto-mapped to a number field with 2-decimal precision and a '($)' label suffix.",
       sideEffect: "write",
       schema: {
         type: "object",
         properties: {
           list_id: { type: "string", description: "Optional — defaults to the configured list." },
           name: { type: "string" },
-          type: { type: "string", description: "text | number | date | drop_down | labels | checkbox | url | email | phone | money | rating" },
+          type: { type: "string", description: "text | number | date | drop_down | labels | checkbox | url | email | phone | rating | money (money is auto-mapped to a formatted number field)" },
+
           type_config: { type: "object", description: "For drop_down/labels pass { options: [{ name: 'Option A' }] }." },
         },
         required: ["name", "type"],
