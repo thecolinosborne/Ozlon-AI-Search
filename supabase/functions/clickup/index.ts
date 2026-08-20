@@ -329,6 +329,56 @@ function normalizeTaskId(raw: string): string {
   return id.split(/[?#\s]/)[0];
 }
 
+// ClickUp has no "money"/"currency" custom field type. Map it to a number field
+// with currency formatting and a "$" hint in the label so intent is preserved.
+const FIELD_TYPE_ALIASES: Record<string, string> = {
+  money: 'number',
+  currency: 'number',
+  cost: 'number',
+  price: 'number',
+  pay: 'number',
+  percent: 'number',
+  percentage: 'number',
+  boolean: 'checkbox',
+  bool: 'checkbox',
+  select: 'drop_down',
+  dropdown: 'drop_down',
+  multiselect: 'labels',
+  datetime: 'date',
+  link: 'url',
+  string: 'text',
+  longtext: 'text',
+  textarea: 'text',
+};
+
+function normalizeFieldSpec(spec: { name?: unknown; type?: unknown; type_config?: unknown }): {
+  name: string;
+  type: string;
+  type_config?: Record<string, unknown>;
+  note?: string;
+} {
+  const rawType = String(spec.type || 'text').trim().toLowerCase();
+  let name = String(spec.name || '').trim();
+  const type = FIELD_TYPE_ALIASES[rawType] || rawType;
+  let type_config = (spec.type_config as Record<string, unknown>) || undefined;
+  let note: string | undefined;
+
+  const isMoney = rawType === 'money' || rawType === 'currency' || rawType === 'cost' || rawType === 'price' || rawType === 'pay';
+  if (isMoney) {
+    type_config = { precision: 2, ...(type_config || {}) };
+    if (!/[$€£]|\(\s*usd\s*\)/i.test(name)) name = `${name} ($)`;
+    note = `ClickUp has no currency field type. Created "${name}" as a number field with 2-decimal precision — store whole dollar amounts (e.g. 250.00).`;
+  }
+  if ((rawType === 'percent' || rawType === 'percentage') && !/%/.test(name)) {
+    name = `${name} (%)`;
+    note = `ClickUp has no percent field type. Created "${name}" as a number field.`;
+  }
+
+  return { name, type, type_config, note };
+}
+
+
+
 async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenOverride?: string) {
 
   const token = getToken(tokenOverride);
@@ -1330,11 +1380,25 @@ serve(async (req) => {
         const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
         if (!listId) throw new Error('listId required');
         if (!params?.name || !params?.type) throw new Error('name and type required');
-        const body: Record<string, unknown> = { name: params.name, type: params.type };
-        if (params.type_config) body.type_config = params.type_config;
-        const data = await clickupCall(`/list/${listId}/field`, 'POST', body);
-        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        const spec = normalizeFieldSpec(params);
+        const body: Record<string, unknown> = { name: spec.name, type: spec.type };
+        if (spec.type_config) body.type_config = spec.type_config;
+        let data;
+        try {
+          data = await clickupCall(`/list/${listId}/field`, 'POST', body);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/Invalid field type/i.test(msg) && spec.type !== 'number' && spec.type !== 'text') {
+            // Last-resort degrade so the user still gets a usable field.
+            data = await clickupCall(`/list/${listId}/field`, 'POST', { name: spec.name, type: 'text' });
+            spec.note = `ClickUp rejected field type "${spec.type}" — created "${spec.name}" as a text field instead.`;
+          } else {
+            throw e;
+          }
+        }
+        return new Response(JSON.stringify(spec.note ? { ...data, note: spec.note } : data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
+
 
       case 'delete_custom_field': {
         const listId = String(params?.listId || await getListId(params, resolvedToken, authCtx));
@@ -1356,19 +1420,35 @@ serve(async (req) => {
 
         const results: Array<Record<string, unknown>> = [];
         for (const f of wanted) {
-          const name = String(f.name || '').trim();
-          if (!name) continue;
-          const hit = byName.get(name.toLowerCase());
+          const requestedName = String(f.name || '').trim();
+          if (!requestedName) continue;
+          const spec = normalizeFieldSpec(f);
+          const name = spec.name;
+          const hit = byName.get(name.toLowerCase()) || byName.get(requestedName.toLowerCase());
           if (hit) {
-            results.push({ name, field_id: hit.id, type: hit.type, status: 'existing' });
+            results.push({ name: hit.name, field_id: hit.id, type: hit.type, status: 'existing', note: spec.note });
             continue;
           }
           try {
-            const body: Record<string, unknown> = { name, type: f.type || 'text' };
-            if (f.type_config) body.type_config = f.type_config;
-            const created = await clickupCall(`/list/${listId}/field`, 'POST', body);
+            const body: Record<string, unknown> = { name, type: spec.type };
+            if (spec.type_config) body.type_config = spec.type_config;
+            let created;
+            let type = spec.type;
+            let note = spec.note;
+            try {
+              created = await clickupCall(`/list/${listId}/field`, 'POST', body);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (/Invalid field type/i.test(msg) && spec.type !== 'text') {
+                created = await clickupCall(`/list/${listId}/field`, 'POST', { name, type: 'text' });
+                type = 'text';
+                note = `ClickUp rejected field type "${spec.type}" — created "${name}" as a text field instead.`;
+              } else {
+                throw err;
+              }
+            }
             const created_id = created?.field?.id || created?.id || null;
-            results.push({ name, field_id: created_id, type: f.type || 'text', status: 'created' });
+            results.push({ name, field_id: created_id, type, status: 'created', note });
           } catch (e) {
             results.push({
               name,
@@ -1378,6 +1458,7 @@ serve(async (req) => {
             });
           }
         }
+
         return new Response(JSON.stringify({ list_id: listId, fields: results }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
