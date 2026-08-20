@@ -329,6 +329,56 @@ function normalizeTaskId(raw: string): string {
   return id.split(/[?#\s]/)[0];
 }
 
+// ClickUp has no "money"/"currency" custom field type. Map it to a number field
+// with currency formatting and a "$" hint in the label so intent is preserved.
+const FIELD_TYPE_ALIASES: Record<string, string> = {
+  money: 'number',
+  currency: 'number',
+  cost: 'number',
+  price: 'number',
+  pay: 'number',
+  percent: 'number',
+  percentage: 'number',
+  boolean: 'checkbox',
+  bool: 'checkbox',
+  select: 'drop_down',
+  dropdown: 'drop_down',
+  multiselect: 'labels',
+  datetime: 'date',
+  link: 'url',
+  string: 'text',
+  longtext: 'text',
+  textarea: 'text',
+};
+
+function normalizeFieldSpec(spec: { name?: unknown; type?: unknown; type_config?: unknown }): {
+  name: string;
+  type: string;
+  type_config?: Record<string, unknown>;
+  note?: string;
+} {
+  const rawType = String(spec.type || 'text').trim().toLowerCase();
+  let name = String(spec.name || '').trim();
+  const type = FIELD_TYPE_ALIASES[rawType] || rawType;
+  let type_config = (spec.type_config as Record<string, unknown>) || undefined;
+  let note: string | undefined;
+
+  const isMoney = rawType === 'money' || rawType === 'currency' || rawType === 'cost' || rawType === 'price' || rawType === 'pay';
+  if (isMoney) {
+    type_config = { precision: 2, ...(type_config || {}) };
+    if (!/[$€£]|\(\s*usd\s*\)/i.test(name)) name = `${name} ($)`;
+    note = `ClickUp has no currency field type. Created "${name}" as a number field with 2-decimal precision — store whole dollar amounts (e.g. 250.00).`;
+  }
+  if ((rawType === 'percent' || rawType === 'percentage') && !/%/.test(name)) {
+    name = `${name} (%)`;
+    note = `ClickUp has no percent field type. Created "${name}" as a number field.`;
+  }
+
+  return { name, type, type_config, note };
+}
+
+
+
 async function clickupFetch(path: string, method = 'GET', body?: unknown, tokenOverride?: string) {
 
   const token = getToken(tokenOverride);
