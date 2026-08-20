@@ -403,7 +403,7 @@ export const clickupIntegration: IntegrationManifest = {
     {
       name: "ensure_clickup_custom_fields",
       action: "ensure_custom_fields",
-      description: "Idempotently make sure a set of custom fields exists on a ClickUp list — creates missing ones, reuses existing ones by name, and returns every field_id ready for set_clickup_custom_field. Use this when the user asks for several fields at once.",
+      description: "Idempotently make sure a set of custom fields exists on a ClickUp list — creates missing ones, reuses existing ones by name, and returns every field_id ready for set_clickup_custom_field. Use this when the user asks for several fields at once. 'money'/'currency' types are auto-mapped to number fields with 2-decimal precision and a '($)' label suffix; unsupported types degrade to text rather than failing.",
       sideEffect: "write",
       schema: {
         type: "object",
