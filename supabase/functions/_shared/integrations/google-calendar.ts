@@ -158,14 +158,18 @@ export const googleCalendarIntegration: IntegrationManifest = {
     },
     {
       name: "calendar_delete_event",
-      description: "Delete a calendar event by ID.",
+      description: "Delete a calendar event by ID. Auto-resolves the event across all of the user's calendars; pass match_title if the id may be stale.",
       action: "delete_event",
       schema: {
         type: "object",
-        properties: { calendarId: { type: "string" }, eventId: { type: "string" } },
+        properties: {
+          calendarId: { type: "string" },
+          eventId: { type: "string" },
+          match_title: { type: "string", description: "Current event title, used to re-find the event if the id is stale" },
+        },
         required: ["eventId"],
       },
-      mapArgs: (a) => ({ calendarId: a.calendarId ?? "primary", eventId: a.eventId }),
+      mapArgs: (a) => ({ calendarId: a.calendarId ?? "primary", eventId: a.eventId, summary: a.match_title }),
     },
     {
       name: "calendar_freebusy",
