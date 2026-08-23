@@ -1067,27 +1067,47 @@ serve(async (req) => {
       }
 
       case 'create_subtask': {
-        const parentTaskId = params?.parentId || params?.parent;
-        if (!parentTaskId) throw new Error('parent taskId required (use parentId or parent)');
-        // Auto-resolve listId from parent task if not provided
-        let listId = params?.listId ? String(params.listId) : '';
-        if (!listId) {
-          try {
-            const parentTask = await clickupCall(`/task/${parentTaskId}`);
-            listId = parentTask?.list?.id || '';
-          } catch { /* fall through */ }
-        }
-          if (!listId) listId = await getListId(params, resolvedToken, authCtx);
+        const rawParent = params?.parentId || params?.parent;
+        if (!rawParent) throw new Error('parent taskId required (use parentId or parent)');
+        const parentTaskId = normalizeTaskId(String(rawParent));
+
+        // The parent's TRUE list always wins — ITEM_137 ("Parent not child of list")
+        // happens when we post to a list the parent doesn't live in.
+        let parentTask: any = null;
+        try { parentTask = await clickupCall(`/task/${parentTaskId}`); } catch { /* fall through */ }
+        let listId = parentTask?.list?.id ? String(parentTask.list.id) : '';
+        const requestedListId = params?.listId ? String(params.listId) : '';
+        if (!listId) listId = requestedListId || await getListId(params, resolvedToken, authCtx);
         if (!listId) throw new Error('Could not resolve listId for subtask — provide listId or ensure parent task is accessible');
+
         const { name, description, parentId: _pid, parent: _p, listId: _lid, apiToken: _at, teamId: _tid, defaultListId: _dlid, ...rest } = params;
-        const data = await clickupCall(`/list/${listId}/task`, 'POST', {
-          name: name || 'Subtask',
-          description,
+        const body = { name: name || 'Subtask', description, parent: parentTaskId, ...rest };
+
+        let data: any;
+        try {
+          data = await clickupCall(`/list/${listId}/task`, 'POST', body);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          // Retry once against the parent's real list if we guessed wrong.
+          if (/ITEM_137|Parent not child of list/i.test(msg)) {
+            const fresh = await clickupCall(`/task/${parentTaskId}`);
+            const trueList = fresh?.list?.id ? String(fresh.list.id) : '';
+            if (!trueList || trueList === listId) throw e;
+            listId = trueList;
+            data = await clickupCall(`/list/${listId}/task`, 'POST', body);
+          } else {
+            throw e;
+          }
+        }
+
+        const result = {
+          ...data,
           parent: parentTaskId,
-          ...rest,
-        });
-        return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          list: data?.list || { id: listId, name: parentTask?.list?.name },
+        };
+        return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
+
 
       case 'move_task': {
         if (!params?.taskId || !params?.listId) throw new Error('taskId and listId required');

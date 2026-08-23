@@ -151,18 +151,25 @@ export const clickupIntegration: IntegrationManifest = {
     {
       name: "create_clickup_subtask",
       action: "create_subtask",
-      description: "Create a subtask under a parent ClickUp task.",
+      description: "Create a subtask under a parent ClickUp task. list_id is optional — the parent's own list is always used when resolvable, so you never need to guess it.",
       schema: {
         type: "object",
-        properties: { parent_id: { type: "string" }, name: { type: "string" }, description: { type: "string" } },
+        properties: {
+          parent_id: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          list_id: { type: "string", description: "Optional. Ignored if the parent task's real list can be resolved." },
+        },
         required: ["parent_id", "name"],
       },
       mapArgs: (a) => {
         const p: Record<string, unknown> = { parentId: a.parent_id, name: a.name };
         if (a.description) p.description = a.description;
+        if (a.list_id) p.listId = a.list_id;
         return p;
       },
     },
+
     {
       name: "move_clickup_task",
       action: "move_task",
