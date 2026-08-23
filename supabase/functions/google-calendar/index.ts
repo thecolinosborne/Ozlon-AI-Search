@@ -23,6 +23,74 @@ async function gFetch(token: string, url: string, init: RequestInit = {}) {
   return data as AnyJson;
 }
 
+/**
+ * Google returns 404 when an eventId lives on a calendar other than the one
+ * addressed (very common: models remember an id but default to "primary"), or
+ * when a recurring instance id ("base_20260823T...") is passed. Resolve the
+ * real {calendarId, eventId} by probing the default calendar first, then every
+ * calendar in the user's list, then falling back to a title search.
+ */
+async function resolveEvent(
+  token: string,
+  preferredCalendarId: string,
+  eventId: string,
+  summaryHint?: string,
+): Promise<{ calendarId: string; eventId: string }> {
+  const baseId = eventId.includes("_") ? eventId.split("_")[0] : eventId;
+  const candidateIds = baseId !== eventId ? [eventId, baseId] : [eventId];
+
+  const probe = async (calId: string, id: string) => {
+    const res = await fetch(
+      `${CAL_BASE}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(id)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return res.ok;
+  };
+
+  for (const id of candidateIds) {
+    if (await probe(preferredCalendarId, id)) return { calendarId: preferredCalendarId, eventId: id };
+  }
+
+  let calendars: string[] = [];
+  try {
+    const list = await gFetch(token, `${CAL_BASE}/users/me/calendarList?maxResults=250`);
+    calendars = ((list.items as AnyJson[]) || [])
+      .map((c) => String(c.id))
+      .filter((id) => id && id !== preferredCalendarId);
+  } catch { /* ignore */ }
+
+  for (const calId of calendars) {
+    for (const id of candidateIds) {
+      if (await probe(calId, id)) return { calendarId: calId, eventId: id };
+    }
+  }
+
+  // Last resort: find by title across calendars (ids can change after delete/recreate).
+  if (summaryHint) {
+    const timeMin = new Date(Date.now() - 90 * 864e5).toISOString();
+    const timeMax = new Date(Date.now() + 365 * 864e5).toISOString();
+    for (const calId of [preferredCalendarId, ...calendars]) {
+      try {
+        const qs = new URLSearchParams({
+          q: summaryHint,
+          timeMin,
+          timeMax,
+          singleEvents: "true",
+          orderBy: "startTime",
+          maxResults: "10",
+        });
+        const data = await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calId)}/events?${qs}`);
+        const hit = ((data.items as AnyJson[]) || [])[0];
+        if (hit?.id) return { calendarId: calId, eventId: String(hit.id) };
+      } catch { /* ignore */ }
+    }
+  }
+
+  throw new Error(
+    `Calendar API 404: event "${eventId}" was not found on "${preferredCalendarId}" or any of the user's other calendars${summaryHint ? ` (also searched by title "${summaryHint}")` : ""}. Re-list events to get current ids.`,
+  );
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
