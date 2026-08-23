@@ -134,11 +134,12 @@ serve(async (req) => {
       }
 
       case "get_event": {
-        const calendarId = String((params as AnyJson).calendarId || "primary");
-        const eventId = String((params as AnyJson).eventId || "");
-        if (!eventId) return jsonErr("eventId is required");
+        const reqCal = String((params as AnyJson).calendarId || "primary");
+        const reqId = String((params as AnyJson).eventId || "");
+        if (!reqId) return jsonErr("eventId is required");
+        const { calendarId, eventId } = await resolveEvent(token, reqCal, reqId, (params as AnyJson).summary as string | undefined);
         const data = await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
-        return jsonOk({ success: true, event: data });
+        return jsonOk({ success: true, event: data, calendarId });
       }
 
       case "create_event": {
@@ -153,26 +154,29 @@ serve(async (req) => {
       }
 
       case "update_event": {
-        const calendarId = String((params as AnyJson).calendarId || "primary");
-        const eventId = String((params as AnyJson).eventId || "");
+        const reqCal = String((params as AnyJson).calendarId || "primary");
+        const reqId = String((params as AnyJson).eventId || "");
         const eventBody = (params as AnyJson).event as AnyJson;
-        if (!eventId) return jsonErr("eventId is required");
+        if (!reqId) return jsonErr("eventId is required");
         if (!eventBody) return jsonErr("event object is required");
+        const hint = ((params as AnyJson).summary as string | undefined) ?? (eventBody.summary as string | undefined);
+        const { calendarId, eventId } = await resolveEvent(token, reqCal, reqId, hint);
         const data = await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
           method: "PATCH",
           body: JSON.stringify(eventBody),
         });
-        return jsonOk({ success: true, event: data });
+        return jsonOk({ success: true, event: data, calendarId });
       }
 
       case "delete_event": {
-        const calendarId = String((params as AnyJson).calendarId || "primary");
-        const eventId = String((params as AnyJson).eventId || "");
-        if (!eventId) return jsonErr("eventId is required");
+        const reqCal = String((params as AnyJson).calendarId || "primary");
+        const reqId = String((params as AnyJson).eventId || "");
+        if (!reqId) return jsonErr("eventId is required");
+        const { calendarId, eventId } = await resolveEvent(token, reqCal, reqId, (params as AnyJson).summary as string | undefined);
         await gFetch(token, `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
           method: "DELETE",
         });
-        return jsonOk({ success: true });
+        return jsonOk({ success: true, calendarId, eventId });
       }
 
       case "quick_add": {
