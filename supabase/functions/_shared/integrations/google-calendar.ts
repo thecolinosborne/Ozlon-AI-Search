@@ -70,13 +70,15 @@ export const googleCalendarIntegration: IntegrationManifest = {
     },
     {
       name: "calendar_update_event",
-      description: "Update an existing calendar event (rename, retime, set description/location/color).",
+      description:
+        "Update an existing calendar event (rename, retime, set description/location/color). If the event lives on a secondary calendar or the id is stale, the backend auto-resolves it across all calendars — pass match_title with the event's current title to help.",
       action: "update_event",
       schema: {
         type: "object",
         properties: {
           calendarId: { type: "string" },
           eventId: { type: "string" },
+          match_title: { type: "string", description: "Current event title, used to re-find the event if the id is stale" },
           summary: { type: "string" },
           description: { type: "string" },
           location: { type: "string" },
@@ -94,7 +96,7 @@ export const googleCalendarIntegration: IntegrationManifest = {
         if (a.colorId !== undefined) event.colorId = String(a.colorId);
         if (a.start_time) event.start = { dateTime: a.start_time };
         if (a.end_time) event.end = { dateTime: a.end_time };
-        return { calendarId: a.calendarId ?? "primary", eventId: a.eventId, event };
+        return { calendarId: a.calendarId ?? "primary", eventId: a.eventId, summary: a.match_title, event };
       },
     },
     {
@@ -156,14 +158,18 @@ export const googleCalendarIntegration: IntegrationManifest = {
     },
     {
       name: "calendar_delete_event",
-      description: "Delete a calendar event by ID.",
+      description: "Delete a calendar event by ID. Auto-resolves the event across all of the user's calendars; pass match_title if the id may be stale.",
       action: "delete_event",
       schema: {
         type: "object",
-        properties: { calendarId: { type: "string" }, eventId: { type: "string" } },
+        properties: {
+          calendarId: { type: "string" },
+          eventId: { type: "string" },
+          match_title: { type: "string", description: "Current event title, used to re-find the event if the id is stale" },
+        },
         required: ["eventId"],
       },
-      mapArgs: (a) => ({ calendarId: a.calendarId ?? "primary", eventId: a.eventId }),
+      mapArgs: (a) => ({ calendarId: a.calendarId ?? "primary", eventId: a.eventId, summary: a.match_title }),
     },
     {
       name: "calendar_freebusy",
