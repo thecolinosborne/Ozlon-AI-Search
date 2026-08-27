@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -811,49 +811,97 @@ export type Database = {
       }
       discovered_events: {
         Row: {
+          added_to_calendar_at: string | null
+          address: string | null
+          calendar_event_id: string | null
+          calendar_id: string | null
           category: string | null
+          confidence: number | null
+          cost_max: number | null
+          cost_min: number | null
+          cost_text: string | null
           created_at: string
+          currency: string | null
           description: string | null
           end_date: string | null
           event_date: string | null
           id: string
+          is_free: boolean | null
           location: string | null
           metadata: Json | null
+          organizer: string | null
+          registration_url: string | null
+          rsvp_deadline: string | null
           source: string | null
+          ticket_notes: string | null
+          timezone: string | null
           title: string
           updated_at: string
           url: string | null
           user_id: string
+          venue_name: string | null
         }
         Insert: {
+          added_to_calendar_at?: string | null
+          address?: string | null
+          calendar_event_id?: string | null
+          calendar_id?: string | null
           category?: string | null
+          confidence?: number | null
+          cost_max?: number | null
+          cost_min?: number | null
+          cost_text?: string | null
           created_at?: string
+          currency?: string | null
           description?: string | null
           end_date?: string | null
           event_date?: string | null
           id?: string
+          is_free?: boolean | null
           location?: string | null
           metadata?: Json | null
+          organizer?: string | null
+          registration_url?: string | null
+          rsvp_deadline?: string | null
           source?: string | null
+          ticket_notes?: string | null
+          timezone?: string | null
           title: string
           updated_at?: string
           url?: string | null
           user_id: string
+          venue_name?: string | null
         }
         Update: {
+          added_to_calendar_at?: string | null
+          address?: string | null
+          calendar_event_id?: string | null
+          calendar_id?: string | null
           category?: string | null
+          confidence?: number | null
+          cost_max?: number | null
+          cost_min?: number | null
+          cost_text?: string | null
           created_at?: string
+          currency?: string | null
           description?: string | null
           end_date?: string | null
           event_date?: string | null
           id?: string
+          is_free?: boolean | null
           location?: string | null
           metadata?: Json | null
+          organizer?: string | null
+          registration_url?: string | null
+          rsvp_deadline?: string | null
           source?: string | null
+          ticket_notes?: string | null
+          timezone?: string | null
           title?: string
           updated_at?: string
           url?: string | null
           user_id?: string
+          venue_name?: string | null
         }
         Relationships: []
       }

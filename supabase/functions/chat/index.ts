@@ -3028,15 +3028,33 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'scrape_events',
-      description: 'Find real upcoming events (networking, conferences, meetups, workshops, webinars, local gatherings) and extract structured event data — title, date, location, URL — then save them for the user. Use whenever the user asks about events, conferences, meetups, networking opportunities, "what\'s happening near me", or upcoming local/industry dates. Combines Tavily web search with Firecrawl page scraping for richer detail.',
+      description: 'Find real upcoming events (networking, conferences, meetups, workshops, chamber mixers, local gatherings) and extract FULL structured detail — date/time, venue name + street address, organizer, registration link, and actual ticket cost (free vs paid, price range, member pricing) — then save/dedupe them for the user. Searches Eventbrite, Meetup, chamber calendars and ticket pages in parallel. Use whenever the user asks about events, networking opportunities, "what\'s happening near me", or upcoming local/industry dates.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Search query for events, e.g. "networking events in LA June 2026"' },
+          query: { type: 'string', description: 'What kind of events, e.g. "real estate and small business networking"' },
+          location: { type: 'string', description: 'City/region, e.g. "Charlotte NC" or "Lake Norman area". Strongly recommended.' },
           category: { type: 'string', enum: ['networking', 'conference', 'meetup', 'workshop', 'webinar', 'other'], description: 'Event category (default: networking)' },
-          max_results: { type: 'number', description: 'Max events to find (default 10, max 20)' },
+          max_results: { type: 'number', description: 'Max events to find (default 12, max 25)' },
         },
         required: ['query'],
+      },
+    },
+  },
+  // ============ Add Discovered Events To Calendar ============
+  {
+    type: 'function',
+    function: {
+      name: 'add_events_to_calendar',
+      description: 'Add previously discovered/saved events to the user\'s Google Calendar as full entries — venue address in the location field, cost, ticket notes, host, RSVP deadline and registration link in the description, plus 1-day and 1-hour reminders. Skips events already added. Use after scrape_events or when the user says "add those to my calendar".',
+      parameters: {
+        type: 'object',
+        properties: {
+          event_ids: { type: 'array', items: { type: 'string' }, description: 'IDs of saved discovered_events rows.' },
+          titles: { type: 'array', items: { type: 'string' }, description: 'Alternative: match saved events by title.' },
+          calendarId: { type: 'string', description: 'Target calendar (default: primary).' },
+          force: { type: 'boolean', description: 'Re-add even if already on the calendar.' },
+        },
       },
     },
   },
@@ -5729,7 +5747,7 @@ async function executeToolCall(
           // We need the user_id — extract from the tool call context
           // The wisdomUserId is captured in the outer scope of the main handler
           // We pass it through via a closure variable set before the tool loop
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated for memory storage.' };
 
           const { data: similar } = await adminClient.rpc('match_wisdom_memories', {
@@ -5786,7 +5804,7 @@ async function executeToolCall(
           const supabaseUrl = Deno.env.get('SUPABASE_URL');
           if (!serviceRoleKey || !supabaseUrl) return { success: false, result: 'Database not configured.' };
 
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated for memory search.' };
 
           const query = String(args.query || '').trim();
@@ -5937,7 +5955,7 @@ async function executeToolCall(
 
       case 'create_routine': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -5961,7 +5979,7 @@ async function executeToolCall(
 
       case 'list_routines': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -5981,7 +5999,7 @@ async function executeToolCall(
 
       case 'toggle_routine': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -5999,7 +6017,7 @@ async function executeToolCall(
 
       case 'delete_routine': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6031,7 +6049,7 @@ async function executeToolCall(
 
       case 'add_standing_order': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6052,7 +6070,7 @@ async function executeToolCall(
 
       case 'remove_standing_order': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6071,7 +6089,7 @@ async function executeToolCall(
 
       case 'update_standing_order': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const oldMatch = String(args.old_rule_match || '').trim();
           const newRule = String(args.new_rule || '').trim();
@@ -6121,7 +6139,7 @@ async function executeToolCall(
 
       case 'update_memory': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const oldMatch = String(args.old_summary_match || '').trim();
           const newContent = String(args.new_content || '').trim();
@@ -6167,7 +6185,7 @@ async function executeToolCall(
 
       case 'add_goal': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6188,7 +6206,7 @@ async function executeToolCall(
 
       case 'update_goal_progress': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6214,7 +6232,7 @@ async function executeToolCall(
 
       case 'complete_goal': {
         try {
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -6243,7 +6261,7 @@ async function executeToolCall(
           const query = args.query as string;
           const searchDepth = (args.search_depth as string) || 'advanced';
           const maxResults = Math.min((args.max_results as number) || 8, 20);
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
 
           // Save task to database if possible
           let taskRowId: string | null = null;
@@ -6424,7 +6442,7 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           const FIRECRAWL_KEY = Deno.env.get('FIRECRAWL_API_KEY');
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
           const supabaseUrl = Deno.env.get('SUPABASE_URL');
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
 
           if (!TAVILY_KEY) return { success: false, result: 'Event search not configured (TAVILY_API_KEY missing).' };
           if (!OPENAI_KEY) return { success: false, result: 'AI extraction not configured.' };
@@ -6432,130 +6450,390 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
 
           const query = args.query as string;
           const category = (args.category as string) || 'networking';
-          const maxResults = Math.min((args.max_results as number) || 10, 20);
+          const maxResults = Math.min((args.max_results as number) || 12, 25);
+          const location = (args.location as string) || '';
+          const today = new Date();
+          const yr = today.getUTCFullYear();
 
-          // Step 1: Search for events via Tavily
-          console.log(`[scrape_events] Searching: "${query}"`);
-          const tavilyRes = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: TAVILY_KEY,
-              query: `${query} events dates 2025 2026`,
-              search_depth: 'advanced',
-              max_results: maxResults,
-              include_answer: true,
-              include_raw_content: false,
-            }),
-          });
+          // ---- Step 1: multi-angle search fan-out (listing sites + ticketing + local) ----
+          const base = location ? `${query} ${location}` : query;
+          const queries = [
+            `${base} events ${yr} ${yr + 1}`,
+            `${base} site:eventbrite.com`,
+            `${base} site:meetup.com`,
+            `${base} tickets price registration cost`,
+            `${base} chamber of commerce networking calendar`,
+          ];
 
-          if (!tavilyRes.ok) {
-            return { success: false, result: `Event search failed: ${tavilyRes.status}` };
+          const searchOne = async (q: string) => {
+            try {
+              const r = await fetch('https://api.tavily.com/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  api_key: TAVILY_KEY,
+                  query: q,
+                  search_depth: 'advanced',
+                  max_results: 8,
+                  include_answer: false,
+                  include_raw_content: false,
+                }),
+              });
+              if (!r.ok) return [];
+              const d = await r.json();
+              return (d.results || []) as Array<{ title: string; url: string; content: string }>;
+            } catch { return []; }
+          };
+
+          console.log(`[scrape_events] Fan-out search: "${base}"`);
+          const searchBatches = await Promise.all(queries.map(searchOne));
+          const seenUrl = new Set<string>();
+          const results: Array<{ title: string; url: string; content: string }> = [];
+          for (const batch of searchBatches) {
+            for (const r of batch) {
+              if (!r?.url || seenUrl.has(r.url)) continue;
+              seenUrl.add(r.url);
+              results.push(r);
+            }
+          }
+          if (results.length === 0) {
+            return { success: true, result: `No event sources found for "${base}". Try naming a city and a month.` };
           }
 
-          const tavilyData = await tavilyRes.json();
-          const results = tavilyData.results || [];
+          let pageContents = results
+            .map((r) => `[${r.title}]\nURL: ${r.url}\n${r.content}`)
+            .join('\n\n---\n\n');
 
-          // Step 2: For each result, try Firecrawl for richer data, then AI-extract events
-          let pageContents = results.map((r: { title: string; url: string; content: string }) =>
-            `[${r.title}]\nURL: ${r.url}\n${r.content}`
-          ).join('\n\n---\n\n');
+          // ---- Step 2: scrape the most promising pages in PARALLEL for pricing/venue detail ----
+          if (FIRECRAWL_KEY) {
+            const priority = [...results].sort((a, b) => {
+              const score = (u: string) =>
+                /eventbrite|meetup|ticket|chamber|luma|lu\.ma|10times|allevents/i.test(u) ? 1 : 0;
+              return score(b.url) - score(a.url);
+            }).slice(0, 5);
 
-          // Optionally enhance with Firecrawl scraping of top URLs
-          if (FIRECRAWL_KEY && results.length > 0) {
-            const topUrls = results.slice(0, 3);
-            for (const r of topUrls) {
+            const scrapes = await Promise.all(priority.map(async (r) => {
               try {
-                const scrapeRes = await fetch('https://api.firecrawl.dev/v2/scrape', {
+                const res = await fetch('https://api.firecrawl.dev/v2/scrape', {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
                   body: JSON.stringify({ url: r.url, formats: ['markdown'], onlyMainContent: true }),
                 });
-                if (scrapeRes.ok) {
-                  const scrapeData = await scrapeRes.json();
-                  if (scrapeData.data?.markdown) {
-                    pageContents += `\n\n---\n\n[DETAILED: ${r.title}]\nURL: ${r.url}\n${scrapeData.data.markdown.slice(0, 3000)}`;
-                  }
-                }
+                if (!res.ok) return '';
+                const d = await res.json();
+                const md = d.data?.markdown || d.markdown;
+                return md ? `\n\n---\n\n[DETAILED: ${r.title}]\nURL: ${r.url}\n${String(md).slice(0, 6000)}` : '';
               } catch (e) {
                 console.warn(`[scrape_events] Firecrawl failed for ${r.url}:`, e);
+                return '';
               }
-            }
+            }));
+            pageContents += scrapes.join('');
           }
 
-          // Step 3: AI extraction of structured events
-          const extractionPrompt = `Extract all events from the following web content. For each event, provide:
-- title: Event name
-- description: 1-2 sentence description
-- event_date: ISO 8601 date/datetime (best guess if only month given, use first of month)
-- end_date: ISO 8601 end date if available, null otherwise
-- location: City/venue or "Online"
-- url: Source URL
-- source: Website name
+          // ---- Step 3: structured extraction with full logistics + ticket cost ----
+          const extractionPrompt = `Today is ${today.toISOString().slice(0, 10)}. Extract every real, dated, UPCOMING event from the web content below.
 
-Return ONLY a JSON array. If no events found, return [].
+For each event return these fields (use null when the content genuinely does not say — never invent):
+- title
+- description: 2-3 sentences: what it is, who attends, why it's worth going
+- event_date: ISO 8601 with start time and timezone offset when known (e.g. 2026-09-14T18:00:00-04:00)
+- end_date: ISO 8601 end, or null
+- timezone: IANA zone, e.g. "America/New_York"
+- venue_name: name of the venue
+- address: full street address including city/state/zip when available
+- location: short "Venue, City, ST" or "Online"
+- organizer: hosting org
+- url: page the details came from
+- registration_url: direct ticket/RSVP link if different from url
+- cost_text: exactly how price is stated, e.g. "Free for members, $25 guests", "$45 early bird / $60 door"
+- cost_min: lowest numeric price in dollars (0 if free), or null if unknown
+- cost_max: highest numeric price in dollars, or null
+- is_free: true/false/null
+- ticket_notes: refund policy, member pricing, capacity, deadlines
+- rsvp_deadline: ISO date if stated, else null
+- source: website name
+- confidence: 0-1, how certain you are the date and price are correct
+
+Rules: skip past events, skip pages with no specific date, merge duplicates of the same event, and prefer the page with pricing detail. Return JSON: {"events": [...]}. Max ${maxResults} events.
 
 CONTENT:
-${pageContents.slice(0, 12000)}`;
+${pageContents.slice(0, 30000)}`;
 
-          const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-5',
-              messages: [
-                { role: 'system', content: 'You extract structured event data from web content. Return only valid JSON arrays.' },
-                { role: 'user', content: extractionPrompt },
-              ],
-              max_completion_tokens: 4096,
-              response_format: { type: 'json_object' },
-            }),
-          });
+          // Extraction runs through a fast gateway model first (reliable JSON, low
+          // latency), then falls back to OpenAI if the gateway is unavailable.
+          const LOVABLE_KEY = Deno.env.get('LOVABLE_API_KEY');
+          const sysPrompt = 'You extract precise structured event data (dates, venues, ticket prices) from web content. Return only valid JSON. Never invent prices or addresses.';
 
-          if (!extractRes.ok) {
-            console.error('[scrape_events] Extraction error:', extractRes.status, await extractRes.text());
-            return { success: false, result: 'Failed to extract event data from search results.' };
+          const tryExtract = async (endpoint: string, key: string, model: string, extra: Record<string, unknown>) => {
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: sysPrompt },
+                  { role: 'user', content: extractionPrompt },
+                ],
+                response_format: { type: 'json_object' },
+                ...extra,
+              }),
+            });
+            if (!r.ok) {
+              console.error(`[scrape_events] Extraction ${model} failed:`, r.status, (await r.text()).slice(0, 400));
+              return null;
+            }
+            const d = await r.json();
+            const txt = d.choices?.[0]?.message?.content;
+            return typeof txt === 'string' && txt.trim() ? txt : null;
+          };
+
+          let extractedText: string | null = null;
+          if (LOVABLE_KEY) {
+            extractedText = await tryExtract(LOVABLE_GATEWAY, LOVABLE_KEY, 'google/gemini-2.5-flash', { max_tokens: 8000 });
+          }
+          if (!extractedText && OPENAI_KEY) {
+            extractedText = await tryExtract('https://api.openai.com/v1/chat/completions', OPENAI_KEY, 'gpt-5-mini', { max_completion_tokens: 16000 });
+          }
+          if (!extractedText) {
+            return { success: false, result: 'Failed to extract event data from search results (extraction model unavailable).' };
           }
 
-          const extractData = await extractRes.json();
-          const extractedText = extractData.choices?.[0]?.message?.content || '{}';
           let events: Array<Record<string, unknown>> = [];
           try {
             const parsed = JSON.parse(extractedText);
-            events = Array.isArray(parsed) ? parsed : (parsed.events || []);
+            events = Array.isArray(parsed) ? parsed : (parsed.events || parsed.results || []);
           } catch { events = []; }
 
           if (events.length === 0) {
-            return { success: true, result: 'No events found for that search. Try a different query or be more specific about dates and location.' };
+            return { success: true, result: `No dated upcoming events found for "${base}". I searched ${results.length} sources. Try naming a city plus a month, or a specific organization.` };
           }
 
-          // Step 4: Save to database
+          // ---- Step 3.5: ticket-price pass — open each event page that still has
+          // no price and pull cost, address and the real registration link. ----
+          const needsPrice = events.filter((e) => {
+            const url = (e.registration_url as string) || (e.url as string);
+            const hasPrice = e.is_free === true || typeof e.cost_min === 'number' ||
+              (typeof e.cost_text === 'string' && /\d|free/i.test(e.cost_text) && !/check ticket price/i.test(e.cost_text));
+            return !!url && !hasPrice;
+          }).slice(0, 8);
+
+          if (FIRECRAWL_KEY && needsPrice.length) {
+            console.log(`[scrape_events] Price pass for ${needsPrice.length} events`);
+            await Promise.all(needsPrice.map(async (e) => {
+              const url = (e.registration_url as string) || (e.url as string);
+              try {
+                const res = await fetch('https://api.firecrawl.dev/v2/scrape', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
+                  // onlyMainContent:false — ticket widgets on Eventbrite/Meetup sit
+                  // outside the main article body, and that's where price lives.
+                  body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: false }),
+                });
+                if (!res.ok) return;
+                const d = await res.json();
+                const md: string = String(d.data?.markdown || d.markdown || '');
+                if (!md) return;
+
+                // Cheap deterministic pre-read: catches "Free" and "$25" ticket widgets
+                // even when the model is conservative.
+                const priceHits = [...md.matchAll(/\$\s?(\d{1,4}(?:\.\d{2})?)/g)].map((m) => Number(m[1])).filter((n) => n > 0 && n < 5000);
+                const looksFree = /\b(free\s+(?:event|admission|to attend|registration)|admission:\s*free|price:\s*free|\$0(?:\.00)?)\b/i.test(md);
+
+                const key = LOVABLE_KEY || OPENAI_KEY;
+                if (!key) return;
+                const endpoint = LOVABLE_KEY ? LOVABLE_GATEWAY : 'https://api.openai.com/v1/chat/completions';
+                const model = LOVABLE_KEY ? 'google/gemini-2.5-flash' : 'gpt-5-mini';
+                const body: Record<string, unknown> = {
+                  model,
+                  messages: [
+                    { role: 'system', content: 'You read one event page and report only what it explicitly states. Never guess a price.' },
+                    { role: 'user', content: `Event: "${e.title}". From this page, return JSON with: cost_text (exact pricing wording, null if none), cost_min (number or null), cost_max (number or null), is_free (true/false/null), ticket_notes (member pricing, deadlines, refunds; null if none), address (full street address or null), registration_url (direct ticket/RSVP link or null), rsvp_deadline (ISO date or null).\n\nPAGE:\n${md.slice(0, 12000)}` },
+                  ],
+                  response_format: { type: 'json_object' },
+                };
+                if (LOVABLE_KEY) body.max_tokens = 1200; else body.max_completion_tokens = 4000;
+                const r = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body),
+                });
+                if (!r.ok) return;
+                const j = await r.json();
+                const txt = j.choices?.[0]?.message?.content;
+                if (!txt) return;
+                const info = JSON.parse(txt) as Record<string, unknown>;
+                for (const f of ['cost_text', 'cost_min', 'cost_max', 'is_free', 'ticket_notes', 'address', 'registration_url', 'rsvp_deadline']) {
+                  if (info[f] !== null && info[f] !== undefined && info[f] !== '') e[f] = info[f];
+                }
+                // Regex fallback when the model declined to state a price.
+                const stillUnknown = e.is_free !== true && typeof e.cost_min !== 'number';
+                if (stillUnknown && looksFree) {
+                  e.is_free = true; e.cost_min = 0;
+                  if (!e.cost_text || /check ticket price/i.test(String(e.cost_text))) e.cost_text = 'Free';
+                } else if (stillUnknown && priceHits.length) {
+                  const min = Math.min(...priceHits), max = Math.max(...priceHits);
+                  e.cost_min = min; e.cost_max = max === min ? null : max;
+                  if (!e.cost_text || /check ticket price/i.test(String(e.cost_text))) {
+                    e.cost_text = max === min ? `$${min}` : `$${min}–$${max} (listed on page)`;
+                  }
+                }
+                if (!e.registration_url) e.registration_url = url;
+              } catch (err) {
+                console.warn('[scrape_events] price pass failed:', url, err instanceof Error ? err.message : err);
+              }
+            }));
+          }
+
+          // ---- Step 4: upsert (dedupe on title + date) ----
           const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
           const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+          const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : null));
+          const rows = events.map((evt) => ({
+            user_id: userId,
+            title: (evt.title as string) || 'Untitled Event',
+            description: (evt.description as string) || null,
+            event_date: (evt.event_date as string) || null,
+            end_date: (evt.end_date as string) || null,
+            timezone: (evt.timezone as string) || null,
+            venue_name: (evt.venue_name as string) || null,
+            address: (evt.address as string) || null,
+            location: (evt.location as string) || (evt.venue_name as string) || null,
+            organizer: (evt.organizer as string) || null,
+            url: (evt.url as string) || null,
+            registration_url: (evt.registration_url as string) || null,
+            cost_text: (evt.cost_text as string) && !/check ticket price/i.test(String(evt.cost_text)) ? (evt.cost_text as string) : null,
+            cost_min: num(evt.cost_min),
+            cost_max: num(evt.cost_max),
+            is_free: typeof evt.is_free === 'boolean' ? evt.is_free : (num(evt.cost_min) === 0 ? true : null),
+            ticket_notes: (evt.ticket_notes as string) || null,
+            rsvp_deadline: (evt.rsvp_deadline as string) || null,
+            confidence: num(evt.confidence),
+            source: (evt.source as string) || null,
+            category,
+            metadata: { search_query: base },
+            updated_at: new Date().toISOString(),
+          }));
+
           let savedCount = 0;
-          for (const evt of events) {
-            const { error } = await adminClient.from('discovered_events').insert({
-              user_id: userId,
-              title: evt.title as string || 'Untitled Event',
-              description: evt.description as string || null,
-              event_date: evt.event_date || null,
-              end_date: evt.end_date || null,
-              location: evt.location as string || null,
-              url: evt.url as string || null,
-              source: evt.source as string || null,
-              category,
-              metadata: { search_query: query },
-            });
-            if (!error) savedCount++;
+          for (const row of rows) {
+            const { error } = await adminClient
+              .from('discovered_events')
+              .upsert(row, { onConflict: 'user_id,title,event_date', ignoreDuplicates: false });
+            if (error) {
+              // Unique index is expression-based; fall back to manual match-then-write.
+              const { data: existing } = await adminClient
+                .from('discovered_events')
+                .select('id')
+                .eq('user_id', userId)
+                .ilike('title', row.title)
+                .limit(1);
+              const hit = (existing || [])[0] as { id: string } | undefined;
+              const res2 = hit
+                ? await adminClient.from('discovered_events').update(row).eq('id', hit.id)
+                : await adminClient.from('discovered_events').insert(row);
+              if (!res2.error) savedCount++;
+              else console.error('[scrape_events] save failed:', res2.error.message);
+            } else savedCount++;
           }
 
+          const money = (r: typeof rows[number]) => {
+            if (r.is_free === true || r.cost_min === 0 && !r.cost_max) return 'Free';
+            if (r.cost_text) return r.cost_text;
+            if (r.cost_min != null && r.cost_max != null && r.cost_min !== r.cost_max) return `$${r.cost_min}–$${r.cost_max}`;
+            if (r.cost_min != null) return `$${r.cost_min}`;
+            return 'Price not listed';
+          };
+          const fmt = (d: string | null) => {
+            if (!d) return 'Date TBD';
+            const dt = new Date(d);
+            return isNaN(dt.getTime()) ? d : dt.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+          };
+
           console.log(`[scrape_events] Found ${events.length} events, saved ${savedCount}`);
-          const eventList = events.map((e, i) => `${i + 1}. **${e.title}** — ${e.event_date || 'Date TBD'} | ${e.location || 'Location TBD'} | ${e.url || ''}`).join('\n');
-          return { success: true, result: `Found and saved ${savedCount} events:\n\n${eventList}` };
+          const eventList = rows.map((r, i) =>
+            `${i + 1}. **${r.title}**\n   - When: ${fmt(r.event_date)}\n   - Where: ${[r.venue_name, r.address || r.location].filter(Boolean).join(' — ') || 'TBD'}\n   - Cost: ${money(r)}${r.ticket_notes ? ` (${r.ticket_notes})` : ''}\n   - Host: ${r.organizer || 'Unknown'}\n   - Link: ${r.registration_url || r.url || 'n/a'}`
+          ).join('\n');
+          return { success: true, result: `Found and saved ${savedCount} events (deduped):\n\n${eventList}\n\nSay "add these to my calendar" and I'll create full calendar entries with venue, cost, and registration link.` };
         } catch (e) {
           console.error('[scrape_events] Error:', e);
           return { success: false, result: `Event scraping error: ${e instanceof Error ? e.message : 'Unknown'}` };
+        }
+      }
+
+      case 'add_events_to_calendar': {
+        try {
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
+          if (!serviceRoleKey || !supabaseUrl || !userId) return { success: false, result: 'Authentication required.' };
+
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+          const ids = (args.event_ids as string[]) || [];
+          const titles = (args.titles as string[]) || [];
+          const calendarId = (args.calendarId as string) || 'primary';
+
+          let q = adminClient.from('discovered_events').select('*').eq('user_id', userId);
+          if (ids.length) q = q.in('id', ids);
+          else if (titles.length) q = q.or(titles.map((t) => `title.ilike.%${t.replace(/[,()]/g, '')}%`).join(','));
+          else q = q.gte('event_date', new Date().toISOString()).order('event_date', { ascending: true }).limit(10);
+
+          const { data: evts, error } = await q;
+          if (error) return { success: false, result: `Could not load events: ${error.message}` };
+          if (!evts || evts.length === 0) return { success: true, result: 'No matching saved events to add.' };
+
+          const lines: string[] = [];
+          for (const e of evts as Array<Record<string, unknown>>) {
+            if (!e.event_date) { lines.push(`- Skipped **${e.title}** — no confirmed date yet.`); continue; }
+            if (e.calendar_event_id && !(args.force as boolean)) { lines.push(`- Already on calendar: **${e.title}**`); continue; }
+
+            const start = new Date(e.event_date as string);
+            const end = e.end_date ? new Date(e.end_date as string) : new Date(start.getTime() + 2 * 3600_000);
+            const tz = (e.timezone as string) || 'America/New_York';
+            const cost = e.is_free === true ? 'Free' : (e.cost_text as string) || (e.cost_min != null ? `$${e.cost_min}${e.cost_max != null && e.cost_max !== e.cost_min ? `–$${e.cost_max}` : ''}` : 'Price not listed');
+            const desc = [
+              e.description as string,
+              '',
+              `Cost: ${cost}`,
+              e.ticket_notes ? `Ticket notes: ${e.ticket_notes}` : '',
+              e.organizer ? `Host: ${e.organizer}` : '',
+              e.rsvp_deadline ? `RSVP by: ${new Date(e.rsvp_deadline as string).toDateString()}` : '',
+              e.registration_url ? `Register: ${e.registration_url}` : '',
+              e.url && e.url !== e.registration_url ? `Details: ${e.url}` : '',
+            ].filter(Boolean).join('\n');
+
+            try {
+              const created = await callNativeEdge('google-calendar', 'create_event', {
+                calendarId,
+                event: {
+                  summary: e.title,
+                  description: desc,
+                  location: [e.venue_name, e.address].filter(Boolean).join(', ') || (e.location as string) || undefined,
+                  start: { dateTime: start.toISOString(), timeZone: tz },
+                  end: { dateTime: end.toISOString(), timeZone: tz },
+                  source: e.url ? { title: String(e.organizer || e.source || 'Event page'), url: String(e.url) } : undefined,
+                  reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 1440 }, { method: 'popup', minutes: 60 }] },
+                },
+              });
+              const evId = (created.event as Record<string, unknown> | undefined)?.id as string | undefined;
+              await adminClient.from('discovered_events').update({
+                calendar_event_id: evId || null,
+                calendar_id: calendarId,
+                added_to_calendar_at: new Date().toISOString(),
+              }).eq('id', e.id as string);
+              lines.push(`- Added **${e.title}** — ${start.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz })} · ${cost}`);
+            } catch (err) {
+              lines.push(`- Failed **${e.title}** — ${err instanceof Error ? err.message : 'calendar error'}`);
+            }
+          }
+
+          return { success: true, result: `Calendar sync:\n${lines.join('\n')}` };
+        } catch (e) {
+          console.error('[add_events_to_calendar] Error:', e);
+          return { success: false, result: `Calendar sync error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
       }
 
@@ -6563,7 +6841,7 @@ ${pageContents.slice(0, 12000)}`;
         try {
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
           const supabaseUrl = Deno.env.get('SUPABASE_URL');
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
 
           if (!serviceRoleKey || !supabaseUrl || !userId) return { success: false, result: 'Authentication required.' };
 
@@ -6583,8 +6861,15 @@ ${pageContents.slice(0, 12000)}`;
           if (!events || events.length === 0) return { success: true, result: 'No events found. Try asking me to search for events first.' };
 
           const eventList = events.map((e: Record<string, unknown>, i: number) => {
-            const date = e.event_date ? new Date(e.event_date as string).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Date TBD';
-            return `${i + 1}. **${e.title}** — ${date} | ${e.location || 'Location TBD'} | ${e.category || ''}\n   ${e.url || ''}`;
+            const date = e.event_date
+              ? new Date(e.event_date as string).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: (e.timezone as string) || 'America/New_York' })
+              : 'Date TBD';
+            const cost = e.is_free === true
+              ? 'Free'
+              : (e.cost_text as string) || (e.cost_min != null ? `$${e.cost_min}${e.cost_max != null && e.cost_max !== e.cost_min ? `–$${e.cost_max}` : ''}` : 'Price not listed');
+            const where = [e.venue_name, e.address || e.location].filter(Boolean).join(' — ') || 'Location TBD';
+            const cal = e.calendar_event_id ? ' · on your calendar' : '';
+            return `${i + 1}. **${e.title}** (id: ${e.id})\n   - When: ${date}${cal}\n   - Where: ${where}\n   - Cost: ${cost}\n   - Host: ${e.organizer || e.source || 'Unknown'}\n   - Link: ${e.registration_url || e.url || 'n/a'}`;
           }).join('\n');
 
           return { success: true, result: `Found ${events.length} events:\n\n${eventList}` };
@@ -6864,7 +7149,7 @@ ${pageContents.slice(0, 12000)}`;
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated. Sign in to upload videos.' };
 
           const a = args as Record<string, unknown>;
@@ -6933,7 +7218,7 @@ ${pageContents.slice(0, 12000)}`;
         try {
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-          const userId = (args as Record<string, unknown>).__user_id as string;
+          const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!userId) return { success: false, result: 'User not authenticated.' };
 
           const a = args as Record<string, unknown>;
@@ -7661,6 +7946,7 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'web_search_google',
   'deep_research',
   'scrape_events',
+  'add_events_to_calendar',
   'list_events',
   'create_work_task',
   'update_work_task',
@@ -7931,6 +8217,7 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'complete_goal': '_always_',
     'deep_research': '_always_',
     'scrape_events': '_always_',
+    'add_events_to_calendar': '_always_',
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
@@ -8348,6 +8635,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'complete_goal': 'Completing goal',
   'deep_research': 'Researching the web',
   'scrape_events': 'Searching for events',
+  'add_events_to_calendar': 'Adding events to your calendar',
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
@@ -9441,7 +9729,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'add_events_to_calendar', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;

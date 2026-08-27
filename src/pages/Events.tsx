@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, MapPin, ExternalLink, ArrowLeft, Search } from "lucide-react";
+import { Calendar, MapPin, ExternalLink, ArrowLeft, Search, Ticket, CalendarPlus, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 
 interface DiscoveredEvent {
   id: string;
@@ -16,6 +17,26 @@ interface DiscoveredEvent {
   source: string | null;
   category: string | null;
   created_at: string;
+  venue_name: string | null;
+  address: string | null;
+  organizer: string | null;
+  registration_url: string | null;
+  cost_text: string | null;
+  cost_min: number | null;
+  cost_max: number | null;
+  is_free: boolean | null;
+  ticket_notes: string | null;
+  calendar_event_id: string | null;
+  timezone: string | null;
+}
+
+function costLabel(e: DiscoveredEvent) {
+  if (e.is_free === true) return "Free";
+  if (e.cost_text) return e.cost_text;
+  if (e.cost_min != null && e.cost_max != null && e.cost_max !== e.cost_min)
+    return `$${e.cost_min}–$${e.cost_max}`;
+  if (e.cost_min != null) return e.cost_min === 0 ? "Free" : `$${e.cost_min}`;
+  return "Price not listed";
 }
 
 const CATEGORIES = ["all", "networking", "conference", "meetup", "workshop", "webinar", "other"];
@@ -147,6 +168,41 @@ function EventCard({
   formatDate: (d: string | null) => string;
   isPast?: boolean;
 }) {
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(!!event.calendar_event_id);
+  const cost = costLabel(event);
+  const free = event.is_free === true || cost === "Free";
+  const where = [event.venue_name, event.address || event.location].filter(Boolean).join(" — ");
+
+  const addToCalendar = async () => {
+    setAdding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("chat", {
+        body: {
+          messages: [
+            {
+              role: "user",
+              content: `Add the saved event with id ${event.id} to my Google Calendar using add_events_to_calendar.`,
+            },
+          ],
+          enableTools: true,
+        },
+      });
+      if (error) throw error;
+      setAdded(true);
+      toast({ title: "Added to calendar", description: event.title });
+      void data;
+    } catch (e) {
+      toast({
+        title: "Could not add to calendar",
+        description: e instanceof Error ? e.message : "Try again from chat.",
+        variant: "destructive",
+      });
+    } finally {
+      setAdding(false);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -157,40 +213,82 @@ function EventCard({
       )}
     >
       <div className="flex justify-between items-start gap-3">
-        <div className="flex-1 min-w-0 space-y-1">
-          <h3 className="font-medium text-foreground truncate">{event.title}</h3>
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <h3 className="font-medium text-foreground">{event.title}</h3>
           {event.description && (
             <p className="text-sm text-muted-foreground line-clamp-2">{event.description}</p>
           )}
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5" />
               {formatDate(event.event_date)}
             </span>
-            {event.location && (
-              <span className="flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5" />
-                {event.location}
+            {where && (
+              <span className="flex items-center gap-1 min-w-0">
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{where}</span>
               </span>
             )}
+            <span
+              className={cn(
+                "flex items-center gap-1",
+                free ? "text-emerald-500" : "text-foreground/80"
+              )}
+            >
+              <Ticket className="w-3.5 h-3.5" />
+              {cost}
+            </span>
           </div>
+          {event.ticket_notes && (
+            <p className="text-xs text-muted-foreground/80">{event.ticket_notes}</p>
+          )}
+          {event.organizer && (
+            <p className="text-xs text-muted-foreground/70">Hosted by {event.organizer}</p>
+          )}
         </div>
-        {event.url && (
+        {(event.registration_url || event.url) && (
           <a
-            href={event.url}
+            href={event.registration_url || event.url || undefined}
             target="_blank"
             rel="noopener noreferrer"
             className="p-2 rounded-xl hover:bg-muted/50 text-muted-foreground"
+            aria-label="Open event page"
           >
             <ExternalLink className="w-4 h-4" />
           </a>
         )}
       </div>
-      {event.category && (
-        <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
-          {event.category}
-        </span>
-      )}
+
+      <div className="flex items-center justify-between gap-2 mt-3">
+        {event.category ? (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
+            {event.category}
+          </span>
+        ) : (
+          <span />
+        )}
+        {!isPast && (
+          <button
+            onClick={addToCalendar}
+            disabled={adding || added}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors",
+              added
+                ? "bg-emerald-500/10 text-emerald-500"
+                : "bg-muted/50 text-foreground hover:bg-muted"
+            )}
+          >
+            {adding ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : added ? (
+              <Check className="w-3.5 h-3.5" />
+            ) : (
+              <CalendarPlus className="w-3.5 h-3.5" />
+            )}
+            {added ? "On calendar" : adding ? "Adding" : "Add to calendar"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
