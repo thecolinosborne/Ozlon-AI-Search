@@ -314,6 +314,22 @@ function EventCard({
           {event.organizer && (
             <p className="text-xs text-muted-foreground/70">Hosted by {event.organizer}</p>
           )}
+          {event.rsvp_deadline && !isPast && (
+            <p
+              className={cn(
+                "flex items-center gap-1 text-xs",
+                deadlineSoon ? "text-amber-500 font-medium" : "text-muted-foreground/80"
+              )}
+            >
+              <AlarmClock className="w-3.5 h-3.5" />
+              RSVP by{" "}
+              {new Date(event.rsvp_deadline).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })}
+              {deadlineSoon && " — deadline soon"}
+            </p>
+          )}
         </div>
         {(event.registration_url || event.url) && (
           <a
