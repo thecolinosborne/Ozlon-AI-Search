@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, MapPin, ExternalLink, ArrowLeft, Search, Ticket, CalendarPlus, Check, Loader2 } from "lucide-react";
+import { Calendar, MapPin, ExternalLink, ArrowLeft, Search, Ticket, CalendarPlus, Check, Loader2, AlarmClock, EyeOff, ThumbsUp, HelpCircle, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -28,7 +28,11 @@ interface DiscoveredEvent {
   ticket_notes: string | null;
   calendar_event_id: string | null;
   timezone: string | null;
+  rsvp_status: "none" | "going" | "maybe" | "skip";
+  rsvp_deadline: string | null;
 }
+
+type RsvpStatus = DiscoveredEvent["rsvp_status"];
 
 function costLabel(e: DiscoveredEvent) {
   if (e.is_free === true) return "Free";
@@ -47,6 +51,8 @@ export default function Events() {
   const [events, setEvents] = useState<DiscoveredEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [rsvpFilter, setRsvpFilter] = useState<"all" | "going" | "maybe">("all");
 
   useEffect(() => {
     if (!user) return;
@@ -68,6 +74,16 @@ export default function Events() {
     fetchEvents();
   }, [user, activeCategory]);
 
+  const setRsvp = (id: string, status: RsvpStatus) => {
+    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, rsvp_status: status } : e)));
+  };
+
+  const visibleEvents = events.filter((e) => {
+    if (e.rsvp_status === "skip") return showSkipped;
+    if (rsvpFilter === "all") return true;
+    return e.rsvp_status === rsvpFilter;
+  });
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "Date TBD";
     return new Date(dateStr).toLocaleDateString("en-US", {
@@ -78,10 +94,10 @@ export default function Events() {
     });
   };
 
-  const upcomingEvents = events.filter(
+  const upcomingEvents = visibleEvents.filter(
     (e) => !e.event_date || new Date(e.event_date) >= new Date()
   );
-  const pastEvents = events.filter(
+  const pastEvents = visibleEvents.filter(
     (e) => e.event_date && new Date(e.event_date) < new Date()
   );
 
@@ -116,6 +132,34 @@ export default function Events() {
           ))}
         </div>
 
+        {/* RSVP filter + skipped toggle */}
+        <div className="flex items-center gap-2">
+          {(["all", "going", "maybe"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setRsvpFilter(f)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium transition-colors",
+                rsvpFilter === f
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              {f === "all" ? "All" : f === "going" ? "Going" : "Maybe"}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowSkipped((s) => !s)}
+            className={cn(
+              "ml-auto flex items-center gap-1 px-2.5 py-1 rounded-full text-xs transition-colors",
+              showSkipped ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50"
+            )}
+          >
+            <EyeOff className="w-3 h-3" />
+            {showSkipped ? "Hiding skipped" : "Show skipped"}
+          </button>
+        </div>
+
         {/* Empty state */}
         {!loading && events.length === 0 && (
           <div className="text-center py-16 space-y-3">
@@ -140,7 +184,7 @@ export default function Events() {
           <div className="space-y-2">
             <h2 className="text-sm font-medium text-muted-foreground px-1">Upcoming</h2>
             {upcomingEvents.map((evt) => (
-              <EventCard key={evt.id} event={evt} formatDate={formatDate} />
+              <EventCard key={evt.id} event={evt} formatDate={formatDate} onRsvp={setRsvp} />
             ))}
           </div>
         )}
@@ -150,7 +194,7 @@ export default function Events() {
           <div className="space-y-2">
             <h2 className="text-sm font-medium text-muted-foreground px-1">Past</h2>
             {pastEvents.map((evt) => (
-              <EventCard key={evt.id} event={evt} formatDate={formatDate} isPast />
+              <EventCard key={evt.id} event={evt} formatDate={formatDate} onRsvp={setRsvp} isPast />
             ))}
           </div>
         )}
@@ -163,16 +207,41 @@ function EventCard({
   event,
   formatDate,
   isPast,
+  onRsvp,
 }: {
   event: DiscoveredEvent;
   formatDate: (d: string | null) => string;
   isPast?: boolean;
+  onRsvp: (id: string, status: RsvpStatus) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(!!event.calendar_event_id);
+  const [rsvpSaving, setRsvpSaving] = useState(false);
   const cost = costLabel(event);
   const free = event.is_free === true || cost === "Free";
   const where = [event.venue_name, event.address || event.location].filter(Boolean).join(" — ");
+
+  const deadlineSoon =
+    event.rsvp_deadline &&
+    event.rsvp_status !== "going" &&
+    event.rsvp_status !== "skip" &&
+    new Date(event.rsvp_deadline).getTime() - Date.now() < 14 * 24 * 60 * 60 * 1000 &&
+    new Date(event.rsvp_deadline).getTime() > Date.now();
+
+  const saveRsvp = async (status: RsvpStatus) => {
+    const next = event.rsvp_status === status ? "none" : status;
+    setRsvpSaving(true);
+    onRsvp(event.id, next);
+    const { error } = await supabase
+      .from("discovered_events" as any)
+      .update({ rsvp_status: next } as any)
+      .eq("id", event.id);
+    if (error) {
+      onRsvp(event.id, event.rsvp_status);
+      toast({ title: "Could not save RSVP", description: error.message, variant: "destructive" });
+    }
+    setRsvpSaving(false);
+  };
 
   const addToCalendar = async () => {
     setAdding(true);
@@ -245,6 +314,22 @@ function EventCard({
           {event.organizer && (
             <p className="text-xs text-muted-foreground/70">Hosted by {event.organizer}</p>
           )}
+          {event.rsvp_deadline && !isPast && (
+            <p
+              className={cn(
+                "flex items-center gap-1 text-xs",
+                deadlineSoon ? "text-amber-500 font-medium" : "text-muted-foreground/80"
+              )}
+            >
+              <AlarmClock className="w-3.5 h-3.5" />
+              RSVP by{" "}
+              {new Date(event.rsvp_deadline).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })}
+              {deadlineSoon && " — deadline soon"}
+            </p>
+          )}
         </div>
         {(event.registration_url || event.url) && (
           <a
@@ -258,6 +343,38 @@ function EventCard({
           </a>
         )}
       </div>
+
+      {!isPast && (
+        <div className="flex items-center gap-1.5 mt-3">
+          {(
+            [
+              { key: "going", label: "Going", Icon: ThumbsUp },
+              { key: "maybe", label: "Maybe", Icon: HelpCircle },
+              { key: "skip", label: "Skip", Icon: Ban },
+            ] as const
+          ).map(({ key, label, Icon }) => {
+            const active = event.rsvp_status === key;
+            return (
+              <button
+                key={key}
+                onClick={() => saveRsvp(key)}
+                disabled={rsvpSaving}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                  active
+                    ? key === "skip"
+                      ? "bg-red-500/10 text-red-400"
+                      : "bg-emerald-500/10 text-emerald-500"
+                    : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <Icon className="w-3 h-3" />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2 mt-3">
         {event.category ? (

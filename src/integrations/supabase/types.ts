@@ -832,6 +832,7 @@ export type Database = {
           organizer: string | null
           registration_url: string | null
           rsvp_deadline: string | null
+          rsvp_status: string
           source: string | null
           ticket_notes: string | null
           timezone: string | null
@@ -863,6 +864,7 @@ export type Database = {
           organizer?: string | null
           registration_url?: string | null
           rsvp_deadline?: string | null
+          rsvp_status?: string
           source?: string | null
           ticket_notes?: string | null
           timezone?: string | null
@@ -894,6 +896,7 @@ export type Database = {
           organizer?: string | null
           registration_url?: string | null
           rsvp_deadline?: string | null
+          rsvp_status?: string
           source?: string | null
           ticket_notes?: string | null
           timezone?: string | null

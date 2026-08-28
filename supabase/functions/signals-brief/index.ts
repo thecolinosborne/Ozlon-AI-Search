@@ -329,7 +329,7 @@ Deno.serve(async (req) => {
 
     // Habits = recurring life_events (already in lifeEvents if due today,
     // but we also peek at the broader set so habits aren't empty if none due).
-    const [habitsRes, emailThreads] = await Promise.all([
+    const [habitsRes, emailThreads, eventDeadlinesRes] = await Promise.all([
       admin
         .from("life_events")
         .select("id, title, recurrence_days, last_done_at")
@@ -338,8 +338,21 @@ Deno.serve(async (req) => {
         .not("recurrence_days", "is", null)
         .limit(8),
       fetchRecentEmail(user.id),
+      // Saved events with an RSVP/registration deadline in the next 14 days,
+      // excluding ones already marked going or skip.
+      admin
+        .from("discovered_events")
+        .select("id, title, event_date, rsvp_deadline, cost_text, is_free, registration_url, rsvp_status")
+        .eq("user_id", user.id)
+        .not("rsvp_deadline", "is", null)
+        .gte("rsvp_deadline", now.toISOString())
+        .lte("rsvp_deadline", new Date(now.getTime() + 14 * 24 * 3600_000).toISOString())
+        .not("rsvp_status", "in", '("going","skip")')
+        .order("rsvp_deadline", { ascending: true })
+        .limit(10),
     ]);
     const habits = habitsRes.data ?? [];
+    const eventDeadlines = eventDeadlinesRes.data ?? [];
 
     const ctx = {
       day_mode: dayMode,
@@ -360,6 +373,13 @@ Deno.serve(async (req) => {
       calendar_tomorrow_count: calendarEvents.filter((e) => e.start && new Date(e.start) > todayEnd).length,
       recent_email: emailThreads.slice(0, 15).map((e) => ({
         from: e.from, subject: e.subject, snippet: e.snippet, date: e.date, unread: e.unread,
+      })),
+      event_deadlines: eventDeadlines.map((e) => ({
+        title: e.title,
+        event_date: e.event_date,
+        rsvp_deadline: e.rsvp_deadline,
+        cost: e.is_free ? "free" : e.cost_text,
+        undecided: e.rsvp_status !== "going",
       })),
     };
 
@@ -390,7 +410,7 @@ Produce one structured briefing via the daily_brief tool. Rules:
 - For each card, one short ai_line that interprets, doesn't list. Empty cards: ai_line = "Clear", value = "Clear".
 - why_this objects must use plain English with the user's actual data points.
 - todos: up to 7 concrete things to do today, ranked most important first. Draw from overdue items, today's life events, meeting prep implied by the calendar, and replies clearly owed from recent_email. Each title is an action starting with a verb, max 10 words. Set source to where it came from. Skip newsletters, receipts, and marketing mail.
-- watchouts: up to 5 things to keep an eye on: back-to-back or conflicting meetings, a meeting with no prep, a promise made in email with a date, someone waiting more than two days, a goal going stale. Never invent facts; each one must trace to context. If there is nothing real, return an empty list.
+- watchouts: up to 5 things to keep an eye on: back-to-back or conflicting meetings, a meeting with no prep, a promise made in email with a date, someone waiting more than two days, a goal going stale, an undecided event in event_deadlines whose RSVP deadline is close. Never invent facts; each one must trace to context. If there is nothing real, return an empty list.
 - do_now_intent on every item: a short chat prompt that starts the work.`,
 
           },

@@ -42,6 +42,7 @@ import GoogleTagManagerDetail from "@/pages/integrations/GoogleTagManagerDetail"
 import SlackDetail from "@/pages/integrations/SlackDetail";
 import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
+import Life from "@/pages/Life";
 import Finance from "@/pages/Finance";
 import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
 import Communications from "@/pages/Communications";
@@ -113,6 +114,7 @@ const AppRoutes = () => {
             a manifest entry in src/integrations/registry.ts. */}
         <Route path="/integrations/:id" element={<AutoIntegrationDetail />} />
         <Route path="/events" element={<Events />} />
+        <Route path="/life" element={<Life />} />
         <Route path="/finance" element={<Finance />} />
         <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
         <Route path="/communications" element={<Communications />} />
