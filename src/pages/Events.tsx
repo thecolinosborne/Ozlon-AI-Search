@@ -94,10 +94,10 @@ export default function Events() {
     });
   };
 
-  const upcomingEvents = events.filter(
+  const upcomingEvents = visibleEvents.filter(
     (e) => !e.event_date || new Date(e.event_date) >= new Date()
   );
-  const pastEvents = events.filter(
+  const pastEvents = visibleEvents.filter(
     (e) => e.event_date && new Date(e.event_date) < new Date()
   );
 
