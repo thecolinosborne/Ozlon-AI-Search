@@ -107,3 +107,6 @@ verify_jwt = true
 
 [functions.seed-skills-catalog]
 verify_jwt = false
+
+[functions.document-ingest]
+verify_jwt = false
