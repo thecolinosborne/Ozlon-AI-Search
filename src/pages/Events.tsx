@@ -207,16 +207,41 @@ function EventCard({
   event,
   formatDate,
   isPast,
+  onRsvp,
 }: {
   event: DiscoveredEvent;
   formatDate: (d: string | null) => string;
   isPast?: boolean;
+  onRsvp: (id: string, status: RsvpStatus) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(!!event.calendar_event_id);
+  const [rsvpSaving, setRsvpSaving] = useState(false);
   const cost = costLabel(event);
   const free = event.is_free === true || cost === "Free";
   const where = [event.venue_name, event.address || event.location].filter(Boolean).join(" — ");
+
+  const deadlineSoon =
+    event.rsvp_deadline &&
+    event.rsvp_status !== "going" &&
+    event.rsvp_status !== "skip" &&
+    new Date(event.rsvp_deadline).getTime() - Date.now() < 14 * 24 * 60 * 60 * 1000 &&
+    new Date(event.rsvp_deadline).getTime() > Date.now();
+
+  const saveRsvp = async (status: RsvpStatus) => {
+    const next = event.rsvp_status === status ? "none" : status;
+    setRsvpSaving(true);
+    onRsvp(event.id, next);
+    const { error } = await supabase
+      .from("discovered_events" as any)
+      .update({ rsvp_status: next } as any)
+      .eq("id", event.id);
+    if (error) {
+      onRsvp(event.id, event.rsvp_status);
+      toast({ title: "Could not save RSVP", description: error.message, variant: "destructive" });
+    }
+    setRsvpSaving(false);
+  };
 
   const addToCalendar = async () => {
     setAdding(true);
