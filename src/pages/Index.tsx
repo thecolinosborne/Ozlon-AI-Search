@@ -90,7 +90,21 @@ const Index = () => {
   const { isRecording, isTranscribing, handleMicClick } = useVoiceRecorder({
     onTranscribed: (text) => setInput(text),
   });
-  const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload } = useFileAttachments();
+  const { attachedFiles, fileInputRef, handleFileSelect, removeFile, triggerFileUpload, uploadAndIngest, isUploading } =
+    useFileAttachments();
+
+  // Upload + extract any attached documents first, then send the turn with references.
+  const handleComposerSubmit = useCallback(async () => {
+    const text = input;
+    if (attachedFiles.length === 0) { sendMessage(text); return; }
+    const docs = await uploadAndIngest();
+    const ids = docs.map((d) => d.document_id);
+    const names = docs.map((d) => d.name).join(", ");
+    const prompt = text.trim()
+      ? text
+      : `I uploaded ${docs.length === 1 ? "a document" : "these documents"}: ${names}. Read ${docs.length === 1 ? "it" : "them"} and give me a clear analysis with the key points and anything I should act on.`;
+    sendMessage(prompt, undefined, undefined, ids.length ? ids : undefined);
+  }, [input, attachedFiles, uploadAndIngest, sendMessage]);
   
 
   // ── Single source of truth for rendered messages ─────────────────────
@@ -285,11 +299,11 @@ const Index = () => {
 
   // Shared composer props — memoized to stabilize child renders
   const composerProps = useMemo(() => ({
-    input, onInputChange: setInput, onSubmit: () => sendMessage(input),
-    onMicClick: handleMicClick, isRecording, isTranscribing, isLoading,
+    input, onInputChange: setInput, onSubmit: handleComposerSubmit,
+    onMicClick: handleMicClick, isRecording, isTranscribing, isLoading: isLoading || isUploading,
     placeholder: `Ask ${systemName} anything...`,
     attachedFiles, onRemoveFile: removeFile, onAttach: triggerFileUpload,
-  }), [input, setInput, sendMessage, handleMicClick, isRecording, isTranscribing, isLoading, systemName, attachedFiles, removeFile, triggerFileUpload]);
+  }), [input, setInput, handleComposerSubmit, isUploading, handleMicClick, isRecording, isTranscribing, isLoading, systemName, attachedFiles, removeFile, triggerFileUpload]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -301,7 +315,7 @@ const Index = () => {
       />
 
       {/* Global File Input */}
-      <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp"
+      <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.xlsx,.xls,.pptx,.txt,.md,.csv,.tsv,.json,.xml,.html,.rtf,.png,.jpg,.jpeg,.gif,.webp,.heic,.mp3,.m4a,.wav,.webm"
         onChange={handleFileSelect} className="hidden" aria-hidden="true" />
 
       {/* Header */}
