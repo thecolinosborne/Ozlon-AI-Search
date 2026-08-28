@@ -178,6 +178,8 @@ export interface StreamChatOptions {
   agentMetadata?: AgentMetadata;
   enableTools?: boolean;
   userSettings?: UserSettings;
+  /** Uploaded documents (ids from document-ingest) the AI should read for this turn. */
+  documentIds?: string[];
   sessionId?: string;
   assistantMessageId?: string;
   /** Force a specific formatting mode (overrides server-side router). */
@@ -211,6 +213,7 @@ export async function streamChat({
   agentMetadata,
   enableTools = false,
   userSettings,
+  documentIds,
   sessionId,
   assistantMessageId,
   formatOverride,
@@ -287,6 +290,7 @@ export async function streamChat({
         agentMetadata,
         enableTools,
         userSettings,
+        documentIds,
         sessionId,
         assistantMessageId,
         formatOverride,
