@@ -51,6 +51,8 @@ export default function Events() {
   const [events, setEvents] = useState<DiscoveredEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [rsvpFilter, setRsvpFilter] = useState<"all" | "going" | "maybe">("all");
 
   useEffect(() => {
     if (!user) return;
@@ -71,6 +73,16 @@ export default function Events() {
     };
     fetchEvents();
   }, [user, activeCategory]);
+
+  const setRsvp = (id: string, status: RsvpStatus) => {
+    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, rsvp_status: status } : e)));
+  };
+
+  const visibleEvents = events.filter((e) => {
+    if (e.rsvp_status === "skip") return showSkipped;
+    if (rsvpFilter === "all") return true;
+    return e.rsvp_status === rsvpFilter;
+  });
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "Date TBD";
