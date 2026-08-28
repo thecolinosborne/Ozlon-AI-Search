@@ -121,6 +121,18 @@ export const UserMenu = () => {
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
+          <Link to="/life" className="cursor-pointer">
+            <Compass className="w-4 h-4 mr-2" />
+            Life OS
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/events" className="cursor-pointer">
+            <CalendarDays className="w-4 h-4 mr-2" />
+            Events
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link to="/profile" className="cursor-pointer">
             <UserIcon className="w-4 h-4 mr-2" />
             Profile
