@@ -8032,6 +8032,8 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'create_work_task',
   'update_work_task',
   'bulk_update_work_tasks',
+  'list_my_documents',
+  'read_my_document',
 ]);
 
 /** Filter the AI tool list down to GHL tools the active sub-account's token actually has scopes for.
@@ -9575,6 +9577,7 @@ async function runToolLoop(
         'create_routine', 'list_routines', 'toggle_routine', 'delete_routine', 'run_routine_now',
         'create_work_task', 'update_work_task', 'bulk_update_work_tasks',
         'deep_research', 'web_search_google',
+        'list_my_documents', 'read_my_document',
         ...LIFE_TOOL_NAMES,
       ]);
 
