@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User as UserIcon, Settings, CreditCard, LogOut, Wallet, MessageCircle, Activity, Compass, CalendarDays } from "lucide-react";
+import { User as UserIcon, Settings, CreditCard, LogOut, MessageCircle, Activity, Compass, CalendarDays } from "lucide-react";
 
 export const UserMenu = () => {
   const navigate = useNavigate();

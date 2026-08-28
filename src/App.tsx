@@ -43,8 +43,6 @@ import SlackDetail from "@/pages/integrations/SlackDetail";
 import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
 import Life from "@/pages/Life";
-import Finance from "@/pages/Finance";
-import PlaidOAuthReturn from "@/pages/PlaidOAuthReturn";
 import Communications from "@/pages/Communications";
 import People from "@/pages/People";
 import Signals from "@/pages/Signals";
