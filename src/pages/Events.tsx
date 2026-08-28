@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, MapPin, ExternalLink, ArrowLeft, Search, Ticket, CalendarPlus, Check, Loader2 } from "lucide-react";
+import { Calendar, MapPin, ExternalLink, ArrowLeft, Search, Ticket, CalendarPlus, Check, Loader2, AlarmClock, EyeOff, ThumbsUp, HelpCircle, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -28,7 +28,11 @@ interface DiscoveredEvent {
   ticket_notes: string | null;
   calendar_event_id: string | null;
   timezone: string | null;
+  rsvp_status: "none" | "going" | "maybe" | "skip";
+  rsvp_deadline: string | null;
 }
+
+type RsvpStatus = DiscoveredEvent["rsvp_status"];
 
 function costLabel(e: DiscoveredEvent) {
   if (e.is_free === true) return "Free";
