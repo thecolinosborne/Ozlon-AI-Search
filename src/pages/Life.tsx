@@ -134,6 +134,23 @@ export default function Life() {
   const askInChat = (prompt: string) =>
     navigate(`/?intent=${encodeURIComponent(prompt)}`);
 
+  const avgRockProgress = rocks.length
+    ? Math.round(rocks.reduce((s, r) => s + Math.max(0, Math.min(100, r.progress ?? 0)), 0) / rocks.length)
+    : null;
+
+  const metricsHit = metrics.reduce(
+    (acc, m) => {
+      const latest = (latestByMetric.get(m.id) || [])[0];
+      if (!latest) return acc;
+      const met = targetMet(latest.value, m.target, m.direction);
+      if (met === null) return acc;
+      return { hit: acc.hit + (met ? 1 : 0), total: acc.total + 1 };
+    },
+    { hit: 0, total: 0 }
+  );
+
+  const hasAnything = !!vision || rocks.length > 0 || metrics.length > 0 || issues.length > 0;
+
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
       <div className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border/30 px-4 py-3">
@@ -147,6 +164,34 @@ export default function Life() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-4 space-y-6">
+        {!loading && hasAnything && (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <StatTile label="Rocks" value={avgRockProgress === null ? "—" : `${avgRockProgress}%`} hint={`${rocks.length} this quarter`} />
+              <StatTile
+                label="Scorecard"
+                value={metricsHit.total ? `${metricsHit.hit}/${metricsHit.total}` : "—"}
+                hint="targets hit"
+              />
+              <StatTile label="Issues" value={`${issues.length}`} hint="open" />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => askInChat("Run my weekly Life OS review: score my rocks, scorecard and issues, then ask me what to change")}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium"
+              >
+                <ClipboardCheck className="w-4 h-4" /> Weekly review
+              </button>
+              <button
+                onClick={() => askInChat("Update my Life OS: rock progress, this week's scorecard numbers, and any new issues")}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border/50 bg-card/60 text-sm font-medium hover:bg-muted/40"
+              >
+                <MessageCircle className="w-4 h-4" /> Update in chat
+              </button>
+            </div>
+          </>
+        )}
+
         {loading && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
