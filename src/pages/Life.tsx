@@ -402,3 +402,13 @@ function EmptyCard({ text, actionLabel, onAction }: { text: string; actionLabel:
     </div>
   );
 }
+
+function StatTile({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="p-3 rounded-2xl border border-border/40 bg-card/60 backdrop-blur-md">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xl font-semibold tabular-nums mt-0.5">{value}</p>
+      <p className="text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
