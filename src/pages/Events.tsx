@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+// RSVP row styles helper lives at bottom of file
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
