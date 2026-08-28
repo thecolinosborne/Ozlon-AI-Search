@@ -139,12 +139,6 @@ export const UserMenu = () => {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="/finance" className="cursor-pointer">
-            <Wallet className="w-4 h-4 mr-2" />
-            Finance
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
           <Link to="/communications" className="cursor-pointer">
             <MessageCircle className="w-4 h-4 mr-2" />
             Communications

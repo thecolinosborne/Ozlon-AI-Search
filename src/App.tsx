@@ -115,8 +115,6 @@ const AppRoutes = () => {
         <Route path="/integrations/:id" element={<AutoIntegrationDetail />} />
         <Route path="/events" element={<Events />} />
         <Route path="/life" element={<Life />} />
-        <Route path="/finance" element={<Finance />} />
-        <Route path="/finance/oauth-return" element={<PlaidOAuthReturn />} />
         <Route path="/communications" element={<Communications />} />
         <Route path="/people" element={<People />} />
         <Route path="/signals" element={<Signals />} />
