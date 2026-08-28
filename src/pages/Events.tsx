@@ -184,7 +184,7 @@ export default function Events() {
           <div className="space-y-2">
             <h2 className="text-sm font-medium text-muted-foreground px-1">Upcoming</h2>
             {upcomingEvents.map((evt) => (
-              <EventCard key={evt.id} event={evt} formatDate={formatDate} />
+              <EventCard key={evt.id} event={evt} formatDate={formatDate} onRsvp={setRsvp} />
             ))}
           </div>
         )}
@@ -194,7 +194,7 @@ export default function Events() {
           <div className="space-y-2">
             <h2 className="text-sm font-medium text-muted-foreground px-1">Past</h2>
             {pastEvents.map((evt) => (
-              <EventCard key={evt.id} event={evt} formatDate={formatDate} isPast />
+              <EventCard key={evt.id} event={evt} formatDate={formatDate} onRsvp={setRsvp} isPast />
             ))}
           </div>
         )}
