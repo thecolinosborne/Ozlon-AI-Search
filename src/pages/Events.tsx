@@ -132,6 +132,34 @@ export default function Events() {
           ))}
         </div>
 
+        {/* RSVP filter + skipped toggle */}
+        <div className="flex items-center gap-2">
+          {(["all", "going", "maybe"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setRsvpFilter(f)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium transition-colors",
+                rsvpFilter === f
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              {f === "all" ? "All" : f === "going" ? "Going" : "Maybe"}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowSkipped((s) => !s)}
+            className={cn(
+              "ml-auto flex items-center gap-1 px-2.5 py-1 rounded-full text-xs transition-colors",
+              showSkipped ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50"
+            )}
+          >
+            <EyeOff className="w-3 h-3" />
+            {showSkipped ? "Hiding skipped" : "Show skipped"}
+          </button>
+        </div>
+
         {/* Empty state */}
         {!loading && events.length === 0 && (
           <div className="text-center py-16 space-y-3">
