@@ -344,6 +344,38 @@ function EventCard({
         )}
       </div>
 
+      {!isPast && (
+        <div className="flex items-center gap-1.5 mt-3">
+          {(
+            [
+              { key: "going", label: "Going", Icon: ThumbsUp },
+              { key: "maybe", label: "Maybe", Icon: HelpCircle },
+              { key: "skip", label: "Skip", Icon: Ban },
+            ] as const
+          ).map(({ key, label, Icon }) => {
+            const active = event.rsvp_status === key;
+            return (
+              <button
+                key={key}
+                onClick={() => saveRsvp(key)}
+                disabled={rsvpSaving}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                  active
+                    ? key === "skip"
+                      ? "bg-red-500/10 text-red-400"
+                      : "bg-emerald-500/10 text-emerald-500"
+                    : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <Icon className="w-3 h-3" />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-2 mt-3">
         {event.category ? (
           <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
