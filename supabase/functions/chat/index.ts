@@ -2820,6 +2820,35 @@ const ACTION_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'list_my_documents',
+      description: "List documents the user has uploaded (PDFs, Word/Excel/PowerPoint files, images, notes, recordings). Call this when the user references a file they uploaded (\"the contract\", \"that PDF\", \"the spreadsheet I sent\") and it isn't already in this conversation. Returns id, name, type and a short summary.",
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Optional filename keyword filter.' },
+          limit: { type: 'number', description: 'Max results, default 20, max 50.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_my_document',
+      description: 'Read the full extracted text of an uploaded document by id (get ids from list_my_documents). Use before analyzing, summarizing, or turning a file into tasks, docs or emails.',
+      parameters: {
+        type: 'object',
+        properties: {
+          document_id: { type: 'string', description: 'Document id from list_my_documents.' },
+          max_chars: { type: 'number', description: 'Max characters to return, default 20000.' },
+        },
+        required: ['document_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'enqueue_background_job',
       description: 'Detach a long-running task into a background job that runs without blocking chat. Use for: deep research (>30s), event scraping, SEO audits, YouTube channel analysis. The user can keep chatting; results appear when the job finishes. Returns a job_id. Do NOT use for quick lookups — those should run inline.',
       parameters: {
@@ -5919,6 +5948,58 @@ async function executeToolCall(
           return { success: true, result: `Recent artifacts:\n${formatted}\n\nUse the matching external id with the appropriate update tool (e.g. docs_insert_text with documentId) instead of creating a new one.` };
         } catch (e) {
           return { success: false, result: `Artifact lookup error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'list_my_documents': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot list documents.' };
+          const limit = Math.min(Math.max(Number(args.limit ?? 20), 1), 50);
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          let q = admin.from('user_documents')
+            .select('id, name, mime_type, summary, status, created_at')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+          const qf = String(args.query || '').trim();
+          if (qf) q = q.ilike('name', `%${qf.replace(/[%_]/g, '')}%`);
+          const { data, error } = await q;
+          if (error) return { success: false, result: `Document lookup failed: ${error.message}` };
+          const rows = data || [];
+          if (!rows.length) return { success: true, result: 'No uploaded documents found.' };
+          const formatted = rows.map((r: Record<string, unknown>, i: number) =>
+            `${i + 1}. ${r.name} — id=${r.id} — ${String(r.status)} — ${new Date(String(r.created_at)).toISOString().slice(0, 10)}${r.summary ? `\n   ${String(r.summary).replace(/\n+/g, ' ').slice(0, 220)}` : ''}`
+          ).join('\n');
+          return { success: true, result: `Uploaded documents:\n${formatted}\n\nCall read_my_document with an id to read the full text.` };
+        } catch (e) {
+          return { success: false, result: `Document lookup error: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      }
+
+      case 'read_my_document': {
+        try {
+          const userId = (args as Record<string, unknown>).__user_id as string
+            || (globalThis as Record<string, unknown>).__currentUserId as string;
+          if (!userId) return { success: false, result: 'Not signed in — cannot read documents.' };
+          const id = String(args.document_id || '').trim();
+          if (!id) return { success: false, result: 'document_id is required.' };
+          const maxChars = Math.min(Math.max(Number(args.max_chars ?? 20000), 500), 60000);
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+          const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          const { data, error } = await admin.from('user_documents')
+            .select('name, mime_type, status, error, extracted_text, summary')
+            .eq('user_id', userId).eq('id', id).maybeSingle();
+          if (error) return { success: false, result: `Document read failed: ${error.message}` };
+          if (!data) return { success: false, result: 'Document not found.' };
+          if (data.status !== 'ready') return { success: false, result: `Document "${data.name}" is ${data.status}${data.error ? `: ${data.error}` : ''}.` };
+          const text = String(data.extracted_text || '');
+          const body = text.length > maxChars ? text.slice(0, maxChars) + `\n\n[...truncated ${text.length - maxChars} chars]` : text;
+          return { success: true, result: `Document: ${data.name} (${data.mime_type || 'unknown type'})\n\n${body}` };
+        } catch (e) {
+          return { success: false, result: `Document read error: ${e instanceof Error ? e.message : String(e)}` };
         }
       }
 
@@ -9729,7 +9810,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'add_events_to_calendar', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'list_my_documents', 'read_my_document', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'add_events_to_calendar', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
@@ -10498,6 +10579,35 @@ serve(async (req) => {
 
     // Build system prompt
     let systemPrompt = buildSystemPrompt(systemName, userSettings);
+
+    // ── Uploaded documents attached to this turn ────────────────────────
+    const attachedDocumentIds: string[] = Array.isArray(body.documentIds)
+      ? (body.documentIds as unknown[]).map(String).slice(0, 10)
+      : [];
+    if (attachedDocumentIds.length) {
+      try {
+        const { createClient: ccDoc } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const adminDoc = ccDoc(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+        const { data: docs } = await adminDoc
+          .from('user_documents')
+          .select('id, name, mime_type, status, extracted_text, summary')
+          .in('id', attachedDocumentIds);
+        const budget = Math.floor(120_000 / Math.max(attachedDocumentIds.length, 1));
+        const blocks = (docs || [])
+          .filter((d: Record<string, unknown>) => d.status === 'ready')
+          .map((d: Record<string, unknown>) => {
+            const t = String(d.extracted_text || '');
+            const clipped = t.length > budget ? t.slice(0, budget) + `\n[...truncated ${t.length - budget} chars — call read_my_document for more]` : t;
+            return `--- DOCUMENT: ${d.name} (id=${d.id}, ${d.mime_type || 'file'}) ---\n${clipped}\n--- END DOCUMENT ---`;
+          });
+        if (blocks.length) {
+          systemPrompt += `\n\nUPLOADED DOCUMENTS (attached by the user to this message — read them and use them directly, do NOT ask the user to paste the contents):\n${blocks.join('\n\n')}`;
+          console.log(`[Documents] Injected ${blocks.length} document(s) into context`);
+        }
+      } catch (e) {
+        console.error('[Documents] injection failed:', (e as Error).message);
+      }
+    }
 
     // Infinity Router — additive pre-processing + tool-domain gating (v2)
     let infinityDebug: InfinityRouterResult | null = null;
