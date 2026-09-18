@@ -985,13 +985,15 @@ async function fetchProactiveMemory(userId: string, query: string): Promise<stri
     const rows = await searchMemories(userId, query, { limit: 6, threshold: 0.55 });
     if (!rows.length) return '';
     const lines = rows.map((r) => {
-      const summary = String(r.summary || r.content || '').trim();
+      const content = String(r.content || '').trim();
+      const summary = String(r.summary || '').trim();
       const source = String(r.source_tool || 'memory');
       const type = String(r.resource_type || r.memory_type || 'memory');
       const when = r.created_at ? new Date(r.created_at as string).toLocaleDateString() : '';
-      return `- [${type}${source ? ` / ${source}` : ''}${when ? ` · ${when}` : ''}] ${summary}`;
+      const fact = summary && summary !== content ? `${summary}: ${content}` : content;
+      return `- [${type}${source ? ` / ${source}` : ''}${when ? ` · ${when}` : ''}] ${fact}`;
     });
-    return `\n\n## Memory that may be relevant\nUse this context to avoid duplicate work and honor prior decisions. Cite it only when directly useful.\n\n${lines.join('\n')}`;
+    return `\n\n## Memory that may be relevant\nUse this context to answer. Prefer these facts over inference or general knowledge. Cite only when directly useful.\n\n${lines.join('\n')}`;
   } catch (e) {
     console.warn('[fetchProactiveMemory] failed:', (e as Error).message);
     return '';
