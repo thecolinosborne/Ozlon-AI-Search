@@ -14,6 +14,7 @@
 // ============================================================================
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { captureToolMemory } from "./memory-capture.ts";
 
 export type LifeDomain = "work" | "money" | "health" | "people" | "self";
 
@@ -347,6 +348,30 @@ export async function buildLifeContext(admin: SupabaseClient, userId: string): P
 
 type ToolResult = { success: boolean; result: string };
 
+// Remember meaningful Life OS mutations for cross-session recall.
+async function rememberLifeAction(
+  userId: string,
+  action: string,
+  resource_type: "value" | "rock" | "metric" | "issue",
+  title: string,
+  detail: string,
+  metadata?: Record<string, unknown>,
+) {
+  try {
+    await captureToolMemory({
+      user_id: userId,
+      tool: "life-os",
+      action,
+      resource_type,
+      title,
+      detail,
+      metadata,
+    });
+  } catch (e) {
+    console.warn("[life-os] memory capture failed:", (e as Error).message);
+  }
+}
+
 async function findRock(admin: SupabaseClient, userId: string, id?: string, titleMatch?: string) {
   if (id) {
     const { data } = await admin.from("life_rocks").select("*").eq("user_id", userId).eq("id", id).maybeSingle();
@@ -387,6 +412,7 @@ export async function handleLifeTool(
         if (Array.isArray(args.core_values)) patch.core_values = (args.core_values as string[]).map(String);
         const { error } = await admin.from("life_vision").upsert(patch, { onConflict: "user_id" });
         if (error) return { success: false, result: `Could not save vision: ${error.message}` };
+        await rememberLifeAction(userId, "Set", "value", "Life vision", `Updated life vision. Purpose: ${String(args.purpose || "").slice(0, 300)}`, { core_values: args.core_values });
         return { success: true, result: "Vision saved." };
       }
 
@@ -410,6 +436,7 @@ export async function handleLifeTool(
         }).select("id").maybeSingle();
         if (error) return { success: false, result: `Could not create priority: ${error.message}` };
         const warn = (count ?? 0) >= 7 ? ` Warning: ${(count ?? 0) + 1} active priorities this quarter — that's too many. Ask which one drops.` : "";
+        await rememberLifeAction(userId, "Created", "rock", title, `Quarter ${quarter} priority: ${String(args.description || "").slice(0, 300)}`, { quarter, domain: args.domain, due_date: args.due_date });
         return { success: true, result: `Priority created for ${quarter}: "${title}" (id ${data?.id}).${warn}` };
       }
 
@@ -424,6 +451,7 @@ export async function handleLifeTool(
         if (!Object.keys(patch).length) return { success: false, result: "Nothing to update." };
         const { error } = await admin.from("life_rocks").update(patch).eq("id", rock.id).eq("user_id", userId);
         if (error) return { success: false, result: `Update failed: ${error.message}` };
+        await rememberLifeAction(userId, "Updated", "rock", String(rock.title), `Progress ${patch.progress ?? rock.progress}% · Status ${patch.status ?? rock.status}`, patch);
         return { success: true, result: `Updated "${rock.title}" → ${patch.progress ?? rock.progress}% · ${patch.status ?? rock.status}.` };
       }
 
@@ -442,6 +470,7 @@ export async function handleLifeTool(
           is_active: true,
         }, { onConflict: "user_id,name" });
         if (error) return { success: false, result: `Could not add metric: ${error.message}` };
+        await rememberLifeAction(userId, "Added", "metric", mname, `Tracking ${mname}${args.target != null ? ` (target ${args.target})` : ""}`, { domain: args.domain, unit: args.unit, target: args.target, cadence: args.cadence });
         return { success: true, result: `Now tracking "${mname}"${args.target != null ? ` (target ${args.target})` : ""}.` };
       }
 
@@ -476,6 +505,7 @@ export async function handleLifeTool(
           const delta = Math.abs(value - Number(m.target));
           verdict = ok ? ` Hit target (${delta} to spare).` : ` Missed target by ${delta}${m.unit ? " " + m.unit : ""}.`;
         }
+        await rememberLifeAction(userId, "Logged", "metric", String(m.name), `Value ${value}${m.unit ? " " + m.unit : ""} for ${period}.${verdict}`, { period, value, target: m.target });
         return { success: true, result: `Logged ${m.name} = ${value}${m.unit ? " " + m.unit : ""} for week of ${period}.${verdict}` };
       }
 
@@ -491,6 +521,7 @@ export async function handleLifeTool(
           priority: Math.min(Math.max(Number(args.priority ?? 2), 1), 3),
         }).select("id").maybeSingle();
         if (error) return { success: false, result: `Could not log issue: ${error.message}` };
+        await rememberLifeAction(userId, "Opened", "issue", title, `Priority ${Math.min(Math.max(Number(args.priority ?? 2), 1), 3)} in ${String(args.domain || "work")}: ${String(args.detail || "").slice(0, 300)}`, { priority: args.priority, domain: args.domain });
         return { success: true, result: `Issue logged: "${title}" (id ${data?.id}).` };
       }
 
@@ -516,6 +547,7 @@ export async function handleLifeTool(
           solved_at: new Date().toISOString(),
         }).eq("id", issue.id).eq("user_id", userId);
         if (error) return { success: false, result: `Could not solve issue: ${error.message}` };
+        await rememberLifeAction(userId, "Solved", "issue", String(issue.title), `${String(solution).slice(0, 500)} (owner: ${String(args.owner || "Colin")}${args.due_date ? `, by ${args.due_date}` : ""})`, { issue_id: issue.id, owner: args.owner, due_date: args.due_date });
         return { success: true, result: `Solved "${issue.title}" → ${solution}${args.due_date ? ` (by ${args.due_date})` : ""}.` };
       }
 

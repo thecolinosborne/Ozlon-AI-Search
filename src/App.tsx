@@ -43,6 +43,7 @@ import SlackDetail from "@/pages/integrations/SlackDetail";
 import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
 import Life from "@/pages/Life";
+import Memory from "@/pages/Memory";
 import Communications from "@/pages/Communications";
 import People from "@/pages/People";
 import Signals from "@/pages/Signals";
@@ -113,6 +114,7 @@ const AppRoutes = () => {
         <Route path="/integrations/:id" element={<AutoIntegrationDetail />} />
         <Route path="/events" element={<Events />} />
         <Route path="/life" element={<Life />} />
+        <Route path="/memory" element={<Memory />} />
         <Route path="/communications" element={<Communications />} />
         <Route path="/people" element={<People />} />
         <Route path="/signals" element={<Signals />} />

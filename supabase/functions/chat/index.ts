@@ -17,6 +17,7 @@ import { renderForChatPrompt } from "../_shared/signals/render.ts";
 import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
+import { captureToolMemory, searchMemories, type MemoryResourceType } from "../_shared/memory-capture.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
 // (The local `MODEL_REGISTRY: Record<string, ModelConfig>` declared below is the chat-side config map.)
@@ -740,6 +741,260 @@ async function recordArtifact(opts: {
     });
   } catch (e) {
     console.warn('[recordArtifact] failed:', (e as Error).message);
+  }
+}
+
+// ---------- Universal action memory capture ----------
+// Persists every meaningful business action so Ozlon can recall it later.
+async function captureActionMemory(toolName: string, args: Record<string, unknown>, result: Record<string, unknown>): Promise<void> {
+  try {
+    const userId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+    const sessionId = (globalThis as Record<string, unknown>).__currentSessionId as string | undefined;
+    if (!userId) return;
+
+    const d = result || {};
+    const task = (d.task as Record<string, unknown>) || d;
+    const contact = (d.contact as Record<string, unknown>) || d;
+    const event = ((d.event as Record<string, any>) || d) as Record<string, any>;
+
+    const base = {
+      user_id: userId,
+      session_id: sessionId,
+      tool: toolName.startsWith('ghl_') ? 'gohighlevel' : toolName.startsWith('calendar_') ? 'google-calendar' : toolName.startsWith('clickup_') ? 'clickup' : 'ozlon',
+    };
+
+    const tryCapture = async (opts: {
+      action: string;
+      resource_type: MemoryResourceType;
+      external_id?: string;
+      external_url?: string;
+      title: string;
+      detail: string;
+      metadata?: Record<string, unknown>;
+    }) => {
+      await captureToolMemory({ ...base, ...opts });
+    };
+
+    // ClickUp
+    if (['create_clickup_task', 'create_subtask'].includes(toolName)) {
+      const taskId = String(task?.id || d.id || '');
+      const taskUrl = String(task?.url || d.url || '');
+      const title = String(args.name || args.title || task?.name || task?.title || 'ClickUp task');
+      await tryCapture({
+        action: 'Created',
+        resource_type: 'task',
+        external_id: taskId,
+        external_url: taskUrl,
+        title,
+        detail: `Created ClickUp task "${title}" in list ${args.list_id || args.parent || ''}. ${args.description ? `Description: ${String(args.description).slice(0, 200)}` : ''}`,
+        metadata: { list_id: args.list_id, parent: args.parent, status: args.status, tags: args.tags },
+      });
+    } else if (toolName === 'update_clickup_task') {
+      const taskId = String(args.task_id || args.id || task?.id || d.id || '');
+      const title = String(args.name || args.title || task?.name || task?.title || 'ClickUp task');
+      await tryCapture({
+        action: 'Updated',
+        resource_type: 'task',
+        external_id: taskId,
+        title,
+        detail: `Updated ClickUp task "${title}". Changes: ${JSON.stringify(args)}`.slice(0, 800),
+        metadata: { changes: Object.keys(args) },
+      });
+    } else if (toolName === 'delete_clickup_task') {
+      await tryCapture({
+        action: 'Deleted',
+        resource_type: 'task',
+        external_id: String(args.task_id || args.id || ''),
+        title: String(args.task_id || args.id || 'ClickUp task'),
+        detail: `Deleted ClickUp task ${args.task_id || args.id}.`,
+      });
+    }
+
+    // GoHighLevel
+    else if (toolName === 'ghl_create_contact' || toolName === 'ghl_update_contact') {
+      const contactId = String(contact?.id || d.id || args.contact_id || '');
+      const name = String(args.firstName || args.name || contact?.firstName || contact?.name || 'GHL contact');
+      await tryCapture({
+        action: toolName === 'ghl_create_contact' ? 'Created' : 'Updated',
+        resource_type: 'contact',
+        external_id: contactId,
+        title: name,
+        detail: `${toolName === 'ghl_create_contact' ? 'Created' : 'Updated'} GoHighLevel contact ${name} (${args.email || contact?.email || ''}).`,
+        metadata: { email: args.email, phone: args.phone },
+      });
+    } else if (toolName === 'ghl_add_contact_task') {
+      const contactId = String(args.contactId || args.contact_id || '');
+      const title = String(args.title || 'GHL contact task');
+      await tryCapture({
+        action: 'Created',
+        resource_type: 'task',
+        external_id: contactId,
+        title,
+        detail: `Added task "${title}" to GHL contact ${contactId}. Due: ${args.dueDate || 'unspecified'}.`,
+        metadata: { contact_id: contactId, due_date: args.dueDate },
+      });
+    } else if (toolName === 'ghl_send_message') {
+      await tryCapture({
+        action: 'Sent',
+        resource_type: 'action',
+        title: `Message to ${args.contactId || args.to || ''}`,
+        detail: `Sent ${args.channel || 'message'} via GoHighLevel to ${args.contactId || args.to || ''}: "${String(args.message).slice(0, 200)}"`,
+        metadata: { channel: args.channel },
+      });
+    }
+
+    // Google Calendar
+    else if (toolName === 'calendar_create_event' || toolName === 'calendar_update_event' || toolName === 'calendar_quick_add_event') {
+      const eventId = String(event?.id || d.id || args.event_id || '');
+      const eventUrl = event?.htmlLink ? String(event.htmlLink) : `https://calendar.google.com/calendar/u/0/r/eventedit/${eventId}`;
+      const summary = String(event?.summary || args.summary || args.title || args.text || 'Calendar event');
+      const start = String(event?.start?.dateTime || event?.start?.date || (args.start as any)?.dateTime || args.start_date || '');
+      await tryCapture({
+        action: toolName === 'calendar_create_event' ? 'Created' : toolName === 'calendar_update_event' ? 'Updated' : 'Quick-added',
+        resource_type: 'event',
+        external_id: eventId,
+        external_url: eventUrl,
+        title: summary,
+        detail: `${toolName === 'calendar_create_event' ? 'Created' : toolName === 'calendar_update_event' ? 'Updated' : 'Quick-added'} calendar event "${summary}"${start ? ` at ${start}` : ''}. ${args.description || event?.description || ''}`.slice(0, 800),
+        metadata: { calendar_id: args.calendarId || 'primary', start },
+      });
+    } else if (toolName === 'calendar_delete_event') {
+      await tryCapture({
+        action: 'Deleted',
+        resource_type: 'event',
+        external_id: String(args.event_id || args.id || ''),
+        title: String(args.event_id || args.id || 'Calendar event'),
+        detail: `Deleted calendar event ${args.event_id || args.id}.`,
+      });
+    }
+
+    // Gmail
+    else if (toolName === 'send_email') {
+      await tryCapture({
+        action: 'Sent',
+        resource_type: 'email',
+        external_id: String((d as any).message?.id || d.id || ''),
+        title: String(args.subject || 'Email'),
+        detail: `Sent email to ${args.to}: "${String(args.subject).slice(0, 200)}"`,
+        metadata: { to: args.to, cc: args.cc },
+      });
+    } else if (toolName === 'create_email_draft') {
+      await tryCapture({
+        action: 'Drafted',
+        resource_type: 'email',
+        external_id: String((d as any).draft?.id || d.id || ''),
+        title: String(args.subject || 'Email draft'),
+        detail: `Created email draft to ${args.to}: "${String(args.subject).slice(0, 200)}"`,
+      });
+    } else if (toolName === 'analyze_content' && String(args.source_type || '').toLowerCase() === 'email') {
+      await tryCapture({
+        action: 'Analyzed',
+        resource_type: 'email',
+        external_id: String(args.id || ''),
+        title: `Email analysis ${args.id}`,
+        detail: `Analyzed email ${args.id}${args.focus ? ` focusing on ${args.focus}` : ''}. Result: ${String(d.summary || d.result || JSON.stringify(d)).slice(0, 500)}`,
+        metadata: { focus: args.focus },
+      });
+    }
+
+    // Google Docs
+    else if (toolName === 'docs_create_document' || toolName === 'docs_apply_markdown' || toolName === 'docs_format_as_report') {
+      const docId = String((d.documentId as string) || ((d.document as Record<string, unknown>)?.documentId as string) || args.documentId || '');
+      await tryCapture({
+        action: toolName === 'docs_create_document' ? 'Created' : 'Updated',
+        resource_type: 'doc',
+        external_id: docId,
+        external_url: docId ? `https://docs.google.com/document/d/${docId}/edit` : undefined,
+        title: String(args.title || 'Google Doc'),
+        detail: `${toolName === 'docs_create_document' ? 'Created' : 'Updated'} Google Doc "${String(args.title || 'Untitled')}".`,
+      });
+    }
+
+    // Life OS
+    else if (toolName === 'create_rock' || toolName === 'update_rock') {
+      const rockId = String(d.id || args.rock_id || '');
+      const title = String(args.title || d.title || 'Rock');
+      await tryCapture({
+        action: toolName === 'create_rock' ? 'Created' : 'Updated',
+        resource_type: 'rock',
+        external_id: rockId,
+        title,
+        detail: `${toolName === 'create_rock' ? 'Created' : 'Updated'} 90-day rock "${title}" (${args.domain || ''}). Progress: ${args.progress ?? d.progress ?? 0}%.`,
+        metadata: { domain: args.domain, quarter: args.quarter, due_date: args.due_date },
+      });
+    } else if (toolName === 'open_issue') {
+      const issueId = String(d.id || '');
+      const title = String(args.title || 'Issue');
+      await tryCapture({
+        action: 'Opened',
+        resource_type: 'issue',
+        external_id: issueId,
+        title,
+        detail: `Opened Life OS issue "${title}" in ${args.domain || 'life'}: ${String(args.detail || '').slice(0, 300)}`,
+        metadata: { domain: args.domain, priority: args.priority },
+      });
+    } else if (toolName === 'solve_issue') {
+      await tryCapture({
+        action: 'Solved',
+        resource_type: 'issue',
+        external_id: String(args.issue_id || d.id || ''),
+        title: String(args.title_match || args.issue_id || 'Issue'),
+        detail: `Solved issue: ${String(args.solution || '').slice(0, 400)} Owner: ${args.owner || ''} · Due: ${args.due_date || ''}`,
+        metadata: { owner: args.owner, due_date: args.due_date },
+      });
+    } else if (toolName === 'log_scorecard') {
+      await tryCapture({
+        action: 'Logged',
+        resource_type: 'metric',
+        title: String(args.metric || 'Scorecard metric'),
+        detail: `Logged ${args.metric} = ${args.value} for week starting ${args.period_start || ''}.`,
+        metadata: { metric: args.metric, value: args.value, period_start: args.period_start },
+      });
+    } else if (toolName === 'set_life_vision') {
+      await tryCapture({
+        action: 'Set',
+        resource_type: 'value',
+        title: 'Life vision',
+        detail: `Updated life vision. Purpose: ${String(args.purpose || '').slice(0, 300)}`,
+        metadata: { core_values: args.core_values },
+      });
+    }
+
+    // Documents uploaded / analyzed
+    else if (toolName === 'document_ingest' || toolName === 'upload_document') {
+      const docId = String(d.document_id || d.id || '');
+      await tryCapture({
+        action: 'Ingested',
+        resource_type: 'doc',
+        external_id: docId,
+        title: String(args.filename || d.filename || 'Document'),
+        detail: `Uploaded and analyzed document "${String(args.filename || d.filename || 'Untitled')}". Extracted ${d.chars || d.textLength || '?'} characters.`,
+        metadata: { filename: args.filename || d.filename },
+      });
+    }
+  } catch (e) {
+    console.warn('[captureActionMemory] failed:', (e as Error).message);
+  }
+}
+
+// ---------- Proactive memory recall ----------
+// Surfaces relevant past actions / facts before the agent chooses tools.
+async function fetchProactiveMemory(userId: string, query: string): Promise<string> {
+  try {
+    if (!query || query.length < 3) return '';
+    const rows = await searchMemories(userId, query, { limit: 6, threshold: 0.55 });
+    if (!rows.length) return '';
+    const lines = rows.map((r) => {
+      const summary = String(r.summary || r.content || '').trim();
+      const source = String(r.source_tool || 'memory');
+      const type = String(r.resource_type || r.memory_type || 'memory');
+      const when = r.created_at ? new Date(r.created_at as string).toLocaleDateString() : '';
+      return `- [${type}${source ? ` / ${source}` : ''}${when ? ` · ${when}` : ''}] ${summary}`;
+    });
+    return `\n\n## Memory that may be relevant\nUse this context to avoid duplicate work and honor prior decisions. Cite it only when directly useful.\n\n${lines.join('\n')}`;
+  } catch (e) {
+    console.warn('[fetchProactiveMemory] failed:', (e as Error).message);
+    return '';
   }
 }
 
@@ -3506,7 +3761,7 @@ const NATIVE_GOOGLE_ROUTES: Record<string, { fn: string; action: string; mapArgs
 async function tryNativeGoogleCall(
   toolName: string,
   args: Record<string, unknown>,
-): Promise<{ success: boolean; result: string } | null> {
+): Promise<{ success: boolean; result: string; data?: Record<string, unknown> } | null> {
   const route = NATIVE_GOOGLE_ROUTES[toolName];
   if (!route) return null;
 
@@ -3543,7 +3798,7 @@ async function tryNativeGoogleCall(
       return { success: false, result: `${toolName} failed: ${errMsg}` };
     }
     console.log(`[NativeGoogle] ${toolName} → ${route.fn}/${route.action} OK`);
-    return { success: true, result: `[Native Google Workspace] ${JSON.stringify(data).slice(0, 4000)}` };
+    return { success: true, result: `[Native Google Workspace] ${JSON.stringify(data).slice(0, 4000)}`, data };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[NativeGoogle] ${toolName} error:`, msg);
@@ -3812,6 +4067,8 @@ async function executeToolCall(
               const docId = String((d.documentId as string) || ((d.document as Record<string, unknown>)?.documentId as string) || '');
               if (docId) await recordArtifact({ type: 'doc_link', title: String(args.title || 'Untitled Doc'), externalRef: { provider: 'google-docs', documentId: docId, url: `https://docs.google.com/document/d/${docId}/edit` } });
             }
+            // Universal memory capture for recall across sessions
+            await captureActionMemory(toolName, args, d);
           } catch (e) { console.warn('[artifact write-through] failed:', (e as Error).message); }
         }
         return { success: dispatched.success, result: dispatched.result, structured: dispatched.data as Record<string, unknown> | undefined };
@@ -3824,7 +4081,10 @@ async function executeToolCall(
     // docs_format_as_report, docs_style_range, docs_clear_formatting) don't fall through
     // to "Unknown tool".
     const native = await tryNativeGoogleCall(toolName, args);
-    if (native) return native;
+    if (native) {
+      if (native.success) await captureActionMemory(toolName, args, native.data || {});
+      return native;
+    }
 
     switch (toolName) {
       // ============ Gmail ============
@@ -4068,6 +4328,7 @@ async function executeToolCall(
         if (args.tags) contactData.tags = (args.tags as string).split(',').map(t => t.trim());
         const res = await callGHL('/contacts/', 'POST', contactData, ghlCreds?.apiKey) as { contact?: { id: string; firstName?: string; lastName?: string }; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        await captureActionMemory(toolName, args, res as Record<string, unknown>);
         return { success: true, result: `Contact created: ${res.contact?.firstName} ${res.contact?.lastName} (ID: ${res.contact?.id})` };
       }
 
@@ -4082,6 +4343,7 @@ async function executeToolCall(
         if (args.monetary_value) data.monetaryValue = args.monetary_value;
         const res = await callGHL('/opportunities/', 'POST', data, ghlCreds?.apiKey) as { opportunity?: { id: string; name: string }; error?: string; message?: string };
         if (res.error || res.message) return { success: false, result: `GHL error: ${res.error || res.message}` };
+        await captureActionMemory(toolName, args, res as Record<string, unknown>);
         return { success: true, result: `Opportunity created: "${res.opportunity?.name}" (ID: ${res.opportunity?.id})` };
       }
 
@@ -4114,6 +4376,7 @@ async function executeToolCall(
         if (type === 'Email' && args.subject) msgData.subject = args.subject;
         const res = await callGHL('/conversations/messages', 'POST', msgData, ghlCreds?.apiKey) as { messageId?: string; message?: string; error?: string };
         if (res.error) return { success: false, result: `GHL message error: ${res.error}` };
+        await captureActionMemory(toolName, args, res as Record<string, unknown>);
         return { success: true, result: `${type} sent to contact ${args.contact_id}: "${(args.message as string).substring(0, 100)}"` };
       }
 
@@ -4191,6 +4454,7 @@ async function executeToolCall(
         if (args.customFields) { try { updateData.customFields = JSON.parse(args.customFields as string); } catch { /* ignore */ } }
         const res = await callGHL(`/contacts/${args.contact_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { contact?: { id: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        await captureActionMemory(toolName, args, res as Record<string, unknown>);
         return { success: true, result: `Contact ${args.contact_id} updated successfully.` };
       }
 
@@ -4216,6 +4480,7 @@ async function executeToolCall(
         if (args.name) updateData.name = args.name;
         const res = await callGHL(`/opportunities/${args.opportunity_id}`, 'PUT', updateData, ghlCreds?.apiKey) as { opportunity?: { id: string }; error?: string };
         if (res.error) return { success: false, result: `GHL error: ${res.error}` };
+        await captureActionMemory(toolName, args, res as Record<string, unknown>);
         return { success: true, result: `Opportunity ${args.opportunity_id} updated successfully.` };
       }
 
@@ -11454,6 +11719,19 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       } catch (e) {
         console.error('[life-os] injection failed:', e);
       }
+    }
+
+    // ===== Proactive memory recall =====
+    // Surface relevant past actions/facts before tool selection so Ozlon avoids
+    // duplicate work and honors prior decisions without requiring a tool call.
+    try {
+      const lastUserMessage = [...messages].reverse().find((m: { role: string; content?: string }) => m.role === 'user');
+      if (credUserId && lastUserMessage?.content) {
+        const memoryBlock = await fetchProactiveMemory(credUserId, String(lastUserMessage.content));
+        if (memoryBlock) systemPrompt += memoryBlock;
+      }
+    } catch (e) {
+      console.warn('[ proactive memory ] append failed:', (e as Error).message);
     }
 
     // Build OpenAI messages
