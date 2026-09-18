@@ -1906,6 +1906,51 @@ export type Database = {
         }
         Relationships: []
       }
+      memory_links: {
+        Row: {
+          created_at: string
+          id: string
+          metadata: Json | null
+          relationship: string
+          source_memory_id: string
+          target_memory_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          relationship?: string
+          source_memory_id: string
+          target_memory_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          relationship?: string
+          source_memory_id?: string
+          target_memory_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_links_source_memory_id_fkey"
+            columns: ["source_memory_id"]
+            isOneToOne: false
+            referencedRelation: "wisdom_memories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_links_target_memory_id_fkey"
+            columns: ["target_memory_id"]
+            isOneToOne: false
+            referencedRelation: "wisdom_memories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       model_calls: {
         Row: {
           created_at: string
@@ -4117,12 +4162,17 @@ export type Database = {
           content: string
           created_at: string
           embedding: string | null
+          external_id: string | null
+          external_url: string | null
           id: string
           last_accessed_at: string | null
           memory_type: string
           metadata: Json | null
           recurrence_count: number | null
+          resource_type: string | null
           salience: number | null
+          session_id: string | null
+          source_tool: string | null
           summary: string | null
           superseded_at: string | null
           superseded_by: string | null
@@ -4134,12 +4184,17 @@ export type Database = {
           content: string
           created_at?: string
           embedding?: string | null
+          external_id?: string | null
+          external_url?: string | null
           id?: string
           last_accessed_at?: string | null
           memory_type?: string
           metadata?: Json | null
           recurrence_count?: number | null
+          resource_type?: string | null
           salience?: number | null
+          session_id?: string | null
+          source_tool?: string | null
           summary?: string | null
           superseded_at?: string | null
           superseded_by?: string | null
@@ -4151,12 +4206,17 @@ export type Database = {
           content?: string
           created_at?: string
           embedding?: string | null
+          external_id?: string | null
+          external_url?: string | null
           id?: string
           last_accessed_at?: string | null
           memory_type?: string
           metadata?: Json | null
           recurrence_count?: number | null
+          resource_type?: string | null
           salience?: number | null
+          session_id?: string | null
+          source_tool?: string | null
           summary?: string | null
           superseded_at?: string | null
           superseded_by?: string | null
