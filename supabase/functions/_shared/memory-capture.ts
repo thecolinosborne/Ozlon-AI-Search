@@ -183,22 +183,24 @@ export async function searchMemories(
 
   // Keyword safety net for short/exact queries and freshly-inserted test rows.
   if (rows.length < limit && query.trim().length >= 3) {
-    const q = `%${query.replace(/[%_]/g, "\\$&")}%`;
-    const term = query.trim().split(/\s+/).filter((w) => w.length >= 3).join(" | ");
-    let kwQuery = admin
-      .from("wisdom_memories")
-      .select("*")
-      .eq("user_id", userId)
-      .ilike("content", q);
-    if (opts.resource_type) kwQuery = kwQuery.eq("resource_type", opts.resource_type);
-    if (term) {
-      kwQuery = kwQuery.or(`summary.ilike.${q},content.ilike.${q},source_tool.ilike.${q}`);
-    }
-    const { data: kwRows, error: kwErr } = await kwQuery.limit(limit - rows.length);
-    if (kwErr) console.warn("[searchMemories] keyword error:", kwErr.message);
-    const seen = new Set(rows.map((r) => String(r.id)));
-    for (const r of (kwRows ?? [])) {
-      if (!seen.has(String(r.id))) rows.push(r);
+    const words = query.toLowerCase().match(/[a-z0-9']+/g)?.filter((w) => w.length >= 3) ?? [];
+    const conditions = words.map((w) => {
+      const escaped = w.replace(/[%_]/g, "\\$&");
+      return `content.ilike.%${escaped}%,summary.ilike.%${escaped}%,source_tool.ilike.%${escaped}%`;
+    });
+    if (conditions.length) {
+      let kwQuery = admin
+        .from("wisdom_memories")
+        .select("*")
+        .eq("user_id", userId)
+        .or(conditions.join(","));
+      if (opts.resource_type) kwQuery = kwQuery.eq("resource_type", opts.resource_type);
+      const { data: kwRows, error: kwErr } = await kwQuery.limit(limit - rows.length);
+      if (kwErr) console.warn("[searchMemories] keyword error:", kwErr.message);
+      const seen = new Set(rows.map((r) => String(r.id)));
+      for (const r of (kwRows ?? [])) {
+        if (!seen.has(String(r.id))) rows.push(r);
+      }
     }
   }
 
