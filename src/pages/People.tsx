@@ -355,14 +355,42 @@ export default function People() {
                       {space.entity.primary_email}
                       {space.entity.last_interaction_at && ` · last ${formatDistanceToNow(new Date(space.entity.last_interaction_at), { addSuffix: true })}`}
                     </p>
+                    {(activeEntity?.primary_phone || activeEntity?.company) && (
+                      <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        {activeEntity?.primary_phone && (
+                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{activeEntity.primary_phone}</span>
+                        )}
+                        {activeEntity?.company && (
+                          <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{activeEntity.company}</span>
+                        )}
+                      </div>
+                    )}
+                    {activeEntity?.notes && (
+                      <p className="text-xs text-foreground/70 mt-2 whitespace-pre-wrap">{activeEntity.notes}</p>
+                    )}
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       <Badge variant="secondary" className="text-[10px] font-normal">{space.entity.entity_type}</Badge>
+                      {activeEntity?.external_ids?.gohighlevel && (
+                        <Badge variant="outline" className="text-[10px] font-normal">GoHighLevel</Badge>
+                      )}
                       {Object.entries(space.entity.channel_counts || {}).map(([ch, n]) => (
                         <Badge key={ch} variant="outline" className="text-[10px] font-normal">{ch} · {String(n)}</Badge>
                       ))}
                     </div>
                   </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Pin contact" onClick={() => activeEntity && star(activeEntity)}>
+                      <Star className={cn("h-3.5 w-3.5", activeEntity?.starred && "fill-primary text-primary")} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Edit contact" onClick={() => activeEntity && openEditContact(activeEntity)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" aria-label="Remove contact" onClick={() => activeEntity && removeContact(activeEntity)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
+
               </div>
 
               {/* Timeline */}
