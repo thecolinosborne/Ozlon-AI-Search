@@ -56,6 +56,7 @@ interface MemoryResult {
 
 interface MemoryLink {
   id: string;
+  source_memory_id: string;
   relationship: string;
   target: {
     id: string;
@@ -185,7 +186,7 @@ export default function Memory() {
     });
   };
 
-  const linksFor = (id: string) => links.filter((l) => l.target && l.id /* source matches later */).filter((l) => l.target?.id === id);
+  const linksFor = (id: string) => links.filter((link) => link.source_memory_id === id && link.target);
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
@@ -206,10 +207,10 @@ export default function Memory() {
             type="button"
             variant="ghost"
             onClick={() => setShowLearning((open) => !open)}
-            className="h-auto w-full justify-between rounded-lg px-4 py-3 text-left"
+            className="h-auto w-full justify-between whitespace-normal rounded-lg px-4 py-3 text-left"
             aria-expanded={showLearning}
           >
-            <span className="flex min-w-0 items-center gap-3">
+              <span className="flex min-w-0 flex-1 items-center gap-3">
               <Info className="h-5 w-5 shrink-0 text-primary" />
               <span>
                 <span className="block text-sm font-medium">How Ozlon learns</span>
@@ -224,6 +225,9 @@ export default function Memory() {
               <LearningStep icon={Database} title="Organized" text="Useful facts, decisions, tasks, people, and patterns are saved to your private memory." />
               <LearningStep icon={Sparkles} title="Used" text="Relevant memories return during chats, daily signals, reviews, and planned actions." />
               <LearningStep icon={ShieldCheck} title="Controlled by you" text="Search what is remembered, open its source when available, or delete it here." />
+              <div className="sm:col-span-2 rounded-md border border-border/30 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                Ozlon improves by connecting repeated facts, completed actions, feedback, and Life OS progress. You remain the final authority.
+              </div>
             </div>
           )}
         </section>
