@@ -281,6 +281,9 @@ export default function People() {
                 <Button variant="link" size="sm" onClick={() => loadEntities(true)} className="mt-2">
                   Build from communications
                 </Button>
+                <Button variant="link" size="sm" onClick={openNewContact} className="mt-1">
+                  Add a contact manually
+                </Button>
               </div>
             ) : (
               <div className="py-2">
