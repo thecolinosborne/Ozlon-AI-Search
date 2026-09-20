@@ -8,6 +8,7 @@ import { clearAllIntegrationCaches, setActiveIntegrationsUser } from "@/stores/u
 const STORAGE_KEY = "ozlon_system_name";
 const ONBOARDED_KEY = "ozlon_onboarded";
 const AUTH_INIT_TIMEOUT = 5000; // 5s failsafe
+const PROFILE_LOAD_TIMEOUT = 4000;
 
 function clearStaleAuthStorage() {
   try {
@@ -74,11 +75,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId);
     try {
-      const { data: profile, error } = await supabase
+      const profileRequest = supabase
         .from("profiles")
         .select("system_name, voice_enabled, elevenlabs_voice_id, onboarding_complete")
         .eq("user_id", userId)
         .single();
+
+      const result = await Promise.race([
+        profileRequest,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), PROFILE_LOAD_TIMEOUT)),
+      ]);
+
+      if (!result) {
+        console.warn("Profile fetch timed out; preserving authenticated access");
+        const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(wasOnboarded || !isNewSignup);
+        setNeedsOnboarding(false);
+        setProfileLoaded(true);
+        return;
+      }
+
+      const { data: profile, error } = result;
 
       console.log("Profile loaded:", profile, "error:", error);
 
