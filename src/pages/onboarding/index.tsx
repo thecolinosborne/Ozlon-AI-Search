@@ -16,7 +16,7 @@ const steps: Step[] = ["welcome", "naming", "complete"];
 const Onboarding = () => {
   const navigate = useNavigate();
   const { updateUser } = useAppStore();
-  const { completeOnboarding, user } = useAuth();
+  const { completeOnboarding, user, authLoading, profileLoaded, needsOnboarding } = useAuth();
   const { isSpeaking, speakForStep, replayCurrentStep, stopSpeaking } = useOnboardingVoice({ enabled: true });
 
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
@@ -45,6 +45,13 @@ const Onboarding = () => {
       }
     }
   }, [user]);
+
+  // Recover users who reached this page while a profile request was timing out.
+  useEffect(() => {
+    if (!authLoading && profileLoaded && user && !needsOnboarding) {
+      navigate("/", { replace: true });
+    }
+  }, [authLoading, profileLoaded, user, needsOnboarding, navigate]);
 
   useEffect(() => {
     speakForStep(currentStep, firstName);

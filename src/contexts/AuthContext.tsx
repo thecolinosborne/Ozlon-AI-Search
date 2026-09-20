@@ -8,6 +8,7 @@ import { clearAllIntegrationCaches, setActiveIntegrationsUser } from "@/stores/u
 const STORAGE_KEY = "ozlon_system_name";
 const ONBOARDED_KEY = "ozlon_onboarded";
 const AUTH_INIT_TIMEOUT = 5000; // 5s failsafe
+const PROFILE_LOAD_TIMEOUT = 4000;
 
 function clearStaleAuthStorage() {
   try {
@@ -71,19 +72,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearAllIntegrationCaches();
   }, []);
 
-  const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
+  const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId);
     try {
-      const { data: profile, error } = await supabase
+      const profileRequest = supabase
         .from("profiles")
         .select("system_name, voice_enabled, elevenlabs_voice_id, onboarding_complete")
         .eq("user_id", userId)
         .single();
 
+      const result = await Promise.race([
+        profileRequest,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), PROFILE_LOAD_TIMEOUT)),
+      ]);
+
+      if (!result) {
+        console.warn("Profile fetch timed out; preserving authenticated access");
+        const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(wasOnboarded || !isNewSignup);
+        setNeedsOnboarding(false);
+        setProfileLoaded(true);
+        return;
+      }
+
+      const { data: profile, error } = result;
+
       console.log("Profile loaded:", profile, "error:", error);
 
-      const onboardingDone = profile?.onboarding_complete === true;
       const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
+
+      // A failed profile read is not evidence that onboarding is incomplete.
+      // Fail safely into the app and let a later auth event retry the profile.
+      if (error) {
+        console.warn("Profile fetch failed; preserving authenticated access", error);
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(wasOnboarded || !isNewSignup);
+        setNeedsOnboarding(false);
+        setProfileLoaded(true);
+        return;
+      }
+
+      const onboardingDone = profile?.onboarding_complete === true;
 
       if (onboardingDone) {
         const name = profile?.system_name || "Ozlon";
@@ -98,9 +128,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsReturningUser(true);
         setNeedsOnboarding(false);
         supabase.from("profiles").update({ onboarding_complete: true }).eq("user_id", userId).then(() => {});
-      } else {
+      } else if (isNewSignup) {
         setNeedsOnboarding(true);
         setIsReturningUser(false);
+      } else {
+        // Existing accounts must never be pushed through first-run onboarding
+        // solely because their profile row is temporarily absent.
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(true);
+        setNeedsOnboarding(false);
       }
 
       setVoiceEnabledState(profile?.voice_enabled ?? false);
