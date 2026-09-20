@@ -79,7 +79,7 @@ export function MobileNav() {
       </nav>
 
       <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
-        <SheetContent side="bottom" className="bottom-[calc(4.125rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain rounded-t-2xl border-border/60 pb-5 md:hidden">
+        <SheetContent side="bottom" className="bottom-[calc(4.25rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain rounded-t-2xl border-border/60 pb-5 md:hidden">
           <SheetHeader className="text-left">
             <SheetTitle>More</SheetTitle>
             <SheetDescription>Open your memory, messages, people, or settings.</SheetDescription>
