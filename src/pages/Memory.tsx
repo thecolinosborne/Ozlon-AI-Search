@@ -29,9 +29,14 @@ import {
   Target,
   Gem,
   Lightbulb,
+  Info,
+  Database,
+  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
 
 interface MemoryResult {
   source: "memory" | "artifact";
@@ -112,6 +117,7 @@ export default function Memory() {
   const [links, setLinks] = useState<MemoryLink[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showLearning, setShowLearning] = useState(false);
 
   const fetchMemories = useCallback(async (q: string, resourceType: string) => {
     if (!user) return;
@@ -195,6 +201,33 @@ export default function Memory() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-4 space-y-4">
+        <section className="rounded-lg border border-border/40 bg-card/40">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setShowLearning((open) => !open)}
+            className="h-auto w-full justify-between rounded-lg px-4 py-3 text-left"
+            aria-expanded={showLearning}
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <Info className="h-5 w-5 shrink-0 text-primary" />
+              <span>
+                <span className="block text-sm font-medium">How Ozlon learns</span>
+                <span className="block text-xs font-normal text-muted-foreground">See how your information becomes useful.</span>
+              </span>
+            </span>
+            {showLearning ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </Button>
+          {showLearning && (
+            <div className="grid gap-3 border-t border-border/30 px-4 py-4 sm:grid-cols-2">
+              <LearningStep icon={FileText} title="Collected" text="Chats, documents, connected services, and Life OS updates provide context." />
+              <LearningStep icon={Database} title="Organized" text="Useful facts, decisions, tasks, people, and patterns are saved to your private memory." />
+              <LearningStep icon={Sparkles} title="Used" text="Relevant memories return during chats, daily signals, reviews, and planned actions." />
+              <LearningStep icon={ShieldCheck} title="Controlled by you" text="Search what is remembered, open its source when available, or delete it here." />
+            </div>
+          )}
+        </section>
+
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -334,6 +367,20 @@ export default function Memory() {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LearningStep({ icon: Icon, title, text }: { icon: typeof FileText; title: string; text: string }) {
+  return (
+    <div className="flex gap-3">
+      <div className="mt-0.5 rounded-md bg-muted/60 p-2 text-muted-foreground">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div>
+        <h2 className="text-sm font-medium">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p>
       </div>
     </div>
   );
