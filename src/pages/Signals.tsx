@@ -1,5 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, RefreshCw, X, Radar, Send, Loader2 } from "lucide-react";
 import { SignalSurface } from "@/components/signals/SignalSurface";
 import { useSignals } from "@/hooks/useSignals";
@@ -15,8 +15,17 @@ export default function Signals() {
   const { moments, synthesizing, synthesize, scanNow, dismissAll, respond, createSignal } = useSignals();
   const { brief, loading: briefLoading, refresh: refreshBrief } = useDailyBriefing();
   const navigate = useNavigate();
+  const location = useLocation();
   const [composerText, setComposerText] = useState("");
   const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    if (location.hash !== "#schedule") return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("schedule")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, briefLoading]);
 
   const digestMoments = useMemo(
     () => moments.filter((m) => m.kind === "digest"),
