@@ -35,6 +35,7 @@ export function MobileNav() {
 
   return (
     <>
+      <div className="h-[calc(4rem+env(safe-area-inset-bottom))] md:hidden" aria-hidden="true" />
       <nav className="fixed inset-x-0 bottom-0 z-[100] border-t border-border/60 bg-background/90 backdrop-blur-xl md:hidden safe-area-bottom" aria-label="Primary navigation">
         <div className="grid h-16 grid-cols-5 items-stretch px-1">
           {primaryItems.map(({ label, to, icon: Icon }) => (
