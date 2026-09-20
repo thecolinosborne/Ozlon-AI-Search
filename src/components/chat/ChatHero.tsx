@@ -26,7 +26,7 @@ export const ChatHero = ({
   onContinueSession,
 }: ChatHeroProps) => {
   return (
-    <div className="flex flex-col items-center justify-center flex-1 min-h-[60vh] px-4">
+    <div className="flex min-h-[60vh] flex-1 flex-col items-center justify-start px-4 pb-24 pt-[calc(7rem+env(safe-area-inset-top))] md:justify-center md:py-0">
       <h1 className="font-light tracking-tight text-neutral-800 text-6xl md:text-7xl mb-2">
         {systemName}
       </h1>

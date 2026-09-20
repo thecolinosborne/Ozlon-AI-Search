@@ -18,7 +18,7 @@ function greeting() {
 
 export function MobileCommandCenter({ systemName, firstName, onSpeak, isRecording }: MobileCommandCenterProps) {
   return (
-    <main className="flex min-h-[calc(100dvh-4rem)] flex-col px-4 pb-2 pt-20 md:hidden">
+    <main className="flex min-h-[calc(100dvh-4rem)] flex-col px-4 pb-2 pt-[calc(6rem+env(safe-area-inset-top))] md:hidden">
       <section className="px-1 pt-2 max-[600px]:pt-0">
         <p className="text-sm font-medium text-muted-foreground">{systemName}</p>
         <h1 className="mt-1 text-3xl font-medium text-foreground">

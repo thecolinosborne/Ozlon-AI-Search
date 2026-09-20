@@ -321,7 +321,7 @@ const Index = () => {
         onChange={handleFileSelect} className="hidden" aria-hidden="true" />
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 px-3 py-3 sm:px-4 sm:py-4 z-[60] bg-background/80 backdrop-blur-sm">
+      <header className="fixed top-0 left-0 right-0 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-4 sm:pb-4 sm:pt-[calc(1rem+env(safe-area-inset-top))] z-[60] bg-background/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             {isAuthenticated && (
