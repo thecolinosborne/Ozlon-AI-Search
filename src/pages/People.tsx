@@ -100,6 +100,67 @@ export default function People() {
     }
   };
 
+  const activeEntity = useMemo(
+    () => entities.find((e) => e.id === activeId) || space?.entity || null,
+    [entities, activeId, space],
+  );
+
+  const openNewContact = () => {
+    setEditing(null);
+    setEditorOpen(true);
+  };
+
+  const openEditContact = (entity: Entity) => {
+    setEditing(entity);
+    setEditorOpen(true);
+  };
+
+  const removeContact = async (entity: Entity) => {
+    if (!window.confirm(`Remove ${entity.display_name} from your People list?`)) return;
+    try {
+      await deleteContact(entity.id);
+      setEntities((prev) => prev.filter((e) => e.id !== entity.id));
+      if (activeId === entity.id) {
+        setActiveId(null);
+        setSpace(null);
+      }
+      toast({ title: "Contact removed", description: "Their record in the connected app was left alone." });
+    } catch (e) {
+      toast({ title: "Couldn't remove the contact", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const star = async (entity: Entity) => {
+    const next = !entity.starred;
+    setEntities((prev) => prev.map((e) => (e.id === entity.id ? { ...e, starred: next } : e)));
+    try {
+      await toggleStar(entity.id, next);
+    } catch (e) {
+      setEntities((prev) => prev.map((x) => (x.id === entity.id ? { ...x, starred: !next } : x)));
+      toast({ title: "Couldn't update", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const runGhlImport = async () => {
+    setImporting(true);
+    try {
+      const { added, updated } = await importFromGhl();
+      toast({ title: "GoHighLevel contacts pulled in", description: `${added} new, ${updated} refreshed.` });
+      await loadEntities(false);
+    } catch (e) {
+      toast({ title: "Couldn't reach GoHighLevel", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const refreshList = useCallback(() => { loadEntities(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user) return;
+    isGhlConnected().then(setGhlConnected).catch(() => setGhlConnected(false));
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
     loadEntities(false).then(() => {
