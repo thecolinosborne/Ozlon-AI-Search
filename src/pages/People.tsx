@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Search, Sparkles, Star, Mail, Paperclip, MessageSquare, Loader2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Search, Sparkles, Star, Mail, Paperclip, MessageSquare, Loader2, UserPlus, Pencil, Trash2, Download, Phone, Building2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
+import { ContactEditorDialog } from "@/components/people/ContactEditorDialog";
+import { deleteContact, importFromGhl, isGhlConnected, toggleStar } from "@/services/contactsService";
 
 type Entity = {
   id: string;
   display_name: string;
   entity_type: string;
   primary_email: string | null;
+  primary_phone?: string | null;
+  company?: string | null;
+  notes?: string | null;
+  source?: string | null;
+  external_ids?: Record<string, string> | null;
   importance_score: number;
   last_interaction_at: string | null;
   interaction_count: number;
