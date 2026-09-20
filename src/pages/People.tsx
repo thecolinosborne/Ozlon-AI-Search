@@ -59,6 +59,10 @@ export default function People() {
   const [space, setSpace] = useState<{ entity: Entity; timeline: TimelineItem[]; counts: any } | null>(null);
   const [spaceLoading, setSpaceLoading] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Entity | null>(null);
+  const [ghlConnected, setGhlConnected] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const callFn = async (name: string, opts: { method?: string; body?: any; query?: Record<string, string> } = {}) => {
     const url = new URL(`https://iebmlegqknigeildujyp.supabase.co/functions/v1/${name}`);
