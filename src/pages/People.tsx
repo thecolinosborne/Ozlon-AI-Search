@@ -487,6 +487,17 @@ export default function People() {
           )}
         </aside>
       </div>
+
+      <ContactEditorDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        contact={editing}
+        ghlConnected={ghlConnected}
+        onSaved={() => {
+          refreshList();
+          if (activeId) loadSpace(activeId, false);
+        }}
+      />
     </div>
   );
 }
