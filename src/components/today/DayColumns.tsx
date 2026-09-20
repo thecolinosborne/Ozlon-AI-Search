@@ -99,7 +99,7 @@ export function DayColumns({ events, connected, todos, watchouts, emailScanned, 
   };
 
   return (
-    <div className="px-6 pt-2 pb-6">
+    <div id="schedule" className="scroll-mt-20 px-4 sm:px-6 pt-2 pb-6">
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-3">
         {/* Schedule */}
         <Column
@@ -186,7 +186,7 @@ export function DayColumns({ events, connected, todos, watchouts, emailScanned, 
                       <button
                         type="button"
                         onClick={() => go(t.do_now_intent, t.title)}
-                        className="ml-auto normal-case tracking-normal text-[11px] text-muted-foreground/70 hover:text-foreground underline-offset-4 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="ml-auto normal-case tracking-normal text-[11px] text-muted-foreground/70 hover:text-foreground underline-offset-4 hover:underline md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                       >
                         Do it now
                       </button>
@@ -239,7 +239,7 @@ export function DayColumns({ events, connected, todos, watchouts, emailScanned, 
                       <button
                         type="button"
                         onClick={() => go(w.do_now_intent, w.title)}
-                        className="ml-auto normal-case tracking-normal text-[11px] text-muted-foreground/70 hover:text-foreground underline-offset-4 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="ml-auto normal-case tracking-normal text-[11px] text-muted-foreground/70 hover:text-foreground underline-offset-4 hover:underline md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                       >
                         Handle
                       </button>

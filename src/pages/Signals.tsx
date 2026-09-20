@@ -65,7 +65,7 @@ export default function Signals() {
   };
 
   return (
-    <div className="relative min-h-screen bg-background">
+    <div className="relative min-h-screen bg-background pb-20 md:pb-0">
       <Link
         to="/"
         className="fixed top-6 left-6 z-50 p-2 rounded-full text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -74,7 +74,7 @@ export default function Signals() {
         <ArrowLeft className="w-4 h-4" />
       </Link>
 
-      <div className="fixed top-6 right-6 z-50 flex items-center gap-1 text-[11px] text-muted-foreground/70">
+      <div className="fixed top-4 right-3 z-50 flex items-center gap-0.5 text-[11px] text-muted-foreground/70 sm:top-6 sm:right-6 sm:gap-1">
         <Link
           to="/stack"
           className="px-2 py-1 rounded-full hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -94,7 +94,7 @@ export default function Signals() {
           aria-label="Scan now"
         >
           <Radar className={`w-3.5 h-3.5 ${synthesizing ? "animate-pulse" : ""}`} />
-          <span>Scan now</span>
+          <span className="hidden min-[360px]:inline">Scan now</span>
         </button>
         <button
           type="button"

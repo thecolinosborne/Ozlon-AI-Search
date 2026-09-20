@@ -20,11 +20,11 @@ export const UserMenu = () => {
   // instead of a skeleton that hides all controls
   if (authLoading && !session) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <Link
           to="/auth?mode=signup"
           className={cn(
-            "px-4 py-2 text-sm font-medium rounded-full",
+            "hidden min-[380px]:inline-flex px-3 py-2 text-sm font-medium rounded-full",
             "border border-neutral-200 text-neutral-700",
             "hover:bg-neutral-50 transition-colors"
           )}
@@ -34,9 +34,9 @@ export const UserMenu = () => {
         <Link
           to="/auth"
           className={cn(
-            "px-4 py-2 text-sm font-medium rounded-full",
-            "bg-neutral-900 text-white",
-            "hover:bg-neutral-800 transition-colors"
+            "px-3 py-2 text-sm font-medium rounded-full",
+            "bg-foreground text-background",
+            "hover:bg-foreground/90 transition-colors"
           )}
         >
           Sign in
@@ -48,11 +48,11 @@ export const UserMenu = () => {
   // Not authenticated - show sign in/up buttons
   if (!session || !user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <Link
           to="/auth?mode=signup"
           className={cn(
-            "px-4 py-2 text-sm font-medium rounded-full",
+            "hidden min-[380px]:inline-flex px-3 py-2 text-sm font-medium rounded-full",
             "border border-neutral-200 text-neutral-700",
             "hover:bg-neutral-50 transition-colors"
           )}
@@ -62,9 +62,9 @@ export const UserMenu = () => {
         <Link
           to="/auth"
           className={cn(
-            "px-4 py-2 text-sm font-medium rounded-full",
-            "bg-neutral-900 text-white",
-            "hover:bg-neutral-800 transition-colors"
+            "px-3 py-2 text-sm font-medium rounded-full",
+            "bg-foreground text-background",
+            "hover:bg-foreground/90 transition-colors"
           )}
         >
           Sign in
