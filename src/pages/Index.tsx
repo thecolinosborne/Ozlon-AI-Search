@@ -24,6 +24,7 @@ import { ChatHero } from "@/components/chat/ChatHero";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { QuickActionsBar, QuickAction } from "@/components/chat/QuickActionsBar";
+import { MobileCommandCenter } from "@/components/mobile/MobileCommandCenter";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -159,6 +160,7 @@ const Index = () => {
       : visibleMessages;
 
   const hasInteracted = chatViewLatched || renderedMessages.length > 0;
+  const forceComposer = searchParams.get("compose") === "1";
 
   // ── Ephemeral state reset helper ─────────────────────────────────────
   const resetEphemeralState = useCallback(() => {
@@ -306,7 +308,7 @@ const Index = () => {
   }), [input, setInput, handleComposerSubmit, isUploading, handleMicClick, isRecording, isTranscribing, isLoading, systemName, attachedFiles, removeFile, triggerFileUpload]);
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       <ConversationSidebar
         open={sidebarOpen} onClose={() => setSidebarOpen(false)}
         sessions={sessions} activeSessionId={activeSessionId}
@@ -319,7 +321,7 @@ const Index = () => {
         onChange={handleFileSelect} className="hidden" aria-hidden="true" />
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 px-4 py-4 z-[60] bg-white/80 backdrop-blur-sm">
+      <header className="fixed top-0 left-0 right-0 px-3 py-3 sm:px-4 sm:py-4 z-[60] bg-background/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             {isAuthenticated && (
@@ -327,11 +329,11 @@ const Index = () => {
                 <Menu className="w-5 h-5 text-neutral-600" />
               </button>
             )}
-            <div className="flex items-center gap-1 p-1 bg-neutral-100 rounded-full">
+            <div className="flex items-center gap-1 p-1 bg-muted rounded-full">
               <button type="button" onClick={() => setActiveMode("chat")}
-                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
-                  activeMode === "chat" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700")}>
-                <MessageSquare className="w-4 h-4" /> Chat
+                className={cn("flex h-8 items-center gap-1.5 px-2.5 text-xs sm:px-3 sm:text-sm font-medium rounded-full transition-all",
+                  activeMode === "chat" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}> 
+                <MessageSquare className="w-4 h-4" /> <span className="hidden min-[350px]:inline">Chat</span>
               </button>
               <button type="button" disabled={!isAuthenticated}
                 onClick={() => {
@@ -339,11 +341,11 @@ const Index = () => {
                   if (!voiceEnabled) { toast.error("Enable voice conversation in Settings first"); return; }
                   setActiveMode("voice");
                 }}
-                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all",
-                  activeMode === "voice" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700",
+                className={cn("flex h-8 items-center gap-1.5 px-2.5 text-xs sm:px-3 sm:text-sm font-medium rounded-full transition-all",
+                  activeMode === "voice" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                   !isAuthenticated && "opacity-50 cursor-not-allowed")}
                 title={!isAuthenticated ? "Sign in to enable voice" : !voiceEnabled ? "Enable in Settings" : "Voice conversation"}>
-                <Phone className="w-4 h-4" /> Voice
+                <Phone className="w-4 h-4" /> <span className="hidden min-[350px]:inline">Voice</span>
               </button>
             </div>
           </div>
@@ -383,10 +385,22 @@ const Index = () => {
       {activeMode === "chat" && (
         <>
           {!hasInteracted && (
-            <ChatHero systemName={systemName} composerProps={composerProps} onQuickAction={handleQuickAction}
-              userSettings={userSettings} disabled={isLoading || isRecording}
-              recentSession={isAuthenticated && sessionsLoaded ? (sessions.find((s) => !!(s.summary || s.preview)) || null) : null}
-              onContinueSession={handleSwitchSession} />
+            <>
+              {isAuthenticated && !forceComposer && (
+                <MobileCommandCenter
+                  systemName={systemName}
+                  firstName={user?.user_metadata?.full_name?.split(" ")[0]}
+                  onSpeak={handleMicClick}
+                  isRecording={isRecording}
+                />
+              )}
+              <div className={cn(isAuthenticated && !forceComposer && "hidden md:block")}>
+                <ChatHero systemName={systemName} composerProps={composerProps} onQuickAction={handleQuickAction}
+                  userSettings={userSettings} disabled={isLoading || isRecording}
+                  recentSession={isAuthenticated && sessionsLoaded ? (sessions.find((s) => !!(s.summary || s.preview)) || null) : null}
+                  onContinueSession={handleSwitchSession} />
+              </div>
+            </>
           )}
 
           {hasInteracted && (
@@ -396,7 +410,7 @@ const Index = () => {
           )}
 
           {hasInteracted && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-100 p-4">
+            <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-background border-t border-border/50 p-3 sm:p-4">
               <ChatComposer {...composerProps} mode="docked" />
             </div>
           )}

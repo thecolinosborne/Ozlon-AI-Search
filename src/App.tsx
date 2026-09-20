@@ -49,6 +49,7 @@ import People from "@/pages/People";
 import Signals from "@/pages/Signals";
 import Stack from "@/pages/Stack";
 import { Navigate } from "react-router-dom";
+import { MobileNav } from "@/components/mobile/MobileNav";
 
 import NotFound from "@/pages/NotFound";
 
@@ -122,6 +123,7 @@ const AppRoutes = () => {
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      <MobileNav />
     </>
   );
 };
