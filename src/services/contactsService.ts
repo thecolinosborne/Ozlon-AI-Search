@@ -219,6 +219,7 @@ export async function importFromGhl(limit = 100): Promise<{ added: number; updat
       c.contactName?.trim() ||
       [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
       c.email ||
+      c.phone ||
       "Unnamed contact";
     const email = c.email?.trim().toLowerCase() || null;
     const match = byGhlId.get(c.id) || (email ? byEmail.get(email) : undefined);
@@ -248,7 +249,7 @@ export async function importFromGhl(limit = 100): Promise<{ added: number; updat
           company: c.companyName || null,
           source: "gohighlevel",
           external_ids: { gohighlevel: c.id },
-          importance_score: 0.45,
+          importance_score: 0.3,
           interaction_count: 0,
           channel_counts: {},
         })
