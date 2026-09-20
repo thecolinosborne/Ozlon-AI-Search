@@ -1026,17 +1026,22 @@ export type Database = {
         Row: {
           avatar_url: string | null
           channel_counts: Json
+          company: string | null
           created_at: string
           display_name: string
           entity_type: string
+          external_ids: Json
           id: string
           importance_score: number
           interaction_count: number
           last_interaction_at: string | null
           metadata: Json | null
           muted: boolean
+          notes: string | null
           primary_email: string | null
+          primary_phone: string | null
           relationship_summary: string | null
+          source: string
           starred: boolean
           tags: string[] | null
           updated_at: string
@@ -1045,17 +1050,22 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           channel_counts?: Json
+          company?: string | null
           created_at?: string
           display_name: string
           entity_type?: string
+          external_ids?: Json
           id?: string
           importance_score?: number
           interaction_count?: number
           last_interaction_at?: string | null
           metadata?: Json | null
           muted?: boolean
+          notes?: string | null
           primary_email?: string | null
+          primary_phone?: string | null
           relationship_summary?: string | null
+          source?: string
           starred?: boolean
           tags?: string[] | null
           updated_at?: string
@@ -1064,17 +1074,22 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           channel_counts?: Json
+          company?: string | null
           created_at?: string
           display_name?: string
           entity_type?: string
+          external_ids?: Json
           id?: string
           importance_score?: number
           interaction_count?: number
           last_interaction_at?: string | null
           metadata?: Json | null
           muted?: boolean
+          notes?: string | null
           primary_email?: string | null
+          primary_phone?: string | null
           relationship_summary?: string | null
+          source?: string
           starred?: boolean
           tags?: string[] | null
           updated_at?: string

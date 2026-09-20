@@ -8,6 +8,13 @@
       "when": 1789748895110,
       "tag": "0000_expand_wisdom_memory_for_business_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789948084810,
+      "tag": "0001_add_contact_fields_to_entities",
+      "breakpoints": true
     }
   ]
 }

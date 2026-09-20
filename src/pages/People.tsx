@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Search, Sparkles, Star, Mail, Paperclip, MessageSquare, Loader2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Search, Sparkles, Star, Mail, Paperclip, MessageSquare, Loader2, UserPlus, Pencil, Trash2, Download, Phone, Building2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
+import { ContactEditorDialog } from "@/components/people/ContactEditorDialog";
+import { deleteContact, importFromGhl, isGhlConnected, toggleStar } from "@/services/contactsService";
 
 type Entity = {
   id: string;
   display_name: string;
   entity_type: string;
   primary_email: string | null;
+  primary_phone?: string | null;
+  company?: string | null;
+  notes?: string | null;
+  source?: string | null;
+  external_ids?: Record<string, string> | null;
   importance_score: number;
   last_interaction_at: string | null;
   interaction_count: number;
@@ -52,20 +59,28 @@ export default function People() {
   const [space, setSpace] = useState<{ entity: Entity; timeline: TimelineItem[]; counts: any } | null>(null);
   const [spaceLoading, setSpaceLoading] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Entity | null>(null);
+  const [ghlConnected, setGhlConnected] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const callFn = async (name: string, opts: { method?: string; body?: any; query?: Record<string, string> } = {}) => {
     const url = new URL(`https://iebmlegqknigeildujyp.supabase.co/functions/v1/${name}`);
     if (opts.query) Object.entries(opts.query).forEach(([k, v]) => url.searchParams.set(k, v));
+    // Always read the freshest token — a cached one can expire during a long session.
+    const { data: { session: live } } = await supabase.auth.getSession();
+    const token = live?.access_token || session?.access_token;
     const res = await fetch(url.toString(), {
       method: opts.method || "GET",
       headers: {
-        Authorization: `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     return res.json();
   };
+
 
   const loadEntities = async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -88,6 +103,67 @@ export default function People() {
       setSpaceLoading(false);
     }
   };
+
+  const activeEntity = useMemo(
+    () => entities.find((e) => e.id === activeId) || space?.entity || null,
+    [entities, activeId, space],
+  );
+
+  const openNewContact = () => {
+    setEditing(null);
+    setEditorOpen(true);
+  };
+
+  const openEditContact = (entity: Entity) => {
+    setEditing(entity);
+    setEditorOpen(true);
+  };
+
+  const removeContact = async (entity: Entity) => {
+    if (!window.confirm(`Remove ${entity.display_name} from your People list?`)) return;
+    try {
+      await deleteContact(entity.id);
+      setEntities((prev) => prev.filter((e) => e.id !== entity.id));
+      if (activeId === entity.id) {
+        setActiveId(null);
+        setSpace(null);
+      }
+      toast({ title: "Contact removed", description: "Their record in the connected app was left alone." });
+    } catch (e) {
+      toast({ title: "Couldn't remove the contact", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const star = async (entity: Entity) => {
+    const next = !entity.starred;
+    setEntities((prev) => prev.map((e) => (e.id === entity.id ? { ...e, starred: next } : e)));
+    try {
+      await toggleStar(entity.id, next);
+    } catch (e) {
+      setEntities((prev) => prev.map((x) => (x.id === entity.id ? { ...x, starred: !next } : x)));
+      toast({ title: "Couldn't update", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const runGhlImport = async () => {
+    setImporting(true);
+    try {
+      const { added, updated } = await importFromGhl();
+      toast({ title: "GoHighLevel contacts pulled in", description: `${added} new, ${updated} refreshed.` });
+      await loadEntities(false);
+    } catch (e) {
+      toast({ title: "Couldn't reach GoHighLevel", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const refreshList = useCallback(() => { loadEntities(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user) return;
+    isGhlConnected().then(setGhlConnected).catch(() => setGhlConnected(false));
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -149,6 +225,16 @@ export default function People() {
             <h1 className="text-sm font-medium tracking-tight">People</h1>
             <p className="text-[11px] text-muted-foreground">Your communication layer — organized by who matters, not by app.</p>
           </div>
+          <Button variant="ghost" size="sm" onClick={openNewContact}>
+            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+            Add contact
+          </Button>
+          {ghlConnected && (
+            <Button variant="ghost" size="sm" onClick={runGhlImport} disabled={importing}>
+              {importing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+              Import from GoHighLevel
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => loadEntities(true)} disabled={refreshing}>
             <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", refreshing && "animate-spin")} />
             Sync
@@ -198,6 +284,9 @@ export default function People() {
                 <p>No people yet.</p>
                 <Button variant="link" size="sm" onClick={() => loadEntities(true)} className="mt-2">
                   Build from communications
+                </Button>
+                <Button variant="link" size="sm" onClick={openNewContact} className="mt-1">
+                  Add a contact manually
                 </Button>
               </div>
             ) : (
@@ -273,14 +362,42 @@ export default function People() {
                       {space.entity.primary_email}
                       {space.entity.last_interaction_at && ` · last ${formatDistanceToNow(new Date(space.entity.last_interaction_at), { addSuffix: true })}`}
                     </p>
+                    {(activeEntity?.primary_phone || activeEntity?.company) && (
+                      <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        {activeEntity?.primary_phone && (
+                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{activeEntity.primary_phone}</span>
+                        )}
+                        {activeEntity?.company && (
+                          <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{activeEntity.company}</span>
+                        )}
+                      </div>
+                    )}
+                    {activeEntity?.notes && (
+                      <p className="text-xs text-foreground/70 mt-2 whitespace-pre-wrap">{activeEntity.notes}</p>
+                    )}
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       <Badge variant="secondary" className="text-[10px] font-normal">{space.entity.entity_type}</Badge>
+                      {activeEntity?.external_ids?.gohighlevel && (
+                        <Badge variant="outline" className="text-[10px] font-normal">GoHighLevel</Badge>
+                      )}
                       {Object.entries(space.entity.channel_counts || {}).map(([ch, n]) => (
                         <Badge key={ch} variant="outline" className="text-[10px] font-normal">{ch} · {String(n)}</Badge>
                       ))}
                     </div>
                   </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Pin contact" onClick={() => activeEntity && star(activeEntity)}>
+                      <Star className={cn("h-3.5 w-3.5", activeEntity?.starred && "fill-primary text-primary")} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Edit contact" onClick={() => activeEntity && openEditContact(activeEntity)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" aria-label="Remove contact" onClick={() => activeEntity && removeContact(activeEntity)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
+
               </div>
 
               {/* Timeline */}
@@ -377,6 +494,17 @@ export default function People() {
           )}
         </aside>
       </div>
+
+      <ContactEditorDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        contact={editing}
+        ghlConnected={ghlConnected}
+        onSaved={() => {
+          refreshList();
+          if (activeId) loadSpace(activeId, false);
+        }}
+      />
     </div>
   );
 }
