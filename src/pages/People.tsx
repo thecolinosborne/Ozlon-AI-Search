@@ -67,16 +67,20 @@ export default function People() {
   const callFn = async (name: string, opts: { method?: string; body?: any; query?: Record<string, string> } = {}) => {
     const url = new URL(`https://iebmlegqknigeildujyp.supabase.co/functions/v1/${name}`);
     if (opts.query) Object.entries(opts.query).forEach(([k, v]) => url.searchParams.set(k, v));
+    // Always read the freshest token — a cached one can expire during a long session.
+    const { data: { session: live } } = await supabase.auth.getSession();
+    const token = live?.access_token || session?.access_token;
     const res = await fetch(url.toString(), {
       method: opts.method || "GET",
       headers: {
-        Authorization: `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     return res.json();
   };
+
 
   const loadEntities = async (refresh = false) => {
     if (refresh) setRefreshing(true);
