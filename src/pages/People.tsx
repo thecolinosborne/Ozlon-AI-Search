@@ -221,6 +221,16 @@ export default function People() {
             <h1 className="text-sm font-medium tracking-tight">People</h1>
             <p className="text-[11px] text-muted-foreground">Your communication layer — organized by who matters, not by app.</p>
           </div>
+          <Button variant="ghost" size="sm" onClick={openNewContact}>
+            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+            Add contact
+          </Button>
+          {ghlConnected && (
+            <Button variant="ghost" size="sm" onClick={runGhlImport} disabled={importing}>
+              {importing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+              Import from GoHighLevel
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => loadEntities(true)} disabled={refreshing}>
             <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", refreshing && "animate-spin")} />
             Sync
