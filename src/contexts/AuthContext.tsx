@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearAllIntegrationCaches();
   }, []);
 
-  const loadUserProfile = useCallback(async (userId: string, _isNewSignup: boolean) => {
+  const loadUserProfile = useCallback(async (userId: string, isNewSignup: boolean) => {
     console.log("Loading user profile for:", userId);
     try {
       const { data: profile, error } = await supabase
@@ -82,8 +82,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log("Profile loaded:", profile, "error:", error);
 
-      const onboardingDone = profile?.onboarding_complete === true;
       const wasOnboarded = localStorage.getItem(ONBOARDED_KEY) === "true";
+
+      // A failed profile read is not evidence that onboarding is incomplete.
+      // Fail safely into the app and let a later auth event retry the profile.
+      if (error) {
+        console.warn("Profile fetch failed; preserving authenticated access", error);
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(wasOnboarded || !isNewSignup);
+        setNeedsOnboarding(false);
+        setProfileLoaded(true);
+        return;
+      }
+
+      const onboardingDone = profile?.onboarding_complete === true;
 
       if (onboardingDone) {
         const name = profile?.system_name || "Ozlon";
@@ -98,9 +110,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsReturningUser(true);
         setNeedsOnboarding(false);
         supabase.from("profiles").update({ onboarding_complete: true }).eq("user_id", userId).then(() => {});
-      } else {
+      } else if (isNewSignup) {
         setNeedsOnboarding(true);
         setIsReturningUser(false);
+      } else {
+        // Existing accounts must never be pushed through first-run onboarding
+        // solely because their profile row is temporarily absent.
+        setSystemName(localStorage.getItem(STORAGE_KEY) || "Ozlon");
+        setIsReturningUser(true);
+        setNeedsOnboarding(false);
       }
 
       setVoiceEnabledState(profile?.voice_enabled ?? false);
