@@ -9773,6 +9773,7 @@ async function runToolLoop(
     let toolsForRequest: ToolDef[] = tools;
     if (tools.length > MAX_TOOLS) {
       const hint = (userMessage || '').toLowerCase();
+      const goalShapedTurn = isGoalShapedAsk(userMessage || '');
 
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
