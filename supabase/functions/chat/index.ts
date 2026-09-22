@@ -9760,6 +9760,7 @@ async function runToolLoop(
   // Outcome gate: a goal-shaped ask must produce a saved outcome before the
   // model is allowed to wander into research / CRM / project tools.
   (globalThis as Record<string, unknown>).__outcomeSaved = false;
+  (globalThis as Record<string, unknown>).__outcomeSavePushed = false;
 
   while (iteration < maxIterations) {
     iteration++;
