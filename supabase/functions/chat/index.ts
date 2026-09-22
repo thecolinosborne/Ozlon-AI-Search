@@ -10337,6 +10337,23 @@ async function runToolLoop(
       continue;
     }
 
+    // Goal-shaped turn that ended with prose but no saved outcome: the model
+    // either asked questions back or claimed a save it never made. Push once.
+    if (
+      isGoalShapedAsk(userMessage || '')
+      && !(globalThis as Record<string, unknown>).__outcomeSaved
+      && !(globalThis as Record<string, unknown>).__outcomeSavePushed
+      && !forcedSynthesis
+    ) {
+      (globalThis as Record<string, unknown>).__outcomeSavePushed = true;
+      console.warn('[OutcomeGate] Final text with no saved outcome. Forcing save_outcome.');
+      openAIMessages.push({
+        role: 'system',
+        content: 'NO OUTCOME WAS SAVED THIS TURN. You must call save_outcome now with title, goal, current_state, success_looks_like, done_when, first_move, venture_name and the full ordered list of steps (each with owner and due_date where you can infer one). Do not ask the user anything — choose sensible defaults. Do not claim a plan was saved until the tool has returned.',
+      });
+      continue;
+    }
+
     // No tool calls - return the final response
     if (taskCreated && onTaskUpdate) {
       const summary = (msg.content || '').substring(0, 200);
