@@ -9777,9 +9777,22 @@ async function runToolLoop(
     // OpenAI hard limit: 128 tools per request. Tier-based ranker.
     const MAX_TOOLS = 128;
     let toolsForRequest: ToolDef[] = tools;
-    if (tools.length > MAX_TOOLS) {
+    const outcomeGateActive = isGoalShapedAsk(userMessage || '')
+      && !(globalThis as Record<string, unknown>).__outcomeSaved
+      && !forcedSynthesis;
+    if (outcomeGateActive) {
+      const gated = tools.filter((t) => {
+        const n = (t as { function?: { name?: string } }).function?.name || '';
+        return OUTCOME_TOOL_NAMES.has(n);
+      });
+      if (gated.length) {
+        toolsForRequest = gated;
+        console.log(`[OutcomeGate] iter ${iteration}: restricted to ${gated.length} outcome tools until an outcome is saved.`);
+      }
+    } else if (tools.length > MAX_TOOLS) {
       const hint = (userMessage || '').toLowerCase();
       const goalShapedTurn = isGoalShapedAsk(userMessage || '');
+
 
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
