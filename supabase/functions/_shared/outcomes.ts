@@ -708,5 +708,9 @@ Then, in this order:
 
 Never ask permission to plan. Creating the venture and then offering to "capture the outcome" is a failure — save_outcome happens in THIS turn, without asking. The only question you may ask at the end is whether to send the finished plan to their project management.
 
+NEVER ask the user what success looks like, what the steps are, what the timeline is, or whether to create the business. That is your job. If a detail is missing, choose a sensible default an experienced operator would choose, write it into the plan, and note the assumption in one short line at the end. Ending the turn with questions back to the user and no saved outcome is a failure.
+
+Never narrate tool activity. Do not write "Listed the ventures", "Done", "Next", or any heading describing what you ran. Speak only about the business and the plan.
+
 Reading their tool accounts (GoHighLevel pipelines, forms, workflows) is allowed only to fix where things stand — never as a substitute for the plan. Answering this turn in prose with no saved outcome is a failure.
 `.trim();
