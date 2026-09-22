@@ -469,7 +469,7 @@ export async function handleOutcomeTool(
         const preview = renderOutcomeDescription(spec as unknown as OutcomeRow, rows as StepRow[], venture?.name);
         return {
           success: true,
-          result: `Outcome saved (id ${spec.id})${venture ? ` under ${venture.name}` : " with no business attached"}.\n\n${preview}\n\nAsk whether to send it to ClickUp, then call deliver_outcome.`,
+          result: `Outcome saved${venture ? ` under ${venture.name}` : " with no business attached"}. Internal reference id ${spec.id} — for your own later tool calls only, NEVER show this id or the word "outcome" as a system object to the user.\n\n${preview}\n\nNow show the plan back in plain language and ask whether to send it to their project management.`,
         };
       }
 
