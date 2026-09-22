@@ -663,3 +663,41 @@ export async function buildPulse(admin: SupabaseClient, userId: string): Promise
   }
   return `Pulse for ${today}\n${lines.join("\n")}`;
 }
+
+// ============================================================================
+// 5. GOAL-SHAPED ASK DETECTION (mechanical trigger)
+// ============================================================================
+// The doctrine alone is not enough: when a request also names a tool stack
+// (GoHighLevel, ClickUp, a website), the model drifts into integration
+// discovery and answers in prose. This makes the trigger deterministic.
+
+const GOAL_PATTERNS: RegExp[] = [
+  /\bi\s+(want|wanna|need|would like)\s+to\s+(start|launch|build|set\s*up|create|open|scale|grow)\b/i,
+  /\bsuccess\s+(looks?|would\s+look)\s+like\b/i,
+  /\blet'?s\s+(start|launch|build|set\s*up)\s+(a|an|the|my)\b/i,
+  /\b(start|launch|spin\s*up)\s+(a|an|my|the)\s+[a-z\s]{2,40}\b(company|business|brand|agency|service)\b/i,
+  /\bget\s+(the|my|our)\s+[a-z\s]{2,30}\b(live|launched|off the ground|running)\b/i,
+  /\bwe\s+need\s+to\s+(build|launch|hire|set\s*up|stand\s*up)\b/i,
+  /\bfrom\s+(scratch|zero)\b.*\b(business|company|brand)\b/i,
+];
+
+export function isGoalShapedAsk(text: string): boolean {
+  const t = String(text || "").slice(0, 2000);
+  if (t.length < 20) return false;
+  return GOAL_PATTERNS.some((re) => re.test(t));
+}
+
+export const OUTCOME_ENFORCEMENT = `
+## THIS TURN IS A GOAL-SHAPED ASK — OUTCOME REQUIRED
+
+The user has described something they want to exist, not a small errand. The outcome doctrine is not optional here.
+
+Your FIRST tool call this turn is list_ventures. Nothing else comes first — not GoHighLevel, not ClickUp, not a search.
+
+Then, in this order:
+1. upsert_venture if this business is not already on the list.
+2. save_outcome with the full picture: where things stand now, what success looks like in things the user can point at, and the ordered steps from here to there. Each step is a result with an owner and a date where you can infer one. Cover every part of what they said success means — if they named branding, a site, automations, capture, CRM and tracking, every one of those is a step or a success criterion. Do not stop at five steps if the goal needs more.
+3. Show it back in plain language and ask whether to send it to their project management. Do not send it unasked.
+
+Reading their tool accounts (GoHighLevel pipelines, forms, workflows) is allowed only to fix where things stand — never as a substitute for the plan. Answering this turn in prose with no saved outcome is a failure.
+`.trim();
