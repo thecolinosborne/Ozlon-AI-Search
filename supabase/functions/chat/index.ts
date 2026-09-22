@@ -3868,6 +3868,9 @@ async function executeToolCall(
     if (OUTCOME_TOOL_NAMES.has(toolName)) {
       const outcomeUserId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
       const outcomeAuth = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      if (toolName === 'save_outcome') {
+        (globalThis as Record<string, unknown>).__outcomeSaved = true;
+      }
       return await handleOutcomeTool(toolName, args, outcomeUserId || '', outcomeAuth);
     }
 
