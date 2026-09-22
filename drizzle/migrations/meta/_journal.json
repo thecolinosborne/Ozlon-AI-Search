@@ -15,6 +15,13 @@
       "when": 1789948084810,
       "tag": "0001_add_contact_fields_to_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790077429393,
+      "tag": "0002_create_ventures_and_outcomes",
+      "breakpoints": true
     }
   ]
 }
