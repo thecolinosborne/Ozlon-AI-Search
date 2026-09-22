@@ -503,25 +503,22 @@ export async function handleOutcomeTool(
         const failed: string[] = [];
         for (const s of steps || []) {
           try {
+            const stepDue = epochMs(s.due_date as string | null);
             const sub = await callClickUp("create_subtask", {
               parentId,
               name: s.title,
-              ...(s.detail || s.owner || s.due_date
+              ...(s.detail || s.owner
                 ? {
-                  description: [s.detail || "", s.owner ? `Owner: ${s.owner}` : "", s.due_date ? `By ${s.due_date}` : ""]
+                  description: [s.detail || "", s.owner ? `Owner: ${s.owner}` : ""]
                     .filter(Boolean).join("\n"),
                 }
                 : {}),
+              ...(stepDue ? { due_date: stepDue } : {}),
             }, authHeader);
             const subId = String((sub as { id?: string }).id || "");
             if (subId) {
-              created.push(s.title);
-              const patch: Record<string, unknown> = { clickup_task_id: subId };
-              await admin.from("outcome_steps").update(patch).eq("id", s.id).eq("user_id", userId);
-              const due = epochMs(s.due_date);
-              if (due) {
-                await callClickUp("update_task", { taskId: subId, due_date: due }, authHeader).catch(() => {});
-              }
+              created.push(s.title as string);
+              await admin.from("outcome_steps").update({ clickup_task_id: subId }).eq("id", s.id).eq("user_id", userId);
             }
           } catch (e) {
             failed.push(`${s.title} (${e instanceof Error ? e.message : String(e)})`);
@@ -600,7 +597,7 @@ export async function handleOutcomeTool(
         }
         if (!taskId) return { success: false, result: "No task to brief. Pass task_id, or deliver the outcome to ClickUp first." };
 
-        await callClickUp("create_comment", { taskId, commentText: brief, notifyAll: true }, authHeader);
+        await callClickUp("create_comment", { taskId, comment_text: brief }, authHeader);
         const assignees = Array.isArray(args.assignee_ids) ? (args.assignee_ids as number[]) : [];
         if (assignees.length) {
           await callClickUp("update_task", { taskId, assignees: { add: assignees } }, authHeader).catch(() => {});
