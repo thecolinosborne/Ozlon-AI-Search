@@ -429,7 +429,16 @@ export async function handleOutcomeTool(
         if (!title || !goal) return { success: false, result: "title and goal are required" };
         if (!steps.length) return { success: false, result: "steps are required — an outcome without a path from A to B is just a wish." };
 
-        const venture = await findVenture(admin, userId, str(args.venture_name));
+        // Self-heal: an outcome must belong to a business. If the named business
+        // does not exist yet, create it rather than saving work with no home.
+        let venture = await findVenture(admin, userId, str(args.venture_name));
+        if (!venture && str(args.venture_name)) {
+          const { data: created } = await admin
+            .from("ventures")
+            .insert({ user_id: userId, name: str(args.venture_name), stage: "idea" })
+            .select("*").maybeSingle();
+          venture = created || null;
+        }
         const { data: spec, error } = await admin.from("outcome_specs").insert({
           user_id: userId,
           venture_id: venture?.id ?? null,
