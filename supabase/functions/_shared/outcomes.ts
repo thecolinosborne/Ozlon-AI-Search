@@ -439,6 +439,16 @@ export async function handleOutcomeTool(
             .select("*").maybeSingle();
           venture = created || null;
         }
+        // Models often anchor on stale training dates and write due dates in the
+        // past, which instantly reads as "overdue". Push any past date forward.
+        const todayISO = new Date().toISOString().slice(0, 10);
+        const futureDate = (v?: string | null, offsetDays = 14): string | null => {
+          const d = str(v);
+          if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+          if (d >= todayISO) return d;
+          const shifted = new Date(Date.now() + offsetDays * 86_400_000);
+          return shifted.toISOString().slice(0, 10);
+        };
         const { data: spec, error } = await admin.from("outcome_specs").insert({
           user_id: userId,
           venture_id: venture?.id ?? null,
@@ -449,7 +459,7 @@ export async function handleOutcomeTool(
           done_when: strArr(args.done_when),
           first_move: str(args.first_move) || null,
           owner: str(args.owner) || null,
-          due_date: str(args.due_date) || null,
+          due_date: futureDate(str(args.due_date), 90),
           status: "draft",
         }).select("*").maybeSingle();
         if (error || !spec) return { success: false, result: `Could not save outcome: ${error?.message}` };
@@ -461,7 +471,7 @@ export async function handleOutcomeTool(
           title: str(s.title) || `Step ${i + 1}`,
           detail: str(s.detail) || null,
           owner: str(s.owner) || null,
-          due_date: str(s.due_date) || null,
+          due_date: futureDate(str(s.due_date), 7 * (i + 1)),
         }));
         const { error: stepErr } = await admin.from("outcome_steps").insert(rows);
         if (stepErr) return { success: false, result: `Outcome saved but steps failed: ${stepErr.message}` };
