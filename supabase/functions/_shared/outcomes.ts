@@ -1,7 +1,8 @@
 // ============================================================================
 // OUTCOME ENGINE — the executive-assistant layer.
 //
-// Turns a goal-shaped ask ("I want to start a cleaning company") into an
+// Turns any goal-shaped ask, in any industry and for any of the user's
+// businesses — starting, fixing, or growing one — into an
 // Outcome Spec: goal → what success looks like → done-when → ordered steps →
 // first move with an owner and a date. Then delivers it into ClickUp as one
 // human-readable parent task with subtasks, and keeps pushing it forward.
