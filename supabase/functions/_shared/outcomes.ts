@@ -79,7 +79,7 @@ export const OUTCOME_TOOLS: OutcomeToolDef[] = [
       parameters: {
         type: "object",
         properties: {
-          name: { type: "string", description: "Business name, e.g. 'Cleaning Company' or 'Avalon'." },
+          name: { type: "string", description: "Business name, any industry." },
           description: { type: "string" },
           stage: { type: "string", enum: ["idea", "building", "launching", "operating", "scaling", "paused"] },
           what_exists: { type: "string", description: "What is already built or in place today." },
