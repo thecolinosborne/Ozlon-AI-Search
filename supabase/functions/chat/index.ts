@@ -9757,6 +9757,9 @@ async function runToolLoop(
   // Stagnation tracking: fingerprints of every tool payload seen this turn.
   const seenResultFingerprints = new Set<string>();
   let stagnantIterations = 0;
+  // Outcome gate: a goal-shaped ask must produce a saved outcome before the
+  // model is allowed to wander into research / CRM / project tools.
+  (globalThis as Record<string, unknown>).__outcomeSaved = false;
 
   while (iteration < maxIterations) {
     iteration++;
