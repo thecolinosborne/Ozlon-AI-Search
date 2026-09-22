@@ -3868,6 +3868,9 @@ async function executeToolCall(
     if (OUTCOME_TOOL_NAMES.has(toolName)) {
       const outcomeUserId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
       const outcomeAuth = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      if (toolName === 'save_outcome') {
+        (globalThis as Record<string, unknown>).__outcomeSaved = true;
+      }
       return await handleOutcomeTool(toolName, args, outcomeUserId || '', outcomeAuth);
     }
 
@@ -9754,6 +9757,10 @@ async function runToolLoop(
   // Stagnation tracking: fingerprints of every tool payload seen this turn.
   const seenResultFingerprints = new Set<string>();
   let stagnantIterations = 0;
+  // Outcome gate: a goal-shaped ask must produce a saved outcome before the
+  // model is allowed to wander into research / CRM / project tools.
+  (globalThis as Record<string, unknown>).__outcomeSaved = false;
+  (globalThis as Record<string, unknown>).__outcomeSavePushed = false;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -9771,9 +9778,22 @@ async function runToolLoop(
     // OpenAI hard limit: 128 tools per request. Tier-based ranker.
     const MAX_TOOLS = 128;
     let toolsForRequest: ToolDef[] = tools;
-    if (tools.length > MAX_TOOLS) {
+    const outcomeGateActive = isGoalShapedAsk(userMessage || '')
+      && !(globalThis as Record<string, unknown>).__outcomeSaved
+      && !forcedSynthesis;
+    if (outcomeGateActive) {
+      const gated = tools.filter((t) => {
+        const n = (t as { function?: { name?: string } }).function?.name || '';
+        return OUTCOME_TOOL_NAMES.has(n);
+      });
+      if (gated.length) {
+        toolsForRequest = gated;
+        console.log(`[OutcomeGate] iter ${iteration}: restricted to ${gated.length} outcome tools until an outcome is saved.`);
+      }
+    } else if (tools.length > MAX_TOOLS) {
       const hint = (userMessage || '').toLowerCase();
       const goalShapedTurn = isGoalShapedAsk(userMessage || '');
+
 
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
@@ -10315,6 +10335,23 @@ async function runToolLoop(
         });
       }
       // Continue the loop so the model can process tool results
+      continue;
+    }
+
+    // Goal-shaped turn that ended with prose but no saved outcome: the model
+    // either asked questions back or claimed a save it never made. Push once.
+    if (
+      isGoalShapedAsk(userMessage || '')
+      && !(globalThis as Record<string, unknown>).__outcomeSaved
+      && !(globalThis as Record<string, unknown>).__outcomeSavePushed
+      && !forcedSynthesis
+    ) {
+      (globalThis as Record<string, unknown>).__outcomeSavePushed = true;
+      console.warn('[OutcomeGate] Final text with no saved outcome. Forcing save_outcome.');
+      openAIMessages.push({
+        role: 'system',
+        content: 'NO OUTCOME WAS SAVED THIS TURN. You must call save_outcome now with title, goal, current_state, success_looks_like, done_when, first_move, venture_name and the full ordered list of steps (each with owner and due_date where you can infer one). Do not ask the user anything — choose sensible defaults. Do not claim a plan was saved until the tool has returned.',
+      });
       continue;
     }
 

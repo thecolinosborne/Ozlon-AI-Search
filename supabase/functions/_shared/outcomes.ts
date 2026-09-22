@@ -429,7 +429,26 @@ export async function handleOutcomeTool(
         if (!title || !goal) return { success: false, result: "title and goal are required" };
         if (!steps.length) return { success: false, result: "steps are required — an outcome without a path from A to B is just a wish." };
 
-        const venture = await findVenture(admin, userId, str(args.venture_name));
+        // Self-heal: an outcome must belong to a business. If the named business
+        // does not exist yet, create it rather than saving work with no home.
+        let venture = await findVenture(admin, userId, str(args.venture_name));
+        if (!venture && str(args.venture_name)) {
+          const { data: created } = await admin
+            .from("ventures")
+            .insert({ user_id: userId, name: str(args.venture_name), stage: "idea" })
+            .select("*").maybeSingle();
+          venture = created || null;
+        }
+        // Models often anchor on stale training dates and write due dates in the
+        // past, which instantly reads as "overdue". Push any past date forward.
+        const todayISO = new Date().toISOString().slice(0, 10);
+        const futureDate = (v?: string | null, offsetDays = 14): string | null => {
+          const d = str(v);
+          if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+          if (d >= todayISO) return d;
+          const shifted = new Date(Date.now() + offsetDays * 86_400_000);
+          return shifted.toISOString().slice(0, 10);
+        };
         const { data: spec, error } = await admin.from("outcome_specs").insert({
           user_id: userId,
           venture_id: venture?.id ?? null,
@@ -440,7 +459,7 @@ export async function handleOutcomeTool(
           done_when: strArr(args.done_when),
           first_move: str(args.first_move) || null,
           owner: str(args.owner) || null,
-          due_date: str(args.due_date) || null,
+          due_date: futureDate(str(args.due_date), 90),
           status: "draft",
         }).select("*").maybeSingle();
         if (error || !spec) return { success: false, result: `Could not save outcome: ${error?.message}` };
@@ -452,7 +471,7 @@ export async function handleOutcomeTool(
           title: str(s.title) || `Step ${i + 1}`,
           detail: str(s.detail) || null,
           owner: str(s.owner) || null,
-          due_date: str(s.due_date) || null,
+          due_date: futureDate(str(s.due_date), 7 * (i + 1)),
         }));
         const { error: stepErr } = await admin.from("outcome_steps").insert(rows);
         if (stepErr) return { success: false, result: `Outcome saved but steps failed: ${stepErr.message}` };
@@ -460,7 +479,7 @@ export async function handleOutcomeTool(
         const preview = renderOutcomeDescription(spec as unknown as OutcomeRow, rows as StepRow[], venture?.name);
         return {
           success: true,
-          result: `Outcome saved (id ${spec.id})${venture ? ` under ${venture.name}` : " with no business attached"}.\n\n${preview}\n\nAsk whether to send it to ClickUp, then call deliver_outcome.`,
+          result: `Outcome saved${venture ? ` under ${venture.name}` : " with no business attached"}. Internal reference id ${spec.id} — for your own later tool calls only, NEVER show this id or the word "outcome" as a system object to the user.\n\n${preview}\n\nNow show the plan back in plain language and ask whether to send it to their project management.`,
         };
       }
 
@@ -707,6 +726,10 @@ Then, in this order:
 3. Show it back in plain language and ask whether to send it to their project management. Do not send it unasked.
 
 Never ask permission to plan. Creating the venture and then offering to "capture the outcome" is a failure — save_outcome happens in THIS turn, without asking. The only question you may ask at the end is whether to send the finished plan to their project management.
+
+NEVER ask the user what success looks like, what the steps are, what the timeline is, or whether to create the business. That is your job. If a detail is missing, choose a sensible default an experienced operator would choose, write it into the plan, and note the assumption in one short line at the end. Ending the turn with questions back to the user and no saved outcome is a failure.
+
+Never narrate tool activity. Do not write "Listed the ventures", "Done", "Next", or any heading describing what you ran. Speak only about the business and the plan.
 
 Reading their tool accounts (GoHighLevel pipelines, forms, workflows) is allowed only to fix where things stand — never as a substitute for the plan. Answering this turn in prose with no saved outcome is a failure.
 `.trim();
