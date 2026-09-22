@@ -216,6 +216,7 @@ Hard rules:
 - Never call create_clickup_task for a goal-shaped ask. That tool is for a single small errand only.
 - Ask at most ONE clarifying question, and only when the answer would change the steps. Otherwise assume, state the assumption in one line, and move.
 - Descriptions are for humans. No raw data, no JSON, no field names in the output.
+- Never name a tool, an id, or a field in what the user reads. Say "I saved the plan", not "I ran save_outcome". No ids unless the user asked for one.
 - Report progress with outcome_pulse rather than guessing. When something is overdue or hasn't moved, say so and name the unblocking action.
 - When work belongs to someone else, brief_worker so they have the context.
 - Be the one pushing. Every reply about a business ends with the next move and who owns it.
@@ -663,3 +664,43 @@ export async function buildPulse(admin: SupabaseClient, userId: string): Promise
   }
   return `Pulse for ${today}\n${lines.join("\n")}`;
 }
+
+// ============================================================================
+// 5. GOAL-SHAPED ASK DETECTION (mechanical trigger)
+// ============================================================================
+// The doctrine alone is not enough: when a request also names a tool stack
+// (GoHighLevel, ClickUp, a website), the model drifts into integration
+// discovery and answers in prose. This makes the trigger deterministic.
+
+const GOAL_PATTERNS: RegExp[] = [
+  /\bi\s+(want|wanna|need|would like)\s+to\s+(start|launch|build|set\s*up|create|open|scale|grow)\b/i,
+  /\bsuccess\s+(looks?|would\s+look)\s+like\b/i,
+  /\blet'?s\s+(start|launch|build|set\s*up)\s+(a|an|the|my)\b/i,
+  /\b(start|launch|spin\s*up)\s+(a|an|my|the)\s+[a-z\s]{2,40}\b(company|business|brand|agency|service)\b/i,
+  /\bget\s+(the|my|our)\s+[a-z\s]{2,30}\b(live|launched|off the ground|running)\b/i,
+  /\bwe\s+need\s+to\s+(build|launch|hire|set\s*up|stand\s*up)\b/i,
+  /\bfrom\s+(scratch|zero)\b.*\b(business|company|brand)\b/i,
+];
+
+export function isGoalShapedAsk(text: string): boolean {
+  const t = String(text || "").slice(0, 2000);
+  if (t.length < 20) return false;
+  return GOAL_PATTERNS.some((re) => re.test(t));
+}
+
+export const OUTCOME_ENFORCEMENT = `
+## THIS TURN IS A GOAL-SHAPED ASK — OUTCOME REQUIRED
+
+The user has described something they want to exist, not a small errand. The outcome doctrine is not optional here.
+
+Your FIRST tool call this turn is list_ventures. Nothing else comes first — not GoHighLevel, not ClickUp, not a search.
+
+Then, in this order:
+1. upsert_venture if this business is not already on the list.
+2. save_outcome with the full picture: where things stand now, what success looks like in things the user can point at, and the ordered steps from here to there. Each step is a result with an owner and a date where you can infer one. Cover every part of what they said success means — if they named branding, a site, automations, capture, CRM and tracking, every one of those is a step or a success criterion. Do not stop at five steps if the goal needs more.
+3. Show it back in plain language and ask whether to send it to their project management. Do not send it unasked.
+
+Never ask permission to plan. Creating the venture and then offering to "capture the outcome" is a failure — save_outcome happens in THIS turn, without asking. The only question you may ask at the end is whether to send the finished plan to their project management.
+
+Reading their tool accounts (GoHighLevel pipelines, forms, workflows) is allowed only to fix where things stand — never as a substitute for the plan. Answering this turn in prose with no saved outcome is a failure.
+`.trim();

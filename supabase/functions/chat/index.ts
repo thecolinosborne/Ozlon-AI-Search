@@ -17,7 +17,7 @@ import { renderForChatPrompt } from "../_shared/signals/render.ts";
 import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
-import { OUTCOME_TOOLS, OUTCOME_TOOL_NAMES, OUTCOME_FRAME, handleOutcomeTool, buildOutcomeContext } from "../_shared/outcomes.ts";
+import { OUTCOME_TOOLS, OUTCOME_TOOL_NAMES, OUTCOME_FRAME, OUTCOME_ENFORCEMENT, isGoalShapedAsk, handleOutcomeTool, buildOutcomeContext } from "../_shared/outcomes.ts";
 import { captureToolMemory, searchMemories, type MemoryResourceType } from "../_shared/memory-capture.ts";
 
 // Local alias preserves prior `MODEL_REGISTRY` references at call sites that expect ModelEntry shape.
@@ -9773,6 +9773,7 @@ async function runToolLoop(
     let toolsForRequest: ToolDef[] = tools;
     if (tools.length > MAX_TOOLS) {
       const hint = (userMessage || '').toLowerCase();
+      const goalShapedTurn = isGoalShapedAsk(userMessage || '');
 
       // Integration classifier — maps a tool name to a logical integration bucket.
       const integrationOf = (name: string): string => {
@@ -9895,6 +9896,8 @@ async function runToolLoop(
         let score = 10; // Tier C baseline
         if (CORE_TOOLS.has(name)) score = 100; // Tier B
         if (namedIntegrations.has(bucket)) score = 1000; // Tier A
+        // Goal-shaped ask: outcome planning outranks every integration this turn.
+        if (goalShapedTurn && OUTCOME_TOOL_NAMES.has(name)) score = 2000;
         score += semanticBoost(name, description);
         return { tool: t, name, bucket, score };
       });
@@ -11742,6 +11745,22 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       } catch (e) {
         console.error('[outcomes] injection failed:', e);
       }
+    }
+    // Deterministic trigger: a goal-shaped ask must produce a saved outcome,
+    // even when it also names a tool stack (GHL, ClickUp) the model wants to explore.
+    try {
+      const lastUserMsg = [...messages].reverse().find((m: { role: string; content?: unknown }) => m.role === 'user');
+      const lastText = typeof lastUserMsg?.content === 'string'
+        ? lastUserMsg.content
+        : Array.isArray(lastUserMsg?.content)
+          ? (lastUserMsg!.content as Array<{ text?: string }>).map((p) => p?.text || '').join(' ')
+          : '';
+      if (isGoalShapedAsk(lastText)) {
+        systemPrompt += `\n\n${OUTCOME_ENFORCEMENT}\n`;
+        console.log('[outcomes] goal-shaped ask detected — enforcement injected');
+      }
+    } catch (e) {
+      console.warn('[outcomes] enforcement check failed:', (e as Error).message);
     }
 
     // ===== Proactive memory recall =====
