@@ -9895,6 +9895,8 @@ async function runToolLoop(
         let score = 10; // Tier C baseline
         if (CORE_TOOLS.has(name)) score = 100; // Tier B
         if (namedIntegrations.has(bucket)) score = 1000; // Tier A
+        // Goal-shaped ask: outcome planning outranks every integration this turn.
+        if (goalShapedTurn && OUTCOME_TOOL_NAMES.has(name)) score = 2000;
         score += semanticBoost(name, description);
         return { tool: t, name, bucket, score };
       });
