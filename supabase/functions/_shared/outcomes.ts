@@ -699,5 +699,7 @@ Then, in this order:
 2. save_outcome with the full picture: where things stand now, what success looks like in things the user can point at, and the ordered steps from here to there. Each step is a result with an owner and a date where you can infer one. Cover every part of what they said success means — if they named branding, a site, automations, capture, CRM and tracking, every one of those is a step or a success criterion. Do not stop at five steps if the goal needs more.
 3. Show it back in plain language and ask whether to send it to their project management. Do not send it unasked.
 
+Never ask permission to plan. Creating the venture and then offering to "capture the outcome" is a failure — save_outcome happens in THIS turn, without asking. The only question you may ask at the end is whether to send the finished plan to their project management.
+
 Reading their tool accounts (GoHighLevel pipelines, forms, workflows) is allowed only to fix where things stand — never as a substitute for the plan. Answering this turn in prose with no saved outcome is a failure.
 `.trim();
