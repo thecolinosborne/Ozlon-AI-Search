@@ -2083,6 +2083,127 @@ export type Database = {
         }
         Relationships: []
       }
+      outcome_specs: {
+        Row: {
+          clickup_list_id: string | null
+          clickup_task_id: string | null
+          created_at: string
+          current_state: string | null
+          done_when: string[]
+          due_date: string | null
+          first_move: string | null
+          goal: string
+          id: string
+          metadata: Json
+          owner: string | null
+          status: string
+          success_looks_like: string[]
+          title: string
+          updated_at: string
+          user_id: string
+          venture_id: string | null
+        }
+        Insert: {
+          clickup_list_id?: string | null
+          clickup_task_id?: string | null
+          created_at?: string
+          current_state?: string | null
+          done_when?: string[]
+          due_date?: string | null
+          first_move?: string | null
+          goal: string
+          id?: string
+          metadata?: Json
+          owner?: string | null
+          status?: string
+          success_looks_like?: string[]
+          title: string
+          updated_at?: string
+          user_id: string
+          venture_id?: string | null
+        }
+        Update: {
+          clickup_list_id?: string | null
+          clickup_task_id?: string | null
+          created_at?: string
+          current_state?: string | null
+          done_when?: string[]
+          due_date?: string | null
+          first_move?: string | null
+          goal?: string
+          id?: string
+          metadata?: Json
+          owner?: string | null
+          status?: string
+          success_looks_like?: string[]
+          title?: string
+          updated_at?: string
+          user_id?: string
+          venture_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outcome_specs_venture_id_fkey"
+            columns: ["venture_id"]
+            isOneToOne: false
+            referencedRelation: "ventures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outcome_steps: {
+        Row: {
+          clickup_task_id: string | null
+          created_at: string
+          detail: string | null
+          due_date: string | null
+          id: string
+          outcome_id: string
+          owner: string | null
+          position: number
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          clickup_task_id?: string | null
+          created_at?: string
+          detail?: string | null
+          due_date?: string | null
+          id?: string
+          outcome_id: string
+          owner?: string | null
+          position?: number
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          clickup_task_id?: string | null
+          created_at?: string
+          detail?: string | null
+          due_date?: string | null
+          id?: string
+          outcome_id?: string
+          owner?: string | null
+          position?: number
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outcome_steps_outcome_id_fkey"
+            columns: ["outcome_id"]
+            isOneToOne: false
+            referencedRelation: "outcome_specs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plaid_accounts: {
         Row: {
           account_id: string
@@ -4040,6 +4161,54 @@ export type Database = {
           tone_settings?: Json
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      ventures: {
+        Row: {
+          clickup_list_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          metadata: Json
+          name: string
+          slug: string | null
+          stage: string
+          updated_at: string
+          user_id: string
+          what_exists: string | null
+          who_works_here: string | null
+        }
+        Insert: {
+          clickup_list_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name: string
+          slug?: string | null
+          stage?: string
+          updated_at?: string
+          user_id: string
+          what_exists?: string | null
+          who_works_here?: string | null
+        }
+        Update: {
+          clickup_list_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          name?: string
+          slug?: string | null
+          stage?: string
+          updated_at?: string
+          user_id?: string
+          what_exists?: string | null
+          who_works_here?: string | null
         }
         Relationships: []
       }
