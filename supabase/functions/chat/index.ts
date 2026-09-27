@@ -6905,7 +6905,7 @@ For each event return these fields (use null when the content genuinely does not
 - location: short "Venue, City, ST" or "Online"
 - organizer: hosting org
 - url: page the details came from
-- registration_url: direct ticket/RSVP link if different from url
+- registration_url: direct ticket/RSVP link for THIS specific event, copied exactly as a full https URL from the content. Never a search, category, or calendar listing page. null if not shown
 - cost_text: exactly how price is stated, e.g. "Free for members, $25 guests", "$45 early bird / $60 door"
 - cost_min: lowest numeric price in dollars (0 if free), or null if unknown
 - cost_max: highest numeric price in dollars, or null
@@ -6969,31 +6969,82 @@ ${pageContents.slice(0, 30000)}`;
             return { success: true, result: `No dated upcoming events found for "${base}". I searched ${results.length} sources. Try naming a city plus a month, or a specific organization.` };
           }
 
+
+          // ---- Ticket link helpers: resolve relative links, reject listing/search
+          // pages, and confirm the link actually opens before we save it. ----
+          const LISTING_RE = /eventbrite\.[a-z.]+\/(d|b)\/|[?&]page=\s*$|\/(calendar|events|search|explore|find)\/?(\?.*)?$|instagram\.com|facebook\.com\/events\/?$/i;
+          const TICKET_HINT_RE = /ticket|regist|rsvp|signup|sign-up|checkout|eventbrite\.[a-z.]+\/e\/|lu\.ma\/|meetup\.com\/[^/]+\/events\/\d|tix|universe\.com|ticketmaster|splashthat|cvent|zeffy|humanitix|eventbrite\.[a-z.]+\/o\//i;
+          const resolveLink = (raw: unknown, base?: string): string | null => {
+            if (typeof raw !== 'string') return null;
+            const t = raw.trim().replace(/[)\].,>]+$/, '');
+            if (!t || /^(javascript|mailto|tel):/i.test(t) || t === '#') return null;
+            try {
+              const u = new URL(t, base);
+              if (!/^https?:$/.test(u.protocol)) return null;
+              u.hash = '';
+              return u.toString();
+            } catch { return null; }
+          };
+          const isSpecificLink = (u: string | null) => !!u && !LISTING_RE.test(u);
+          const linkWorks = async (u: string): Promise<boolean> => {
+            try {
+              const ctl = new AbortController();
+              const timer = setTimeout(() => ctl.abort(), 6000);
+              const r = await fetch(u, { method: 'GET', redirect: 'follow', signal: ctl.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OzlonBot/1.0)' } });
+              clearTimeout(timer);
+              try { await r.body?.cancel(); } catch { /* ignore */ }
+              // 403/429 usually means bot protection on a real page; treat as working.
+              return r.ok || r.status === 403 || r.status === 429 || r.status === 405;
+            } catch { return false; }
+          };
+          const scoreTicketLink = (u: string, title: string) => {
+            let s = 0;
+            if (TICKET_HINT_RE.test(u)) s += 5;
+            const words = title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+            for (const w of words) if (u.toLowerCase().includes(w)) s += 1;
+            if (!isSpecificLink(u)) s -= 10;
+            return s;
+          };
+
           // ---- Step 3.5: ticket-price pass — open each event page that still has
           // no price and pull cost, address and the real registration link. ----
           const needsPrice = events.filter((e) => {
             const url = (e.registration_url as string) || (e.url as string);
             const hasPrice = e.is_free === true || typeof e.cost_min === 'number' ||
               (typeof e.cost_text === 'string' && /\d|free/i.test(e.cost_text) && !/check ticket price/i.test(e.cost_text));
-            return !!url && !hasPrice;
-          }).slice(0, 8);
+            const linkBad = !isSpecificLink(resolveLink(e.registration_url, e.url as string));
+            return !!url && (!hasPrice || linkBad);
+          }).slice(0, 10);
 
           if (FIRECRAWL_KEY && needsPrice.length) {
             console.log(`[scrape_events] Price pass for ${needsPrice.length} events`);
             await Promise.all(needsPrice.map(async (e) => {
-              const url = (e.registration_url as string) || (e.url as string);
+              const regAbs = resolveLink(e.registration_url, e.url as string);
+              const url = (isSpecificLink(regAbs) ? regAbs : null) || resolveLink(e.url) || (e.url as string);
               try {
                 const res = await fetch('https://api.firecrawl.dev/v2/scrape', {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${FIRECRAWL_KEY}`, 'Content-Type': 'application/json' },
                   // onlyMainContent:false — ticket widgets on Eventbrite/Meetup sit
                   // outside the main article body, and that's where price lives.
-                  body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: false }),
+                  body: JSON.stringify({ url, formats: ['markdown', 'links'], onlyMainContent: false }),
                 });
                 if (!res.ok) return;
                 const d = await res.json();
                 const md: string = String(d.data?.markdown || d.markdown || '');
                 if (!md) return;
+                const pageUrl: string = String(d.data?.metadata?.sourceURL || d.data?.metadata?.url || url);
+                const rawLinks: unknown[] = Array.isArray(d.data?.links) ? d.data.links : [];
+                const mdLinks = [...md.matchAll(/\]\((\S+?)\)/g)].map((m) => m[1]);
+                const allLinks = [...new Set([...rawLinks, ...mdLinks].map((l) => resolveLink(l, pageUrl)).filter((l): l is string => !!l))];
+                const ticketCandidates = allLinks
+                  .map((l) => ({ l, s: scoreTicketLink(l, String(e.title || '')) }))
+                  .filter((x) => x.s >= 5)
+                  .sort((a, b) => b.s - a.s)
+                  .slice(0, 15)
+                  .map((x) => x.l);
+                (e as Record<string, unknown>).__ticketCandidates = ticketCandidates;
+                (e as Record<string, unknown>).__pageUrl = pageUrl;
 
                 // Cheap deterministic pre-read: catches "Free" and "$25" ticket widgets
                 // even when the model is conservative.
@@ -7008,7 +7059,7 @@ ${pageContents.slice(0, 30000)}`;
                   model,
                   messages: [
                     { role: 'system', content: 'You read one event page and report only what it explicitly states. Never guess a price.' },
-                    { role: 'user', content: `Event: "${e.title}". From this page, return JSON with: cost_text (exact pricing wording, null if none), cost_min (number or null), cost_max (number or null), is_free (true/false/null), ticket_notes (member pricing, deadlines, refunds; null if none), address (full street address or null), registration_url (direct ticket/RSVP link or null), rsvp_deadline (ISO date or null).\n\nPAGE:\n${md.slice(0, 12000)}` },
+                    { role: 'user', content: `Event: "${e.title}". From this page, return JSON with: cost_text (exact pricing wording, null if none), cost_min (number or null), cost_max (number or null), is_free (true/false/null), ticket_notes (member pricing, deadlines, refunds; null if none), address (full street address or null), registration_url (the ticket/RSVP link for THIS event — copy it character-for-character from CANDIDATE LINKS below; if none clearly fits, null. Never build or shorten a link), rsvp_deadline (ISO date or null).\n\nCANDIDATE LINKS:\n${ticketCandidates.join('\n') || '(none)'}\n\nPAGE:\n${md.slice(0, 12000)}` },
                   ],
                   response_format: { type: 'json_object' },
                 };
@@ -7038,7 +7089,19 @@ ${pageContents.slice(0, 30000)}`;
                     e.cost_text = max === min ? `$${min}` : `$${min}–$${max} (listed on page)`;
                   }
                 }
-                if (!e.registration_url) e.registration_url = url;
+                // Choose the final link: model pick (must be absolute + specific),
+                // else best-scoring candidate, else the page itself if it is an event page.
+                const picked = resolveLink(info.registration_url, pageUrl);
+                const choices = [
+                  isSpecificLink(picked) ? picked : null,
+                  ...ticketCandidates,
+                  isSpecificLink(pageUrl) ? pageUrl : null,
+                ].filter((l): l is string => !!l);
+                e.registration_url = null;
+                for (const c of [...new Set(choices)].slice(0, 4)) {
+                  if (await linkWorks(c)) { e.registration_url = c; break; }
+                }
+                if (!isSpecificLink(resolveLink(e.url))) e.url = pageUrl;
               } catch (err) {
                 console.warn('[scrape_events] price pass failed:', url, err instanceof Error ? err.message : err);
               }
@@ -7062,7 +7125,7 @@ ${pageContents.slice(0, 30000)}`;
             location: (evt.location as string) || (evt.venue_name as string) || null,
             organizer: (evt.organizer as string) || null,
             url: (evt.url as string) || null,
-            registration_url: (evt.registration_url as string) || null,
+            registration_url: (() => { const r = resolveLink(evt.registration_url, evt.url as string); return isSpecificLink(r) ? r : null; })(),
             cost_text: (evt.cost_text as string) && !/check ticket price/i.test(String(evt.cost_text)) ? (evt.cost_text as string) : null,
             cost_min: num(evt.cost_min),
             cost_max: num(evt.cost_max),
