@@ -6868,8 +6868,10 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
             } catch { return []; }
           };
 
-          console.log(`[scrape_events] Fan-out search: "${base}"`);
-          const searchBatches = await Promise.all(queries.map(searchOne));
+          // A pasted event link means "this event" — read that page only, no web search.
+          const pastedOnly = /https?:\/\//i.test(String(base));
+          console.log(`[scrape_events] ${pastedOnly ? 'Pasted link' : 'Fan-out search'}: "${base}"`);
+          const searchBatches = pastedOnly ? [] : await Promise.all(queries.map(searchOne));
           const seenUrl = new Set<string>();
           const results: Array<{ title: string; url: string; content: string }> = [];
           // A link the user pasted is the primary source — always read it first.
@@ -6998,6 +7000,11 @@ ${pageContents.slice(0, 30000)}`;
             events = Array.isArray(parsed) ? parsed : (parsed.events || parsed.results || []);
           } catch { events = []; }
 
+          // Deterministic guard: the extractor sometimes keeps past events.
+          events = events.filter((e) => {
+            const d = normalizeEventDate(e.event_date, (e.timezone as string) || 'America/New_York');
+            return !d || new Date(d).getTime() >= today.getTime() - 24 * 3600_000;
+          });
           if (events.length === 0) {
             return { success: true, result: `No dated upcoming events found for "${base}". I searched ${results.length} sources. Try naming a city plus a month, or a specific organization.` };
           }
@@ -7258,9 +7265,12 @@ ${pageContents.slice(0, 30000)}`;
         const uid = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
         const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
         const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-        const { data: recent } = await admin.from('discovered_events').select('*').eq('user_id', uid)
-          .gte('updated_at', new Date(Date.now() - 5 * 60_000).toISOString()).order('updated_at', { ascending: false }).limit(3);
-        if (!recent?.length) return scraped;
+        const { data: recentAll } = await admin.from('discovered_events').select('*').eq('user_id', uid)
+          .gte('updated_at', new Date(Date.now() - 5 * 60_000).toISOString()).order('updated_at', { ascending: false }).limit(10);
+        // Only the event behind the pasted link — never other events found along the way.
+        const key = (() => { try { const u = new URL(url); return (u.host + u.pathname).replace(/^www\./, '').replace(/\/$/, '').toLowerCase(); } catch { return url.toLowerCase(); } })();
+        const recent = (recentAll || []).filter((r) => [r.url, r.registration_url].some((v) => typeof v === 'string' && v.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').includes(key)));
+        if (!recent.length) return { success: false, result: `${scraped.result}\n\nI could not confirm the event from that link, so nothing was added to the calendar.` };
         const lines = await addEventsToCalendar(admin, uid, (a, p) => callNativeEdge('google-calendar', a, p), recent as Array<Record<string, unknown>>);
         return { success: true, result: `${scraped.result}\n\nCalendar sync:\n${formatSyncLines(lines)}` };
       }
