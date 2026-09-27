@@ -6849,6 +6849,13 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           const searchBatches = await Promise.all(queries.map(searchOne));
           const seenUrl = new Set<string>();
           const results: Array<{ title: string; url: string; content: string }> = [];
+          // A link the user pasted is the primary source — always read it first.
+          const pastedUrls = [...String(base).matchAll(/https?:\/\/[^\s<>"')]+/gi)].map((m) => m[0].replace(/[.,]+$/, ''));
+          for (const u of pastedUrls) {
+            if (seenUrl.has(u)) continue;
+            seenUrl.add(u);
+            results.push({ title: 'Link from user', url: u, content: '' });
+          }
           for (const batch of searchBatches) {
             for (const r of batch) {
               if (!r?.url || seenUrl.has(r.url)) continue;
@@ -6870,7 +6877,10 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
               const score = (u: string) =>
                 /eventbrite|meetup|ticket|chamber|luma|lu\.ma|10times|allevents/i.test(u) ? 1 : 0;
               return score(b.url) - score(a.url);
-            }).slice(0, 5);
+            });
+            // Pasted links first, always scraped.
+            priority.sort((a, b) => (pastedUrls.includes(b.url) ? 1 : 0) - (pastedUrls.includes(a.url) ? 1 : 0));
+            priority.splice(5);
 
             const scrapes = await Promise.all(priority.map(async (r) => {
               try {
