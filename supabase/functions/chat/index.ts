@@ -6834,7 +6834,8 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           const query = args.query as string;
           const category = (args.category as string) || 'networking';
           const maxResults = Math.min((args.max_results as number) || 12, 25);
-          const location = (args.location as string) || '';
+          // Colin's home base: Lake Norman (Huntersville, Cornelius, Davidson, Mooresville) + Charlotte.
+          const location = (args.location as string) || 'Lake Norman Huntersville Cornelius NC';
           const today = new Date();
           const yr = today.getUTCFullYear();
 
@@ -6950,7 +6951,8 @@ For each event return these fields (use null when the content genuinely does not
 - source: website name
 - confidence: 0-1, how certain you are the date and price are correct
 
-Rules: skip past events, skip pages with no specific date, merge duplicates of the same event, and prefer the page with pricing detail. Return JSON: {"events": [...]}. Max ${maxResults} events.
+Rules: skip past events, skip pages with no specific date, merge duplicates of the same event, and prefer the page with pricing detail.
+Relevance: the user is an entrepreneur running service businesses (a cleaning company, a web development agency). Keep networking, business, entrepreneur, chamber, small-business and founder events. SKIP anything that is not an attendable event: memberships, sponsorship or partner tiers, date ranges spanning months, job postings, and unrelated niche-industry events (e.g. deathcare, veterinary openings, transportation policy) unless the user's query asked for them. Return JSON: {"events": [...]}. Max ${maxResults} events.
 
 CONTENT:
 ${pageContents.slice(0, 30000)}`;
@@ -7001,7 +7003,9 @@ ${pageContents.slice(0, 30000)}`;
           } catch { events = []; }
 
           // Deterministic guard: the extractor sometimes keeps past events.
+          const NOT_AN_EVENT = /\b(sustaining partner|membership|sponsorship|sponsor package|partner(ship)? level|job posting|now hiring)\b|\d{4}\s*[-–]\s*\w+\.?\s*\d{1,2},?\s*\d{4}/i;
           events = events.filter((e) => {
+            if (NOT_AN_EVENT.test(String(e.title || ''))) return false;
             const d = normalizeEventDate(e.event_date, (e.timezone as string) || 'America/New_York');
             return !d || new Date(d).getTime() >= today.getTime() - 24 * 3600_000;
           });
