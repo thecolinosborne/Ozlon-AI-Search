@@ -110,3 +110,6 @@ verify_jwt = false
 
 [functions.document-ingest]
 verify_jwt = false
+
+[functions.events-calendar]
+verify_jwt = false

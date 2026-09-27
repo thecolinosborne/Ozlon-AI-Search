@@ -1,3 +1,4 @@
+import { addEventsToCalendar, removeEventsFromCalendar, formatSyncLines, normalizeEventDate } from "../_shared/events-calendar.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callWithFallback, loadUserPrefs, logRouting, loadCustomModels, mergeRegistry, MODEL_REGISTRY as MODEL_REGISTRY_BASE, DEFAULT_PREFS, type UserPrefs, type ModelEntry } from "../_shared/model-registry.ts";
@@ -3334,7 +3335,7 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'add_events_to_calendar',
-      description: 'Add previously discovered/saved events to the user\'s Google Calendar as full entries — venue address in the location field, cost, ticket notes, host, RSVP deadline and registration link in the description, plus 1-day and 1-hour reminders. Skips events already added. Use after scrape_events or when the user says "add those to my calendar".',
+      description: 'Add previously discovered/saved events to the user\'s Google Calendar as full entries — venue address in the location field, cost, ticket notes, host, RSVP deadline and registration link in the description, plus 1-day and 1-hour reminders. Updates the existing calendar entry in place (never duplicates) and uses the event\'s local time zone. With no ids/titles it adds upcoming events marked Going or Maybe. Use after scrape_events or when the user says "add those to my calendar".',
       parameters: {
         type: 'object',
         properties: {
@@ -3344,6 +3345,28 @@ const ACTION_TOOLS: ToolDef[] = [
           force: { type: 'boolean', description: 'Re-add even if already on the calendar.' },
         },
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_events_from_calendar',
+      description: 'Remove saved events from the user\'s Google Calendar (e.g. after they skip one). Match by event_ids or titles.',
+      parameters: { type: 'object', properties: {
+        event_ids: { type: 'array', items: { type: 'string' } },
+        titles: { type: 'array', items: { type: 'string' } },
+      } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_event_from_link',
+      description: 'The user pasted a link to one specific event (Eventbrite, Meetup, Luma, chamber page, etc.). Read that page, save the event with the real ticket link, date, venue and price, and optionally put it on their Google Calendar. Use this instead of a web search whenever an event URL is given.',
+      parameters: { type: 'object', properties: {
+        url: { type: 'string', description: 'The event link exactly as pasted.' },
+        add_to_calendar: { type: 'boolean', description: 'Also add it to Google Calendar. True when the user asks to add/save it to their calendar.' },
+      }, required: ['url'] },
     },
   },
   // ============ List Events Tool ============
@@ -6845,8 +6868,10 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
             } catch { return []; }
           };
 
-          console.log(`[scrape_events] Fan-out search: "${base}"`);
-          const searchBatches = await Promise.all(queries.map(searchOne));
+          // A pasted event link means "this event" — read that page only, no web search.
+          const pastedOnly = /https?:\/\//i.test(String(base));
+          console.log(`[scrape_events] ${pastedOnly ? 'Pasted link' : 'Fan-out search'}: "${base}"`);
+          const searchBatches = pastedOnly ? [] : await Promise.all(queries.map(searchOne));
           const seenUrl = new Set<string>();
           const results: Array<{ title: string; url: string; content: string }> = [];
           // A link the user pasted is the primary source — always read it first.
@@ -6975,6 +7000,11 @@ ${pageContents.slice(0, 30000)}`;
             events = Array.isArray(parsed) ? parsed : (parsed.events || parsed.results || []);
           } catch { events = []; }
 
+          // Deterministic guard: the extractor sometimes keeps past events.
+          events = events.filter((e) => {
+            const d = normalizeEventDate(e.event_date, (e.timezone as string) || 'America/New_York');
+            return !d || new Date(d).getTime() >= today.getTime() - 24 * 3600_000;
+          });
           if (events.length === 0) {
             return { success: true, result: `No dated upcoming events found for "${base}". I searched ${results.length} sources. Try naming a city plus a month, or a specific organization.` };
           }
@@ -7127,9 +7157,9 @@ ${pageContents.slice(0, 30000)}`;
             user_id: userId,
             title: (evt.title as string) || 'Untitled Event',
             description: (evt.description as string) || null,
-            event_date: (evt.event_date as string) || null,
-            end_date: (evt.end_date as string) || null,
-            timezone: (evt.timezone as string) || null,
+            event_date: normalizeEventDate(evt.event_date, (evt.timezone as string) || 'America/New_York'),
+            end_date: normalizeEventDate(evt.end_date, (evt.timezone as string) || 'America/New_York'),
+            timezone: (evt.timezone as string) || 'America/New_York',
             venue_name: (evt.venue_name as string) || null,
             address: (evt.address as string) || null,
             location: (evt.location as string) || (evt.venue_name as string) || null,
@@ -7195,79 +7225,54 @@ ${pageContents.slice(0, 30000)}`;
         }
       }
 
-      case 'add_events_to_calendar': {
+      case 'add_events_to_calendar':
+      case 'remove_events_from_calendar': {
         try {
           const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
           const supabaseUrl = Deno.env.get('SUPABASE_URL');
           const userId = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
           if (!serviceRoleKey || !supabaseUrl || !userId) return { success: false, result: 'Authentication required.' };
-
           const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
           const adminClient = createClient(supabaseUrl, serviceRoleKey);
-
-          const ids = (args.event_ids as string[]) || [];
-          const titles = (args.titles as string[]) || [];
-          const calendarId = (args.calendarId as string) || 'primary';
-
+          const ids = ((args.event_ids as string[]) || []).filter(Boolean);
+          const titles = ((args.titles as string[]) || []).filter(Boolean);
+          const removing = toolName === 'remove_events_from_calendar';
           let q = adminClient.from('discovered_events').select('*').eq('user_id', userId);
           if (ids.length) q = q.in('id', ids);
-          else if (titles.length) q = q.or(titles.map((t) => `title.ilike.%${t.replace(/[,()]/g, '')}%`).join(','));
-          else q = q.gte('event_date', new Date().toISOString()).order('event_date', { ascending: true }).limit(10);
-
+          else if (titles.length) q = q.or(titles.map((t) => `title.ilike.%${t.replace(/[,()%]/g, '')}%`).join(','));
+          else if (removing) return { success: false, result: 'Tell me which events to remove.' };
+          else q = q.gte('event_date', new Date().toISOString()).in('rsvp_status', ['going', 'maybe']).order('event_date', { ascending: true }).limit(10);
           const { data: evts, error } = await q;
           if (error) return { success: false, result: `Could not load events: ${error.message}` };
-          if (!evts || evts.length === 0) return { success: true, result: 'No matching saved events to add.' };
-
-          const lines: string[] = [];
-          for (const e of evts as Array<Record<string, unknown>>) {
-            if (!e.event_date) { lines.push(`- Skipped **${e.title}** — no confirmed date yet.`); continue; }
-            if (e.calendar_event_id && !(args.force as boolean)) { lines.push(`- Already on calendar: **${e.title}**`); continue; }
-
-            const start = new Date(e.event_date as string);
-            const end = e.end_date ? new Date(e.end_date as string) : new Date(start.getTime() + 2 * 3600_000);
-            const tz = (e.timezone as string) || 'America/New_York';
-            const cost = e.is_free === true ? 'Free' : (e.cost_text as string) || (e.cost_min != null ? `$${e.cost_min}${e.cost_max != null && e.cost_max !== e.cost_min ? `–$${e.cost_max}` : ''}` : 'Price not listed');
-            const desc = [
-              e.description as string,
-              '',
-              `Cost: ${cost}`,
-              e.ticket_notes ? `Ticket notes: ${e.ticket_notes}` : '',
-              e.organizer ? `Host: ${e.organizer}` : '',
-              e.rsvp_deadline ? `RSVP by: ${new Date(e.rsvp_deadline as string).toDateString()}` : '',
-              e.registration_url ? `Register: ${e.registration_url}` : '',
-              e.url && e.url !== e.registration_url ? `Details: ${e.url}` : '',
-            ].filter(Boolean).join('\n');
-
-            try {
-              const created = await callNativeEdge('google-calendar', 'create_event', {
-                calendarId,
-                event: {
-                  summary: e.title,
-                  description: desc,
-                  location: [e.venue_name, e.address].filter(Boolean).join(', ') || (e.location as string) || undefined,
-                  start: { dateTime: start.toISOString(), timeZone: tz },
-                  end: { dateTime: end.toISOString(), timeZone: tz },
-                  source: e.url ? { title: String(e.organizer || e.source || 'Event page'), url: String(e.url) } : undefined,
-                  reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 1440 }, { method: 'popup', minutes: 60 }] },
-                },
-              });
-              const evId = (created.event as Record<string, unknown> | undefined)?.id as string | undefined;
-              await adminClient.from('discovered_events').update({
-                calendar_event_id: evId || null,
-                calendar_id: calendarId,
-                added_to_calendar_at: new Date().toISOString(),
-              }).eq('id', e.id as string);
-              lines.push(`- Added **${e.title}** — ${start.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz })} · ${cost}`);
-            } catch (err) {
-              lines.push(`- Failed **${e.title}** — ${err instanceof Error ? err.message : 'calendar error'}`);
-            }
-          }
-
-          return { success: true, result: `Calendar sync:\n${lines.join('\n')}` };
+          if (!evts || evts.length === 0) return { success: true, result: 'No matching saved events found.' };
+          const cal = (action: string, params: Record<string, unknown>) => callNativeEdge('google-calendar', action, params);
+          const lines = removing
+            ? await removeEventsFromCalendar(adminClient, userId, cal, evts as Array<Record<string, unknown>>)
+            : await addEventsToCalendar(adminClient, userId, cal, evts as Array<Record<string, unknown>>, { calendarId: args.calendarId as string | undefined, force: !!args.force });
+          const failed = lines.filter((l) => l.status === 'failed').length;
+          return { success: failed < lines.length, result: `Calendar sync:\n${formatSyncLines(lines)}` };
         } catch (e) {
-          console.error('[add_events_to_calendar] Error:', e);
+          console.error('[calendar sync] Error:', e);
           return { success: false, result: `Calendar sync error: ${e instanceof Error ? e.message : 'Unknown'}` };
         }
+      }
+
+      case 'add_event_from_link': {
+        const url = String(args.url || '').trim();
+        if (!/^https?:\/\//i.test(url)) return { success: false, result: 'A full event link (starting with http) is required.' };
+        const scraped = await executeToolCall('scrape_events', { query: url, max_results: 3, __user_id: args.__user_id }, _connMap, _userMessage, _aliasMap, ghlCreds);
+        if (!args.add_to_calendar) return scraped;
+        const uid = ((args as Record<string, unknown>).__user_id as string) || ((globalThis as Record<string, unknown>).__currentUserId as string);
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.1");
+        const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+        const { data: recentAll } = await admin.from('discovered_events').select('*').eq('user_id', uid)
+          .gte('updated_at', new Date(Date.now() - 5 * 60_000).toISOString()).order('updated_at', { ascending: false }).limit(10);
+        // Only the event behind the pasted link — never other events found along the way.
+        const key = (() => { try { const u = new URL(url); return (u.host + u.pathname).replace(/^www\./, '').replace(/\/$/, '').toLowerCase(); } catch { return url.toLowerCase(); } })();
+        const recent = (recentAll || []).filter((r) => [r.url, r.registration_url].some((v) => typeof v === 'string' && v.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').includes(key)));
+        if (!recent.length) return { success: false, result: `${scraped.result}\n\nI could not confirm the event from that link, so nothing was added to the calendar.` };
+        const lines = await addEventsToCalendar(admin, uid, (a, p) => callNativeEdge('google-calendar', a, p), recent as Array<Record<string, unknown>>);
+        return { success: true, result: `${scraped.result}\n\nCalendar sync:\n${formatSyncLines(lines)}` };
       }
 
       case 'list_events': {
@@ -8380,6 +8385,8 @@ const SYSTEM_TOOL_NAMES = new Set<string>([
   'deep_research',
   'scrape_events',
   'add_events_to_calendar',
+  'remove_events_from_calendar',
+  'add_event_from_link',
   'list_events',
   'create_work_task',
   'update_work_task',
@@ -8653,6 +8660,8 @@ function getAvailableTools(connMap: MultiConnMap, hasGHLOverride?: boolean, allo
     'deep_research': '_always_',
     'scrape_events': '_always_',
     'add_events_to_calendar': '_always_',
+    'remove_events_from_calendar': '_always_',
+    'add_event_from_link': '_always_',
     'list_events': '_always_',
     'create_work_task': '_always_',
     'update_work_task': '_always_',
@@ -9071,6 +9080,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'deep_research': 'Researching the web',
   'scrape_events': 'Searching for events',
   'add_events_to_calendar': 'Adding events to your calendar',
+  'remove_events_from_calendar': 'Removing events from your calendar',
+  'add_event_from_link': 'Reading the event page',
   'list_events': 'Loading your events',
   'create_work_task': 'Creating work task',
   'update_work_task': 'Updating work task',
@@ -10186,7 +10197,7 @@ async function runToolLoop(
             args = {};
           }
           // Inject user ID for tools that need it
-          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'list_my_documents', 'read_my_document', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'add_events_to_calendar', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
+          if (['save_memory', 'search_wisdom_memories', 'recall_past_chats', 'recall_recent_artifacts', 'list_my_documents', 'read_my_document', 'enqueue_background_job', 'update_memory', 'deep_research', 'scrape_events', 'add_events_to_calendar', 'remove_events_from_calendar', 'add_event_from_link', 'list_events', 'upload_youtube_video', 'analyze_youtube_channel', 'add_standing_order', 'remove_standing_order', 'update_standing_order', 'add_goal', 'update_goal_progress', 'complete_goal', 'generate_image', 'edit_image', 'generate_video', 'create_routine', 'list_routines', 'toggle_routine', 'delete_routine'].includes(tc.function.name) && userId) {
             args.__user_id = userId;
           }
           const stepLabel = TOOL_DISPLAY_NAMES[tc.function.name] || tc.function.name;
