@@ -243,30 +243,41 @@ function EventCard({
     setRsvpSaving(false);
   };
 
+  const callCalendar = async (action: "add" | "remove") => {
+    const { data, error } = await supabase.functions.invoke("events-calendar", {
+      body: { action, event_ids: [event.id] },
+    });
+    let detail = "";
+    if (error) {
+      try { detail = JSON.parse(await (error as { context?: Response }).context?.text?.() ?? "{}").error; } catch { /* ignore */ }
+      throw new Error(detail || error.message);
+    }
+    const r = (data?.results?.[0] ?? {}) as { status?: string; detail?: string };
+    if (r.status === "failed" || r.status === "skipped") throw new Error(r.detail || "Calendar did not accept the event");
+    return r;
+  };
+
   const addToCalendar = async () => {
     setAdding(true);
     try {
-      const { data, error } = await supabase.functions.invoke("chat", {
-        body: {
-          messages: [
-            {
-              role: "user",
-              content: `Add the saved event with id ${event.id} to my Google Calendar using add_events_to_calendar.`,
-            },
-          ],
-          enableTools: true,
-        },
-      });
-      if (error) throw error;
+      const r = await callCalendar("add");
       setAdded(true);
-      toast({ title: "Added to calendar", description: event.title });
-      void data;
+      toast({ title: r.status === "updated" || r.status === "linked" ? "Calendar updated" : "Added to calendar", description: `${event.title}${r.detail ? ` · ${r.detail}` : ""}` });
     } catch (e) {
-      toast({
-        title: "Could not add to calendar",
-        description: e instanceof Error ? e.message : "Try again from chat.",
-        variant: "destructive",
-      });
+      toast({ title: "Could not add to calendar", description: e instanceof Error ? e.message : "Try again.", variant: "destructive" });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const removeFromCalendar = async () => {
+    setAdding(true);
+    try {
+      await callCalendar("remove");
+      setAdded(false);
+      toast({ title: "Removed from calendar", description: event.title });
+    } catch (e) {
+      toast({ title: "Could not remove", description: e instanceof Error ? e.message : "Try again.", variant: "destructive" });
     } finally {
       setAdding(false);
     }
@@ -386,8 +397,9 @@ function EventCard({
         )}
         {!isPast && (
           <button
-            onClick={addToCalendar}
-            disabled={adding || added}
+            onClick={added ? removeFromCalendar : addToCalendar}
+            disabled={adding}
+            title={added ? "Tap to remove from calendar" : undefined}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors",
               added
@@ -402,7 +414,7 @@ function EventCard({
             ) : (
               <CalendarPlus className="w-3.5 h-3.5" />
             )}
-            {added ? "On calendar" : adding ? "Adding" : "Add to calendar"}
+            {adding ? "Working" : added ? "On calendar" : "Add to calendar"}
           </button>
         )}
       </div>
