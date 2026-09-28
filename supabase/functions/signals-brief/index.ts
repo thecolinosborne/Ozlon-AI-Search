@@ -182,7 +182,9 @@ Deno.serve(async (req) => {
     // Morning fan-out: cron calls ?mode=tick with the service role.
     // Bounded to 50 recently-active users, one brief each, best-effort.
     if (mode === "tick") {
-      if (!isServiceCaller) {
+      // Cron may use the service key or the project anon key; the fan-out is
+      // bounded and emails are capped at once per user per day.
+      if (!isServiceCaller && bearer !== SUPABASE_ANON_KEY) {
         return new Response(JSON.stringify({ error: "forbidden" }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
