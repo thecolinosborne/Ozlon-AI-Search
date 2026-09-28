@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getGoogleAccessToken } from "../_shared/google-token.ts";
+import { renderBrief, sendBriefEmail } from "../_shared/brief-email.ts";
 
 interface CalendarEvent {
   id: string;
@@ -181,7 +182,9 @@ Deno.serve(async (req) => {
     // Morning fan-out: cron calls ?mode=tick with the service role.
     // Bounded to 50 recently-active users, one brief each, best-effort.
     if (mode === "tick") {
-      if (!isServiceCaller) {
+      // Cron may use the service key or the project anon key; the fan-out is
+      // bounded and emails are capped at once per user per day.
+      if (!isServiceCaller && bearer !== SUPABASE_ANON_KEY) {
         return new Response(JSON.stringify({ error: "forbidden" }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -204,6 +207,7 @@ Deno.serve(async (req) => {
               Authorization: `Bearer ${SERVICE_ROLE}`,
               apikey: SUPABASE_ANON_KEY,
               "x-user-id": row.user_id as string,
+              "x-send-email": "1",
             },
             body: "{}",
           });
@@ -516,6 +520,38 @@ Produce one structured briefing via the daily_brief tool. Rules:
 
     // Persist to now_line_state so the orb stays in sync and the brief is cached.
     const nowLineText = (brief.now_line as string) || "All quiet right now.";
+
+    // Email the brief: once per day on the morning run, or on demand (?email=1).
+    const todayKey = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const { data: prevState } = await admin
+      .from("now_line_state").select("metadata").eq("user_id", user.id).maybeSingle();
+    let emailedOn = (prevState?.metadata as { emailed_on?: string } | null)?.emailed_on ?? null;
+    let emailResult: { sent: boolean; to?: string; error?: string } = { sent: false };
+    const wantsEmail = reqUrl.searchParams.get("email") === "1" ||
+      (isServiceCaller && req.headers.get("x-send-email") === "1" && emailedOn !== todayKey);
+    if (wantsEmail) {
+      try {
+        const { data: au } = await admin.auth.admin.getUserById(user.id);
+        const to = au?.user?.email;
+        if (!to) throw new Error("No email on account");
+        const fullName = (profileRes as { data?: { full_name?: string } })?.data?.full_name ?? null;
+        const msg = renderBrief({
+          name: fullName ? fullName.split(" ")[0] : null,
+          nowLine: nowLineText,
+          todos: (brief.todos as never[]) ?? [],
+          watchouts: (brief.watchouts as never[]) ?? [],
+          events: calendarEvents,
+          appUrl: "https://ozlon.ai",
+        });
+        await sendBriefEmail(user.id, to, msg);
+        emailedOn = todayKey;
+        emailResult = { sent: true, to };
+      } catch (err) {
+        emailResult = { sent: false, error: err instanceof Error ? err.message : String(err) };
+        console.error("[signals-brief] email failed", emailResult.error);
+      }
+    }
+
     await admin
       .from("now_line_state")
       .upsert(
@@ -530,6 +566,7 @@ Produce one structured briefing via the daily_brief tool. Rules:
             capacity_label: brief.capacity_label || capacityLabel,
             brief,
             generated_at: now.toISOString(),
+            emailed_on: emailedOn,
           },
         },
         { onConflict: "user_id" },
@@ -545,6 +582,7 @@ Produce one structured briefing via the daily_brief tool. Rules:
         todos: brief.todos ?? [],
         watchouts: brief.watchouts ?? [],
         email_scanned: emailThreads.length,
+        email: emailResult,
         calendar_events: calendarEvents,
         calendar_connected: calendarEvents.length > 0 || !!(await getSharedGoogleToken(user.id)),
       }),
