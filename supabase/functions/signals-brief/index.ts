@@ -580,6 +580,7 @@ Produce one structured briefing via the daily_brief tool. Rules:
         todos: brief.todos ?? [],
         watchouts: brief.watchouts ?? [],
         email_scanned: emailThreads.length,
+        email: emailResult,
         calendar_events: calendarEvents,
         calendar_connected: calendarEvents.length > 0 || !!(await getSharedGoogleToken(user.id)),
       }),
