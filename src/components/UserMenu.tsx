@@ -121,39 +121,9 @@ export const UserMenu = () => {
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link to="/life" className="cursor-pointer">
-            <Compass className="w-4 h-4 mr-2" />
-            Life OS
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/memory" className="cursor-pointer">
-            <Brain className="w-4 h-4 mr-2" />
-            Memory
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/events" className="cursor-pointer">
-            <CalendarDays className="w-4 h-4 mr-2" />
-            Events
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
           <Link to="/profile" className="cursor-pointer">
             <UserIcon className="w-4 h-4 mr-2" />
             Profile
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/communications" className="cursor-pointer">
-            <MessageCircle className="w-4 h-4 mr-2" />
-            Communications
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/signals" className="cursor-pointer">
-            <Activity className="w-4 h-4 mr-2" />
-            Signals
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
