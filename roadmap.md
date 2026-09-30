@@ -1,6 +1,8 @@
-# Roadmap
+# Roadmap — One assistant, one Settings page
 
-- [x] Fix trapped mobile More menu and scroll behavior
-- [x] Verify all mobile navigation destinations and Schedule jump
-- [x] Add clear information lifecycle view in Memory
-- [x] Test signed-in mobile at 320×565 and 390×844 plus desktop regression
+- [x] Two-item navigation (Assistant, Settings); assistant-only home
+- [x] Settings: Connections first, Manage section for Today/Life OS/Events/People/Messages/Stack/Memory
+- [ ] Chat cards for Today, Life OS, Events, People, Business plans (open full view in a sheet)
+- [ ] Connect / status / reconnect cards triggered from conversation
+- [ ] Cloud browser agent (needs a browser service provider + API key)
+- [ ] Own-computer helper app (later)
