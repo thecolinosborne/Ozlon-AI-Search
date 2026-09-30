@@ -13,6 +13,12 @@ import {
   Sparkles,
   Brain,
   Wand2,
+  Activity,
+  Compass,
+  CalendarDays,
+  Users,
+  Inbox,
+  Layers,
 } from "lucide-react";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { SettingsRow } from "@/components/settings/SettingsRow";
@@ -200,6 +206,16 @@ const Settings = () => {
           avatarUrl={avatarUrl}
         />
 
+        {/* Connections — first, since they power everything */}
+        <SettingsSection title="Connections">
+          <SettingsRow
+            icon={Plug}
+            label="Connected services"
+            description="Gmail, Calendar, ClickUp, GoHighLevel, Slack and more. You can also just ask the assistant to connect one."
+            onClick={() => navigate("/integrations")}
+          />
+        </SettingsSection>
+
         {/* Personalization */}
         <SettingsSection title="Personalization">
           <SettingsRow
@@ -290,14 +306,15 @@ const Settings = () => {
           <WisdomLibraryCard />
         </SettingsSection>
 
-        {/* Integrations */}
-        <SettingsSection title="Integrations">
-          <SettingsRow
-            icon={Plug}
-            label="Manage Integrations"
-            description="Connect and configure your tools"
-            onClick={() => navigate("/integrations")}
-          />
+        {/* Manage — everything you can also do by talking */}
+        <SettingsSection title="Manage">
+          <SettingsRow icon={Activity} label="Today" description="Schedule, to-dos and watch-outs" onClick={() => navigate("/signals")} />
+          <SettingsRow icon={Compass} label="Life OS" description="Vision, goals, scorecard and issues" onClick={() => navigate("/life")} />
+          <SettingsRow icon={CalendarDays} label="Events" description="Networking events and RSVPs" onClick={() => navigate("/events")} />
+          <SettingsRow icon={Users} label="People" description="Contacts from email and GoHighLevel" onClick={() => navigate("/people")} />
+          <SettingsRow icon={Inbox} label="Messages" description="Email and conversations" onClick={() => navigate("/communications")} />
+          <SettingsRow icon={Layers} label="Stack" description="Your saved items" onClick={() => navigate("/stack")} />
+          <SettingsRow icon={Brain} label="Memory" description="What it remembers and how it learns" onClick={() => navigate("/memory")} />
         </SettingsSection>
 
         {/* Data & Privacy */}

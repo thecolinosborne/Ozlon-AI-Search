@@ -386,20 +386,10 @@ const Index = () => {
         <>
           {!hasInteracted && (
             <>
-              {isAuthenticated && !forceComposer && (
-                <MobileCommandCenter
-                  systemName={systemName}
-                  firstName={user?.user_metadata?.full_name?.split(" ")[0]}
-                  onSpeak={handleMicClick}
-                  isRecording={isRecording}
-                />
-              )}
-              <div className={cn(isAuthenticated && !forceComposer && "hidden md:block")}>
-                <ChatHero systemName={systemName} composerProps={composerProps} onQuickAction={handleQuickAction}
-                  userSettings={userSettings} disabled={isLoading || isRecording}
-                  recentSession={isAuthenticated && sessionsLoaded ? (sessions.find((s) => !!(s.summary || s.preview)) || null) : null}
-                  onContinueSession={handleSwitchSession} />
-              </div>
+              <ChatHero systemName={systemName} composerProps={composerProps} onQuickAction={handleQuickAction}
+                userSettings={userSettings} disabled={isLoading || isRecording}
+                recentSession={isAuthenticated && sessionsLoaded ? (sessions.find((s) => !!(s.summary || s.preview)) || null) : null}
+                onContinueSession={handleSwitchSession} />
             </>
           )}
 
