@@ -11,6 +11,7 @@ import { useAppStore } from "@/stores/useAppStore";
 
 import { toast } from "sonner";
 import { voiceService } from "@/services/voiceService";
+import { BrowserLiveDock } from "@/components/chat/BrowserLiveDock";
 import { supabase } from "@/integrations/supabase/client";
 import { RealtimeVoiceChat } from "@/components/RealtimeVoiceChat";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
@@ -382,6 +383,8 @@ const Index = () => {
       )}
 
       {/* Chat Mode */}
+      {isAuthenticated && <BrowserLiveDock userId={user?.id} voiceEnabled={voiceEnabled} />}
+
       {activeMode === "chat" && (
         <>
           {!hasInteracted && (
