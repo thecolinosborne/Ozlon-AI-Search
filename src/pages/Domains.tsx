@@ -138,7 +138,7 @@ export default function Domains() {
           .select("id, domain, tld, registration_expires, statuses, auto_renew, locked, customer_id")
           .eq("customer_id", cust.id)
           .order("created_at", { ascending: false });
-        setDomains(doms ?? []);
+        setDomains((doms ?? []) as unknown as Domain[]);
       }
     } finally {
       setLoading(false);
