@@ -119,7 +119,7 @@ export default function Domains() {
 
       if (!prof?.email) return;
 
-      const { data: cust } = await supabase
+      const { data: cust } = await (supabase as any)
         .from("customers")
         .select("id, phone, company")
         .eq("email", prof.email)
@@ -133,7 +133,7 @@ export default function Domains() {
       });
 
       if (cust?.id) {
-        const { data: doms } = await supabase
+        const { data: doms } = await (supabase as any)
           .from("domains")
           .select("id, domain, tld, registration_expires, statuses, auto_renew, locked, customer_id")
           .eq("customer_id", cust.id)
