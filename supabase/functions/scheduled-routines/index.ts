@@ -88,6 +88,7 @@ async function runRoutine(routineId: string, triggeredBy = "cron") {
         "Content-Type": "application/json",
         Authorization: `Bearer ${SERVICE_ROLE}`,
         apikey: ANON_KEY,
+        "x-user-id": routine.user_id,
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: routine.prompt }],
@@ -97,12 +98,21 @@ async function runRoutine(routineId: string, triggeredBy = "cron") {
       }),
     });
 
-    const chatJson = await chatRes.json().catch(() => ({}));
-    const output: string =
-      chatJson?.message ||
-      chatJson?.content ||
-      chatJson?.choices?.[0]?.message?.content ||
-      JSON.stringify(chatJson).slice(0, 4000);
+    // Chat always answers with an SSE stream — collect the text deltas.
+    const raw = await chatRes.text();
+    let output = "";
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const payload = t.slice(5).trim();
+      if (payload === "[DONE]") break;
+      try {
+        const d = JSON.parse(payload);
+        const delta = d?.choices?.[0]?.delta?.content;
+        if (typeof delta === "string") output += delta;
+      } catch { /* partial line */ }
+    }
+    if (!output) output = raw.slice(0, 4000);
 
     const duration = Date.now() - startTime;
 

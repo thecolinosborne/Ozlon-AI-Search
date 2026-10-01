@@ -333,7 +333,16 @@ Deno.serve(async (req) => {
 
     // Habits = recurring life_events (already in lifeEvents if due today,
     // but we also peek at the broader set so habits aren't empty if none due).
-    const [habitsRes, emailThreads, eventDeadlinesRes] = await Promise.all([
+    const [habitsRes, emailThreads, eventDeadlinesRes, routineRunsRes] = await Promise.all([
+      // Automations that ran in the last 24h — their output belongs in the brief.
+      admin
+        .from("routine_runs")
+        .select("status, output, completed_at, scheduled_routines(name)")
+        .eq("user_id", user.id)
+        .eq("status", "completed")
+        .gte("completed_at", new Date(now.getTime() - 24 * 3600_000).toISOString())
+        .order("completed_at", { ascending: false })
+        .limit(5),
       admin
         .from("life_events")
         .select("id, title, recurrence_days, last_done_at")
@@ -357,6 +366,10 @@ Deno.serve(async (req) => {
     ]);
     const habits = habitsRes.data ?? [];
     const eventDeadlines = eventDeadlinesRes.data ?? [];
+    const routineRuns = (routineRunsRes.data ?? []).map((r: any) => ({
+      name: r.scheduled_routines?.name ?? "Automation",
+      output: String(r.output ?? "").slice(0, 600),
+    }));
 
     const ctx = {
       day_mode: dayMode,
@@ -378,6 +391,7 @@ Deno.serve(async (req) => {
       recent_email: emailThreads.slice(0, 15).map((e) => ({
         from: e.from, subject: e.subject, snippet: e.snippet, date: e.date, unread: e.unread,
       })),
+      routine_results: routineRuns,
       event_deadlines: eventDeadlines.map((e) => ({
         title: e.title,
         event_date: e.event_date,
@@ -409,7 +423,7 @@ CONTEXT (JSON):
 ${JSON.stringify(ctx)}
 
 Produce one structured briefing via the daily_brief tool. Rules:
-- now_line: one short sentence introducing today.
+- now_line: one short sentence introducing today. If routine_results has overnight automation output, weave the most useful result into now_line or a todo so the user sees what their automations did.
 - top_of_mind: the single highest-leverage next move. If nothing matters, set headline to "You're clear right now." with a deep-work suggestion.
 - For each card, one short ai_line that interprets, doesn't list. Empty cards: ai_line = "Clear", value = "Clear".
 - why_this objects must use plain English with the user's actual data points.

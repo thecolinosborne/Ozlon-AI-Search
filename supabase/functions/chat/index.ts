@@ -19,6 +19,7 @@ import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
 import { BROWSER_TOOLS, BROWSER_TOOL_NAMES, BROWSER_FRAME, handleBrowserTool } from "../_shared/browser-tools.ts";
+import { PLAYBOOK_FRAME, buildPlaybookContext, recordTurnActivity, markPatternAutomated } from "../_shared/playbooks.ts";
 import { OUTCOME_TOOLS, OUTCOME_TOOL_NAMES, OUTCOME_FRAME, OUTCOME_ENFORCEMENT, isGoalShapedAsk, handleOutcomeTool, buildOutcomeContext } from "../_shared/outcomes.ts";
 import { captureToolMemory, searchMemories, type MemoryResourceType } from "../_shared/memory-capture.ts";
 
@@ -452,13 +453,17 @@ async function invokeNativeEdge(
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const hdrs: Record<string, string> = {
+    'Authorization': authHeader,
+    'apikey': anonKey,
+    'Content-Type': 'application/json',
+  };
+  const srKey0 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const curUid0 = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+  if (srKey0 && authHeader === `Bearer ${srKey0}` && curUid0) hdrs['x-user-id'] = curUid0;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    },
+    headers: hdrs,
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
@@ -3807,13 +3812,18 @@ async function tryNativeGoogleCall(
       action: route.action,
       params: route.mapArgs ? route.mapArgs(args) : args,
     };
+    const fwdHeaders: Record<string, string> = {
+      'Authorization': authHeader,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
+    };
+    // Service-role callers (scheduled routines) must also pass the owner explicitly.
+    const srKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const curUid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+    if (srKey && authHeader === `Bearer ${srKey}` && curUid) fwdHeaders['x-user-id'] = curUid;
     const res = await fetch(`${supabaseUrl}/functions/v1/${route.fn}`, {
       method: 'POST',
-      headers: {
-        'Authorization': authHeader,
-        'apikey': anonKey,
-        'Content-Type': 'application/json',
-      },
+      headers: fwdHeaders,
       body: JSON.stringify(payload),
     });
     const text = await res.text();
@@ -3849,13 +3859,17 @@ async function callNativeEdge(
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const fwdHeaders2: Record<string, string> = {
+    'Authorization': authHeader,
+    'apikey': anonKey,
+    'Content-Type': 'application/json',
+  };
+  const srKey2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const curUid2 = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+  if (srKey2 && authHeader === `Bearer ${srKey2}` && curUid2) fwdHeaders2['x-user-id'] = curUid2;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    },
+    headers: fwdHeaders2,
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
@@ -6363,6 +6377,8 @@ async function executeToolCall(
             active: true,
           }).select('id, name, cron_expression').single();
           if (error) return { success: false, result: `Failed: ${error.message}` };
+          // A repeated pattern just became an automation — stop offering it.
+          markPatternAutomated(userId).catch(() => {});
           return { success: true, result: `Routine "${data.name}" created (id: ${data.id}). Schedule: ${data.cron_expression} UTC. It will fire automatically and the result will appear in your Routines page.` };
         } catch (e) {
           return { success: false, result: `Routine error: ${e instanceof Error ? e.message : String(e)}` };
@@ -11082,6 +11098,12 @@ serve(async (req) => {
         console.error('[Auth] getUser threw:', (e as Error).message);
       }
     }
+    // Server-to-server calls (scheduled routines, internal jobs) authenticate with the
+    // service-role key and pass the owner in body.userId — trust it only in that case.
+    if (!credUserId && authHeaderForCreds === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}` && typeof (body as { userId?: unknown }).userId === 'string') {
+      credUserId = (body as { userId: string }).userId;
+      console.log(`[Auth] service-role call — using body.userId: ${credUserId.slice(0, 8)}...`);
+    }
 
     // Expose userId + sessionId to tool handlers (used by load_skill, recall tools, artifact write-through, etc.)
     (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
@@ -11874,12 +11896,19 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
     // ===== Outcome engine: doctrine + businesses/outcomes in flight =====
     systemPrompt += `\n\n${OUTCOME_FRAME}\n`;
     systemPrompt += `\n\n${BROWSER_FRAME}\n`;
+    systemPrompt += `\n\n${PLAYBOOK_FRAME}\n`;
     if (credUserId) {
       try {
         const outcomeCtx = await buildOutcomeContext(lifeAdminClient(), credUserId);
         if (outcomeCtx) systemPrompt += `\n\n${outcomeCtx}\n`;
       } catch (e) {
         console.error('[outcomes] injection failed:', e);
+      }
+      try {
+        const playbookCtx = await buildPlaybookContext(credUserId);
+        if (playbookCtx) systemPrompt += `\n\n${playbookCtx}\n`;
+      } catch (e) {
+        console.error('[playbooks] injection failed:', e);
       }
     }
     // Deterministic trigger: a goal-shaped ask must produce a saved outcome,
@@ -11891,6 +11920,8 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
         : Array.isArray(lastUserMsg?.content)
           ? (lastUserMsg!.content as Array<{ text?: string }>).map((p) => p?.text || '').join(' ')
           : '';
+      // Learn what Colin keeps doing (fire-and-forget, never blocks the reply).
+      if (credUserId && lastText) recordTurnActivity(credUserId, lastText).catch(() => {});
       if (isGoalShapedAsk(lastText)) {
         systemPrompt += `\n\n${OUTCOME_ENFORCEMENT}\n`;
         console.log('[outcomes] goal-shaped ask detected — enforcement injected');
