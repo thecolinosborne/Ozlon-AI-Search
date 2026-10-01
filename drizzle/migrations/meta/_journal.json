@@ -43,6 +43,13 @@
       "when": 1790820338059,
       "tag": "0005_browser_tasks_live_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790854110293,
+      "tag": "0006_browser_extension_devices",
+      "breakpoints": true
     }
   ]
 }

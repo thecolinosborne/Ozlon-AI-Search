@@ -218,6 +218,42 @@ export type Database = {
         }
         Relationships: []
       }
+      browser_devices: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          last_seen_at: string | null
+          pair_code: string | null
+          pair_expires_at: string | null
+          revoked: boolean
+          token_hash: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string
+          last_seen_at?: string | null
+          pair_code?: string | null
+          pair_expires_at?: string | null
+          revoked?: boolean
+          token_hash?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          last_seen_at?: string | null
+          pair_code?: string | null
+          pair_expires_at?: string | null
+          revoked?: boolean
+          token_hash?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       browser_logins: {
         Row: {
           bb_context_id: string
@@ -263,7 +299,9 @@ export type Database = {
           bb_session_id: string | null
           context_id: string | null
           created_at: string
+          device_id: string | null
           error: string | null
+          executor: string
           finished_at: string | null
           goal: string
           id: string
@@ -287,7 +325,9 @@ export type Database = {
           bb_session_id?: string | null
           context_id?: string | null
           created_at?: string
+          device_id?: string | null
           error?: string | null
+          executor?: string
           finished_at?: string | null
           goal: string
           id?: string
@@ -311,7 +351,9 @@ export type Database = {
           bb_session_id?: string | null
           context_id?: string | null
           created_at?: string
+          device_id?: string | null
           error?: string | null
+          executor?: string
           finished_at?: string | null
           goal?: string
           id?: string

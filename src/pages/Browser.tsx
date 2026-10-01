@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Globe, Check, X, Square, ExternalLink, KeyRound, Trash2, Loader2, Plus } from "lucide-react";
+import { ArrowLeft, Globe, Chrome, Download, Check, X, Square, ExternalLink, KeyRound, Trash2, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,24 @@ export default function Browser() {
   const [busy, setBusy] = useState<string | null>(null);
   const [site, setSite] = useState("");
   const [pending, setPending] = useState<{ domain: string; url: string } | null>(null);
+
+  const [devices, setDevices] = useState<{ id: string; label: string; online: boolean }[]>([]);
+  const [code, setCode] = useState<string | null>(null);
+  const local = async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("local-browser", { body });
+    if (error) throw new Error(error.message);
+    if (data?.success === false) throw new Error(data.error);
+    return data;
+  };
+  const loadDevices = useCallback(async () => {
+    try { const d = await local({ action: "devices_list" }); setDevices(d.devices || []); } catch (e) { console.warn(e); }
+  }, []);
+  useEffect(() => { void loadDevices(); const iv = setInterval(loadDevices, 10000); return () => clearInterval(iv); }, [loadDevices]);
+  const download = () => {
+    fetch("/ozlon-browser.zip").then((r) => { if (!r.ok) throw new Error("Download failed"); return r.blob(); })
+      .then((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "ozlon-browser.zip"; a.click(); URL.revokeObjectURL(a.href); })
+      .catch((e) => toast.error(e.message));
+  };
 
   const load = useCallback(async () => {
     try {
@@ -86,6 +104,30 @@ export default function Browser() {
         <p className="text-sm text-muted-foreground">
           Ask the assistant to do things on any website. It stops and asks before it sends, submits, buys or deletes anything. It never moves money and never types your passwords.
         </p>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Your Chrome</h2>
+          <p className="text-xs text-muted-foreground">Connect your own Chrome so the assistant works where you're already signed in. It asks before it starts and before it presses any send, submit or publish button. You can say "always" for a site or for everything.</p>
+          {devices.map((d) => (
+            <div key={d.id} className="flex items-center justify-between rounded-2xl border border-border/60 bg-card/60 px-4 py-3">
+              <div className="flex items-center gap-3"><Chrome className="h-4 w-4 text-primary" /><div><p className="text-sm font-medium">{d.label}</p><p className="text-xs text-muted-foreground">{d.online ? "Connected and ready" : "Offline. Open Chrome to reconnect."}</p></div></div>
+              <Button size="icon" variant="ghost" aria-label="Disconnect" onClick={async () => { await local({ action: "device_revoke", device_id: d.id }); void loadDevices(); }}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          ))}
+          <div className="space-y-3 rounded-2xl border border-border/60 bg-card/60 p-4 text-sm">
+            <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>Download the add-on and unzip it.</li>
+              <li>Open <span className="text-foreground">chrome://extensions</span> and turn on Developer mode (top right).</li>
+              <li>Click Load unpacked and pick the unzipped folder.</li>
+              <li>Click the Ozlon icon in Chrome and enter the code below.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={download}><Download className="mr-1 h-4 w-4" />Download add-on</Button>
+              <Button size="sm" onClick={async () => { try { const d = await local({ action: "pair_create" }); setCode(d.code); } catch (e) { toast.error((e as Error).message); } }}><Chrome className="mr-1 h-4 w-4" />Connect Chrome</Button>
+            </div>
+            {code && <p>Your code: <span className="font-mono text-lg tracking-widest text-foreground">{code}</span> <span className="text-xs text-muted-foreground">(works for 10 minutes)</span></p>}
+          </div>
+        </section>
 
         <section className="space-y-3">
           <h2 className="text-sm font-medium text-muted-foreground">Recent tasks</h2>
