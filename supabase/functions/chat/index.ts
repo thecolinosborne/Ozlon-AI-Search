@@ -453,13 +453,17 @@ async function invokeNativeEdge(
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const hdrs: Record<string, string> = {
+    'Authorization': authHeader,
+    'apikey': anonKey,
+    'Content-Type': 'application/json',
+  };
+  const srKey0 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const curUid0 = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+  if (srKey0 && authHeader === `Bearer ${srKey0}` && curUid0) hdrs['x-user-id'] = curUid0;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    },
+    headers: hdrs,
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
