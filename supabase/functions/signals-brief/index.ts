@@ -391,6 +391,7 @@ Deno.serve(async (req) => {
       recent_email: emailThreads.slice(0, 15).map((e) => ({
         from: e.from, subject: e.subject, snippet: e.snippet, date: e.date, unread: e.unread,
       })),
+      routine_results: routineRuns,
       event_deadlines: eventDeadlines.map((e) => ({
         title: e.title,
         event_date: e.event_date,
@@ -422,7 +423,7 @@ CONTEXT (JSON):
 ${JSON.stringify(ctx)}
 
 Produce one structured briefing via the daily_brief tool. Rules:
-- now_line: one short sentence introducing today.
+- now_line: one short sentence introducing today. If routine_results has overnight automation output, weave the most useful result into now_line or a todo so the user sees what their automations did.
 - top_of_mind: the single highest-leverage next move. If nothing matters, set headline to "You're clear right now." with a deep-work suggestion.
 - For each card, one short ai_line that interprets, doesn't list. Empty cards: ai_line = "Clear", value = "Clear".
 - why_this objects must use plain English with the user's actual data points.
