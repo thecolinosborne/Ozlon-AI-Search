@@ -435,7 +435,10 @@ serve(async (req) => {
     };
 
     if (action === "start") {
-      const goal = String(body.goal || "").trim().slice(0, 2000);
+      const goal = String(body.goal || "").trim().slice(0, 2000)
+        // Never store or forward secrets the user typed in chat.
+        .replace(/\b(password|passcode|pwd|pin|otp|code|cvv|cvc)\b(\s*(is|:|=)?\s*)\S+/gi, "$1 [withheld]")
+        .replace(/\b\d{12,19}\b/g, "[number withheld]");
       if (goal.length < 4) return json({ success: false, error: "Tell me what to do in the browser." }, 400);
       const startUrl = body.start_url ? safeUrl(String(body.start_url)) : null;
       if (body.start_url && !startUrl) return json({ success: false, error: "That address is not allowed." }, 400);
