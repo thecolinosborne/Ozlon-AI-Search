@@ -6,3 +6,6 @@
 - [ ] Connect / status / reconnect cards triggered from conversation
 - [ ] Cloud browser agent (needs a browser service provider + API key)
 - [ ] Own-computer helper app (later)
+
+- [x] Browser control via Browserbase (research, forms, messages, approvals, secure sign-ins)
+- [ ] Control of your own computer (helper app) — later
