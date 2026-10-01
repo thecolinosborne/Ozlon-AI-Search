@@ -131,6 +131,22 @@ export async function handleBrowserTool(name: string, args: Record<string, any>,
     }
     if (name === "browser_task_respond") {
       const r = String(args.response);
+      // Task ids are not visible in prior chat text, so resolve to the most recent
+      // paused task when the id is missing or does not belong to this user.
+      {
+        const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const wanted = r === "answer" ? ["needs_input"] : r === "cancel" ? ["queued", "running", "needs_approval", "needs_input", "needs_login"] : ["needs_approval"];
+        let ok = false;
+        if (/^[0-9a-f-]{36}$/i.test(String(args.task_id || ""))) {
+          const { data } = await admin.from("browser_tasks").select("id,status").eq("id", args.task_id).eq("user_id", userId).maybeSingle();
+          ok = !!data && wanted.includes(data.status);
+        }
+        if (!ok) {
+          const { data } = await admin.from("browser_tasks").select("id").eq("user_id", userId).in("status", wanted).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+          if (!data) return { success: false, result: "There is no browser task waiting on you right now." };
+          args.task_id = data.id;
+        }
+      }
       const action = r === "cancel" ? "cancel" : r === "answer" ? "answer" : "approve";
       const d = await callAgent({ action, task_id: args.task_id, decision: r === "deny" ? "deny" : "approve", answer: args.answer }, authHeader, userId);
       if (!d.success) return { success: false, result: d.error };
