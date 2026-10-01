@@ -268,7 +268,11 @@ export type Database = {
           goal: string
           id: string
           live_url: string | null
+          narration: string | null
           pending_action: Json | null
+          phase: string
+          plan: Json
+          plan_index: number
           question: string | null
           result: string | null
           start_url: string | null
@@ -288,7 +292,11 @@ export type Database = {
           goal: string
           id?: string
           live_url?: string | null
+          narration?: string | null
           pending_action?: Json | null
+          phase?: string
+          plan?: Json
+          plan_index?: number
           question?: string | null
           result?: string | null
           start_url?: string | null
@@ -308,7 +316,11 @@ export type Database = {
           goal?: string
           id?: string
           live_url?: string | null
+          narration?: string | null
           pending_action?: Json | null
+          phase?: string
+          plan?: Json
+          plan_index?: number
           question?: string | null
           result?: string | null
           start_url?: string | null
