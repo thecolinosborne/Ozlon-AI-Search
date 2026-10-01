@@ -19,6 +19,7 @@ import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
 import { BROWSER_TOOLS, BROWSER_TOOL_NAMES, BROWSER_FRAME, handleBrowserTool } from "../_shared/browser-tools.ts";
+import { PLAYBOOK_FRAME, buildPlaybookContext, recordTurnActivity, markPatternAutomated } from "../_shared/playbooks.ts";
 import { OUTCOME_TOOLS, OUTCOME_TOOL_NAMES, OUTCOME_FRAME, OUTCOME_ENFORCEMENT, isGoalShapedAsk, handleOutcomeTool, buildOutcomeContext } from "../_shared/outcomes.ts";
 import { captureToolMemory, searchMemories, type MemoryResourceType } from "../_shared/memory-capture.ts";
 
@@ -11874,12 +11875,19 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
     // ===== Outcome engine: doctrine + businesses/outcomes in flight =====
     systemPrompt += `\n\n${OUTCOME_FRAME}\n`;
     systemPrompt += `\n\n${BROWSER_FRAME}\n`;
+    systemPrompt += `\n\n${PLAYBOOK_FRAME}\n`;
     if (credUserId) {
       try {
         const outcomeCtx = await buildOutcomeContext(lifeAdminClient(), credUserId);
         if (outcomeCtx) systemPrompt += `\n\n${outcomeCtx}\n`;
       } catch (e) {
         console.error('[outcomes] injection failed:', e);
+      }
+      try {
+        const playbookCtx = await buildPlaybookContext(credUserId);
+        if (playbookCtx) systemPrompt += `\n\n${playbookCtx}\n`;
+      } catch (e) {
+        console.error('[playbooks] injection failed:', e);
       }
     }
     // Deterministic trigger: a goal-shaped ask must produce a saved outcome,
