@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Globe,
   Mic,
   LogOut,
   ArrowLeft,
@@ -314,6 +315,7 @@ const Settings = () => {
           <SettingsRow icon={Users} label="People" description="Contacts from email and GoHighLevel" onClick={() => navigate("/people")} />
           <SettingsRow icon={Inbox} label="Messages" description="Email and conversations" onClick={() => navigate("/communications")} />
           <SettingsRow icon={Layers} label="Stack" description="Your saved items" onClick={() => navigate("/stack")} />
+          <SettingsRow icon={Globe} label="Browser" description="Web tasks, approvals and saved sign-ins" onClick={() => navigate("/browser")} />
           <SettingsRow icon={Brain} label="Memory" description="What it remembers and how it learns" onClick={() => navigate("/memory")} />
         </SettingsSection>
 

@@ -111,7 +111,7 @@ export default function Domains() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: prof } = await supabase
+      const { data: prof } = await (supabase as any)
         .from("profiles")
         .select("email, full_name")
         .eq("id", session.user.id)
@@ -119,7 +119,7 @@ export default function Domains() {
 
       if (!prof?.email) return;
 
-      const { data: cust } = await supabase
+      const { data: cust } = await (supabase as any)
         .from("customers")
         .select("id, phone, company")
         .eq("email", prof.email)
@@ -133,12 +133,12 @@ export default function Domains() {
       });
 
       if (cust?.id) {
-        const { data: doms } = await supabase
+        const { data: doms } = await (supabase as any)
           .from("domains")
           .select("id, domain, tld, registration_expires, statuses, auto_renew, locked, customer_id")
           .eq("customer_id", cust.id)
           .order("created_at", { ascending: false });
-        setDomains(doms ?? []);
+        setDomains((doms ?? []) as unknown as Domain[]);
       }
     } finally {
       setLoading(false);
