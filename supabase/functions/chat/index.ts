@@ -11896,6 +11896,11 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
       const lastUserMsg = [...messages].reverse().find((m: { role: string; content?: unknown }) => m.role === 'user');
       const lastText = typeof lastUserMsg?.content === 'string'
         ? lastUserMsg.content
+        : '';
+      // Learn what Colin keeps doing (fire-and-forget, never blocks the reply).
+      if (credUserId && lastText) recordTurnActivity(credUserId, lastText).catch(() => {});
+      const lastText2 = typeof lastUserMsg?.content === 'string'
+        ? lastUserMsg.content
         : Array.isArray(lastUserMsg?.content)
           ? (lastUserMsg!.content as Array<{ text?: string }>).map((p) => p?.text || '').join(' ')
           : '';
