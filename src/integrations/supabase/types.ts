@@ -182,6 +182,108 @@ export type Database = {
         }
         Relationships: []
       }
+      browser_logins: {
+        Row: {
+          bb_context_id: string
+          created_at: string
+          domain: string
+          id: string
+          label: string
+          last_used_at: string | null
+          sign_in_session_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bb_context_id: string
+          created_at?: string
+          domain: string
+          id?: string
+          label: string
+          last_used_at?: string | null
+          sign_in_session_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bb_context_id?: string
+          created_at?: string
+          domain?: string
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          sign_in_session_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      browser_tasks: {
+        Row: {
+          approved_actions: Json
+          bb_session_id: string | null
+          context_id: string | null
+          created_at: string
+          error: string | null
+          finished_at: string | null
+          goal: string
+          id: string
+          live_url: string | null
+          pending_action: Json | null
+          question: string | null
+          result: string | null
+          start_url: string | null
+          status: string
+          step_count: number
+          steps: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_actions?: Json
+          bb_session_id?: string | null
+          context_id?: string | null
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          goal: string
+          id?: string
+          live_url?: string | null
+          pending_action?: Json | null
+          question?: string | null
+          result?: string | null
+          start_url?: string | null
+          status?: string
+          step_count?: number
+          steps?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          approved_actions?: Json
+          bb_session_id?: string | null
+          context_id?: string | null
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          goal?: string
+          id?: string
+          live_url?: string | null
+          pending_action?: Json | null
+          question?: string | null
+          result?: string | null
+          start_url?: string | null
+          status?: string
+          step_count?: number
+          steps?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       cache_policy: {
         Row: {
           action: string
