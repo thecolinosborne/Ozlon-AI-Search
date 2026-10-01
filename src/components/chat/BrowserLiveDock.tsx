@@ -134,7 +134,7 @@ export function BrowserLiveDock({ userId, voiceEnabled }: { userId?: string | nu
             {showLive && (
               <div className="relative aspect-video bg-muted">
                 <iframe title="Live browser" src={task.live_url!} className="absolute inset-0 h-full w-full"
-                  sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"
+                  allow="clipboard-read; clipboard-write"
                   style={{ pointerEvents: task.status === "paused" || waiting ? "auto" : "none" }} />
               </div>
             )}
