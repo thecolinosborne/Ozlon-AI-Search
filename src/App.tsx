@@ -44,6 +44,7 @@ import AutoIntegrationDetail from "@/pages/integrations/AutoIntegrationDetail";
 import Events from "@/pages/Events";
 import Life from "@/pages/Life";
 import Memory from "@/pages/Memory";
+import Browser from "@/pages/Browser";
 import Communications from "@/pages/Communications";
 import People from "@/pages/People";
 import Signals from "@/pages/Signals";
@@ -116,6 +117,7 @@ const AppRoutes = () => {
         <Route path="/events" element={<Events />} />
         <Route path="/life" element={<Life />} />
         <Route path="/memory" element={<Memory />} />
+        <Route path="/browser" element={<Browser />} />
         <Route path="/communications" element={<Communications />} />
         <Route path="/people" element={<People />} />
         <Route path="/signals" element={<Signals />} />
