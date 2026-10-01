@@ -1,2 +1,4 @@
 
 - Browser automation runs in the `browser-agent` edge function on Browserbase (keepAlive sessions, per-user contexts for sign-ins); risky clicks pause for approval server-side and money movement is hard-blocked — why: safety must not depend on the AI obeying prompts.
+- Server-to-server calls (scheduled routines, internal jobs) authenticate to `chat` with the service-role key plus `body.userId`; chat trusts that userId only when the bearer is the service-role key, and forwards `x-user-id` to native Google edge functions on those calls — why: unattended automations must act as their owner without a user JWT.
+- The `chat` function always responds with SSE, even to non-browser callers; any internal caller must parse `data:` deltas, not `res.json()` — why: `scheduled-routines` silently saved empty outputs until it parsed the stream.
