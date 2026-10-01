@@ -11085,6 +11085,12 @@ serve(async (req) => {
         console.error('[Auth] getUser threw:', (e as Error).message);
       }
     }
+    // Server-to-server calls (scheduled routines, internal jobs) authenticate with the
+    // service-role key and pass the owner in body.userId — trust it only in that case.
+    if (!credUserId && authHeaderForCreds === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}` && typeof (body as { userId?: unknown }).userId === 'string') {
+      credUserId = (body as { userId: string }).userId;
+      console.log(`[Auth] service-role call — using body.userId: ${credUserId.slice(0, 8)}...`);
+    }
 
     // Expose userId + sessionId to tool handlers (used by load_skill, recall tools, artifact write-through, etc.)
     (globalThis as Record<string, unknown>).__currentUserId = credUserId || undefined;
