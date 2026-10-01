@@ -333,7 +333,16 @@ Deno.serve(async (req) => {
 
     // Habits = recurring life_events (already in lifeEvents if due today,
     // but we also peek at the broader set so habits aren't empty if none due).
-    const [habitsRes, emailThreads, eventDeadlinesRes] = await Promise.all([
+    const [habitsRes, emailThreads, eventDeadlinesRes, routineRunsRes] = await Promise.all([
+      // Automations that ran in the last 24h — their output belongs in the brief.
+      admin
+        .from("routine_runs")
+        .select("status, output, completed_at, scheduled_routines(name)")
+        .eq("user_id", user.id)
+        .eq("status", "completed")
+        .gte("completed_at", new Date(now.getTime() - 24 * 3600_000).toISOString())
+        .order("completed_at", { ascending: false })
+        .limit(5),
       admin
         .from("life_events")
         .select("id, title, recurrence_days, last_done_at")
