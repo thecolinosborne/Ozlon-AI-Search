@@ -29,6 +29,13 @@
       "when": 1790817971425,
       "tag": "0003_create_browser_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790819019925,
+      "tag": "0004_create_activity_patterns",
+      "breakpoints": true
     }
   ]
 }

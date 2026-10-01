@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      activity_patterns: {
+        Row: {
+          count: number
+          created_at: string
+          id: string
+          label: string
+          last_seen_at: string
+          pattern_key: string
+          status: string
+          suggestion: string | null
+          user_id: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          id?: string
+          label: string
+          last_seen_at?: string
+          pattern_key: string
+          status?: string
+          suggestion?: string | null
+          user_id: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          id?: string
+          label?: string
+          last_seen_at?: string
+          pattern_key?: string
+          status?: string
+          suggestion?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       ai_providers: {
         Row: {
           capabilities: Json
