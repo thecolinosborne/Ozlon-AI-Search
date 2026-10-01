@@ -3808,13 +3808,18 @@ async function tryNativeGoogleCall(
       action: route.action,
       params: route.mapArgs ? route.mapArgs(args) : args,
     };
+    const fwdHeaders: Record<string, string> = {
+      'Authorization': authHeader,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
+    };
+    // Service-role callers (scheduled routines) must also pass the owner explicitly.
+    const srKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const curUid = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+    if (srKey && authHeader === `Bearer ${srKey}` && curUid) fwdHeaders['x-user-id'] = curUid;
     const res = await fetch(`${supabaseUrl}/functions/v1/${route.fn}`, {
       method: 'POST',
-      headers: {
-        'Authorization': authHeader,
-        'apikey': anonKey,
-        'Content-Type': 'application/json',
-      },
+      headers: fwdHeaders,
       body: JSON.stringify(payload),
     });
     const text = await res.text();
@@ -3850,13 +3855,17 @@ async function callNativeEdge(
   if (!authHeader) throw new Error('No auth context — user must be signed in');
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const fwdHeaders2: Record<string, string> = {
+    'Authorization': authHeader,
+    'apikey': anonKey,
+    'Content-Type': 'application/json',
+  };
+  const srKey2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const curUid2 = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+  if (srKey2 && authHeader === `Bearer ${srKey2}` && curUid2) fwdHeaders2['x-user-id'] = curUid2;
   const res = await fetch(`${supabaseUrl}/functions/v1/${fn}`, {
     method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    },
+    headers: fwdHeaders2,
     body: JSON.stringify({ action, params }),
   });
   const text = await res.text();
