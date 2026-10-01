@@ -18,6 +18,7 @@ import { renderForChatPrompt } from "../_shared/signals/render.ts";
 import type { Entity } from "../_shared/signals/entities.ts";
 import { extractEmailBody, extractDocsText, extractSheetGrid, stripHtml, clip } from "../_shared/content-extract.ts";
 import { LIFE_TOOLS, LIFE_TOOL_NAMES, LIFE_OS_FRAME, handleLifeTool, buildLifeContext, adminClient as lifeAdminClient } from "../_shared/life-os.ts";
+import { BROWSER_TOOLS, BROWSER_TOOL_NAMES, BROWSER_FRAME, handleBrowserTool } from "../_shared/browser-tools.ts";
 import { OUTCOME_TOOLS, OUTCOME_TOOL_NAMES, OUTCOME_FRAME, OUTCOME_ENFORCEMENT, isGoalShapedAsk, handleOutcomeTool, buildOutcomeContext } from "../_shared/outcomes.ts";
 import { captureToolMemory, searchMemories, type MemoryResourceType } from "../_shared/memory-capture.ts";
 
@@ -1318,6 +1319,7 @@ const ACTION_TOOLS: ToolDef[] = [
   // Life OS (EOS-style): vision, 90-day priorities, scorecard, issues, weekly review
   ...(LIFE_TOOLS as ToolDef[]),
   ...(OUTCOME_TOOLS as unknown as ToolDef[]),
+  ...(BROWSER_TOOLS as unknown as ToolDef[]),
   // Gmail actions
   {
     type: 'function',
@@ -3885,6 +3887,13 @@ async function executeToolCall(
     if (LIFE_TOOL_NAMES.has(toolName)) {
       const lifeUserId = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
       return await handleLifeTool(toolName, args, lifeUserId || '');
+    }
+
+    // ---- Cloud browser agent (Browserbase) ----
+    if (BROWSER_TOOL_NAMES.has(toolName)) {
+      const bUser = (globalThis as Record<string, unknown>).__currentUserId as string | undefined;
+      const bAuth = (globalThis as Record<string, unknown>).__currentAuthHeader as string | undefined;
+      return await handleBrowserTool(toolName, args as Record<string, any>, bUser || '', bAuth || '');
     }
 
     // ---- Outcome engine (businesses, outcome specs, ClickUp delivery, pulse) ----
@@ -8336,7 +8345,7 @@ let _registryDriftReport: { missingCases: string[]; orphanCases: string[] } = {
 _registryDriftReport = checkRegistryDrift({
   executeToolCallSource: executeToolCall.toString(),
   declaredToolNames: ACTION_TOOLS.map((t) => t?.function?.name).filter(Boolean) as string[],
-  nonLegacyTools: [...LIFE_TOOL_NAMES, ...OUTCOME_TOOL_NAMES],
+  nonLegacyTools: [...LIFE_TOOL_NAMES, ...OUTCOME_TOOL_NAMES, ...BROWSER_TOOL_NAMES],
   nativeGoogleRouteKeys: Object.keys(NATIVE_GOOGLE_ROUTES),
 });
 
@@ -9965,6 +9974,7 @@ async function runToolLoop(
         'list_my_documents', 'read_my_document',
         ...LIFE_TOOL_NAMES,
         ...OUTCOME_TOOL_NAMES,
+        ...BROWSER_TOOL_NAMES,
       ]);
 
       // Per-integration soft cap when 2+ named (proportional split).
@@ -11863,6 +11873,7 @@ The UI will strip this from the user's view but it trains you to admit gaps inst
 
     // ===== Outcome engine: doctrine + businesses/outcomes in flight =====
     systemPrompt += `\n\n${OUTCOME_FRAME}\n`;
+    systemPrompt += `\n\n${BROWSER_FRAME}\n`;
     if (credUserId) {
       try {
         const outcomeCtx = await buildOutcomeContext(lifeAdminClient(), credUserId);
