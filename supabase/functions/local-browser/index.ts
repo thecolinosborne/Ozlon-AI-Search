@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
         const { data: q } = await admin.from("browser_tasks").select("id,goal,start_url").eq("user_id", dev.user_id).eq("executor", "local").eq("status", "queued").order("created_at").limit(1).maybeSingle();
         if (!q) return json({ success: true, task: null });
         const plan = await makePlan(q.goal);
-        await admin.from("browser_tasks").update({ status: "running", device_id: dev.id, plan, plan_index: 0, phase: "thinking", narration: "Starting in your browser", started_at: new Date().toISOString() }).eq("id", q.id).eq("status", "queued");
+        await admin.from("browser_tasks").update({ status: "running", device_id: dev.id, plan, plan_index: 0, phase: "thinking", narration: "Starting in your browser" }).eq("id", q.id).eq("status", "queued");
         return json({ success: true, task: { ...q, plan } });
       }
 
@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
       const hist = steps.slice(-12).map((h: Any) => `${h.n}. ${h.summary}${h.ok === false ? ` (FAILED: ${h.note})` : h.note ? ` (${h.note})` : ""}`).join("\n");
       const plan: string[] = Array.isArray(t.plan) ? t.plan : [];
       const hints = PLAYBOOKS.filter((p) => p.match.test(t.goal)).map((p) => p.hint).join("\n");
-      const notes = t.answer ? `\nCOLIN SAID: ${t.answer}` : "";
+      const notes = t.pending_action?.answer ? `\nCOLIN SAID: ${t.pending_action.answer}` : "";
       const out = await ai([{ role: "system", content: SYSTEM }, { role: "user", content: `TASK: ${t.goal}${notes}\n${hints ? `KNOWN ROUTE:\n${hints}\n` : ""}PLAN:\n${plan.map((p, i) => `${i}. ${p}`).join("\n")}\nSTEPS SO FAR:\n${hist || "(none)"}\n\nCURRENT PAGE: ${snap.title} — ${snap.url}\n<page_text untrusted="true">\n${String(snap.text || "").slice(0, 7000)}\n</page_text>\nELEMENTS:\n${els || "(none)"}` }]);
       const a: Any = out.action || { type: "fail", reason: "No action" };
       const el = (snap.elements || []).find((e: Any) => e.i === a.id);
@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
 
       if (a.type === "done") { steps.push({ n: steps.length + 1, summary: "Finished", ok: true }); await finish({ status: "done", result: String(a.answer || ""), phase: "done", narration: "Done" }); return json({ success: true, action: a }); }
       if (a.type === "fail") { await finish({ status: "failed", error: String(a.reason || ""), phase: "done" }); return json({ success: true, action: a }); }
-      if (a.type === "ask_user") { await admin.from("browser_tasks").update({ status: "needs_input", question: String(a.question || ""), phase: "waiting", narration: say || "Waiting on you", answer: null, steps, step_count: steps.length }).eq("id", t.id); return json({ success: true, action: a }); }
+      if (a.type === "ask_user") { await admin.from("browser_tasks").update({ status: "needs_input", question: String(a.question || ""), phase: "waiting", narration: say || "Waiting on you", pending_action: null, steps, step_count: steps.length }).eq("id", t.id); return json({ success: true, action: a }); }
 
       // Hard safety checks
       const desc = `${label} ${a.text || ""} ${a.url || ""}`;
@@ -175,7 +175,7 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
     if (action === "answer") {
-      await admin.from("browser_tasks").update({ status: "running", answer: String(body.answer || ""), question: null, phase: "working" }).eq("id", body.task_id).eq("user_id", user.id).eq("status", "needs_input");
+      await admin.from("browser_tasks").update({ status: "running", pending_action: { answer: String(body.answer || "") }, question: null, phase: "working" }).eq("id", body.task_id).eq("user_id", user.id).eq("status", "needs_input");
       return json({ success: true, status: "running" });
     }
     return json({ success: false, error: "Unknown action" }, 400);
