@@ -6364,6 +6364,8 @@ async function executeToolCall(
             active: true,
           }).select('id, name, cron_expression').single();
           if (error) return { success: false, result: `Failed: ${error.message}` };
+          // A repeated pattern just became an automation — stop offering it.
+          markPatternAutomated(userId).catch(() => {});
           return { success: true, result: `Routine "${data.name}" created (id: ${data.id}). Schedule: ${data.cron_expression} UTC. It will fire automatically and the result will appear in your Routines page.` };
         } catch (e) {
           return { success: false, result: `Routine error: ${e instanceof Error ? e.message : String(e)}` };
