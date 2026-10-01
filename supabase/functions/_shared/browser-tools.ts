@@ -64,7 +64,7 @@ export const BROWSER_TOOLS = [
 
 export const BROWSER_TOOL_NAMES = new Set(BROWSER_TOOLS.map((t) => t.function.name));
 
-export const BROWSER_FRAME = `BROWSER: You can operate a real web browser with browser_task for anything on the web (research, account pages, forms, messages). Put every needed detail in the goal. If it returns needs_approval, tell Colin exactly what will be sent/submitted and ask for a yes; only call browser_task_respond approve after he says yes. If needs_login, call browser_sign_in start and give him the link to sign in himself, then finish when he confirms. Never claim a browser result you did not get. If a task is still running, say it keeps going and he can ask "how did that browser task go" — never promise to message him later.`;
+export const BROWSER_FRAME = `BROWSER: You can operate a real web browser with browser_task for anything on the web (research, account pages, forms, messages). Put every needed detail in the goal. If it returns needs_approval, tell Colin exactly what will be sent/submitted and ask for a yes; only call browser_task_respond approve after he says yes. If needs_login, call browser_sign_in start and give him the link to sign in himself, then finish when he confirms. Never claim a browser result you did not get. Never invent or rewrite a link — only share URLs that a browser tool returned, character for character. If a task is still running, say it keeps going and he can ask "how did that browser task go" — never promise to message him later.`;
 
 async function callAgent(body: Record<string, unknown>, authHeader: string, userId: string) {
   const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -88,7 +88,7 @@ function render(t: Record<string, any>): string {
       return `${base}\nPAUSED FOR APPROVAL: about to click "${p.label}" on ${p.host} (${p.page}).${p.typed ? ` Text entered: "${p.typed}".` : ""}\nAsk Colin to approve or deny.${t.live_url ? `\nHe can watch the browser live: ${t.live_url}` : ""}\nRecent steps:\n${trail}`;
     }
     case "needs_input": return `${base}\nQUESTION FOR COLIN: ${t.question}`;
-    case "needs_login": return `${base}\nNEEDS SIGN-IN: ${t.question}\nCall browser_sign_in start with that site.`;
+    case "needs_login": return `${base}\nNEEDS SIGN-IN: ${t.question}`;
     case "failed": return `${base}\nFAILED: ${t.error}\nRecent steps:\n${trail}`;
     case "cancelled": return `${base}\nCancelled.`;
     default: return `${base}\nSTILL RUNNING in the background.${t.live_url ? ` Live view: ${t.live_url}` : ""}\nRecent steps:\n${trail}`;
@@ -115,7 +115,13 @@ export async function handleBrowserTool(name: string, args: Record<string, any>,
       const d = await callAgent({ action: "start", goal: args.goal, start_url: args.start_url }, authHeader, userId);
       if (!d.success) return { success: false, result: `Could not start the browser: ${d.error}` };
       const t = await waitFor(d.task_id, userId, 100_000);
-      return { success: true, result: (d.using_login ? `Using saved sign-in: ${d.using_login}\n` : "") + render(t) };
+      let extra = "";
+      if (t?.status === "needs_login" && t.pending_action?.domain) {
+        // Open the secure sign-in browser right away so the link is real, never invented.
+        const l = await callAgent({ action: "login_start", url: t.pending_action.domain }, authHeader, userId);
+        if (l.success && l.live_url) extra = `\nSECURE SIGN-IN LINK (give Colin exactly this URL, unchanged): ${l.live_url}\nHe signs in himself there. When he says he is done, call browser_sign_in finish with url ${l.domain}; the task then resumes on its own.`;
+      }
+      return { success: true, result: (d.using_login ? `Using saved sign-in: ${d.using_login}\n` : "") + render(t) + extra };
     }
     if (name === "browser_task_status") {
       const d = await callAgent({ action: "status", task_id: args.task_id }, authHeader, userId);
