@@ -111,7 +111,7 @@ export default function Domains() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: prof } = await supabase
+      const { data: prof } = await (supabase as any)
         .from("profiles")
         .select("email, full_name")
         .eq("id", session.user.id)
