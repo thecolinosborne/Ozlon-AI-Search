@@ -533,7 +533,18 @@ serve(async (req) => {
       if (!login) return json({ success: false, error: "No sign-in in progress for that site." }, 404);
       await releaseSession(login.sign_in_session_id); // persists cookies into the context
       await admin.from("browser_logins").update({ status: "active", sign_in_session_id: null }).eq("id", login.id);
-      return json({ success: true, domain: login.domain, status: "active" });
+      // Resume any task that was waiting on this sign-in.
+      const { data: waiting } = await admin.from("browser_tasks").select("id,pending_action").eq("user_id", userId).eq("status", "needs_login");
+      const resumed: string[] = [];
+      for (const w of waiting || []) {
+        const d = String(w.pending_action?.domain || "");
+        if (d && (d === login.domain || d.endsWith(`.${login.domain}`) || login.domain.endsWith(`.${d}`))) {
+          await admin.from("browser_tasks").update({ status: "queued", context_id: login.id, bb_session_id: null, pending_action: null, question: null }).eq("id", w.id);
+          background(runTask(w.id));
+          resumed.push(w.id);
+        }
+      }
+      return json({ success: true, domain: login.domain, status: "active", resumed_tasks: resumed });
     }
 
     if (action === "logins_list") {
