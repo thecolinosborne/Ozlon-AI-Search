@@ -12,7 +12,7 @@
 //  - Only public http(s) URLs. No localhost, private IPs or cloud metadata.
 //  - Step, time and concurrency budgets; long tasks continue in a fresh run.
 //
-// Actions: start | status | approve | answer | cancel | continue (internal)
+// Actions: start | status | approve | answer | pause | resume | cancel | continue (internal)
 //          login_start | login_finish | logins_list | login_remove
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import puppeteer from "https://deno.land/x/puppeteer@16.2.0/mod.ts";
@@ -332,17 +332,17 @@ async function runTask(taskId: string, invocation = 0) {
 
       // ---------- terminal / pausing actions
       if (a.type === "done") {
-        await patch(taskId, { status: "done", result: String(a.answer || "Done."), steps, step_count: steps.length, finished_at: new Date().toISOString(), pending_action: null });
+        await patch(taskId, { status: "done", phase: "done", narration: "All done.", plan_index: Math.max(0, taskPlan.length - 1), result: String(a.answer || "Done."), steps, step_count: steps.length, finished_at: new Date().toISOString(), pending_action: null });
         await releaseSession(sessionId); browser.disconnect(); return;
       }
       if (a.type === "fail") throw new Error(String(a.reason || "The task could not be completed."));
       if (a.type === "ask_user") {
-        await patch(taskId, { status: "needs_input", question: String(a.question), steps, step_count: steps.length, pending_action: null });
+        await patch(taskId, { status: "needs_input", phase: "waiting", narration: "I have a question for you.", question: String(a.question), steps, step_count: steps.length, pending_action: null });
         browser.disconnect(); return; // session kept alive for the answer
       }
       if (a.type === "need_login") {
         const domain = hostOf(safeUrl(String(a.domain || snap.url)) || snap.url) || host;
-        await patch(taskId, { status: "needs_login", question: `Sign in to ${domain} first. ${String(a.reason || "")}`.trim(), steps, step_count: steps.length, pending_action: { domain } });
+        await patch(taskId, { status: "needs_login", phase: "waiting", narration: "Please sign in so I can continue.", question: `Sign in to ${domain} first. ${String(a.reason || "")}`.trim(), steps, step_count: steps.length, pending_action: { domain } });
         await releaseSession(sessionId); browser.disconnect(); return;
       }
 
@@ -372,7 +372,7 @@ async function runTask(taskId: string, invocation = 0) {
             await admin.storage.from("documents").upload(shotPath, bytes, { contentType: "image/jpeg", upsert: true }).catch(() => {});
           }
           await patch(taskId, {
-            status: "needs_approval", steps, step_count: steps.length,
+            status: "needs_approval", phase: "waiting", narration: `Ready to click "${label}". Waiting for your OK.`, steps, step_count: steps.length,
             pending_action: { fingerprint: fp, label, host, page: snap.title, url: snap.url, action: a, typed: a.type === "type" ? a.text : undefined, screenshot: shotPath, reason: step.thought },
           });
           browser.disconnect(); return; // keepAlive session waits for the decision
@@ -444,7 +444,7 @@ async function runTask(taskId: string, invocation = 0) {
   } catch (e) {
     const msg = (e as Error).message || String(e);
     console.error("[browser-agent]", taskId, msg);
-    await patch(taskId, { status: "failed", error: msg.slice(0, 500), steps, step_count: steps.length, finished_at: new Date().toISOString() });
+    await patch(taskId, { status: "failed", phase: "done", narration: "I couldn't finish this one.", error: msg.slice(0, 500), steps, step_count: steps.length, finished_at: new Date().toISOString() });
     await releaseSession(sessionId);
   } finally {
     try { browser?.disconnect(); } catch { /* ignore */ }
@@ -514,7 +514,7 @@ serve(async (req) => {
         const t = await own(String(body.task_id));
         return t ? json({ success: true, task: t }) : json({ success: false, error: "Task not found" }, 404);
       }
-      const { data } = await admin.from("browser_tasks").select("id,goal,status,result,question,pending_action,error,step_count,live_url,created_at,updated_at")
+      const { data } = await admin.from("browser_tasks").select("id,goal,status,result,question,pending_action,error,step_count,live_url,created_at,updated_at,plan,plan_index,narration,phase,steps")
         .eq("user_id", userId).order("created_at", { ascending: false }).limit(Number(body.limit) || 10);
       return json({ success: true, tasks: data || [] });
     }
