@@ -88,6 +88,7 @@ async function runRoutine(routineId: string, triggeredBy = "cron") {
         "Content-Type": "application/json",
         Authorization: `Bearer ${SERVICE_ROLE}`,
         apikey: ANON_KEY,
+        "x-user-id": routine.user_id,
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: routine.prompt }],
