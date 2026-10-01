@@ -36,6 +36,13 @@
       "when": 1790819019925,
       "tag": "0004_create_activity_patterns",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790820338059,
+      "tag": "0005_browser_tasks_live_plan",
+      "breakpoints": true
     }
   ]
 }

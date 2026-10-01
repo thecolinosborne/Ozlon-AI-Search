@@ -14,7 +14,7 @@ type Task = {
 type Login = { id: string; label: string; domain: string; status: string };
 
 const STATUS: Record<string, string> = {
-  queued: "Starting", running: "Working", done: "Done", failed: "Didn't finish", cancelled: "Stopped",
+  queued: "Starting", running: "Working", paused: "Paused", done: "Done", failed: "Didn't finish", cancelled: "Stopped",
   needs_approval: "Waiting for your OK", needs_input: "Has a question", needs_login: "Needs you to sign in",
 };
 
