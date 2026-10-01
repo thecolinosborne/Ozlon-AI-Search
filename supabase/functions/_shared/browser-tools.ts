@@ -15,6 +15,7 @@ export const BROWSER_TOOLS = [
         properties: {
           goal: { type: "string", description: "Full task in plain language, including every detail needed (exact message text, names, dates, what to report back)." },
           start_url: { type: "string", description: "Website to start on, if known." },
+          where: { type: "string", enum: ["auto", "cloud"], description: "auto (default) uses Colin's own Chrome when the Ozlon add-on is connected, otherwise the cloud browser." },
         },
         required: ["goal"],
       },
@@ -64,7 +65,7 @@ export const BROWSER_TOOLS = [
 
 export const BROWSER_TOOL_NAMES = new Set(BROWSER_TOOLS.map((t) => t.function.name));
 
-export const BROWSER_FRAME = `BROWSER: You can operate a real web browser with browser_task for anything on the web (research, account pages, forms, messages). Put every needed detail in the goal. If it returns needs_approval, tell Colin exactly what will be sent/submitted and ask for a yes; only call browser_task_respond approve after he says yes. If needs_login, call browser_sign_in start and give him the link to sign in himself, then finish when he confirms. Never claim a browser result you did not get. Never invent or rewrite a link — only share URLs that a browser tool returned, character for character. Colin watches the browser live on his screen while it works, so keep chat replies short. If a task is still running, say it keeps going in the live window and he can ask "how did that browser task go" — never promise to message him later.`;
+export const BROWSER_FRAME = `BROWSER: You can operate a real web browser with browser_task for anything on the web (research, account pages, forms, messages). Put every needed detail in the goal. If it returns needs_approval, tell Colin exactly what will be sent/submitted and ask for a yes; only call browser_task_respond approve after he says yes. If needs_login, call browser_sign_in start and give him the link to sign in himself, then finish when he confirms. Never claim a browser result you did not get. Never invent or rewrite a link — only share URLs that a browser tool returned, character for character. When the Ozlon Chrome add-on is connected, tasks run in Colin's own Chrome where he is already signed in, and he approves risky clicks in a pop-up there. Otherwise Colin watches the cloud browser live, so keep chat replies short. If a task is still running, say it keeps going in the live window and he can ask "how did that browser task go" — never promise to message him later.`;
 
 async function callAgent(body: Record<string, unknown>, authHeader: string, userId: string) {
   const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -112,6 +113,16 @@ export async function handleBrowserTool(name: string, args: Record<string, any>,
   if (!userId) return { success: false, result: "Browser tasks need Colin to be signed in." };
   try {
     if (name === "browser_task") {
+      // Prefer Colin's own Chrome (Ozlon add-on) when it is online: he is already signed in there.
+      const adm = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: dev } = await adm.from("browser_devices").select("id").eq("user_id", userId).eq("revoked", false)
+        .gt("last_seen_at", new Date(Date.now() - 75_000).toISOString()).limit(1).maybeSingle();
+      if (dev && args.where !== "cloud") {
+        const { data: lt, error: le } = await adm.from("browser_tasks").insert({ user_id: userId, goal: String(args.goal).slice(0, 4000), start_url: args.start_url || null, executor: "local", status: "queued", phase: "thinking" }).select("id").single();
+        if (le) return { success: false, result: `Could not start: ${le.message}` };
+        const t = await waitFor(lt.id, userId, 100_000);
+        return { success: true, result: `Running in Colin's own Chrome via the Ozlon add-on (he approves risky clicks in a pop-up there).\n` + render(t) };
+      }
       const d = await callAgent({ action: "start", goal: args.goal, start_url: args.start_url }, authHeader, userId);
       if (!d.success) return { success: false, result: `Could not start the browser: ${d.error}` };
       const t = await waitFor(d.task_id, userId, 100_000);
@@ -145,6 +156,14 @@ export async function handleBrowserTool(name: string, args: Record<string, any>,
           const { data } = await admin.from("browser_tasks").select("id").eq("user_id", userId).in("status", wanted).order("updated_at", { ascending: false }).limit(1).maybeSingle();
           if (!data) return { success: false, result: "There is no browser task waiting on you right now." };
           args.task_id = data.id;
+        }
+      }
+      if (r === "answer") {
+        const admL = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const { data: lt } = await admL.from("browser_tasks").select("executor").eq("id", args.task_id).maybeSingle();
+        if (lt?.executor === "local") {
+          await admL.from("browser_tasks").update({ status: "running", pending_action: { answer: String(args.answer || "") }, question: null, phase: "working" }).eq("id", args.task_id).eq("user_id", userId);
+          return { success: true, result: render(await waitFor(String(args.task_id), userId, 90_000)) };
         }
       }
       const action = r === "cancel" ? "cancel" : r === "answer" ? "answer" : "approve";
