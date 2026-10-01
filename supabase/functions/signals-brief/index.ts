@@ -366,6 +366,10 @@ Deno.serve(async (req) => {
     ]);
     const habits = habitsRes.data ?? [];
     const eventDeadlines = eventDeadlinesRes.data ?? [];
+    const routineRuns = (routineRunsRes.data ?? []).map((r: any) => ({
+      name: r.scheduled_routines?.name ?? "Automation",
+      output: String(r.output ?? "").slice(0, 600),
+    }));
 
     const ctx = {
       day_mode: dayMode,
