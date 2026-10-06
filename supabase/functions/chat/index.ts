@@ -7075,6 +7075,9 @@ ${pageContents.slice(0, 45000)}`;
               const u = new URL(t, base);
               if (!/^https?:$/.test(u.protocol)) return null;
               u.hash = '';
+              // Login/register wrappers (e.g. Meetup ?returnUri=) — use the real event page.
+              const wrapped = u.searchParams.get('returnUri') || u.searchParams.get('returnUrl') || u.searchParams.get('redirect');
+              if (wrapped && /^https?:\/\//i.test(wrapped)) return wrapped;
               return u.toString();
             } catch { return null; }
           };
