@@ -3324,12 +3324,12 @@ const ACTION_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'scrape_events',
-      description: 'Find real upcoming events (networking, conferences, meetups, workshops, chamber mixers, local gatherings) and extract FULL structured detail — date/time, venue name + street address, organizer, registration link, and actual ticket cost (free vs paid, price range, member pricing) — then save/dedupe them for the user. Searches Eventbrite, Meetup, chamber calendars and ticket pages in parallel. Use whenever the user asks about events, networking opportunities, "what\'s happening near me", or upcoming local/industry dates.',
+      description: 'Deep scan for real upcoming events (networking, marketing, conferences, meetups, workshops, chamber mixers, local business groups). Searches Eventbrite, Meetup, Luma, Facebook Events, LinkedIn Events, AllEvents, city calendars, chambers of commerce, BNI chapters, business associations and coworking spaces in parallel. Returns full detail — date/time, venue + address, organizer, ticket link and real cost — plus the people (speakers, hosts, sponsors), who attends, and a fit score ranking each event against the user\'s businesses. Saves/dedupes them. Use whenever the user asks about events, networking or marketing opportunities. The user wants to pick the area each time: if they did not name a place, ask "Which area should I search?" before calling.',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'What kind of events, e.g. "real estate and small business networking"' },
-          location: { type: 'string', description: 'City/region, e.g. "Charlotte NC" or "Lake Norman area". Strongly recommended.' },
+          location: { type: 'string', description: 'City/region the user named, e.g. "Charlotte NC" or "Lake Norman". Required — ask the user if they did not say.' },
           category: { type: 'string', enum: ['networking', 'conference', 'meetup', 'workshop', 'webinar', 'other'], description: 'Event category (default: networking)' },
           max_results: { type: 'number', description: 'Max events to find (default 12, max 25)' },
         },
@@ -6859,19 +6859,31 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           const query = args.query as string;
           const category = (args.category as string) || 'networking';
           const maxResults = Math.min((args.max_results as number) || 12, 25);
-          // Colin's home base: Lake Norman (Huntersville, Cornelius, Davidson, Mooresville) + Charlotte.
-          const location = (args.location as string) || 'Lake Norman Huntersville Cornelius NC';
+          // The user picks the area each time — no silent default.
+          const location = String(args.location || '').trim();
+          if (!location && !/https?:\/\//i.test(String(query))) {
+            return { success: false, result: 'No area given. Ask the user which area to search (for example Lake Norman, Charlotte, or another city), then call again with location.' };
+          }
           const today = new Date();
           const yr = today.getUTCFullYear();
+          const monthName = today.toLocaleString('en-US', { month: 'long' });
 
-          // ---- Step 1: multi-angle search fan-out (listing sites + ticketing + local) ----
+          // ---- Step 1: wide multi-source fan-out (event sites + local groups) ----
           const base = location ? `${query} ${location}` : query;
           const queries = [
-            `${base} events ${yr} ${yr + 1}`,
+            `${base} events ${monthName} ${yr}`,
             `${base} site:eventbrite.com`,
             `${base} site:meetup.com`,
-            `${base} tickets price registration cost`,
-            `${base} chamber of commerce networking calendar`,
+            `${base} site:lu.ma OR site:luma.com`,
+            `${base} site:facebook.com/events`,
+            `${base} site:linkedin.com/events`,
+            `${base} site:allevents.in`,
+            `${location} chamber of commerce events calendar ${query}`,
+            `${location} BNI chapter business networking group meeting`,
+            `${location} business association OR rotary OR young professionals networking events`,
+            `${location} coworking space events ${query}`,
+            `${location} city events calendar business ${monthName} ${yr}`,
+            `${base} tickets price registration`,
           ];
 
           const searchOne = async (q: string) => {
@@ -6926,12 +6938,19 @@ Be specific, factual, and cite findings with [Source N] notation throughout.`;
           if (FIRECRAWL_KEY) {
             const priority = [...results].sort((a, b) => {
               const score = (u: string) =>
-                /eventbrite|meetup|ticket|chamber|luma|lu\.ma|10times|allevents/i.test(u) ? 1 : 0;
+                /eventbrite|meetup|ticket|chamber|luma|lu\.ma|10times|allevents|bni|linkedin\.com\/events|facebook\.com\/events|calendar|cowork/i.test(u) ? 1 : 0;
               return score(b.url) - score(a.url);
             });
             // Pasted links first, always scraped.
             priority.sort((a, b) => (pastedUrls.includes(b.url) ? 1 : 0) - (pastedUrls.includes(a.url) ? 1 : 0));
-            priority.splice(5);
+            // Spread scrapes across different sites so one source can't crowd out the rest.
+            const perHost = new Map<string, number>();
+            const spread = priority.filter((r) => {
+              let h = ''; try { h = new URL(r.url).hostname.replace(/^www\./, ''); } catch { /* skip */ }
+              const n = perHost.get(h) || 0; perHost.set(h, n + 1);
+              return n < 2 || pastedUrls.includes(r.url);
+            });
+            priority.splice(0, priority.length, ...spread.slice(0, 10));
 
             const scrapes = await Promise.all(priority.map(async (r) => {
               try {
@@ -6975,12 +6994,16 @@ For each event return these fields (use null when the content genuinely does not
 - rsvp_deadline: ISO date if stated, else null
 - source: website name
 - confidence: 0-1, how certain you are the date and price are correct
+- audience: who usually attends, one short line (e.g. "local business owners, realtors, contractors"), or null
+- people: array of {name, role ("speaker"|"host"|"sponsor"|"organizer"), company} named on the page. [] if none. Never invent names
+- fit_score: 0-100, how useful this event is for the user's businesses (meeting buyers of cleaning services or web design, referral partners, other owners)
+- fit_reason: one short plain sentence explaining the score
 
-Rules: skip past events, skip pages with no specific date, merge duplicates of the same event, and prefer the page with pricing detail.
-Relevance: the user is an entrepreneur running service businesses (a cleaning company, a web development agency). Keep networking, business, entrepreneur, chamber, small-business and founder events. SKIP anything that is not an attendable event: memberships, sponsorship or partner tiers, date ranges spanning months, job postings, and unrelated niche-industry events (e.g. deathcare, veterinary openings, transportation policy) unless the user's query asked for them. Return JSON: {"events": [...]}. Max ${maxResults} events.
+Rules: skip past events, skip pages with no specific date, merge duplicates of the same event, and prefer the page with pricing detail. Recurring group meetings (BNI, chamber mixers, rotary) count when the next date is stated.
+Relevance: the user is an entrepreneur running service businesses (a cleaning company, a web development agency). Keep networking, marketing, business, entrepreneur, chamber, small-business and founder events. SKIP anything that is not an attendable event: memberships, sponsorship or partner tiers, date ranges spanning months, job postings, and unrelated niche-industry events (e.g. deathcare, veterinary openings, transportation policy) unless the user's query asked for them. Return JSON: {"events": [...]}. Max ${maxResults} events.
 
 CONTENT:
-${pageContents.slice(0, 30000)}`;
+${pageContents.slice(0, 45000)}`;
 
           // Extraction runs through a fast gateway model first (reliable JSON, low
           // latency), then falls back to OpenAI if the gateway is unavailable.
@@ -7012,7 +7035,8 @@ ${pageContents.slice(0, 30000)}`;
 
           let extractedText: string | null = null;
           if (LOVABLE_KEY) {
-            extractedText = await tryExtract(LOVABLE_GATEWAY, LOVABLE_KEY, 'google/gemini-2.5-flash', { max_tokens: 8000 });
+            extractedText = await tryExtract(LOVABLE_GATEWAY, LOVABLE_KEY, 'openai/gpt-6-astra', {});
+            if (!extractedText) extractedText = await tryExtract(LOVABLE_GATEWAY, LOVABLE_KEY, 'google/gemini-2.5-flash', {});
           }
           if (!extractedText && OPENAI_KEY) {
             extractedText = await tryExtract('https://api.openai.com/v1/chat/completions', OPENAI_KEY, 'gpt-5-mini', { max_completion_tokens: 16000 });
@@ -7204,9 +7228,17 @@ ${pageContents.slice(0, 30000)}`;
             confidence: num(evt.confidence),
             source: (evt.source as string) || null,
             category,
-            metadata: { search_query: base },
+            metadata: {
+              search_query: base,
+              audience: (evt.audience as string) || null,
+              people: Array.isArray(evt.people) ? (evt.people as Array<Record<string, unknown>>).filter((p) => p && typeof p.name === 'string').slice(0, 12) : [],
+              fit_score: num(evt.fit_score),
+              fit_reason: (evt.fit_reason as string) || null,
+            },
             updated_at: new Date().toISOString(),
           }));
+          // Best fit first.
+          rows.sort((a, b) => (b.metadata.fit_score ?? -1) - (a.metadata.fit_score ?? -1));
 
           let savedCount = 0;
           for (const row of rows) {
@@ -7244,10 +7276,13 @@ ${pageContents.slice(0, 30000)}`;
           };
 
           console.log(`[scrape_events] Found ${events.length} events, saved ${savedCount}`);
-          const eventList = rows.map((r, i) =>
-            `${i + 1}. **${r.title}**\n   - When: ${fmt(r.event_date)}\n   - Where: ${[r.venue_name, r.address || r.location].filter(Boolean).join(' — ') || 'TBD'}\n   - Cost: ${money(r)}${r.ticket_notes ? ` (${r.ticket_notes})` : ''}\n   - Host: ${r.organizer || 'Unknown'}\n   - Link: ${r.registration_url || r.url || 'n/a'}`
-          ).join('\n');
-          return { success: true, result: `Found and saved ${savedCount} events (deduped):\n\n${eventList}\n\nSay "add these to my calendar" and I'll create full calendar entries with venue, cost, and registration link.` };
+          const sourceCount = new Set(results.map((r) => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return r.url; } })).size;
+          const eventList = rows.map((r, i) => {
+            const m = r.metadata;
+            const people = (m.people as Array<Record<string, unknown>>).map((p) => `${p.name}${p.role ? ` (${p.role}${p.company ? `, ${p.company}` : ''})` : ''}`).join('; ');
+            return `${i + 1}. **${r.title}**${m.fit_score != null ? ` — fit ${m.fit_score}/100` : ''}\n   - When: ${fmt(r.event_date)}\n   - Where: ${[r.venue_name, r.address || r.location].filter(Boolean).join(' — ') || 'TBD'}\n   - Cost: ${money(r)}${r.ticket_notes ? ` (${r.ticket_notes})` : ''}\n   - Host: ${r.organizer || 'Unknown'}${m.audience ? `\n   - Who goes: ${m.audience}` : ''}${people ? `\n   - People to meet: ${people}` : ''}${m.fit_reason ? `\n   - Why: ${m.fit_reason}` : ''}\n   - Link: ${r.registration_url || r.url || 'n/a'}`;
+          }).join('\n');
+          return { success: true, result: `Scanned ${sourceCount} websites. Found and saved ${savedCount} events, best fit first:\n\n${eventList}\n\nPresent these ranked, keep the fit reason and people. Offer to add the top ones to the calendar.` };
         } catch (e) {
           console.error('[scrape_events] Error:', e);
           return { success: false, result: `Event scraping error: ${e instanceof Error ? e.message : 'Unknown'}` };
