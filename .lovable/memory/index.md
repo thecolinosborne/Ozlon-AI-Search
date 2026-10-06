@@ -89,6 +89,7 @@
 - [Testing mode](mem://constraints/testing-mode-live-actions) — Live actions (create/update/delete) explicitly permitted for dev
 - [File attachments](mem://input/file-attachment-system) — 10 files, 20MB max. Metadata passed to backend
 - [Google Drive links](mem://preferences/google-drive-link-conversion) — Auto-convert view links to export=download
+- [Event scanning](mem://features/event-scanning) — Ask area each time; many sources + local groups; people + fit ranking; on-demand only
 - [Event research](mem://features/event-research-architecture) — Tavily + Firecrawl scraping into `discovered_events`
 - [Sentient SEO](mem://features/sentient-seo-intelligence) — GSC snapshots + web_search_google cross-referencing
 - [GoHighLevel support](mem://integrations/gohighlevel-tier-3-support) — 50+ tools including Social Planner, Products, Contacts
