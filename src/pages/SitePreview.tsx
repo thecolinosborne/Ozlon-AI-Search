@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowRight, Monitor, Smartphone, Check, Sparkles, Loader2, Link2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { landscapingSample } from "@/lib/landscapingSample";
 
 type Preview = { id: string; html: string; domain: string; business_name?: string | null; source_url?: string };
 
@@ -22,12 +24,19 @@ export default function SitePreview() {
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(() => params.get("sample") === "landscaping" ? landscapingSample : null);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [lead, setLead] = useState({ name: "", email: "", phone: "" });
   const [claimed, setClaimed] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const isSample = preview?.id === landscapingSample.id;
+  const showSample = () => {
+    setError(null);
+    setPreview(landscapingSample);
+    setClaimed(false);
+    window.history.replaceState(null, "", `/preview?sample=landscaping${embed ? "&embed=1" : ""}`);
+  };
 
   useEffect(() => {
     document.title = "See your next website | Ozlon";
@@ -138,6 +147,7 @@ export default function SitePreview() {
             </form>
 
             {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+            {!loading && <Button variant="ghost" className="mt-5 text-muted-foreground" onClick={showSample}>See a landscaping sample <ArrowRight className="ml-2 h-4 w-4" /></Button>}
 
             {loading && !id && (
               <div className="mx-auto mt-10 max-w-md text-left rounded-2xl border border-border/60 bg-card/40 p-5 backdrop-blur-xl">
@@ -163,7 +173,7 @@ export default function SitePreview() {
           <section className="mt-8">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-primary">Your new homepage</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-primary">{isSample ? "Sample design" : "Your new homepage"}</p>
                 <h2 className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight">{preview.business_name || preview.domain}</h2>
               </div>
               <div className="flex items-center gap-2">
@@ -175,10 +185,10 @@ export default function SitePreview() {
                     </button>
                   ))}
                 </div>
-                <button onClick={() => { navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+                {!isSample && <button onClick={() => { navigator.clipboard.writeText(shareLink); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
                   className="inline-flex items-center gap-2 rounded-xl border border-border/60 bg-card/40 px-3 py-2 text-sm hover:bg-card/70">
                   <Link2 className="h-4 w-4" /> {copied ? "Copied" : "Share"}
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -196,7 +206,16 @@ export default function SitePreview() {
               </div>
 
               <aside className="rounded-2xl border border-border/60 bg-card/40 p-5 backdrop-blur-xl h-fit">
-                {claimed ? (
+                {isSample ? (
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold">Picture your business here.</h3>
+                    <p className="text-sm text-muted-foreground">This is an illustrative landscaping design, not a real client. Enter your website to see your own.</p>
+                    <form onSubmit={generate} className="space-y-3">
+                      <input aria-label="Your website address" placeholder="yourbusiness.com" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={300} className="w-full rounded-xl border border-border/60 bg-background/60 px-3 py-2.5 text-sm outline-none focus:border-primary" />
+                      <Button type="submit" className="w-full" disabled={loading || !url.trim()}>Design my website <ArrowRight className="ml-2 h-4 w-4" /></Button>
+                    </form>
+                  </div>
+                ) : claimed ? (
                   <div>
                     <Check className="h-6 w-6 text-primary" />
                     <h3 className="mt-3 text-lg font-semibold">It's yours.</h3>

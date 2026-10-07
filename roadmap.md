@@ -1,5 +1,7 @@
 # Roadmap — One assistant, one Settings page
 
+- [x] Dynamic garden-editorial landscaping sample in the public website-preview tool, with local photography and no fictional CRM submissions
+
 - [x] Two-item navigation (Assistant, Settings); assistant-only home
 - [x] Settings: Connections first, Manage section for Today/Life OS/Events/People/Messages/Stack/Memory
 - [ ] Chat cards for Today, Life OS, Events, People, Business plans (open full view in a sheet)
