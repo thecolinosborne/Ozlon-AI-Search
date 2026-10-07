@@ -105,7 +105,7 @@ ${site.markdown}`;
   const html = sanitize(text);
   if (!/<html|<body/i.test(html) || html.length < 800) throw new Error("The designer returned an incomplete page. Try again.");
   const nameMatch = html.match(/<title>([^<]{1,120})<\/title>/i);
-  return { html, name: nameMatch?.[1]?.split(/[|\-–]/)[0].trim() || site.title || null };
+  return { html, name: nameMatch?.[1]?.split(/[|\-–—]/)[0].trim() || site.title || null };
 }
 
 Deno.serve(async (req) => {
