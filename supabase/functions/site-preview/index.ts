@@ -108,6 +108,40 @@ ${site.markdown}`;
   return { html, name: nameMatch?.[1]?.split(/[|\-–—]/)[0].trim() || site.title || null };
 }
 
+// Push the lead into GoHighLevel as a contact with the design link attached.
+async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, email: string, phone: string) {
+  // Use the owner's connected GoHighLevel account (Settings), falling back to project secrets.
+  let key: string | undefined, loc: string | undefined;
+  const { data: conn } = await sb.from("integration_connections").select("metadata")
+    .eq("provider", "gohighlevel").eq("status", "connected").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  const meta = (conn?.metadata ?? {}) as Record<string, any>;
+  loc = meta.location_id;
+  const subs: any[] = Array.isArray(meta.sub_accounts) ? meta.sub_accounts : [];
+  key = subs.find((x) => x?.id === loc && x?.api_key)?.api_key || meta.api_key;
+  if (!key || !loc) { key = Deno.env.get("GHL_API_KEY"); loc = Deno.env.get("GHL_LOCATION_ID"); }
+  if (!key || !loc) return "not_configured";
+  const { data: row } = await sb.from("website_previews").select("source_url,domain").eq("id", id).maybeSingle();
+  const h = { Authorization: `Bearer ${key}`, Version: "2021-07-28", "Content-Type": "application/json" };
+  const [firstName, ...rest] = name.split(/\s+/);
+  try {
+    const r = await fetch("https://services.leadconnectorhq.com/contacts/upsert", {
+      method: "POST", headers: h,
+      body: JSON.stringify({ locationId: loc, firstName, lastName: rest.join(" ") || undefined, email, phone: phone || undefined,
+        website: row?.source_url, source: "Website Preview Tool", tags: ["website-preview", "inbound-lead"] }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { console.error("ghl upsert", r.status, JSON.stringify(d).slice(0, 300)); return "failed"; }
+    const cid = d.contact?.id;
+    if (cid) {
+      await fetch(`https://services.leadconnectorhq.com/contacts/${cid}/notes`, {
+        method: "POST", headers: h,
+        body: JSON.stringify({ body: `Requested a website redesign preview for ${row?.domain}.\nView their design: https://ozlon.ai/preview/${id}` }),
+      }).catch(() => {});
+    }
+    return "sent";
+  } catch (e) { console.error("ghl", e); return "failed"; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   try {
@@ -132,7 +166,8 @@ Deno.serve(async (req) => {
       if (phone && !/^[0-9+().\-\s]{7,40}$/.test(phone)) return json({ error: "That phone number doesn't look right." }, 400);
       const { error } = await sb.from("website_previews").update({ lead_name: name, lead_email: email, lead_phone: phone || null, lead_at: new Date().toISOString() }).eq("id", id);
       if (error) return json({ error: "Couldn't save. Try again." }, 500);
-      return json({ ok: true });
+      const crm = await sendToCrm(sb, id, name, email, phone);
+      return json({ ok: true, crm });
     }
 
     // generate
