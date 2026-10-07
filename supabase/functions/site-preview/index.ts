@@ -122,7 +122,7 @@ async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, em
         website: row?.source_url, source: "Website Preview Tool", tags: ["website-preview", "inbound-lead"] }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { console.error("ghl upsert", r.status, JSON.stringify(d).slice(0, 300)); return "failed"; }
+    if (!r.ok) { console.error("ghl upsert", r.status, JSON.stringify(d).slice(0, 300)); return "failed:" + r.status + ":" + JSON.stringify(d).slice(0, 200); }
     const cid = d.contact?.id;
     if (cid) {
       await fetch(`https://services.leadconnectorhq.com/contacts/${cid}/notes`, {
@@ -131,7 +131,7 @@ async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, em
       }).catch(() => {});
     }
     return "sent";
-  } catch (e) { console.error("ghl", e); return "failed"; }
+  } catch (e) { console.error("ghl", e); return "failed:" + r.status + ":" + JSON.stringify(d).slice(0, 200); }
 }
 
 Deno.serve(async (req) => {
