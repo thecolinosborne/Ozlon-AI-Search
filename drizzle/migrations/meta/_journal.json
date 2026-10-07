@@ -50,6 +50,13 @@
       "when": 1790854110293,
       "tag": "0006_browser_extension_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791337856325,
+      "tag": "0007_website_previews",
+      "breakpoints": true
     }
   ]
 }
