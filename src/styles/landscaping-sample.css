@@ -15,7 +15,7 @@ body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foregroun
 a { color: inherit; text-decoration: none; }
 .hero { position: relative; background: hsl(var(--surface)); color: hsl(var(--surface-foreground)); }
 .nav { position: absolute; inset: 0 0 auto; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 26px 8%; }
-.brand { font-family: 'Playfair Display', serif; font-size: 23px; font-weight: 700; }
+.brand { font-family: 'Playfair Display', serif; font-size: 23px; font-weight: 700; color: hsl(var(--foreground)); background: hsl(var(--background) / .92); padding: 7px 12px; border-radius: 4px; }
 .nav-link { background: hsl(var(--background) / .92); color: hsl(var(--foreground)); padding: 10px 16px; font-size: 12px; border-radius: 4px; }
 .photo { height: 330px; overflow: hidden; }
 .photo img { width: 100%; height: 100%; object-fit: cover; animation: garden-reveal 1.4s ease-out both; }

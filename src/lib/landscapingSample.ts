@@ -5,7 +5,7 @@ export const landscapingSample = {
   id: 'sample-landscaping',
   domain: 'Illustrative landscaping sample',
   business_name: 'Fieldwork Landscaping',
-  html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fieldwork Landscaping — Sample design</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;600&display=swap" rel="stylesheet"><style>${styles}</style></head><body>
+  html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="about:srcdoc"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fieldwork Landscaping — Sample design</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;600&display=swap" rel="stylesheet"><style>${styles}</style></head><body>
   <header class="hero"><nav class="nav"><a class="brand" href="#home">Fieldwork.</a><a class="nav-link" href="#services">Our services ↗</a></nav>
   <div class="photo" id="home"><img src="${garden}" width="1536" height="1024" alt="A landscaped residential garden with native flowers and a stone pathway"></div>
   <div class="hero-copy"><p class="eyebrow">Fieldwork Landscaping</p><h1>Crafting <em>beautiful</em><br>living spaces.</h1><p class="intro">Thoughtful gardens. Beautiful stonework. Outdoor spaces that feel like home.</p><a class="cta" href="#work">Explore our work <span aria-hidden="true">↗</span></a><a class="scroll" href="#services">Discover <span></span>↓</a></div></header>
