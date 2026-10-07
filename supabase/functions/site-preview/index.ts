@@ -131,7 +131,7 @@ async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, em
       }).catch(() => {});
     }
     return "sent";
-  } catch (e) { console.error("ghl", e); return "failed:" + r.status + ":" + JSON.stringify(d).slice(0, 200); }
+  } catch (e) { console.error("ghl", e); return "failed:" + String(e); }
 }
 
 Deno.serve(async (req) => {
