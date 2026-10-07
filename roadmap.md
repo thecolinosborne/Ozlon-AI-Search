@@ -9,3 +9,6 @@
 
 - [x] Browser control via Browserbase (research, forms, messages, approvals, secure sign-ins)
 - [ ] Control of your own computer (helper app) — later
+
+- [ ] Daily intelligence: inbox cleanup + market watch -> 3 actions/day (awaiting user pick)
+- [ ] Coworker mode: long multi-step jobs (30-day content, outreach, bulk site builds) that self-check and resume (awaiting user pick)
