@@ -5,3 +5,4 @@
 - Jobs run in the user's own Chrome via the Ozlon add-on (extension/, packaged to public/ozlon-browser.zip) when a paired device heartbeated in the last 75s; the add-on drives the loop and the `local-browser` edge function decides each step and enforces money/sensitive-field blocks — why: the user's signed-in browser can't be reached from a web page, and safety must stay server-side.
 
 - The public "see your next website" tool (/preview) calls the `site-preview` edge function, which scrapes with Firecrawl, generates script-free HTML, and stores designs and leads in a service-role-only table — why: anonymous visitors must never read other leads, and generated pages render in a no-script sandbox.
+- Illustrative website samples use local imported assets and static sandboxed HTML, and never submit sample IDs to the lead-claim service — why: visitors can inspect examples without creating fictional CRM leads.
