@@ -119,3 +119,6 @@ verify_jwt = false
 
 [functions.local-browser]
 verify_jwt = false
+
+[functions.site-preview]
+verify_jwt = false

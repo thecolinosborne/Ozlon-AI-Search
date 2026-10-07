@@ -13,7 +13,7 @@ export function MobileNav() {
   const { session } = useAuth();
   const location = useLocation();
 
-  if (!session || location.pathname.startsWith("/auth") || location.pathname.startsWith("/onboarding")) return null;
+  if (!session || location.pathname.startsWith("/auth") || location.pathname.startsWith("/onboarding") || location.pathname.startsWith("/preview")) return null;
 
   const isActive = (to: string) =>
     to === "/" ? location.pathname === "/" : location.pathname !== "/";

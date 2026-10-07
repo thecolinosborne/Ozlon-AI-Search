@@ -53,6 +53,7 @@ import { Navigate } from "react-router-dom";
 import { MobileNav } from "@/components/mobile/MobileNav";
 
 import NotFound from "@/pages/NotFound";
+import SitePreview from "@/pages/SitePreview";
 
 const queryClient = new QueryClient();
 
@@ -77,6 +78,8 @@ const AppRoutes = () => {
     <>
       <OfflineDetector />
       <Routes>
+        <Route path="/preview" element={<SitePreview />} />
+        <Route path="/preview/:id" element={<SitePreview />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/billing" element={<Billing />} />

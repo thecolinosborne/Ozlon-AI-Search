@@ -4532,6 +4532,54 @@ export type Database = {
         }
         Relationships: []
       }
+      website_previews: {
+        Row: {
+          business_name: string | null
+          created_at: string
+          domain: string
+          error: string | null
+          html: string | null
+          id: string
+          ip_hash: string | null
+          lead_at: string | null
+          lead_email: string | null
+          lead_name: string | null
+          lead_phone: string | null
+          source_url: string
+          status: string
+        }
+        Insert: {
+          business_name?: string | null
+          created_at?: string
+          domain: string
+          error?: string | null
+          html?: string | null
+          id?: string
+          ip_hash?: string | null
+          lead_at?: string | null
+          lead_email?: string | null
+          lead_name?: string | null
+          lead_phone?: string | null
+          source_url: string
+          status?: string
+        }
+        Update: {
+          business_name?: string | null
+          created_at?: string
+          domain?: string
+          error?: string | null
+          html?: string | null
+          id?: string
+          ip_hash?: string | null
+          lead_at?: string | null
+          lead_email?: string | null
+          lead_name?: string | null
+          lead_phone?: string | null
+          source_url?: string
+          status?: string
+        }
+        Relationships: []
+      }
       wisdom_memories: {
         Row: {
           confidence: number | null
