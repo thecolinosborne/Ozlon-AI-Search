@@ -110,7 +110,15 @@ ${site.markdown}`;
 
 // Push the lead into GoHighLevel as a contact with the design link attached.
 async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, email: string, phone: string) {
-  const key = Deno.env.get("GHL_API_KEY"), loc = Deno.env.get("GHL_LOCATION_ID");
+  // Use the owner's connected GoHighLevel account (Settings), falling back to project secrets.
+  let key: string | undefined, loc: string | undefined;
+  const { data: conn } = await sb.from("integration_connections").select("metadata")
+    .eq("provider", "gohighlevel").eq("status", "connected").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  const meta = (conn?.metadata ?? {}) as Record<string, any>;
+  loc = meta.location_id;
+  const subs: any[] = Array.isArray(meta.sub_accounts) ? meta.sub_accounts : [];
+  key = subs.find((x) => x?.id === loc && x?.api_key)?.api_key || meta.api_key;
+  if (!key || !loc) { key = Deno.env.get("GHL_API_KEY"); loc = Deno.env.get("GHL_LOCATION_ID"); }
   if (!key || !loc) return "not_configured";
   const { data: row } = await sb.from("website_previews").select("source_url,domain").eq("id", id).maybeSingle();
   const h = { Authorization: `Bearer ${key}`, Version: "2021-07-28", "Content-Type": "application/json" };
@@ -122,7 +130,7 @@ async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, em
         website: row?.source_url, source: "Website Preview Tool", tags: ["website-preview", "inbound-lead"] }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { console.error("ghl upsert", r.status, JSON.stringify(d).slice(0, 300)); return "failed:" + r.status + ":" + JSON.stringify(d).slice(0, 200); }
+    if (!r.ok) { console.error("ghl upsert", r.status, JSON.stringify(d).slice(0, 300)); return "failed"; }
     const cid = d.contact?.id;
     if (cid) {
       await fetch(`https://services.leadconnectorhq.com/contacts/${cid}/notes`, {
@@ -131,7 +139,7 @@ async function sendToCrm(sb: ReturnType<typeof db>, id: string, name: string, em
       }).catch(() => {});
     }
     return "sent";
-  } catch (e) { console.error("ghl", e); return "failed:" + String(e); }
+  } catch (e) { console.error("ghl", e); return "failed"; }
 }
 
 Deno.serve(async (req) => {
